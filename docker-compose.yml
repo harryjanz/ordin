@@ -1,0 +1,99 @@
+version: '3.9'
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD","mysqladmin","ping","-h","localhost","-u","root","-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  auth-service:
+    build: ./services/auth
+    restart: always
+    ports:
+      - "8001:8001"
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  company-service:
+    build: ./services/company
+    restart: always
+    ports:
+      - "8002:8002"
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  catalog-service:
+    build: ./services/catalog
+    restart: always
+    ports:
+      - "8003:8003"
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  order-service:
+    build: ./services/order
+    restart: always
+    ports:
+      - "8004:8004"
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  payment-service:
+    build: ./services/payment
+    restart: always
+    ports:
+      - "8005:8005"
+    env_file: .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "8000:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - auth-service
+      - company-service
+      - catalog-service
+      - order-service
+      - payment-service
+
+volumes:
+  mysql_data:
