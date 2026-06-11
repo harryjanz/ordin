@@ -50,6 +50,33 @@ Você está atuando no step **Code Review** da esteira **Downstream** do projeto
 - [ ] Sem código morto ou imports não usados
 - [ ] Sem `print()` ou `logger.debug()` esquecido
 
+## Após aprovação — merge para develop
+
+Quando todos os itens do checklist estiverem verificados e a PR não tiver comentários bloqueadores:
+
+### 1. Confirmar que o CI passou
+
+```bash
+gh pr checks <número-da-pr>
+# todos os checks devem estar com status "pass"
+```
+
+### 2. Mergear a PR para develop
+
+```bash
+gh pr merge <número-da-pr> --merge --delete-branch
+```
+
+O merge para `develop` dispara automaticamente o `deploy-staging.yml`:
+```
+build → push ECR → deck sync kong.yml →
+alembic upgrade head (ECS Run Task) →
+deploy ECS blue/green (staging)
+```
+
+> Após o deploy em staging, a história avança para o step **QA**.
+> O merge para `main` acontece no step **Deploy**, após aprovação do QA.
+
 ## Tarefa
 
 $ARGUMENTS
