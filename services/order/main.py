@@ -1,8 +1,3 @@
-# services/order/main.py
-# SELECT FOR UPDATE — sem dupla baixa em multi-device
-# Rastreabilidade: collected_by, collected_at, collection_device
-# Finalização atômica do pedido no backend
-
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, select, func
@@ -74,17 +69,13 @@ async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
 
-app = FastAPI(title="Order Service")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=get_cors_origins(),
-    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Internal-Secret"],
-    allow_credentials=True,
-)
+# ── Request schemas ───────────────────────────────────────────────────────────
 
 class ItemIn(BaseModel):
-    product_id: int; name: str; qty: int; unit_price: float
+    product_id: int
+    name: str
+    qty: int
+    unit_price: float
 
 class OrderIn(BaseModel):
     items: List[ItemIn]
@@ -95,6 +86,82 @@ class CollectIn(BaseModel):
     collected_by: Optional[str] = "balcao"
     collection_device: Optional[str] = None
     qr_data: Optional[str] = None  # opcional durante grace period (Sprint 4 remove a exceção)
+
+# ── Response schemas ──────────────────────────────────────────────────────────
+
+class OrderOut(BaseModel):
+    order_ref: str
+    total: float
+    status: str
+
+class TicketOut(BaseModel):
+    ticket_code: str
+    status: str
+    unit_number: int
+    total_units: int
+    collected_at: Optional[str] = None
+    collected_by: Optional[str] = None
+
+class TicketListOut(BaseModel):
+    order_ref: str
+    progress: str
+    tickets: list[TicketOut]
+
+class CollectOut(BaseModel):
+    ok: bool
+    ticket_code: str
+    order_ref: str
+    collected_at: str
+    collected_by: Optional[str] = None
+    order_completed: bool
+    progress: str
+
+class OrderStatusOut(BaseModel):
+    order_ref: str
+    status: str
+
+class HealthOut(BaseModel):
+    service: str
+    status: str
+
+# ── App ───────────────────────────────────────────────────────────────────────
+
+_tags = [
+    {
+        "name": "Pedidos",
+        "description": "Criação de pedidos pelo totem e acompanhamento do status.",
+    },
+    {
+        "name": "Tickets",
+        "description": (
+            "Coleta de tickets por QR Code. Cada unidade de item gera um ticket independente. "
+            "Usa `SELECT FOR UPDATE` para prevenir dupla coleta em ambientes multi-device."
+        ),
+    },
+]
+
+app = FastAPI(
+    title="Ordin — Order Service",
+    description=(
+        "Serviço de pedidos da plataforma Ordin.\n\n"
+        "Gerencia o ciclo completo de um pedido: criação pelo totem, geração de tickets "
+        "por unidade de item com QR Code assinado (**HMAC-SHA256**), coleta pelo operador de balcão "
+        "e finalização automática quando todos os tickets forem coletados.\n\n"
+        "**Prevenção de dupla coleta:** `SELECT FOR UPDATE` no endpoint de coleta.\n\n"
+        "**QR Code:** `{ticket_code}|{product_name}|{order_ref}|{timestamp}|{HMAC-SHA256}`\n\n"
+        "**Autenticação:** todos os endpoints exigem `Authorization: Bearer <token>`. "
+        "Os endpoints `/internal/*` exigem `X-Internal-Secret` e são bloqueados no Kong."
+    ),
+    version="1.0.0",
+    openapi_tags=_tags,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_cors_origins(),
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Internal-Secret"],
+    allow_credentials=True,
+)
 
 def _gen_ref(): return "P"+"".join(random.choices(string.digits,k=6))
 def _gen_code():
@@ -116,12 +183,22 @@ def _verify_qr(qr_data: str) -> bool:
     expected = hmaclib.new(QR_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return hmaclib.compare_digest(expected, received_sig)
 
-@app.post("/orders", status_code=201)
+@app.post(
+    "/orders",
+    status_code=201,
+    response_model=OrderOut,
+    tags=["Pedidos"],
+    summary="Criar pedido",
+)
 async def create_order(
     body: OrderIn,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    """
+    Cria um pedido para o totem autenticado. Para cada unidade de cada item, gera um ticket
+    independente com QR Code assinado por HMAC-SHA256. Requer `role: kiosk`.
+    """
     ref         = _gen_ref()
     total       = sum(i.unit_price*i.qty for i in body.items) - body.discount
     terminal_id = current_user.terminal_id or 0
@@ -145,7 +222,18 @@ async def create_order(
     await db.commit(); await db.refresh(order)
     return {"order_ref":order.order_ref,"total":float(order.total),"status":order.status}
 
-@app.post("/tickets/{ticket_code}/collect")
+@app.post(
+    "/tickets/{ticket_code}/collect",
+    response_model=CollectOut,
+    tags=["Tickets"],
+    summary="Coletar ticket via QR Code",
+    responses={
+        400: {"description": "QR Code inválido ou assinatura HMAC incorreta"},
+        404: {"description": "Ticket não encontrado"},
+        409: {"description": "Ticket já coletado"},
+        410: {"description": "Ticket expirado"},
+    },
+)
 async def collect_ticket(
     ticket_code: str,
     body: CollectIn,
@@ -153,6 +241,12 @@ async def collect_ticket(
     current_user: TokenPayload = Depends(get_current_user),
     x_device_id: Optional[str] = Header(default=None),
 ):
+    """
+    Registra a coleta de um ticket. Valida o HMAC do QR Code antes de acessar o banco.
+    Usa `SELECT FOR UPDATE` para evitar dupla coleta em ambientes multi-device.
+    Quando o último ticket de um pedido é coletado, o pedido é marcado como `completed` automaticamente.
+    Requer `role: cashier` ou `admin`.
+    """
     if body.qr_data is not None:
         if not _verify_qr(body.qr_data) or body.qr_data.split("|")[0] != ticket_code:
             raise HTTPException(400, detail="QR inválido")
@@ -194,25 +288,39 @@ async def collect_ticket(
             "order_completed":order_done,
             "progress":f"{collected_t}/{total_t}"}
 
-@app.patch("/orders/{order_ref}/status")
+@app.patch(
+    "/orders/{order_ref}/status",
+    response_model=OrderStatusOut,
+    tags=["Pedidos"],
+    summary="Atualizar status do pedido",
+    responses={404: {"description": "Pedido não encontrado"}},
+)
 async def update_status(
     order_ref: str,
     body: dict,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    """Atualiza o status de um pedido. Requer `role: admin`."""
     result = await db.execute(select(Order).filter_by(order_ref=order_ref, company_id=current_user.company_id))
     o = result.scalars().first()
     if not o: raise HTTPException(404)
     o.status = body["status"]; await db.commit()
     return {"order_ref":order_ref,"status":o.status}
 
-@app.get("/orders/{order_ref}/tickets")
+@app.get(
+    "/orders/{order_ref}/tickets",
+    response_model=TicketListOut,
+    tags=["Tickets"],
+    summary="Listar tickets de um pedido",
+    responses={404: {"description": "Pedido não encontrado ou de outra empresa"}},
+)
 async def list_order_tickets(
     order_ref: str,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    """Retorna todos os tickets de um pedido com progresso de coleta. Isolamento multi-tenant aplicado."""
     result = await db.execute(
         select(Ticket)
         .join(Order, Order.order_ref == Ticket.order_ref)
@@ -228,7 +336,7 @@ async def list_order_tickets(
                         "collected_at":t.collected_at.isoformat() if t.collected_at else None,
                         "collected_by":t.collected_by} for t in tickets]}
 
-@app.patch("/internal/orders/{order_ref}/status")
+@app.patch("/internal/orders/{order_ref}/status", include_in_schema=False)
 async def internal_update_status(
     order_ref: str,
     body: dict,
@@ -241,5 +349,5 @@ async def internal_update_status(
     o.status = body["status"]; await db.commit()
     return {"order_ref": order_ref, "status": o.status}
 
-@app.get("/health")
+@app.get("/health", response_model=HealthOut, tags=["Pedidos"], summary="Healthcheck")
 def health(): return {"service":"order","status":"ok"}
