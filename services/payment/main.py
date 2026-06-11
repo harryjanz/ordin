@@ -4,15 +4,22 @@
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Numeric, DateTime
-from sqlalchemy.orm import sessionmaker, DeclarativeBase, Session
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, select
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
-import httpx, random, os
+import httpx, random
+from config import require_env, get_cors_origins
+from auth import get_current_user, TokenPayload
 
-DB_URL = f"mysql+pymysql://fk_payment:payment_pass@{os.getenv('DB_HOST','mysql')}:3306/fk_payment?charset=utf8mb4"
-engine = create_engine(DB_URL, pool_pre_ping=True)
+DB_URL           = require_env("DB_URL")
+ORDER_SVC        = require_env("ORDER_SERVICE_URL")
+INTERNAL_SECRET  = require_env("INTERNAL_SECRET")
+INTERNAL_HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
+engine = create_async_engine(DB_URL.replace("mysql+pymysql://", "mysql+aiomysql://"), pool_pre_ping=True)
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 class Base(DeclarativeBase): pass
 
@@ -34,45 +41,59 @@ class Transaction(Base):
     created_at    = Column(DateTime, default=datetime.utcnow)
     updated_at    = Column(DateTime, onupdate=datetime.utcnow)
 
-Base.metadata.create_all(engine)
-SessionLocal = sessionmaker(bind=engine)
-def get_db():
-    db=SessionLocal()
-    try: yield db
-    finally: db.close()
-
-ORDER_SVC = os.getenv("ORDER_SERVICE_URL","http://order-service:8004")
+async def get_db():
+    async with AsyncSessionLocal() as db:
+        yield db
 
 app = FastAPI(title="Payment Service")
-app.add_middleware(CORSMiddleware,allow_origins=["*"],allow_methods=["*"],allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_cors_origins(),
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Internal-Secret"],
+    allow_credentials=True,
+)
 
 class ItemIn(BaseModel):
     product_id: int; name: str; qty: int; unit_price: float
 
 class PaymentIn(BaseModel):
-    order_ref: str; company_id: int; terminal_id: int
-    tef_number: str; method: str; amount: float
-    items: List[ItemIn]; cpf: Optional[str] = None
+    order_ref: str
+    tef_number: str
+    method: str
+    amount: float
+    items: List[ItemIn]
+    cpf: Optional[str] = None
 
 class CancelIn(BaseModel):
     reason: Optional[str] = "Cancelamento solicitado"
 
 @app.post("/payments", status_code=201)
-async def create_payment(body: PaymentIn, db: Session = Depends(get_db)):
-    tx = Transaction(company_id=body.company_id,order_ref=body.order_ref,
-                     terminal_id=body.terminal_id,tef_number=body.tef_number,
-                     method=body.method,amount=body.amount,status="pending")
-    db.add(tx); db.commit(); db.refresh(tx)
+async def create_payment(
+    body: PaymentIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    tx = Transaction(
+        company_id=current_user.company_id,
+        order_ref=body.order_ref,
+        terminal_id=current_user.terminal_id or 0,
+        tef_number=body.tef_number,
+        method=body.method,
+        amount=body.amount,
+        status="pending",
+    )
+    db.add(tx); await db.commit(); await db.refresh(tx)
     approved = random.random() < 0.95
     nsu  = f"NSU{int(datetime.utcnow().timestamp())}"
     auth = f"AUT{random.randint(100000,999999)}"
     tx.status = "approved" if approved else "refused"
     if approved: tx.nsu=nsu; tx.authorization=auth
-    db.commit()
+    await db.commit()
     if approved:
         try:
             async with httpx.AsyncClient(timeout=5) as c:
-                await c.patch(f"{ORDER_SVC}/orders/{body.order_ref}/status",json={"status":"paid"})
+                await c.patch(f"{ORDER_SVC}/internal/orders/{body.order_ref}/status", json={"status":"paid"}, headers=INTERNAL_HEADERS)
         except: pass
     if not approved:
         return {"ok":False,"transaction_id":tx.id,"status":"refused","error":"Não autorizado"}
@@ -80,22 +101,36 @@ async def create_payment(body: PaymentIn, db: Session = Depends(get_db)):
             "authorization":auth,"order_ref":body.order_ref,"amount":body.amount}
 
 @app.get("/payments")
-def list_payments(company_id: int, db: Session = Depends(get_db)):
-    txs = db.query(Transaction).filter_by(company_id=company_id)
-            .order_by(Transaction.created_at.desc()).limit(100).all()
+async def list_payments(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Transaction)
+        .where(Transaction.company_id == current_user.company_id)
+        .order_by(Transaction.created_at.desc())
+        .limit(100)
+    )
+    txs = result.scalars().all()
     return {"items":[{"id":t.id,"order_ref":t.order_ref,"method":t.method,
             "amount":float(t.amount),"status":t.status,"nsu":t.nsu,
             "authorization":t.authorization,"created_at":str(t.created_at)} for t in txs]}
 
 @app.post("/payments/{tx_id}/cancel")
-async def cancel_payment(tx_id: int, body: CancelIn, db: Session = Depends(get_db)):
-    tx = db.get(Transaction, tx_id)
+async def cancel_payment(
+    tx_id: int,
+    body: CancelIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    result = await db.execute(select(Transaction).where(Transaction.id == tx_id, Transaction.company_id == current_user.company_id))
+    tx = result.scalars().first()
     if not tx: raise HTTPException(404)
     if tx.status != "approved": raise HTTPException(400, f"Status: {tx.status}")
     tx.status="cancelled"; tx.cancelled_at=datetime.utcnow(); tx.cancel_reason=body.reason
-    db.commit()
+    await db.commit()
     async with httpx.AsyncClient(timeout=5) as c:
-        await c.patch(f"{ORDER_SVC}/orders/{tx.order_ref}/status",json={"status":"cancelled"})
+        await c.patch(f"{ORDER_SVC}/internal/orders/{tx.order_ref}/status", json={"status":"cancelled"}, headers=INTERNAL_HEADERS)
     return {"ok":True,"detail":"Transação cancelada"}
 
 @app.get("/health")
