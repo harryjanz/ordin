@@ -5,14 +5,16 @@
 
 from fastapi import FastAPI, HTTPException, Depends, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
-from sqlalchemy.orm import sessionmaker, DeclarativeBase, Session
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, select
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import DeclarativeBase
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 import hashlib, os, redis, httpx
+from config import require_env, get_cors_origins
 
-redis_client = redis.from_url(os.getenv("REDIS_URL","redis://redis:6379/0"), decode_responses=True)
+redis_client = redis.from_url(require_env("REDIS_URL"), decode_responses=True)
 RATE_MAX = 5
 RATE_TTL = 15 * 60  # 15 minutos
 
@@ -37,8 +39,9 @@ def reset_rate_limit(ip, key):
     redis_client.delete(f"pin_attempts:{ip}:{hashlib.md5(key.encode()).hexdigest()}")
     redis_client.delete(f"pin_blocked:{ip}")
 
-DB_URL = f"mysql+pymysql://fk_auth:auth_pass@{os.getenv('DB_HOST','mysql')}:3306/fk_auth?charset=utf8mb4"
-engine = create_engine(DB_URL, pool_pre_ping=True)
+DB_URL = require_env("DB_URL")
+engine = create_async_engine(DB_URL.replace("mysql+pymysql://", "mysql+aiomysql://"), pool_pre_ping=True)
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 class Base(DeclarativeBase): pass
 
@@ -51,20 +54,25 @@ class RefreshToken(Base):
     expires_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-Base.metadata.create_all(engine)
-SessionLocal = sessionmaker(bind=engine)
-def get_db():
-    db = SessionLocal()
-    try: yield db
-    finally: db.close()
+async def get_db():
+    async with AsyncSessionLocal() as db:
+        yield db
 
-SECRET    = os.getenv("JWT_SECRET", "dev-secret")
-ALGO      = "HS256"
-ACCESS_EX = int(os.getenv("JWT_ACCESS_EXP_MINUTES", 60))
-COMPANY_SVC = os.getenv("COMPANY_SERVICE_URL", "http://company-service:8002")
+SECRET           = require_env("JWT_SECRET")
+ALGO             = "HS256"
+ACCESS_EX        = int(os.getenv("JWT_ACCESS_EXP_MINUTES", 60))
+COMPANY_SVC      = require_env("COMPANY_SERVICE_URL")
+INTERNAL_SECRET  = require_env("INTERNAL_SECRET")
+INTERNAL_HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 
 app = FastAPI(title="Auth Service")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_cors_origins(),
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Internal-Secret"],
+    allow_credentials=True,
+)
 
 def make_token(payload, delta):
     return jwt.encode({**payload, "exp": datetime.utcnow()+delta}, SECRET, algorithm=ALGO)
@@ -80,7 +88,7 @@ class RefreshReq(BaseModel): refresh_token: str
 async def validate_pin(body: ValidatePinReq, request: Request, response: Response):
     check_rate_limit(request.client.host, body.pin, response)
     async with httpx.AsyncClient() as c:
-        r = await c.post(f"{COMPANY_SVC}/internal/validate-pin", json={"pin": body.pin})
+        r = await c.post(f"{COMPANY_SVC}/internal/validate-pin", json={"pin": body.pin}, headers=INTERNAL_HEADERS)
     if r.status_code != 200: raise HTTPException(401, "PIN inválido")
     reset_rate_limit(request.client.host, body.pin)
     return {"ok": True, "company": r.json()["company"]}
@@ -90,7 +98,8 @@ async def pin_login(body: PinLoginReq, request: Request, response: Response):
     check_rate_limit(request.client.host, body.pin, response)
     async with httpx.AsyncClient() as c:
         r = await c.post(f"{COMPANY_SVC}/internal/verify-pin",
-                         json={"pin": body.pin, "terminal_id": body.terminal_id})
+                         json={"pin": body.pin, "terminal_id": body.terminal_id},
+                         headers=INTERNAL_HEADERS)
     if r.status_code != 200: raise HTTPException(401, "PIN ou terminal inválido")
     reset_rate_limit(request.client.host, body.pin)
     data = r.json()
@@ -98,23 +107,55 @@ async def pin_login(body: PinLoginReq, request: Request, response: Response):
     return {"ok":True,"access_token":token,"token_type":"bearer","company":data["company"],"terminal":data["terminal"]}
 
 @app.post("/auth/login")
-async def login(body: LoginReq, request: Request, response: Response, db: Session = Depends(get_db)):
+async def login(body: LoginReq, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     check_rate_limit(request.client.host, body.email, response)
     async with httpx.AsyncClient() as c:
-        r = await c.post(f"{COMPANY_SVC}/internal/verify-credentials", json={"email":body.email,"password":body.password})
+        r = await c.post(f"{COMPANY_SVC}/internal/verify-credentials", json={"email":body.email,"password":body.password}, headers=INTERNAL_HEADERS)
     if r.status_code != 200: raise HTTPException(401, "Credenciais inválidas")
     reset_rate_limit(request.client.host, body.email)
     u = r.json()
     access  = make_token({"sub":str(u["id"]),"company":u["company_id"],"role":u["role"]}, timedelta(minutes=ACCESS_EX))
-    refresh = make_token({"sub":str(u["id"]),"type":"refresh"}, timedelta(days=7))
+    refresh = make_token({"sub":str(u["id"]),"type":"refresh","company":u["company_id"],"role":u["role"]}, timedelta(days=7))
     db.add(RefreshToken(user_id=u["id"],token_hash=hash_tok(refresh),expires_at=datetime.utcnow()+timedelta(days=7)))
-    db.commit()
+    await db.commit()
     return {"access_token":access,"refresh_token":refresh,"token_type":"bearer"}
 
+@app.post("/auth/refresh")
+async def refresh(body: RefreshReq, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(RefreshToken).where(
+        RefreshToken.token_hash == hash_tok(body.refresh_token),
+        RefreshToken.revoked == False
+    ))
+    stored = result.scalars().first()
+    if not stored:
+        raise HTTPException(401, detail="Token revogado ou inválido")
+    if stored.expires_at < datetime.utcnow():
+        stored.revoked = True; await db.commit()
+        raise HTTPException(401, detail="Token revogado ou inválido")
+    try:
+        payload = jwt.decode(body.refresh_token, SECRET, algorithms=[ALGO])
+        if payload.get("type") != "refresh":
+            raise HTTPException(401, detail="Token revogado ou inválido")
+        user_id    = int(payload["sub"])
+        company_id = payload.get("company")
+        role       = payload.get("role", "cashier")
+    except JWTError:
+        raise HTTPException(401, detail="Token revogado ou inválido")
+    stored.revoked = True; await db.flush()
+    new_access  = make_token({"sub":str(user_id),"company":company_id,"role":role}, timedelta(minutes=ACCESS_EX))
+    new_refresh = make_token({"sub":str(user_id),"type":"refresh","company":company_id,"role":role}, timedelta(days=7))
+    db.add(RefreshToken(user_id=user_id, token_hash=hash_tok(new_refresh),
+                        expires_at=datetime.utcnow()+timedelta(days=7)))
+    await db.commit()
+    return {"access_token":new_access,"refresh_token":new_refresh,"token_type":"bearer"}
+
 @app.post("/auth/logout")
-def logout(body: RefreshReq, db: Session = Depends(get_db)):
-    db.query(RefreshToken).filter_by(token_hash=hash_tok(body.refresh_token)).update({"revoked":True})
-    db.commit()
+async def logout(body: RefreshReq, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == hash_tok(body.refresh_token)))
+    tok = result.scalars().first()
+    if tok:
+        tok.revoked = True
+        await db.commit()
     return {"detail":"Logout realizado"}
 
 @app.get("/health")
