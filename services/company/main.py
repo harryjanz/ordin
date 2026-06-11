@@ -1,15 +1,10 @@
-# services/company/main.py
-# Gerencia empresas, usuários e terminais
-# Endpoints internos usados pelo auth-service:
-#   POST /internal/validate-pin
-#   POST /internal/verify-pin
-#   POST /internal/verify-credentials
-
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
 import bcrypt, secrets
 from config import require_env, get_cors_origins
@@ -63,7 +58,49 @@ async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
 
-app = FastAPI(title="Company Service")
+# ── Response schemas ──────────────────────────────────────────────────────────
+
+class TerminalOut(BaseModel):
+    id: int
+    label: str
+    terminal_code: Optional[str] = None
+    tef_number: Optional[str] = None
+
+class TerminalListOut(BaseModel):
+    terminals: list[TerminalOut]
+
+class RegeneratePinOut(BaseModel):
+    pin: str
+
+class HealthOut(BaseModel):
+    service: str
+    status: str
+
+# ── App ───────────────────────────────────────────────────────────────────────
+
+_tags = [
+    {
+        "name": "Terminais",
+        "description": "Gerenciamento de terminais de atendimento vinculados a uma empresa.",
+    },
+    {
+        "name": "Empresas",
+        "description": "Operações administrativas de empresa (PIN, configuração).",
+    },
+]
+
+app = FastAPI(
+    title="Ordin — Company Service",
+    description=(
+        "Serviço de gerenciamento de empresas, usuários e terminais da plataforma Ordin.\n\n"
+        "Mantém o cadastro multi-tenant: cada empresa possui seu próprio catálogo, terminais e usuários. "
+        "O PIN da empresa é armazenado com **bcrypt rounds=12**.\n\n"
+        "Os endpoints `/internal/*` são consumidos exclusivamente pelo `auth-service` via rede interna "
+        "(header `X-Internal-Secret`). Eles são bloqueados no Kong e **não aparecem nesta documentação**."
+    ),
+    version="1.0.0",
+    openapi_tags=_tags,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_cors_origins(),
@@ -72,9 +109,9 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-# ── Endpoints internos — autenticados por X-Internal-Secret (ORD-003) ─────────
+# ── Endpoints internos — acessíveis apenas via VPC (ORD-003) ─────────────────
 
-@app.post("/internal/validate-pin")
+@app.post("/internal/validate-pin", include_in_schema=False)
 async def validate_pin(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_internal)):
     # bcrypt não é buscável por índice; iteração é aceitável para piloto (< 100 empresas)
     result = await db.execute(select(Company).filter_by(active=True))
@@ -83,7 +120,7 @@ async def validate_pin(body: dict, db: AsyncSession = Depends(get_db), _: None =
     if not co: raise HTTPException(401,"PIN inválido")
     return {"company":{"id":co.id,"name":co.name,"plan":co.plan}}
 
-@app.post("/internal/verify-pin")
+@app.post("/internal/verify-pin", include_in_schema=False)
 async def verify_pin(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_internal)):
     result = await db.execute(select(Company).filter_by(active=True))
     companies = result.scalars().all()
@@ -95,7 +132,7 @@ async def verify_pin(body: dict, db: AsyncSession = Depends(get_db), _: None = D
     return {"company":{"id":co.id,"name":co.name,"plan":co.plan},
             "terminal":{"id":t.id,"label":t.label,"tef_number":t.tef_number}}
 
-@app.post("/internal/verify-credentials")
+@app.post("/internal/verify-credentials", include_in_schema=False)
 async def verify_credentials(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_internal)):
     result = await db.execute(select(User).filter_by(email=body["email"],active=True))
     u = result.scalars().first()
@@ -105,24 +142,41 @@ async def verify_credentials(body: dict, db: AsyncSession = Depends(get_db), _: 
 
 # ── Endpoints protegidos por JWT ───────────────────────────────────────────────
 
-@app.get("/companies/{company_id}/terminals")
+@app.get(
+    "/companies/{company_id}/terminals",
+    response_model=TerminalListOut,
+    tags=["Terminais"],
+    summary="Listar terminais da empresa",
+    responses={403: {"description": "Acesso negado — empresa diferente da do JWT"}},
+)
 async def list_terminals(
     company_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    """Lista os terminais ativos de uma empresa. Requer `role: admin` ou `super_admin`."""
     if current_user.company_id != company_id and current_user.role not in ("superadmin",):
         raise HTTPException(403, "Acesso negado")
     result = await db.execute(select(Terminal).filter_by(company_id=company_id,active=True))
     ts = result.scalars().all()
     return {"terminals":[{"id":t.id,"label":t.label,"terminal_code":t.terminal_code,"tef_number":t.tef_number} for t in ts]}
 
-@app.post("/companies/{company_id}/regenerate-pin")
+@app.post(
+    "/companies/{company_id}/regenerate-pin",
+    response_model=RegeneratePinOut,
+    tags=["Empresas"],
+    summary="Regenerar PIN da empresa",
+    responses={
+        403: {"description": "Acesso negado — empresa diferente da do JWT"},
+        404: {"description": "Empresa não encontrada"},
+    },
+)
 async def regenerate_pin(
     company_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    """Gera um novo PIN numérico de 6 dígitos para a empresa e armazena com bcrypt rounds=12. Requer `role: admin`."""
     if current_user.company_id != company_id and current_user.role not in ("superadmin",):
         raise HTTPException(403, "Acesso negado")
     co = await db.get(Company, company_id)
@@ -132,5 +186,5 @@ async def regenerate_pin(
     await db.commit()
     return {"pin":new_pin}
 
-@app.get("/health")
+@app.get("/health", response_model=HealthOut, tags=["Empresas"], summary="Healthcheck")
 def health(): return {"service":"company","status":"ok"}

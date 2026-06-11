@@ -1,0 +1,512 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Ordin — Payment Service",
+    "description": "Serviço de pagamentos da plataforma Ordin.\n\nIntegra com o PayGo TEF para processar pagamentos nos terminais. A integração real está pendente (Fase 2); atualmente **simula 95% de aprovação**.\n\nAo aprovar ou cancelar um pagamento, notifica o `order-service` via endpoint interno para manter o status do pedido sincronizado.\n\n**Autenticação:** todos os endpoints exigem `Authorization: Bearer <token>`.\n\n**Métodos aceitos:** `credit`, `debit`, `pix`, `voucher`.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/payments": {
+      "get": {
+        "tags": [
+          "Pagamentos"
+        ],
+        "summary": "Listar transações da empresa",
+        "description": "Retorna as últimas 100 transações da empresa autenticada, ordenadas pela mais recente. Requer `role: admin`.",
+        "operationId": "list_payments_payments_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentListOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Pagamentos"
+        ],
+        "summary": "Processar pagamento TEF",
+        "description": "Processa um pagamento TEF para o pedido informado. Retorna `ok: true` se aprovado, `ok: false` se recusado.\nAo aprovar, envia `PATCH /internal/orders/{ref}/status` com `{status: \"paid\"}` para o order-service.\nRequer `role: kiosk`.",
+        "operationId": "create_payment_payments_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PaymentIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Pagamento aprovado ou recusado (ver campo `ok`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentApprovedOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/payments/{tx_id}/cancel": {
+      "post": {
+        "tags": [
+          "Pagamentos"
+        ],
+        "summary": "Cancelar transação aprovada",
+        "description": "Cancela uma transação aprovada. Ao cancelar, notifica o order-service para marcar o pedido como `cancelled`.\nRequer `role: admin`.",
+        "operationId": "cancel_payment_payments__tx_id__cancel_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tx_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Tx Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Transação não está no status `approved`"
+          },
+          "404": {
+            "description": "Transação não encontrada ou de outra empresa"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Pagamentos"
+        ],
+        "summary": "Healthcheck",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CancelIn": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "default": "Cancelamento solicitado"
+          }
+        },
+        "type": "object",
+        "title": "CancelIn"
+      },
+      "CancelOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "detail"
+        ],
+        "title": "CancelOut"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthOut": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "status"
+        ],
+        "title": "HealthOut"
+      },
+      "ItemIn": {
+        "properties": {
+          "product_id": {
+            "type": "integer",
+            "title": "Product Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "qty": {
+            "type": "integer",
+            "title": "Qty"
+          },
+          "unit_price": {
+            "type": "number",
+            "title": "Unit Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "product_id",
+          "name",
+          "qty",
+          "unit_price"
+        ],
+        "title": "ItemIn"
+      },
+      "PaymentApprovedOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "transaction_id": {
+            "type": "integer",
+            "title": "Transaction Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "nsu": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nsu"
+          },
+          "authorization": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization"
+          },
+          "order_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Ref"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "transaction_id",
+          "status"
+        ],
+        "title": "PaymentApprovedOut"
+      },
+      "PaymentIn": {
+        "properties": {
+          "order_ref": {
+            "type": "string",
+            "title": "Order Ref"
+          },
+          "tef_number": {
+            "type": "string",
+            "title": "Tef Number"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemIn"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "cpf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpf"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_ref",
+          "tef_number",
+          "method",
+          "amount",
+          "items"
+        ],
+        "title": "PaymentIn"
+      },
+      "PaymentListOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TransactionOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "PaymentListOut"
+      },
+      "TransactionOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "order_ref": {
+            "type": "string",
+            "title": "Order Ref"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "nsu": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nsu"
+          },
+          "authorization": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "order_ref",
+          "method",
+          "amount",
+          "status",
+          "created_at"
+        ],
+        "title": "TransactionOut"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Pagamentos",
+      "description": "Processamento de pagamentos via TEF (PayGo). Ao aprovar, notifica o `order-service` para marcar o pedido como `paid`. Ao cancelar, notifica o `order-service` para marcar como `cancelled`."
+    }
+  ]
+}

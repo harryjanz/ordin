@@ -1,0 +1,289 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Ordin — Company Service",
+    "description": "Serviço de gerenciamento de empresas, usuários e terminais da plataforma Ordin.\n\nMantém o cadastro multi-tenant: cada empresa possui seu próprio catálogo, terminais e usuários. O PIN da empresa é armazenado com **bcrypt rounds=12**.\n\nOs endpoints `/internal/*` são consumidos exclusivamente pelo `auth-service` via rede interna (header `X-Internal-Secret`). Eles são bloqueados no Kong e **não aparecem nesta documentação**.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/companies/{company_id}/terminals": {
+      "get": {
+        "tags": [
+          "Terminais"
+        ],
+        "summary": "Listar terminais da empresa",
+        "description": "Lista os terminais ativos de uma empresa. Requer `role: admin` ou `super_admin`.",
+        "operationId": "list_terminals_companies__company_id__terminals_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TerminalListOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acesso negado — empresa diferente da do JWT"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/regenerate-pin": {
+      "post": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Regenerar PIN da empresa",
+        "description": "Gera um novo PIN numérico de 6 dígitos para a empresa e armazena com bcrypt rounds=12. Requer `role: admin`.",
+        "operationId": "regenerate_pin_companies__company_id__regenerate_pin_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegeneratePinOut"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Acesso negado — empresa diferente da do JWT"
+          },
+          "404": {
+            "description": "Empresa não encontrada"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Healthcheck",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthOut": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "status"
+        ],
+        "title": "HealthOut"
+      },
+      "RegeneratePinOut": {
+        "properties": {
+          "pin": {
+            "type": "string",
+            "title": "Pin"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pin"
+        ],
+        "title": "RegeneratePinOut"
+      },
+      "TerminalListOut": {
+        "properties": {
+          "terminals": {
+            "items": {
+              "$ref": "#/components/schemas/TerminalOut"
+            },
+            "type": "array",
+            "title": "Terminals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "terminals"
+        ],
+        "title": "TerminalListOut"
+      },
+      "TerminalOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "terminal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Code"
+          },
+          "tef_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tef Number"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "TerminalOut"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Terminais",
+      "description": "Gerenciamento de terminais de atendimento vinculados a uma empresa."
+    },
+    {
+      "name": "Empresas",
+      "description": "Operações administrativas de empresa (PIN, configuração)."
+    }
+  ]
+}

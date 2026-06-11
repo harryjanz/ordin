@@ -46,6 +46,74 @@ Você está atuando no step **In Progress** da esteira **Downstream** do projeto
 - [ ] company_id vem do JWT (não do body)
 ```
 
+## Commit ao final do desenvolvimento
+
+Ao finalizar a implementação, antes de abrir a PR, execute os passos abaixo na ordem:
+
+### 1. Atualizar o Swagger (obrigatório se a história criar ou modificar endpoints)
+
+```bash
+cd services/<nome-do-servico>
+python3 generate_openapi.py
+# inclui o openapi.json atualizado no commit abaixo
+```
+
+O `generate_openapi.py` importa o app FastAPI e regenera `openapi.json`. Executar de dentro do diretório do serviço com as dependências instaladas (ou via `docker exec`):
+
+```bash
+docker exec ordin-<nome>-service-1 sh -c "cd /app && python3 generate_openapi.py"
+docker cp ordin-<nome>-service-1:/app/openapi.json services/<nome>/openapi.json
+```
+
+### 2. Commitar as alterações
+
+```bash
+# Adicionar apenas os arquivos da história (evitar .env e arquivos não relacionados)
+git add services/<nome>/main.py
+git add services/<nome>/openapi.json        # se API foi alterada
+git add services/<nome>/migrations/         # se schema foi alterado
+
+# Commit em PT-BR descrevendo o porquê (não o que)
+git commit -m "feat(<serviço>): <descrição do porquê da mudança>"
+```
+
+**Convenção de mensagem de commit:**
+- Prefixo: `feat`, `fix`, `refactor`, `infra`, `docs`
+- Escopo: nome do serviço (ex: `auth`, `order`, `payment`)
+- Corpo: descreve a motivação, não a implementação
+
+### 3. Abrir a PR
+
+```bash
+gh pr create \
+  --title "feat(ORD-XXX): <título da história>" \
+  --body "$(cat <<'EOF'
+## História
+[ID e título]
+
+## O que foi implementado
+- [Item 1]
+- [Item 2]
+
+## Cenários Gherkin
+[Link para os cenários do QA Explorer]
+
+## Como testar localmente
+1. `docker compose up -d`
+2. [passos específicos]
+
+## Checklist
+- [ ] ruff sem erros
+- [ ] mypy sem erros
+- [ ] Testes unitários passando
+- [ ] Migration incluída (se aplicável)
+- [ ] openapi.json atualizado (se API alterada)
+- [ ] company_id vem do JWT (não do body)
+EOF
+)" \
+  --base develop
+```
+
 ## Tarefa
 
 $ARGUMENTS
