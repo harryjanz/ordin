@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  security:
+    name: Security checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar credenciais hardcoded
+        run: |
+          ! grep -rn \
+            "auth_pass\|company_pass\|catalog_pass\|order_pass\|payment_pass\|dev-secret" \
+            services/
+
+  lint:
+    name: Lint & type check
+    runs-on: ubuntu-latest
+    needs: security
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install ruff mypy
+
+      - name: ruff
+        run: ruff check services/
+
+      - name: mypy
+        run: mypy services/ --ignore-missing-imports
+
+  build:
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build all services
+        run: |
+          for svc in auth company catalog order payment; do
+            docker build -t ordin-$svc:ci ./services/$svc
+          done
