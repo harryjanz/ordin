@@ -1,0 +1,627 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Ordin — Order Service",
+    "description": "Serviço de pedidos da plataforma Ordin.\n\nGerencia o ciclo completo de um pedido: criação pelo totem, geração de tickets por unidade de item com QR Code assinado (**HMAC-SHA256**), coleta pelo operador de balcão e finalização automática quando todos os tickets forem coletados.\n\n**Prevenção de dupla coleta:** `SELECT FOR UPDATE` no endpoint de coleta.\n\n**QR Code:** `{ticket_code}|{product_name}|{order_ref}|{timestamp}|{HMAC-SHA256}`\n\n**Autenticação:** todos os endpoints exigem `Authorization: Bearer <token>`. Os endpoints `/internal/*` exigem `X-Internal-Secret` e são bloqueados no Kong.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/orders": {
+      "post": {
+        "tags": [
+          "Pedidos"
+        ],
+        "summary": "Criar pedido",
+        "description": "Cria um pedido para o totem autenticado. Para cada unidade de cada item, gera um ticket\nindependente com QR Code assinado por HMAC-SHA256. Requer `role: kiosk`.",
+        "operationId": "create_order_orders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/tickets/{ticket_code}/collect": {
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Coletar ticket via QR Code",
+        "description": "Registra a coleta de um ticket. Valida o HMAC do QR Code antes de acessar o banco.\nUsa `SELECT FOR UPDATE` para evitar dupla coleta em ambientes multi-device.\nQuando o último ticket de um pedido é coletado, o pedido é marcado como `completed` automaticamente.\nRequer `role: cashier` ou `admin`.",
+        "operationId": "collect_ticket_tickets__ticket_code__collect_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "ticket_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticket Code"
+            }
+          },
+          {
+            "name": "x-device-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Device-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "QR Code inválido ou assinatura HMAC incorreta"
+          },
+          "404": {
+            "description": "Ticket não encontrado"
+          },
+          "409": {
+            "description": "Ticket já coletado"
+          },
+          "410": {
+            "description": "Ticket expirado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{order_ref}/status": {
+      "patch": {
+        "tags": [
+          "Pedidos"
+        ],
+        "summary": "Atualizar status do pedido",
+        "description": "Atualiza o status de um pedido. Requer `role: admin`.",
+        "operationId": "update_status_orders__order_ref__status_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Ref"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderStatusOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Pedido não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{order_ref}/tickets": {
+      "get": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Listar tickets de um pedido",
+        "description": "Retorna todos os tickets de um pedido com progresso de coleta. Isolamento multi-tenant aplicado.",
+        "operationId": "list_order_tickets_orders__order_ref__tickets_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Ref"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TicketListOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Pedido não encontrado ou de outra empresa"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Pedidos"
+        ],
+        "summary": "Healthcheck",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CollectIn": {
+        "properties": {
+          "collected_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected By",
+            "default": "balcao"
+          },
+          "collection_device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Device"
+          },
+          "qr_data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qr Data"
+          }
+        },
+        "type": "object",
+        "title": "CollectIn"
+      },
+      "CollectOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "ticket_code": {
+            "type": "string",
+            "title": "Ticket Code"
+          },
+          "order_ref": {
+            "type": "string",
+            "title": "Order Ref"
+          },
+          "collected_at": {
+            "type": "string",
+            "title": "Collected At"
+          },
+          "collected_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected By"
+          },
+          "order_completed": {
+            "type": "boolean",
+            "title": "Order Completed"
+          },
+          "progress": {
+            "type": "string",
+            "title": "Progress"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "ticket_code",
+          "order_ref",
+          "collected_at",
+          "order_completed",
+          "progress"
+        ],
+        "title": "CollectOut"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthOut": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "status"
+        ],
+        "title": "HealthOut"
+      },
+      "ItemIn": {
+        "properties": {
+          "product_id": {
+            "type": "integer",
+            "title": "Product Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "qty": {
+            "type": "integer",
+            "title": "Qty"
+          },
+          "unit_price": {
+            "type": "number",
+            "title": "Unit Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "product_id",
+          "name",
+          "qty",
+          "unit_price"
+        ],
+        "title": "ItemIn"
+      },
+      "OrderIn": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ItemIn"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "cpf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpf"
+          },
+          "discount": {
+            "type": "number",
+            "title": "Discount",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "OrderIn"
+      },
+      "OrderOut": {
+        "properties": {
+          "order_ref": {
+            "type": "string",
+            "title": "Order Ref"
+          },
+          "total": {
+            "type": "number",
+            "title": "Total"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_ref",
+          "total",
+          "status"
+        ],
+        "title": "OrderOut"
+      },
+      "OrderStatusOut": {
+        "properties": {
+          "order_ref": {
+            "type": "string",
+            "title": "Order Ref"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_ref",
+          "status"
+        ],
+        "title": "OrderStatusOut"
+      },
+      "TicketListOut": {
+        "properties": {
+          "order_ref": {
+            "type": "string",
+            "title": "Order Ref"
+          },
+          "progress": {
+            "type": "string",
+            "title": "Progress"
+          },
+          "tickets": {
+            "items": {
+              "$ref": "#/components/schemas/TicketOut"
+            },
+            "type": "array",
+            "title": "Tickets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_ref",
+          "progress",
+          "tickets"
+        ],
+        "title": "TicketListOut"
+      },
+      "TicketOut": {
+        "properties": {
+          "ticket_code": {
+            "type": "string",
+            "title": "Ticket Code"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "unit_number": {
+            "type": "integer",
+            "title": "Unit Number"
+          },
+          "total_units": {
+            "type": "integer",
+            "title": "Total Units"
+          },
+          "collected_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected At"
+          },
+          "collected_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected By"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticket_code",
+          "status",
+          "unit_number",
+          "total_units"
+        ],
+        "title": "TicketOut"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "Pedidos",
+      "description": "Criação de pedidos pelo totem e acompanhamento do status."
+    },
+    {
+      "name": "Tickets",
+      "description": "Coleta de tickets por QR Code. Cada unidade de item gera um ticket independente. Usa `SELECT FOR UPDATE` para prevenir dupla coleta em ambientes multi-device."
+    }
+  ]
+}
