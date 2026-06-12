@@ -1,6 +1,6 @@
 ---
 id: ORD-025
-status: Ready
+status: Done
 fase: 1
 sprint: 3
 responsavel: Backend SR
