@@ -38,10 +38,67 @@ jobs:
       - name: mypy
         run: mypy services/ --ignore-missing-imports
 
+  test:
+    name: Testes + cobertura
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_root
+          MYSQL_DATABASE: fk_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -ptest_root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r services/requirements.txt
+          pip install -r services/requirements-dev.txt
+
+      - name: Run tests
+        env:
+          DB_URL: mysql+aiomysql://root:test_root@localhost:3306/fk_test
+          JWT_SECRET: test-secret-ci
+          JWT_ACCESS_EXP_MINUTES: "60"
+          JWT_REFRESH_EXP_DAYS: "7"
+          INTERNAL_SECRET: test-internal-ci
+          QR_SECRET: test-qr-secret-ci
+          CORS_ORIGINS: http://localhost:3000
+          REDIS_URL: redis://localhost:6379/0
+          RABBITMQ_URL: amqp://guest:guest@localhost:5672/
+          MESSAGE_BROKER: sqs
+          COMPANY_SERVICE_URL: http://localhost:8002
+          ORDER_SERVICE_URL: http://localhost:8004
+          PAYGO_BASE_URL: https://sandbox.controlpay.com.br/webapi/
+        run: |
+          pytest services/ \
+            --cov=services \
+            --cov-report=term-missing \
+            --cov-fail-under=40 \
+            -v
+
   build:
     name: Build Docker images
     runs-on: ubuntu-latest
-    needs: lint
+    needs: test
     steps:
       - uses: actions/checkout@v4
 
