@@ -79,6 +79,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SECRET: ${INTERNAL_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
     networks:
       - ordin
     depends_on:
@@ -130,12 +131,19 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       INTERNAL_SECRET: ${INTERNAL_SECRET}
       ORDER_SERVICE_URL: ${ORDER_SERVICE_URL}
+      COMPANY_SERVICE_URL: ${COMPANY_SERVICE_URL}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      MESSAGE_BROKER: ${MESSAGE_BROKER}
+      RABBITMQ_URL: ${RABBITMQ_URL}
+      MONGO_URL: ${MONGO_URL}
+      MONGO_DB: ${MONGO_DB}
     networks:
       - ordin
     depends_on:
       mysql:
         condition: service_healthy
+      mongo:
+        condition: service_started
 
   nginx:
     image: nginx:alpine
