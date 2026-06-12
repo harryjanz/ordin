@@ -35,6 +35,19 @@ services:
     networks:
       - ordin
 
+  mongo:
+    image: mongo:7
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ordin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-ordin_dev}
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - ordin
+
   auth-service:
     build: ./services/auth
     restart: always
@@ -146,3 +159,4 @@ networks:
 
 volumes:
   mysql_data:
+  mongo_data:

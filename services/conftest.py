@@ -13,6 +13,8 @@ os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
 os.environ.setdefault("MESSAGE_BROKER", "sqs")
+os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", "0" * 64)
+# MONGO_URL não definido em CI — save_audit faz best-effort e silencia
 os.environ.setdefault("COMPANY_SERVICE_URL", "http://localhost:8002")
 os.environ.setdefault("ORDER_SERVICE_URL", "http://localhost:8004")
 os.environ.setdefault("PAYGO_BASE_URL", "https://sandbox.controlpay.com.br/webapi/")
