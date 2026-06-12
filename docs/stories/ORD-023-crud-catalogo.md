@@ -1,6 +1,6 @@
 ---
 id: ORD-023
-status: New
+status: Done
 fase: 1
 sprint: 2
 responsavel: Backend SR

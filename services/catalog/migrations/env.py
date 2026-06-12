@@ -11,7 +11,7 @@ from main import Base
 from config import require_env
 
 config = context.config
-config.set_main_option("sqlalchemy.url", require_env("DB_URL"))
+config.set_main_option("sqlalchemy.url", require_env("DB_URL").replace("mysql+aiomysql://", "mysql+pymysql://"))
 if config.config_file_name:
     fileConfig(config.config_file_name)
 target_metadata = Base.metadata

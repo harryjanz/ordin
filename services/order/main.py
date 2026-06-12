@@ -9,6 +9,7 @@ from datetime import datetime
 import random, string, secrets, hmac as hmaclib, hashlib
 from config import require_env, get_cors_origins
 from auth import get_current_user, TokenPayload
+from websocket import ws_router, broadcast_order_created, broadcast_ticket_collected, broadcast_order_completed
 
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
@@ -162,6 +163,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Internal-Secret"],
     allow_credentials=True,
 )
+app.include_router(ws_router)
 
 def _gen_ref(): return "P"+"".join(random.choices(string.digits,k=6))
 def _gen_code():
@@ -220,6 +222,10 @@ async def create_order(
             db.add(Ticket(order_item_id=oi.id, ticket_code=code, qr_data=qr,
                           order_ref=ref, unit_number=u, total_units=item.qty))
     await db.commit(); await db.refresh(order)
+    await broadcast_order_created(
+        current_user.company_id, order.order_ref,
+        float(order.total), f"Terminal {terminal_id}",
+    )
     return {"order_ref":order.order_ref,"total":float(order.total),"status":order.status}
 
 @app.post(
@@ -251,15 +257,16 @@ async def collect_ticket(
         if not _verify_qr(body.qr_data) or body.qr_data.split("|")[0] != ticket_code:
             raise HTTPException(400, detail="QR inválido")
     result = await db.execute(
-        select(Ticket)
+        select(Ticket, OrderItem.product_name)
         .join(OrderItem, OrderItem.id == Ticket.order_item_id)
         .join(Order, Order.id == OrderItem.order_id)
         .where(Ticket.ticket_code == ticket_code,
                Order.company_id == current_user.company_id)
         .with_for_update()
     )
-    ticket = result.scalars().first()
-    if not ticket:  raise HTTPException(404, "Ticket não encontrado")
+    row = result.first()
+    if not row: raise HTTPException(404, "Ticket não encontrado")
+    ticket, product_name = row
     if ticket.status=="collected": raise HTTPException(409, "Ticket já coletado")
     if ticket.status=="expired":  raise HTTPException(410, "Ticket expirado")
     ticket.status            = "collected"
@@ -282,11 +289,18 @@ async def collect_ticket(
         if order and order.status != "completed":
             order.status = "completed"; order_done = True
     await db.commit()
+    progress_str = f"{collected_t}/{total_t}"
+    await broadcast_ticket_collected(
+        current_user.company_id, ticket_code, ticket.order_ref,
+        product_name, progress_str, body.collected_by,
+    )
+    if order_done:
+        await broadcast_order_completed(current_user.company_id, ticket.order_ref)
     return {"ok":True,"ticket_code":ticket_code,"order_ref":ticket.order_ref,
             "collected_at":ticket.collected_at.isoformat(),
             "collected_by":ticket.collected_by,
             "order_completed":order_done,
-            "progress":f"{collected_t}/{total_t}"}
+            "progress":progress_str}
 
 @app.patch(
     "/orders/{order_ref}/status",
