@@ -1,36 +1,82 @@
+import base64
+import os
+import secrets
+from datetime import datetime
+from typing import Optional
+
+import bcrypt
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI, HTTPException, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, select, func
+from pydantic import BaseModel
+from sqlalchemy import (
+    Column, Integer, String, Boolean, DateTime, JSON,
+    UniqueConstraint, select, func,
+)
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
-from pydantic import BaseModel
-from typing import Optional
-from datetime import datetime
-import bcrypt, secrets
+
 from config import require_env, get_cors_origins
 from auth import get_current_user, TokenPayload
 
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
 
+
 def require_internal(x_internal_secret: str = Header(default="")) -> None:
     if not secrets.compare_digest(x_internal_secret, INTERNAL_SECRET):
         raise HTTPException(403, detail="Acesso interno não autorizado")
 
+
 engine = create_async_engine(DB_URL.replace("mysql+pymysql://", "mysql+aiomysql://"), pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
+
+# ── Credential encryption helpers ─────────────────────────────────────────────
+
+def _encryption_key() -> bytes | None:
+    key_hex = os.getenv("CREDENTIAL_ENCRYPTION_KEY", "").strip()
+    return bytes.fromhex(key_hex) if len(key_hex) == 64 else None
+
+
+def encrypt_credential(plaintext: str) -> str:
+    key = _encryption_key()
+    if key is None:
+        return plaintext  # plaintext only in local dev (no key configured)
+    nonce = os.urandom(12)
+    ct = AESGCM(key).encrypt(nonce, plaintext.encode(), None)
+    return "enc:" + base64.b64encode(nonce + ct).decode()
+
+
+def decrypt_credential(stored: str) -> str:
+    if stored.startswith("arn:aws:secretsmanager:"):
+        raise NotImplementedError("Secrets Manager — Fase 2")
+    if stored.startswith("enc:"):
+        key = _encryption_key()
+        if key is None:
+            raise RuntimeError("CREDENTIAL_ENCRYPTION_KEY não configurada")
+        raw = base64.b64decode(stored[4:])
+        nonce, ct = raw[:12], raw[12:]
+        return AESGCM(key).decrypt(nonce, ct, None).decode()
+    return stored  # plaintext — dev local
+
+
+# ── Models ────────────────────────────────────────────────────────────────────
+
 class Base(DeclarativeBase): pass
+
 
 class Company(Base):
     __tablename__ = "companies"
-    id         = Column(Integer, primary_key=True)
-    name       = Column(String(120))
-    document   = Column(String(20))
-    pin_hash   = Column(String(128), nullable=False)
-    plan       = Column(String(20), default="free")
-    active     = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id               = Column(Integer, primary_key=True)
+    name             = Column(String(120))
+    document         = Column(String(20))
+    pin_hash         = Column(String(128), nullable=False)
+    plan             = Column(String(20), default="free")
+    payment_provider = Column(String(20), default="mock")
+    active           = Column(Boolean, default=True)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+
 
 class User(Base):
     __tablename__ = "users"
@@ -43,20 +89,41 @@ class User(Base):
     active        = Column(Boolean, default=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
 
+
 class Terminal(Base):
     __tablename__ = "terminals"
-    id            = Column(Integer, primary_key=True)
-    company_id    = Column(Integer)
-    label         = Column(String(80))
-    terminal_code = Column(String(20))
-    tef_number    = Column(String(40))
-    tef_serial    = Column(String(40))
-    active        = Column(Boolean, default=True)
-    created_at    = Column(DateTime, default=datetime.utcnow)
+    id                = Column(Integer, primary_key=True)
+    company_id        = Column(Integer)
+    label             = Column(String(80))
+    terminal_code     = Column(String(20))
+    tef_number        = Column(String(40))
+    tef_serial        = Column(String(40))
+    paygo_terminal_id = Column(String(40), nullable=True)
+    environment       = Column(String(10), default="sandbox")
+    active            = Column(Boolean, default=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+
+
+class CompanyPaymentConfig(Base):
+    __tablename__ = "company_payment_configs"
+    id           = Column(Integer, primary_key=True)
+    company_id   = Column(Integer, nullable=False, index=True)
+    provider     = Column(String(20), nullable=False)
+    environment  = Column(String(10), nullable=False)
+    api_key      = Column(String(500), nullable=True)
+    api_secret   = Column(String(500), nullable=True)
+    extra_config = Column(JSON, nullable=True)
+    active       = Column(Boolean, default=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        UniqueConstraint("company_id", "provider", "environment", name="uq_company_provider_env"),
+    )
+
 
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
+
 
 # ── Access control ────────────────────────────────────────────────────────────
 
@@ -64,11 +131,13 @@ def _require_superadmin(u: TokenPayload) -> None:
     if u.role != "superadmin":
         raise HTTPException(403, "Acesso restrito a super admin")
 
+
 def _require_company_admin(u: TokenPayload, company_id: int) -> None:
     if u.role == "superadmin":
         return
     if u.company_id != company_id or u.role not in ("owner", "manager"):
         raise HTTPException(403, "Acesso negado")
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -77,27 +146,35 @@ class CompanyOut(BaseModel):
     name: str
     document: Optional[str] = None
     plan: str
+    payment_provider: str = "mock"
     active: bool
     created_at: datetime
     model_config = {"from_attributes": True}
+
 
 class CompanyIn(BaseModel):
     name: str
     document: Optional[str] = None
     plan: str = "free"
+    payment_provider: str = "mock"
+
 
 class CompanyUpdate(BaseModel):
     name: Optional[str] = None
     document: Optional[str] = None
     plan: Optional[str] = None
+    payment_provider: Optional[str] = None
+
 
 class CompanyListOut(BaseModel):
     companies: list[CompanyOut]
     total: int
 
+
 class CompanyCreateOut(BaseModel):
     company: CompanyOut
     pin: str
+
 
 class TerminalOut(BaseModel):
     id: int
@@ -105,23 +182,33 @@ class TerminalOut(BaseModel):
     terminal_code: Optional[str] = None
     tef_number: Optional[str] = None
     tef_serial: Optional[str] = None
+    paygo_terminal_id: Optional[str] = None
+    environment: str = "sandbox"
     active: bool = True
     model_config = {"from_attributes": True}
+
 
 class TerminalIn(BaseModel):
     label: str
     terminal_code: Optional[str] = None
     tef_number: Optional[str] = None
     tef_serial: Optional[str] = None
+    paygo_terminal_id: Optional[str] = None
+    environment: str = "sandbox"
+
 
 class TerminalUpdate(BaseModel):
     label: Optional[str] = None
     tef_number: Optional[str] = None
     tef_serial: Optional[str] = None
+    paygo_terminal_id: Optional[str] = None
+    environment: Optional[str] = None
+
 
 class TerminalListOut(BaseModel):
     terminals: list[TerminalOut]
     total: int
+
 
 class UserOut(BaseModel):
     id: int
@@ -133,33 +220,64 @@ class UserOut(BaseModel):
     created_at: datetime
     model_config = {"from_attributes": True}
 
+
 class UserIn(BaseModel):
     name: str
     email: str
     password: str
     role: str = "cashier"
 
+
 class UserUpdate(BaseModel):
     role: Optional[str] = None
     active: Optional[bool] = None
+
 
 class UserListOut(BaseModel):
     users: list[UserOut]
     total: int
 
+
 class RegeneratePinOut(BaseModel):
     pin: str
+
+
+class PaymentConfigIn(BaseModel):
+    provider: str
+    environment: str
+    api_key: Optional[str] = None
+    api_secret: Optional[str] = None
+    extra_config: Optional[dict] = None
+
+
+class PaymentConfigOut(BaseModel):
+    id: int
+    provider: str
+    environment: str
+    api_key: str = "***"
+    api_secret: str = "***"
+    extra_config: Optional[dict] = None
+    active: bool
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class PaymentConfigListOut(BaseModel):
+    configs: list[PaymentConfigOut]
+
 
 class HealthOut(BaseModel):
     service: str
     status: str
 
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 _tags = [
-    {"name": "Empresas",  "description": "Gestão de empresas (super admin)."},
-    {"name": "Terminais", "description": "Gestão de terminais por empresa (owner/manager)."},
-    {"name": "Usuários",  "description": "Gestão de usuários por empresa (owner/manager)."},
+    {"name": "Empresas",       "description": "Gestão de empresas (super admin)."},
+    {"name": "Terminais",      "description": "Gestão de terminais por empresa (owner/manager)."},
+    {"name": "Usuários",       "description": "Gestão de usuários por empresa (owner/manager)."},
+    {"name": "Pagamento",      "description": "Configuração de provider TEF/PIX por empresa (owner/superadmin)."},
 ]
 
 app = FastAPI(
@@ -167,11 +285,12 @@ app = FastAPI(
     description=(
         "Serviço de gerenciamento de empresas, usuários e terminais da plataforma Ordin.\n\n"
         "Mantém o cadastro multi-tenant: cada empresa possui seu próprio catálogo, terminais e usuários. "
-        "O PIN da empresa é armazenado com **bcrypt rounds=12**.\n\n"
-        "Os endpoints `/internal/*` são consumidos exclusivamente pelo `auth-service` via rede interna "
-        "(header `X-Internal-Secret`). Eles são bloqueados no Kong e **não aparecem nesta documentação**."
+        "O PIN da empresa é armazenado com **bcrypt rounds=12**. "
+        "Credenciais TEF são criptografadas com **AES-256-GCM** antes de persistir.\n\n"
+        "Os endpoints `/internal/*` são consumidos exclusivamente via rede interna "
+        "(header `X-Internal-Secret`). Eles são bloqueados no Kong."
     ),
-    version="1.0.0",
+    version="1.1.0",
     openapi_tags=_tags,
 )
 app.add_middleware(
@@ -182,38 +301,109 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-# ── Endpoints internos — acessíveis apenas via VPC (ORD-003) ─────────────────
+
+# ── Endpoints internos — acessíveis apenas via VPC ────────────────────────────
 
 @app.post("/internal/validate-pin", include_in_schema=False)
-async def validate_pin(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_internal)):
-    # bcrypt não é buscável por índice; iteração é aceitável para piloto (< 100 empresas)
+async def validate_pin(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
     result = await db.execute(select(Company).filter_by(active=True))
     companies = result.scalars().all()
     co = next((c for c in companies if bcrypt.checkpw(body["pin"].encode(), c.pin_hash.encode())), None)
-    if not co: raise HTTPException(401, "PIN inválido")
+    if not co:
+        raise HTTPException(401, "PIN inválido")
     return {"company": {"id": co.id, "name": co.name, "plan": co.plan}}
 
+
 @app.post("/internal/verify-pin", include_in_schema=False)
-async def verify_pin(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_internal)):
+async def verify_pin(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
     result = await db.execute(select(Company).filter_by(active=True))
     companies = result.scalars().all()
     co = next((c for c in companies if bcrypt.checkpw(body["pin"].encode(), c.pin_hash.encode())), None)
-    if not co: raise HTTPException(401, "PIN inválido")
-    t_result = await db.execute(select(Terminal).filter_by(id=body["terminal_id"], company_id=co.id, active=True))
+    if not co:
+        raise HTTPException(401, "PIN inválido")
+    t_result = await db.execute(
+        select(Terminal).filter_by(id=body["terminal_id"], company_id=co.id, active=True)
+    )
     t = t_result.scalars().first()
-    if not t: raise HTTPException(404, "Terminal não encontrado")
+    if not t:
+        raise HTTPException(404, "Terminal não encontrado")
     return {
         "company":  {"id": co.id, "name": co.name, "plan": co.plan},
         "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
     }
 
+
 @app.post("/internal/verify-credentials", include_in_schema=False)
-async def verify_credentials(body: dict, db: AsyncSession = Depends(get_db), _: None = Depends(require_internal)):
+async def verify_credentials(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
     result = await db.execute(select(User).filter_by(email=body["email"], active=True))
     u = result.scalars().first()
-    if not u: raise HTTPException(401)
-    if not bcrypt.checkpw(body["password"].encode(), u.password_hash.encode()): raise HTTPException(401)
+    if not u:
+        raise HTTPException(401)
+    if not bcrypt.checkpw(body["password"].encode(), u.password_hash.encode()):
+        raise HTTPException(401)
     return {"id": u.id, "company_id": u.company_id, "role": u.role, "name": u.name}
+
+
+@app.get("/internal/terminals/{terminal_id}", include_in_schema=False)
+async def internal_get_terminal(
+    terminal_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    """Retorna config do terminal + credenciais descriptografadas para o payment-service."""
+    t_result = await db.execute(select(Terminal).filter_by(id=terminal_id, active=True))
+    t = t_result.scalars().first()
+    if not t:
+        raise HTTPException(404, "Terminal não encontrado ou inativo")
+
+    co = await db.get(Company, t.company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    provider = co.payment_provider or "mock"
+    config = None
+
+    if provider != "mock":
+        cfg_result = await db.execute(
+            select(CompanyPaymentConfig).filter_by(
+                company_id=t.company_id,
+                provider=provider,
+                environment=t.environment or "sandbox",
+                active=True,
+            )
+        )
+        cfg = cfg_result.scalars().first()
+        if not cfg:
+            raise HTTPException(
+                400,
+                f"Configuração de pagamento não encontrada para provider={provider} "
+                f"environment={t.environment}",
+            )
+        config = {
+            "api_key":      decrypt_credential(cfg.api_key) if cfg.api_key else None,
+            "api_secret":   decrypt_credential(cfg.api_secret) if cfg.api_secret else None,
+            "extra_config": cfg.extra_config or {},
+        }
+
+    return {
+        "paygo_terminal_id": t.paygo_terminal_id,
+        "payment_provider":  provider,
+        "environment":       t.environment or "sandbox",
+        "config":            config,
+    }
+
 
 # ── Empresas (super admin) ────────────────────────────────────────────────────
 
@@ -225,11 +415,22 @@ async def list_companies(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_superadmin(current_user)
-    total = (await db.execute(select(func.count()).select_from(Company).where(Company.active == True))).scalar()
-    result = await db.execute(select(Company).where(Company.active == True).offset(skip).limit(limit))
+    total = (await db.execute(
+        select(func.count()).select_from(Company).where(Company.active == True)
+    )).scalar()
+    result = await db.execute(
+        select(Company).where(Company.active == True).offset(skip).limit(limit)
+    )
     return {"companies": result.scalars().all(), "total": total}
 
-@app.post("/companies", response_model=CompanyCreateOut, status_code=201, tags=["Empresas"], summary="Criar empresa")
+
+@app.post(
+    "/companies",
+    response_model=CompanyCreateOut,
+    status_code=201,
+    tags=["Empresas"],
+    summary="Criar empresa",
+)
 async def create_company(
     body: CompanyIn,
     db: AsyncSession = Depends(get_db),
@@ -241,6 +442,7 @@ async def create_company(
         name=body.name,
         document=body.document,
         plan=body.plan,
+        payment_provider=body.payment_provider,
         pin_hash=bcrypt.hashpw(pin.encode(), bcrypt.gensalt(12)).decode(),
     )
     db.add(co)
@@ -248,7 +450,13 @@ async def create_company(
     await db.refresh(co)
     return {"company": co, "pin": pin}
 
-@app.get("/companies/{company_id}", response_model=CompanyOut, tags=["Empresas"], summary="Detalhe da empresa")
+
+@app.get(
+    "/companies/{company_id}",
+    response_model=CompanyOut,
+    tags=["Empresas"],
+    summary="Detalhe da empresa",
+)
 async def get_company(
     company_id: int,
     db: AsyncSession = Depends(get_db),
@@ -256,10 +464,17 @@ async def get_company(
 ):
     _require_superadmin(current_user)
     co = await db.get(Company, company_id)
-    if not co or not co.active: raise HTTPException(404, "Empresa não encontrada")
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
     return co
 
-@app.put("/companies/{company_id}", response_model=CompanyOut, tags=["Empresas"], summary="Editar empresa")
+
+@app.put(
+    "/companies/{company_id}",
+    response_model=CompanyOut,
+    tags=["Empresas"],
+    summary="Editar empresa",
+)
 async def update_company(
     company_id: int,
     body: CompanyUpdate,
@@ -268,15 +483,27 @@ async def update_company(
 ):
     _require_superadmin(current_user)
     co = await db.get(Company, company_id)
-    if not co or not co.active: raise HTTPException(404, "Empresa não encontrada")
-    if body.name is not None: co.name = body.name
-    if body.document is not None: co.document = body.document
-    if body.plan is not None: co.plan = body.plan
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+    if body.name is not None:
+        co.name = body.name
+    if body.document is not None:
+        co.document = body.document
+    if body.plan is not None:
+        co.plan = body.plan
+    if body.payment_provider is not None:
+        co.payment_provider = body.payment_provider
     await db.commit()
     await db.refresh(co)
     return co
 
-@app.delete("/companies/{company_id}", status_code=204, tags=["Empresas"], summary="Desativar empresa")
+
+@app.delete(
+    "/companies/{company_id}",
+    status_code=204,
+    tags=["Empresas"],
+    summary="Desativar empresa",
+)
 async def delete_company(
     company_id: int,
     db: AsyncSession = Depends(get_db),
@@ -284,30 +511,33 @@ async def delete_company(
 ):
     _require_superadmin(current_user)
     co = await db.get(Company, company_id)
-    if not co or not co.active: raise HTTPException(404, "Empresa não encontrada")
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
     co.active = False
     await db.commit()
+
 
 @app.post(
     "/companies/{company_id}/regenerate-pin",
     response_model=RegeneratePinOut,
     tags=["Empresas"],
     summary="Regenerar PIN da empresa",
-    responses={403: {"description": "Acesso negado"}, 404: {"description": "Empresa não encontrada"}},
 )
 async def regenerate_pin(
     company_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    if current_user.company_id != company_id and current_user.role not in ("superadmin",):
+    if current_user.company_id != company_id and current_user.role != "superadmin":
         raise HTTPException(403, "Acesso negado")
     co = await db.get(Company, company_id)
-    if not co or not co.active: raise HTTPException(404, "Empresa não encontrada")
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
     new_pin = str(secrets.randbelow(900000) + 100000)
     co.pin_hash = bcrypt.hashpw(new_pin.encode(), bcrypt.gensalt(12)).decode()
     await db.commit()
     return {"pin": new_pin}
+
 
 # ── Terminais (owner/manager da empresa) ─────────────────────────────────────
 
@@ -326,12 +556,16 @@ async def list_terminals(
 ):
     _require_company_admin(current_user, company_id)
     total = (await db.execute(
-        select(func.count()).select_from(Terminal).where(Terminal.company_id == company_id, Terminal.active == True)
+        select(func.count()).select_from(Terminal)
+        .where(Terminal.company_id == company_id, Terminal.active == True)
     )).scalar()
     result = await db.execute(
-        select(Terminal).where(Terminal.company_id == company_id, Terminal.active == True).offset(skip).limit(limit)
+        select(Terminal)
+        .where(Terminal.company_id == company_id, Terminal.active == True)
+        .offset(skip).limit(limit)
     )
     return {"terminals": result.scalars().all(), "total": total}
+
 
 @app.post(
     "/companies/{company_id}/terminals",
@@ -348,7 +582,8 @@ async def create_terminal(
 ):
     _require_company_admin(current_user, company_id)
     co = await db.get(Company, company_id)
-    if not co or not co.active: raise HTTPException(404, "Empresa não encontrada")
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
     terminal_code = body.terminal_code or f"T{company_id}{secrets.token_hex(3).upper()}"
     t = Terminal(
         company_id=company_id,
@@ -356,11 +591,14 @@ async def create_terminal(
         terminal_code=terminal_code,
         tef_number=body.tef_number,
         tef_serial=body.tef_serial,
+        paygo_terminal_id=body.paygo_terminal_id,
+        environment=body.environment,
     )
     db.add(t)
     await db.commit()
     await db.refresh(t)
     return t
+
 
 @app.put(
     "/companies/{company_id}/terminals/{terminal_id}",
@@ -376,15 +614,26 @@ async def update_terminal(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_company_admin(current_user, company_id)
-    result = await db.execute(select(Terminal).filter_by(id=terminal_id, company_id=company_id, active=True))
+    result = await db.execute(
+        select(Terminal).filter_by(id=terminal_id, company_id=company_id, active=True)
+    )
     t = result.scalars().first()
-    if not t: raise HTTPException(404, "Terminal não encontrado")
-    if body.label is not None: t.label = body.label
-    if body.tef_number is not None: t.tef_number = body.tef_number
-    if body.tef_serial is not None: t.tef_serial = body.tef_serial
+    if not t:
+        raise HTTPException(404, "Terminal não encontrado")
+    if body.label is not None:
+        t.label = body.label
+    if body.tef_number is not None:
+        t.tef_number = body.tef_number
+    if body.tef_serial is not None:
+        t.tef_serial = body.tef_serial
+    if body.paygo_terminal_id is not None:
+        t.paygo_terminal_id = body.paygo_terminal_id
+    if body.environment is not None:
+        t.environment = body.environment
     await db.commit()
     await db.refresh(t)
     return t
+
 
 @app.delete(
     "/companies/{company_id}/terminals/{terminal_id}",
@@ -399,11 +648,15 @@ async def delete_terminal(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_company_admin(current_user, company_id)
-    result = await db.execute(select(Terminal).filter_by(id=terminal_id, company_id=company_id, active=True))
+    result = await db.execute(
+        select(Terminal).filter_by(id=terminal_id, company_id=company_id, active=True)
+    )
     t = result.scalars().first()
-    if not t: raise HTTPException(404, "Terminal não encontrado")
+    if not t:
+        raise HTTPException(404, "Terminal não encontrado")
     t.active = False
     await db.commit()
+
 
 # ── Usuários (owner/manager da empresa) ──────────────────────────────────────
 
@@ -422,12 +675,15 @@ async def list_users(
 ):
     _require_company_admin(current_user, company_id)
     total = (await db.execute(
-        select(func.count()).select_from(User).where(User.company_id == company_id, User.active == True)
+        select(func.count()).select_from(User)
+        .where(User.company_id == company_id, User.active == True)
     )).scalar()
     result = await db.execute(
-        select(User).where(User.company_id == company_id, User.active == True).offset(skip).limit(limit)
+        select(User).where(User.company_id == company_id, User.active == True)
+        .offset(skip).limit(limit)
     )
     return {"users": result.scalars().all(), "total": total}
+
 
 @app.post(
     "/companies/{company_id}/users",
@@ -446,9 +702,11 @@ async def create_user(
     if body.role == "owner" and current_user.role == "manager":
         raise HTTPException(403, "Manager não pode criar usuários com role owner")
     co = await db.get(Company, company_id)
-    if not co or not co.active: raise HTTPException(404, "Empresa não encontrada")
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
     existing = (await db.execute(select(User).filter_by(email=body.email))).scalars().first()
-    if existing: raise HTTPException(409, "E-mail já cadastrado")
+    if existing:
+        raise HTTPException(409, "E-mail já cadastrado")
     u = User(
         company_id=company_id,
         name=body.name,
@@ -460,6 +718,7 @@ async def create_user(
     await db.commit()
     await db.refresh(u)
     return u
+
 
 @app.put(
     "/companies/{company_id}/users/{user_id}",
@@ -477,7 +736,8 @@ async def update_user(
     _require_company_admin(current_user, company_id)
     result = await db.execute(select(User).filter_by(id=user_id, company_id=company_id))
     u = result.scalars().first()
-    if not u: raise HTTPException(404, "Usuário não encontrado")
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
     if body.role is not None:
         if str(u.id) == current_user.sub and u.role != body.role:
             raise HTTPException(403, "Owner não pode alterar o próprio role")
@@ -489,6 +749,7 @@ async def update_user(
     await db.commit()
     await db.refresh(u)
     return u
+
 
 @app.delete(
     "/companies/{company_id}/users/{user_id}",
@@ -503,15 +764,159 @@ async def delete_user(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_company_admin(current_user, company_id)
-    result = await db.execute(select(User).filter_by(id=user_id, company_id=company_id, active=True))
+    result = await db.execute(
+        select(User).filter_by(id=user_id, company_id=company_id, active=True)
+    )
     u = result.scalars().first()
-    if not u: raise HTTPException(404, "Usuário não encontrado")
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
     if str(u.id) == current_user.sub:
         raise HTTPException(403, "Não é possível desativar o próprio usuário")
     u.active = False
     await db.commit()
 
+
+# ── Configurações de pagamento (owner/superadmin) ─────────────────────────────
+
+@app.get(
+    "/companies/{company_id}/payment-configs",
+    response_model=PaymentConfigListOut,
+    tags=["Pagamento"],
+    summary="Listar configurações de pagamento",
+)
+async def list_payment_configs(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(
+        select(CompanyPaymentConfig)
+        .where(CompanyPaymentConfig.company_id == company_id, CompanyPaymentConfig.active == True)
+    )
+    configs = result.scalars().all()
+    return {
+        "configs": [
+            {
+                "id": c.id,
+                "provider": c.provider,
+                "environment": c.environment,
+                "api_key": "***",
+                "api_secret": "***",
+                "extra_config": c.extra_config,
+                "active": c.active,
+                "created_at": c.created_at,
+            }
+            for c in configs
+        ]
+    }
+
+
+@app.post(
+    "/companies/{company_id}/payment-configs",
+    response_model=PaymentConfigOut,
+    status_code=201,
+    tags=["Pagamento"],
+    summary="Criar configuração de pagamento",
+)
+async def create_payment_config(
+    company_id: int,
+    body: PaymentConfigIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    cfg = CompanyPaymentConfig(
+        company_id=company_id,
+        provider=body.provider,
+        environment=body.environment,
+        api_key=encrypt_credential(body.api_key) if body.api_key else None,
+        api_secret=encrypt_credential(body.api_secret) if body.api_secret else None,
+        extra_config=body.extra_config,
+    )
+    db.add(cfg)
+    try:
+        await db.commit()
+    except Exception:
+        raise HTTPException(409, "Já existe config ativa para este provider+environment")
+    await db.refresh(cfg)
+    return {
+        "id": cfg.id,
+        "provider": cfg.provider,
+        "environment": cfg.environment,
+        "api_key": "***",
+        "api_secret": "***",
+        "extra_config": cfg.extra_config,
+        "active": cfg.active,
+        "created_at": cfg.created_at,
+    }
+
+
+@app.put(
+    "/companies/{company_id}/payment-configs/{config_id}",
+    response_model=PaymentConfigOut,
+    tags=["Pagamento"],
+    summary="Atualizar configuração de pagamento",
+)
+async def update_payment_config(
+    company_id: int,
+    config_id: int,
+    body: PaymentConfigIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(id=config_id, company_id=company_id, active=True)
+    )
+    cfg = result.scalars().first()
+    if not cfg:
+        raise HTTPException(404, "Config não encontrada")
+    if body.api_key is not None:
+        cfg.api_key = encrypt_credential(body.api_key)
+    if body.api_secret is not None:
+        cfg.api_secret = encrypt_credential(body.api_secret)
+    if body.extra_config is not None:
+        cfg.extra_config = body.extra_config
+    await db.commit()
+    await db.refresh(cfg)
+    return {
+        "id": cfg.id,
+        "provider": cfg.provider,
+        "environment": cfg.environment,
+        "api_key": "***",
+        "api_secret": "***",
+        "extra_config": cfg.extra_config,
+        "active": cfg.active,
+        "created_at": cfg.created_at,
+    }
+
+
+@app.delete(
+    "/companies/{company_id}/payment-configs/{config_id}",
+    status_code=204,
+    tags=["Pagamento"],
+    summary="Desativar configuração de pagamento",
+)
+async def delete_payment_config(
+    company_id: int,
+    config_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(id=config_id, company_id=company_id, active=True)
+    )
+    cfg = result.scalars().first()
+    if not cfg:
+        raise HTTPException(404, "Config não encontrada")
+    cfg.active = False
+    await db.commit()
+
+
 # ── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthOut, tags=["Empresas"], summary="Healthcheck")
-def health(): return {"service": "company", "status": "ok"}
+def health():
+    return {"service": "company", "status": "ok"}
