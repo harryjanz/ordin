@@ -6,6 +6,7 @@ Create Date: 2026-06-11 09:01:00.000000
 
 """
 from alembic import op
+import sqlalchemy as sa
 
 revision = "bbb002"
 down_revision = "bbb001"
@@ -14,6 +15,12 @@ depends_on = None
 
 
 def upgrade() -> None:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    cols = {c["name"] for c in inspector.get_columns("companies")}
+    # Aguarda bbb003 renomear 'pin' → 'pin_hash' em instalações legadas
+    if "pin_hash" not in cols:
+        return
     # PINs: Burger House=1234, Pasta & Co=5678, Sweet Corner=9999 (bcrypt rounds=12)
     op.execute("""
         INSERT IGNORE INTO companies (id, name, document, pin_hash, plan, active) VALUES
