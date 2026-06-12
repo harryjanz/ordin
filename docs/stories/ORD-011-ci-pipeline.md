@@ -1,6 +1,6 @@
 ---
 id: ORD-011
-status: Ready
+status: Done
 fase: 1
 sprint: 3
 responsavel: DevOps + Backend SR
