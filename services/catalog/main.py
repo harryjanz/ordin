@@ -51,6 +51,7 @@ async def get_db():
 class CategoryOut(BaseModel):
     id: int
     name: str
+    active: bool
 
 class CategoryListOut(BaseModel):
     categories: list[CategoryOut]
@@ -147,7 +148,7 @@ async def list_categories(
     """Retorna todas as categorias ativas da empresa autenticada."""
     result = await db.execute(select(Category).filter_by(company_id=current_user.company_id, active=True))
     cats = result.scalars().all()
-    return {"categories": [{"id": c.id, "name": c.name} for c in cats]}
+    return {"categories": [{"id": c.id, "name": c.name, "active": c.active} for c in cats]}
 
 @app.get(
     "/catalog/products",
