@@ -15,7 +15,8 @@ export default function Sidebar() {
   const { role, logout } = useStore();
 
   async function handleLogout() {
-    try { await api.post("/auth/logout"); } catch { /* best-effort */ }
+    const { refreshToken } = useStore.getState();
+    try { await api.post("/auth/logout", { refresh_token: refreshToken }); } catch { /* best-effort */ }
     logout();
   }
 

@@ -43,6 +43,10 @@ async def broadcast_order_created(company_id, order_ref, total, terminal_label):
     await manager.broadcast(company_id,{"event":"order.created","order_ref":order_ref,
         "total":total,"terminal_label":terminal_label})
 
+async def broadcast_order_paid(company_id: int, order_ref: str, total: float, terminal_id: int):
+    await manager.broadcast(company_id,{"event":"order.paid","order_ref":order_ref,
+        "total":total,"terminal_id":terminal_id})
+
 @ws_router.websocket("/ws/orders")
 async def ws_orders(ws: WebSocket, company_id: int = Query(...)):
     await manager.connect(ws, company_id)

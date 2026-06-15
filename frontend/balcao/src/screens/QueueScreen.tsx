@@ -50,7 +50,7 @@ export default function QueueScreen() {
   }, [companyId]);
 
   const handleWsEvent = useCallback((event: WsEvent) => {
-    if (event.event === "order.created" && event.order_ref) {
+    if (event.event === "order.paid" && event.order_ref) {
       api.get(`/orders?status=paid&limit=50`)
         .then((r) => setOrders(r.data.orders ?? []))
         .catch(() => null);

@@ -93,6 +93,8 @@ async def _create_seed(SessionLocal):
 
 
 async def _cleanup_seed(SessionLocal, co_id):
+    if co_id <= 10:
+        return  # nunca deletar seeds (IDs 1-3 são Burger House, Pasta & Co, Sweet Corner)
     import main as svc
     async with SessionLocal() as db:
         await db.execute(sa_delete(svc.CompanyPaymentConfig).where(

@@ -77,6 +77,7 @@ export default function CatalogScreen() {
   const [newCatName, setNewCatName] = useState("");
   const [newProd, setNewProd] = useState({ name: "", price: "", image_url: "" });
   const [editCat, setEditCat] = useState<{ id: number; name: string } | null>(null);
+  const [editProd, setEditProd] = useState<{ id: number; name: string; price: string; image_url: string } | null>(null);
 
   useEffect(() => { loadCategories(); }, []);
   useEffect(() => { if (selectedCat) loadProducts(selectedCat); else setProducts([]); }, [selectedCat]);
@@ -125,6 +126,18 @@ export default function CatalogScreen() {
     });
     setNewProd({ name: "", price: "", image_url: "" });
     loadProducts(selectedCat);
+  }
+
+  async function saveEditProd(e: FormEvent) {
+    e.preventDefault();
+    if (!editProd || !editProd.name.trim() || parseFloat(editProd.price) <= 0) return;
+    await api.put(`/catalog/products/${editProd.id}`, {
+      name: editProd.name.trim(),
+      price: parseFloat(editProd.price),
+      image_url: editProd.image_url || null,
+    });
+    setEditProd(null);
+    if (selectedCat) loadProducts(selectedCat);
   }
 
   async function deleteProduct(id: number) {
@@ -218,6 +231,27 @@ export default function CatalogScreen() {
             </form>
           )}
 
+          {editProd && (
+            <form style={S.form} onSubmit={saveEditProd}>
+              <div style={{ fontSize: 12, color: "rgba(223,232,237,0.5)", marginBottom: 6 }}>Editando produto</div>
+              <input style={S.input} placeholder="Nome" value={editProd.name} autoFocus
+                onChange={(e) => setEditProd({ ...editProd, name: e.target.value })} />
+              <input style={S.input} placeholder="Preço" type="number" step="0.01" min="0.01"
+                value={editProd.price}
+                onChange={(e) => setEditProd({ ...editProd, price: e.target.value })} />
+              <input style={S.input} placeholder="URL da imagem (opcional)"
+                value={editProd.image_url}
+                onChange={(e) => setEditProd({ ...editProd, image_url: e.target.value })} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={S.addBtn} type="submit"
+                  disabled={!editProd.name.trim() || parseFloat(editProd.price) <= 0}>
+                  Salvar
+                </button>
+                <button type="button" style={S.btn("ghost")} onClick={() => setEditProd(null)}>Cancelar</button>
+              </div>
+            </form>
+          )}
+
           {products.map((p) => (
             <div key={p.id} style={S.item}>
               <span>
@@ -227,7 +261,10 @@ export default function CatalogScreen() {
                 </span>
                 <span style={S.badge(p.active)}>{p.active ? "ativo" : "inativo"}</span>
               </span>
-              <button style={S.btn("danger")} onClick={() => deleteProduct(p.id)}>Desativar</button>
+              <div style={S.actions}>
+                <button style={S.btn("ghost")} onClick={() => { setEditCat(null); setEditProd({ id: p.id, name: p.name, price: String(p.price), image_url: p.image_url ?? "" }); }}>Editar</button>
+                <button style={S.btn("danger")} onClick={() => deleteProduct(p.id)}>Desativar</button>
+              </div>
             </div>
           ))}
 

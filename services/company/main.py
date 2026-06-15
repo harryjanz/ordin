@@ -185,7 +185,7 @@ class TerminalOut(BaseModel):
     tef_number: Optional[str] = None
     tef_serial: Optional[str] = None
     paygo_terminal_id: Optional[str] = None
-    environment: str = "sandbox"
+    environment: Optional[str] = "sandbox"
     active: bool = True
     model_config = {"from_attributes": True}
 
@@ -219,7 +219,7 @@ class UserOut(BaseModel):
     email: str
     role: str
     active: bool
-    created_at: datetime
+    created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 

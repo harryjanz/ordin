@@ -42,12 +42,14 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
     setScanning(false);
     setPendingTicket(null);
 
+    const isFullQr = qrData.includes("|");
+    const ticketCode = isFullQr ? qrData.split("|")[0] : qrData;
+
     try {
-      const ticketCode = qrData.split("|")[0];
       await api.post(`/tickets/${ticketCode}/collect`, {
         collected_by: "balcao",
         collection_device: "balcao-web",
-        qr_data: qrData,
+        ...(isFullQr ? { qr_data: qrData } : {}),
       });
       beepSuccess();
       showFeedback("Ticket coletado com sucesso!", true);
