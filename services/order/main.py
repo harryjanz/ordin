@@ -95,8 +95,22 @@ class OrderOut(BaseModel):
     total: float
     status: str
 
+class OrderListItem(BaseModel):
+    order_ref: str
+    status: str
+    total: float
+    terminal_id: int
+    created_at: str
+    tickets_total: int
+    tickets_collected: int
+
+class OrderListOut(BaseModel):
+    orders: list[OrderListItem]
+    total: int
+
 class TicketOut(BaseModel):
     ticket_code: str
+    qr_data: str
     status: str
     unit_number: int
     total_units: int
@@ -302,6 +316,52 @@ async def collect_ticket(
             "order_completed":order_done,
             "progress":progress_str}
 
+@app.get(
+    "/orders",
+    response_model=OrderListOut,
+    tags=["Pedidos"],
+    summary="Listar pedidos da empresa",
+)
+async def list_orders(
+    status: Optional[str] = None,
+    limit: int = 50,
+    skip: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """Lista pedidos da empresa autenticada com filtro opcional de status."""
+    q = select(Order).where(Order.company_id == current_user.company_id)
+    if status and status != "all":
+        q = q.where(Order.status == status)
+    q = q.order_by(Order.created_at.desc()).offset(skip).limit(limit)
+    result = await db.execute(q)
+    orders = result.scalars().all()
+
+    count_q = select(func.count(Order.id)).where(Order.company_id == current_user.company_id)
+    if status and status != "all":
+        count_q = count_q.where(Order.status == status)
+    total = (await db.execute(count_q)).scalar_one()
+
+    items = []
+    for o in orders:
+        tix_q = (
+            select(Ticket)
+            .join(OrderItem, OrderItem.id == Ticket.order_item_id)
+            .where(OrderItem.order_id == o.id)
+        )
+        tix_rows = (await db.execute(tix_q)).scalars().all()
+        items.append({
+            "order_ref": o.order_ref,
+            "status": o.status,
+            "total": float(o.total),
+            "terminal_id": o.terminal_id,
+            "created_at": o.created_at.isoformat() if o.created_at else "",
+            "tickets_total": len(tix_rows),
+            "tickets_collected": sum(1 for t in tix_rows if t.status == "collected"),
+        })
+    return {"orders": items, "total": total}
+
+
 @app.patch(
     "/orders/{order_ref}/status",
     response_model=OrderStatusOut,
@@ -345,7 +405,7 @@ async def list_order_tickets(
     if not tickets: raise HTTPException(404)
     col = sum(1 for t in tickets if t.status=="collected")
     return {"order_ref":order_ref,"progress":f"{col}/{len(tickets)}",
-            "tickets":[{"ticket_code":t.ticket_code,"status":t.status,
+            "tickets":[{"ticket_code":t.ticket_code,"qr_data":t.qr_data,"status":t.status,
                         "unit_number":t.unit_number,"total_units":t.total_units,
                         "collected_at":t.collected_at.isoformat() if t.collected_at else None,
                         "collected_by":t.collected_by} for t in tickets]}

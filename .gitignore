@@ -12,3 +12,4 @@ venv/
 *.tfstate
 *.tfstate.backup
 *.tfvars
+node_modules/

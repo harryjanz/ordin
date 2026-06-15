@@ -161,6 +161,36 @@ services:
       - order-service
       - payment-service
 
+  totem:
+    build: ./frontend/totem
+    restart: always
+    ports:
+      - "3000:80"
+    networks:
+      - ordin
+    depends_on:
+      - nginx
+
+  admin:
+    build: ./frontend/admin
+    restart: always
+    ports:
+      - "3001:80"
+    networks:
+      - ordin
+    depends_on:
+      - nginx
+
+  balcao:
+    build: ./frontend/balcao
+    restart: always
+    ports:
+      - "3002:80"
+    networks:
+      - ordin
+    depends_on:
+      - nginx
+
 networks:
   ordin:
     driver: bridge
