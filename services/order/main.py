@@ -9,7 +9,7 @@ from datetime import datetime
 import random, string, secrets, hmac as hmaclib, hashlib
 from config import require_env, get_cors_origins
 from auth import get_current_user, TokenPayload
-from websocket import ws_router, broadcast_order_created, broadcast_ticket_collected, broadcast_order_completed
+from websocket import ws_router, broadcast_order_created, broadcast_ticket_collected, broadcast_order_completed, broadcast_order_paid
 
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
@@ -421,6 +421,8 @@ async def internal_update_status(
     o = result.scalars().first()
     if not o: raise HTTPException(404)
     o.status = body["status"]; await db.commit()
+    if body["status"] == "paid":
+        await broadcast_order_paid(o.company_id, order_ref, float(o.total), o.terminal_id)
     return {"order_ref": order_ref, "status": o.status}
 
 @app.get("/health", response_model=HealthOut, tags=["Pedidos"], summary="Healthcheck")

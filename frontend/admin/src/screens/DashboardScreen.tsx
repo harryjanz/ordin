@@ -54,11 +54,11 @@ export default function DashboardScreen() {
   }, [selectedCompanyId]);
 
   const pendingCount = orders.filter((o) => o.status === "pending").length;
-  const completedToday = orders.filter((o) => {
+  const paidToday = orders.filter((o) => {
     const d = new Date(o.created_at);
     const now = new Date();
     return (
-      o.status === "completed" &&
+      (o.status === "paid" || o.status === "completed") &&
       d.getFullYear() === now.getFullYear() &&
       d.getMonth() === now.getMonth() &&
       d.getDate() === now.getDate()
@@ -98,8 +98,8 @@ export default function DashboardScreen() {
               <div style={S.cardValue}>{pendingCount}</div>
             </div>
             <div style={S.card}>
-              <div style={S.cardLabel}>Concluídos hoje</div>
-              <div style={S.cardValue}>{completedToday}</div>
+              <div style={S.cardLabel}>Pagos hoje</div>
+              <div style={S.cardValue}>{paidToday}</div>
             </div>
             <div style={S.card}>
               <div style={S.cardLabel}>Faturamento aprovado</div>

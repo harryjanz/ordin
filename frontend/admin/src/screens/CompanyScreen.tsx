@@ -92,7 +92,8 @@ export default function CompanyScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [newTerminal, setNewTerminal] = useState("");
   const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "cashier" as Role });
-  const [msg, setMsg] = useState("");
+  const [errTerminals, setErrTerminals] = useState<string | null>(null);
+  const [errUsers, setErrUsers] = useState<string | null>(null);
 
   useEffect(() => {
     if (!companyId) return;
@@ -102,14 +103,24 @@ export default function CompanyScreen() {
 
   async function loadTerminals() {
     if (!companyId) return;
-    const r = await api.get(`/companies/${companyId}/terminals`);
-    setTerminals(r.data.terminals ?? r.data);
+    try {
+      const r = await api.get(`/companies/${companyId}/terminals`);
+      setTerminals(r.data.terminals ?? r.data);
+      setErrTerminals(null);
+    } catch {
+      setErrTerminals("Erro ao carregar terminais.");
+    }
   }
 
   async function loadUsers() {
     if (!companyId) return;
-    const r = await api.get(`/companies/${companyId}/users`);
-    setUsers(r.data.users ?? r.data);
+    try {
+      const r = await api.get(`/companies/${companyId}/users`);
+      setUsers(r.data.users ?? r.data);
+      setErrUsers(null);
+    } catch {
+      setErrUsers("Erro ao carregar usuários.");
+    }
   }
 
   async function addTerminal(e: FormEvent) {
@@ -140,13 +151,6 @@ export default function CompanyScreen() {
     loadUsers();
   }
 
-  async function regeneratePin() {
-    if (!companyId || !confirm("Gerar novo PIN? O PIN atual será invalidado imediatamente.")) return;
-    const r = await api.post(`/companies/${companyId}/regenerate-pin`);
-    const pin = r.data.pin ?? r.data.new_pin;
-    setMsg(`Novo PIN: ${pin} — anote antes de fechar.`);
-  }
-
   if (!companyId) {
     return (
       <div style={S.page}>
@@ -159,27 +163,6 @@ export default function CompanyScreen() {
     <div style={S.page}>
       <div style={S.title}>Empresa</div>
 
-      {msg && (
-        <div style={{
-          background: "rgba(153,0,255,0.12)",
-          border: "1px solid #9900ff",
-          borderRadius: 8,
-          padding: "12px 16px",
-          marginBottom: 20,
-          fontSize: 15,
-          fontWeight: 600,
-          color: "#DFE8ED",
-        }}>
-          {msg}
-          <button
-            onClick={() => setMsg("")}
-            style={{ marginLeft: 16, background: "none", border: "none", color: "rgba(223,232,237,0.5)", cursor: "pointer", fontSize: 13 }}
-          >
-            Fechar
-          </button>
-        </div>
-      )}
-
       <div style={S.tabs}>
         <button style={S.tab(tab === "terminals")} onClick={() => setTab("terminals")}>Terminais</button>
         <button style={S.tab(tab === "users")} onClick={() => setTab("users")}>Usuários</button>
@@ -187,6 +170,12 @@ export default function CompanyScreen() {
 
       {tab === "terminals" && (
         <>
+          {errTerminals && (
+            <div style={{ color: "#ff4d6d", marginBottom: 12, fontSize: 14 }}>
+              {errTerminals}{" "}
+              <button onClick={loadTerminals} style={{ background: "none", border: "none", color: "#9900ff", cursor: "pointer", fontSize: 13 }}>Tentar novamente</button>
+            </div>
+          )}
           <form style={S.form} onSubmit={addTerminal}>
             <input
               style={S.input}
@@ -215,6 +204,12 @@ export default function CompanyScreen() {
 
       {tab === "users" && (
         <>
+          {errUsers && (
+            <div style={{ color: "#ff4d6d", marginBottom: 12, fontSize: 14 }}>
+              {errUsers}{" "}
+              <button onClick={loadUsers} style={{ background: "none", border: "none", color: "#9900ff", cursor: "pointer", fontSize: 13 }}>Tentar novamente</button>
+            </div>
+          )}
           <form style={S.form} onSubmit={addUser}>
             <input style={S.input} placeholder="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
             <input style={S.input} placeholder="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />

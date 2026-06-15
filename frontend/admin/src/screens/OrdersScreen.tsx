@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import api from "../api";
 import type { Order, Ticket } from "../types";
 
@@ -116,8 +116,8 @@ export default function OrdersScreen() {
           </thead>
           <tbody>
             {orders.map((o) => (
-              <>
-                <tr key={o.order_ref}>
+              <Fragment key={o.order_ref}>
+                <tr>
                   <td style={{ ...S.td, fontFamily: "monospace" }}>{o.order_ref}</td>
                   <td style={S.td}>
                     <span style={S.statusBadge(o.status)}>{o.status}</span>
@@ -137,7 +137,7 @@ export default function OrdersScreen() {
                   </td>
                 </tr>
                 {expanded === o.order_ref && (
-                  <tr key={`${o.order_ref}-detail`}>
+                  <tr>
                     <td colSpan={7} style={{ padding: "0 12px 8px" }}>
                       <div style={S.ticketPanel}>
                         {(tickets[o.order_ref] ?? []).length === 0 ? (
@@ -179,7 +179,7 @@ export default function OrdersScreen() {
                     </td>
                   </tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
