@@ -20,7 +20,7 @@ export default function App() {
   const {
     company, terminal, cart, cpf, completedOrder, screen,
     setToken, setCompany, setTerminal, setScreen,
-    addToCart, removeFromCart, setCpf, setCompletedOrder, resetSession, touch,
+    addToCart, removeFromCart, setCpf, setCompletedOrder, newOrder, resetSession, touch,
   } = useStore();
 
   const savedTerminalId = getStoredTerminalId();
@@ -194,9 +194,9 @@ export default function App() {
       {screen === "success" && completedOrder && (
         <SuccessScreen
           T={T}
-          themeKey={themeKey}
           order={completedOrder}
-          onNew={resetSession}
+          companyName={company?.name ?? "ordin"}
+          onNew={newOrder}
         />
       )}
 
