@@ -5,8 +5,8 @@ import pytest
 import respx
 import httpx
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-# Resposta mock do company-service para terminal com MockProvider
 _MOCK_TERMINAL_CONFIG = {
     "paygo_terminal_id": None,
     "payment_provider": "mock",
@@ -14,7 +14,6 @@ _MOCK_TERMINAL_CONFIG = {
     "config": None,
 }
 
-# Resposta mock do company-service para terminal com PayGoProvider
 _PAYGO_TERMINAL_CONFIG = {
     "paygo_terminal_id": "81",
     "payment_provider": "paygo",
@@ -27,15 +26,35 @@ _PAYGO_TERMINAL_CONFIG = {
 }
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def client():
-    from main import app, Base, engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    import main as svc
+    db_url = os.environ["DB_URL"].replace("mysql+pymysql://", "mysql+aiomysql://")
+    test_engine = create_async_engine(db_url, echo=False)
+    test_session = async_sessionmaker(test_engine, expire_on_commit=False)
+    orig_engine, orig_session = svc.engine, svc.AsyncSessionLocal
+    svc.engine = test_engine
+    svc.AsyncSessionLocal = test_session
+    async with test_engine.begin() as conn:
+        await conn.run_sync(svc.Base.metadata.create_all)
+    async with AsyncClient(transport=ASGITransport(app=svc.app), base_url="http://test") as c:
         yield c
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    await test_engine.dispose()
+    svc.engine, svc.AsyncSessionLocal = orig_engine, orig_session
+
+
+def _company_url():
+    import main as svc
+    return svc.COMPANY_SVC
+
+
+def _order_url():
+    import main as svc
+    return svc.ORDER_SVC
+
+
+def _paygo_base():
+    return os.environ.get("PAYGO_BASE_URL", "https://sandbox.controlpay.com.br/webapi/")
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -57,30 +76,24 @@ async def test_create_payment_sem_token(client):
 
 async def test_create_payment_mock_approved(client, token_kiosk):
     with respx.mock:
-        respx.get("http://localhost:8002/internal/terminals/1").mock(
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
             return_value=httpx.Response(200, json=_MOCK_TERMINAL_CONFIG)
         )
-        respx.patch("http://localhost:8004/internal/orders/ORD-MOCK01/status").mock(
+        respx.patch(f"{_order_url()}/internal/orders/ORD-MOCK01/status").mock(
             return_value=httpx.Response(200)
         )
-        # Forçar aprovação fixando a semente do random
         import random
         original = random.random
-        random.random = lambda: 0.01  # < 0.95 → aprovado
+        random.random = lambda: 0.01
         try:
             r = await client.post(
                 "/payments",
-                json={
-                    "order_ref": "ORD-MOCK01",
-                    "method": "credit",
-                    "amount": 26.00,
-                    "items": [{"product_id": 1, "name": "X-Burger", "qty": 1, "unit_price": 26.00}],
-                },
+                json={"order_ref": "ORD-MOCK01", "method": "credit", "amount": 26.00,
+                      "items": [{"product_id": 1, "name": "X-Burger", "qty": 1, "unit_price": 26.00}]},
                 headers={"Authorization": f"Bearer {token_kiosk}"},
             )
         finally:
             random.random = original
-
     assert r.status_code == 201
     data = r.json()
     assert data["ok"] is True
@@ -93,26 +106,21 @@ async def test_create_payment_mock_approved(client, token_kiosk):
 
 async def test_create_payment_mock_refused(client, token_kiosk):
     with respx.mock:
-        respx.get("http://localhost:8002/internal/terminals/1").mock(
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
             return_value=httpx.Response(200, json=_MOCK_TERMINAL_CONFIG)
         )
         import random
         original = random.random
-        random.random = lambda: 0.99  # >= 0.95 → recusado
+        random.random = lambda: 0.99
         try:
             r = await client.post(
                 "/payments",
-                json={
-                    "order_ref": "ORD-MOCK02",
-                    "method": "credit",
-                    "amount": 10.00,
-                    "items": [{"product_id": 1, "name": "Produto", "qty": 1, "unit_price": 10.00}],
-                },
+                json={"order_ref": "ORD-MOCK02", "method": "credit", "amount": 10.00,
+                      "items": [{"product_id": 1, "name": "Produto", "qty": 1, "unit_price": 10.00}]},
                 headers={"Authorization": f"Bearer {token_kiosk}"},
             )
         finally:
             random.random = original
-
     assert r.status_code == 201
     assert r.json()["ok"] is False
     assert r.json()["status"] == "refused"
@@ -139,7 +147,7 @@ async def test_paygo_sem_terminal_id_retorna_400(client, token_kiosk):
         "config": {"api_key": "k", "api_secret": "s", "extra_config": {}},
     }
     with respx.mock:
-        respx.get("http://localhost:8002/internal/terminals/1").mock(
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
             return_value=httpx.Response(200, json=config_sem_terminal)
         )
         r = await client.post(
@@ -150,15 +158,15 @@ async def test_paygo_sem_terminal_id_retorna_400(client, token_kiosk):
     assert r.status_code == 400
 
 
-# ── PayGoProvider — aprovado (mock das chamadas HTTP ao PayGo) ────────────────
+# ── PayGoProvider — aprovado ──────────────────────────────────────────────────
 
 async def test_create_payment_paygo_approved(client, token_kiosk):
+    base = _paygo_base()
     with respx.mock:
-        respx.get("http://localhost:8002/internal/terminals/1").mock(
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
             return_value=httpx.Response(200, json=_PAYGO_TERMINAL_CONFIG)
         )
-        # Mock Venda/Vender
-        respx.post("https://sandbox.controlpay.com.br/webapi/Venda/Vender/").mock(
+        respx.post(f"{base}Venda/Vender/").mock(
             return_value=httpx.Response(200, json={
                 "intencaoVenda": {
                     "id": 23454,
@@ -166,8 +174,7 @@ async def test_create_payment_paygo_approved(client, token_kiosk):
                 }
             })
         )
-        # Mock polling — retorna aprovado imediatamente
-        respx.post("https://sandbox.controlpay.com.br/webapi/IntencaoVenda/GetById").mock(
+        respx.post(f"{base}IntencaoVenda/GetById").mock(
             return_value=httpx.Response(200, json={
                 "intencaoVenda": {
                     "id": 23454,
@@ -180,21 +187,15 @@ async def test_create_payment_paygo_approved(client, token_kiosk):
                 }
             })
         )
-        respx.patch("http://localhost:8004/internal/orders/ORD-PG01/status").mock(
+        respx.patch(f"{_order_url()}/internal/orders/ORD-PG01/status").mock(
             return_value=httpx.Response(200)
         )
-
         r = await client.post(
             "/payments",
-            json={
-                "order_ref": "ORD-PG01",
-                "method": "credit",
-                "amount": 26.00,
-                "items": [{"product_id": 1, "name": "X-Burger", "qty": 1, "unit_price": 26.00}],
-            },
+            json={"order_ref": "ORD-PG01", "method": "credit", "amount": 26.00,
+                  "items": [{"product_id": 1, "name": "X-Burger", "qty": 1, "unit_price": 26.00}]},
             headers={"Authorization": f"Bearer {token_kiosk}"},
         )
-
     assert r.status_code == 201
     data = r.json()
     assert data["ok"] is True
@@ -203,21 +204,20 @@ async def test_create_payment_paygo_approved(client, token_kiosk):
     assert data["authorization"] == "019501"
 
 
-# ── PayGoProvider — timeout ───────────────────────────────────────────────────
+# ── PayGoProvider — expirado ──────────────────────────────────────────────────
 
 async def test_create_payment_paygo_expired(client, token_kiosk):
-    """Quando PayGo retorna sempre 'Em Pagamento', deve expirar — mas o timeout real é 90s.
-    Mockamos para retornar status 15 (Expirado) diretamente."""
+    base = _paygo_base()
     with respx.mock:
-        respx.get("http://localhost:8002/internal/terminals/1").mock(
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
             return_value=httpx.Response(200, json=_PAYGO_TERMINAL_CONFIG)
         )
-        respx.post("https://sandbox.controlpay.com.br/webapi/Venda/Vender/").mock(
+        respx.post(f"{base}Venda/Vender/").mock(
             return_value=httpx.Response(200, json={
                 "intencaoVenda": {"id": 99999, "intencaoVendaStatus": {"id": 6}}
             })
         )
-        respx.post("https://sandbox.controlpay.com.br/webapi/IntencaoVenda/GetById").mock(
+        respx.post(f"{base}IntencaoVenda/GetById").mock(
             return_value=httpx.Response(200, json={
                 "intencaoVenda": {
                     "id": 99999,
@@ -225,13 +225,11 @@ async def test_create_payment_paygo_expired(client, token_kiosk):
                 }
             })
         )
-
         r = await client.post(
             "/payments",
             json={"order_ref": "ORD-EXP01", "method": "credit", "amount": 5.00, "items": []},
             headers={"Authorization": f"Bearer {token_kiosk}"},
         )
-
     assert r.status_code == 201
     assert r.json()["ok"] is False
     assert r.json()["status"] == "expired"

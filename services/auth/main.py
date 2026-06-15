@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 import hashlib, os, redis, httpx
 from config import require_env, get_cors_origins
+from audit import emit_audit
 
 redis_client = redis.from_url(require_env("REDIS_URL"), decode_responses=True)
 RATE_MAX = 5
@@ -189,9 +190,17 @@ async def pin_login(body: PinLoginReq, request: Request, response: Response):
         r = await c.post(f"{COMPANY_SVC}/internal/verify-pin",
                          json={"pin": body.pin, "terminal_id": body.terminal_id},
                          headers=INTERNAL_HEADERS)
-    if r.status_code != 200: raise HTTPException(401, "PIN ou terminal inválido")
+    if r.status_code != 200:
+        emit_audit("pin_login_failure", request,
+                   actor=f"terminal-{body.terminal_id}", actor_id=None, company_id=None,
+                   result="failure", detail={"terminal_id": body.terminal_id})
+        raise HTTPException(401, "PIN ou terminal inválido")
     reset_rate_limit(request.client.host, body.pin)
     data = r.json()
+    emit_audit("pin_login_success", request,
+               actor=f"terminal-{body.terminal_id}", actor_id=body.terminal_id,
+               company_id=data["company"]["id"], result="success",
+               detail={"terminal_id": body.terminal_id})
     token = make_token({"sub":"0","company":data["company"]["id"],"terminal":data["terminal"]["id"],"role":"kiosk"}, timedelta(hours=12))
     return {"ok":True,"access_token":token,"token_type":"bearer","company":data["company"],"terminal":data["terminal"]}
 
@@ -210,13 +219,18 @@ async def login(body: LoginReq, request: Request, response: Response, db: AsyncS
     check_rate_limit(request.client.host, body.email, response)
     async with httpx.AsyncClient() as c:
         r = await c.post(f"{COMPANY_SVC}/internal/verify-credentials", json={"email":body.email,"password":body.password}, headers=INTERNAL_HEADERS)
-    if r.status_code != 200: raise HTTPException(401, "Credenciais inválidas")
+    if r.status_code != 200:
+        emit_audit("login_failure", request,
+                   actor=body.email, actor_id=None, company_id=None, result="failure")
+        raise HTTPException(401, "Credenciais inválidas")
     reset_rate_limit(request.client.host, body.email)
     u = r.json()
     access  = make_token({"sub":str(u["id"]),"company":u["company_id"],"role":u["role"]}, timedelta(minutes=ACCESS_EX))
     refresh = make_token({"sub":str(u["id"]),"type":"refresh","company":u["company_id"],"role":u["role"]}, timedelta(days=7))
     db.add(RefreshToken(user_id=u["id"],token_hash=hash_tok(refresh),expires_at=datetime.utcnow()+timedelta(days=7)))
     await db.commit()
+    emit_audit("login_success", request,
+               actor=body.email, actor_id=u["id"], company_id=u["company_id"], result="success")
     return {"access_token":access,"refresh_token":refresh,"token_type":"bearer"}
 
 @app.post(
@@ -261,13 +275,23 @@ async def refresh(body: RefreshReq, db: AsyncSession = Depends(get_db)):
     tags=["Autenticação"],
     summary="Logout — revogar refresh token",
 )
-async def logout(body: RefreshReq, db: AsyncSession = Depends(get_db)):
+async def logout(body: RefreshReq, request: Request, db: AsyncSession = Depends(get_db)):
     """Revoga o refresh token informado. O access token expira naturalmente no TTL."""
     result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == hash_tok(body.refresh_token)))
     tok = result.scalars().first()
     if tok:
         tok.revoked = True
         await db.commit()
+    try:
+        payload = jwt.decode(body.refresh_token, SECRET, algorithms=[ALGO], options={"verify_exp": False})
+        actor = payload.get("sub")
+        company_id = payload.get("company")
+    except Exception:
+        actor = None
+        company_id = None
+    emit_audit("logout", request,
+               actor=actor, actor_id=int(actor) if actor else None,
+               company_id=company_id, result="success")
     return {"detail":"Logout realizado"}
 
 @app.get("/health", response_model=HealthOut, tags=["Autenticação"], summary="Healthcheck")

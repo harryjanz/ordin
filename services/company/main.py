@@ -17,7 +17,9 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from config import require_env, get_cors_origins
+from fastapi import Request
 from auth import get_current_user, TokenPayload
+from audit import emit_audit
 
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
@@ -525,6 +527,7 @@ async def delete_company(
 )
 async def regenerate_pin(
     company_id: int,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
@@ -536,6 +539,12 @@ async def regenerate_pin(
     new_pin = str(secrets.randbelow(900000) + 100000)
     co.pin_hash = bcrypt.hashpw(new_pin.encode(), bcrypt.gensalt(12)).decode()
     await db.commit()
+    emit_audit("pin_regenerated", request,
+               actor=current_user.sub,
+               actor_id=int(current_user.sub),
+               company_id=current_user.company_id,
+               result="success",
+               detail={"company_id_alvo": company_id})
     return {"pin": new_pin}
 
 

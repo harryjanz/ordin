@@ -4,6 +4,29 @@ Duas esteiras independentes com handoff no **Ready → To Do**.
 
 ---
 
+> **Regra inviolável: nenhuma história é implementada sem estar `Ready`.**
+>
+> Toda história deve percorrer o upstream completo antes de qualquer linha de código ser escrita:
+>
+> ```
+> [ New ] → [ Explorer ] → [ QA Explorer ] → [ Tech Explorer ] → [ Ready ]
+> ```
+>
+> Isso vale sem exceção — inclusive para histórias "simples" ou "urgentes". O upstream existe para evitar retrabalho, não para atrasar. Se uma história parece óbvia demais para precisar de upstream, o upstream leva 15 minutos e confirma isso.
+>
+> **O que significa estar `Ready`:**
+> - User story documentada (Como / Quero / Para)
+> - Critérios de aceitação escritos e aprovados
+> - Solução técnica definida (endpoints, schemas, impacto em outros serviços)
+> - Estimativa acordada
+> - Sem bloqueadores abertos
+>
+> **Quando uma história não está Ready e alguém quer implementar:** rodar o upstream primeiro, apresentar ao time para aprovação em cada fase, só então codar.
+
+---
+
+---
+
 ## Esteira Upstream — Discovery até Ready
 
 O objetivo do upstream é garantir que nenhuma história entre no sprint sem estar completamente entendida, testável e com solução técnica definida.
@@ -127,6 +150,7 @@ O downstream começa quando uma história **Ready** é puxada para o sprint. O o
 ## Handoff e regras gerais
 
 - **Única porta de entrada no downstream:** história deve estar em **Ready** para entrar em To Do. Nenhuma história entra no sprint sem passar pelo upstream completo.
+- **Sprint travada por história não-Ready:** se ao iniciar uma sprint qualquer história proposta não estiver `Ready`, o sprint **não começa**. O time deve ser alertado com a lista de histórias bloqueadas e em qual fase do upstream cada uma está. O sprint só é desbloqueado quando todas as histórias atingem `Ready`.
 - **Bloqueios:** se uma história bloquear em qualquer step, volta ao step anterior com comentário explicando o bloqueio.
 - **Referências obrigatórias em cada PR:** número/ID da história + link para os cenários Gherkin.
 - **Diretiva de arquitetura:** toda decisão técnica segue `docs/ARQUITETURA.md`. Desvios precisam ser justificados na história durante o Tech Explorer.

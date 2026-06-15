@@ -204,7 +204,7 @@ async def create_category(
 ):
     cat = Category(company_id=current_user.company_id, name=body.name)
     db.add(cat); await db.commit(); await db.refresh(cat)
-    return {"id": cat.id, "name": cat.name}
+    return {"id": cat.id, "name": cat.name, "active": cat.active}
 
 @app.put(
     "/catalog/categories/{category_id}",
@@ -224,7 +224,7 @@ async def update_category(
     if not cat: raise HTTPException(404)
     cat.name = body.name
     await db.commit(); await db.refresh(cat)
-    return {"id": cat.id, "name": cat.name}
+    return {"id": cat.id, "name": cat.name, "active": cat.active}
 
 @app.delete(
     "/catalog/categories/{category_id}",

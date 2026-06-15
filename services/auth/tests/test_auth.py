@@ -5,17 +5,29 @@ import pytest
 import respx
 import httpx
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def client():
-    from main import app, Base, engine
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+    import main as svc
+    db_url = os.environ["DB_URL"].replace("mysql+pymysql://", "mysql+aiomysql://")
+    test_engine = create_async_engine(db_url, echo=False)
+    test_session = async_sessionmaker(test_engine, expire_on_commit=False)
+    orig_engine, orig_session = svc.engine, svc.AsyncSessionLocal
+    svc.engine = test_engine
+    svc.AsyncSessionLocal = test_session
+    async with test_engine.begin() as conn:
+        await conn.run_sync(svc.Base.metadata.create_all)
+    async with AsyncClient(transport=ASGITransport(app=svc.app), base_url="http://test") as c:
         yield c
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    await test_engine.dispose()
+    svc.engine, svc.AsyncSessionLocal = orig_engine, orig_session
+
+
+def _company_svc_url() -> str:
+    import main as svc
+    return svc.COMPANY_SVC
 
 
 async def test_health(client):
@@ -25,8 +37,9 @@ async def test_health(client):
 
 
 async def test_login_user_not_found(client):
+    base = _company_svc_url()
     with respx.mock:
-        respx.post("http://localhost:8002/internal/verify-credentials").mock(
+        respx.post(f"{base}/internal/verify-credentials").mock(
             return_value=httpx.Response(401)
         )
         r = await client.post("/auth/login", json={"email": "nao@existe.com", "password": "errado"})
@@ -34,8 +47,9 @@ async def test_login_user_not_found(client):
 
 
 async def test_login_wrong_password(client):
+    base = _company_svc_url()
     with respx.mock:
-        respx.post("http://localhost:8002/internal/verify-credentials").mock(
+        respx.post(f"{base}/internal/verify-credentials").mock(
             return_value=httpx.Response(401)
         )
         r = await client.post("/auth/login", json={"email": "user@test.com", "password": "wrong"})
@@ -48,8 +62,9 @@ async def test_refresh_invalid_token(client):
 
 
 async def test_kiosk_pin_validate_invalid(client):
+    base = _company_svc_url()
     with respx.mock:
-        respx.post("http://localhost:8002/internal/validate-pin").mock(
+        respx.post(f"{base}/internal/validate-pin").mock(
             return_value=httpx.Response(401, json={"detail": "PIN inválido"})
         )
         r = await client.post("/auth/validate-pin", json={"pin": "000000"})
@@ -57,8 +72,9 @@ async def test_kiosk_pin_validate_invalid(client):
 
 
 async def test_pin_login_invalid(client):
+    base = _company_svc_url()
     with respx.mock:
-        respx.post("http://localhost:8002/internal/verify-pin").mock(
+        respx.post(f"{base}/internal/verify-pin").mock(
             return_value=httpx.Response(401, json={"detail": "PIN inválido"})
         )
         r = await client.post("/auth/pin-login", json={"pin": "000000", "terminal_id": 1})
