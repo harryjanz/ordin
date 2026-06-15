@@ -162,11 +162,30 @@ Datadog APM + logs | Secrets Manager (ordin/{env}/db/{svc}, jwt_secret, qr_secre
 
 **Deploy:** blue/green via ECS + CodeDeploy. Secrets injetados via Secrets Manager — nunca em texto na task definition. OIDC GitHub Actions (sem chaves de longa duração).
 
+## Regra de implementação obrigatória
+
+**Nunca escrever código de produção para uma história antes de ela estar `Ready`.**
+
+O fluxo obrigatório antes de qualquer implementação:
+```
+[ New ] → [ Explorer ] → [ QA Explorer ] → [ Tech Explorer ] → [ Ready ]
+```
+
+Ao iniciar uma sprint ou receber um pedido de implementação:
+1. Verificar o status de cada história em `docs/stories/ORD-xxx.md`
+2. **Se qualquer história da sprint não estiver `Ready`: TRAVAR o início da sprint**
+   - Listar quais histórias estão bloqueadas e em qual fase do upstream estão
+   - Não escrever nenhuma linha de código até o problema ser resolvido
+   - Rodar o upstream das histórias pendentes (Explorer → QA Explorer → Tech Explorer → Ready)
+3. Só após **todas** as histórias da sprint estarem `Ready` → começar a implementar
+
+Referência completa: `docs/WORKFLOW.md`.
+
 ## Documentação
 
 `docs/` é o repositório de decisões arquiteturais e contexto de trabalho:
 
 - **`ARQUITETURA.md`** — documento autoritativo: stack, Clean Architecture alvo, Kong plugins, multi-tenancy, QR, filas, SLOs, segurança. Ler antes de qualquer mudança estrutural.
-- **`WORKFLOW.md`** — fluxo upstream/downstream: New → Ready → Deploy. Só stories *Ready* entram no sprint.
+- **`WORKFLOW.md`** — fluxo upstream/downstream completo com a regra de Ready obrigatório.
 - **`roles/`** — guias por papel: `backend-sr.md`, `frontend.md`, `devops.md`, `qa.md`, `pm.md`, `security.md`
 - **`stories/ORD-xxx.md`** — contexto de cada issue implementada (credentials, JWT, bcrypt, QR, Alembic, Kong, etc.)
