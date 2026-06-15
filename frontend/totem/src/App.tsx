@@ -2,8 +2,8 @@ import { useState, useEffect } from "react";
 import api from "./api";
 import { useStore } from "./store";
 import { THEMES, type ThemeKey } from "./themes";
-import DeviceSetupScreen, { getStoredTerminalId } from "./screens/DeviceSetupScreen";
-import PinScreen from "./screens/PinScreen";
+import SetupScreen from "./screens/SetupScreen";
+import { getStoredTerminalId } from "./screens/DeviceSetupScreen";
 import CatalogScreen from "./screens/CatalogScreen";
 import CpfScreen from "./screens/CpfScreen";
 import PaymentScreen from "./screens/PaymentScreen";
@@ -23,7 +23,7 @@ export default function App() {
     addToCart, removeFromCart, setCpf, setCompletedOrder, resetSession, touch,
   } = useStore();
 
-  const [terminalId, setTerminalId] = useState<number | null>(getStoredTerminalId);
+  const savedTerminalId = getStoredTerminalId();
   const [orderRef, setOrderRef] = useState<string | null>(null);
   const [warnCountdown, setWarnCountdown] = useState(0);
   const [showInactivityModal, setShowInactivityModal] = useState(false);
@@ -90,12 +90,23 @@ export default function App() {
 
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
-  // ── sem terminal configurado ──────────────────────────────────────────────
-  if (!terminalId) {
+  // ── heartbeat enquanto em modo kiosk ─────────────────────────────────────
+  useEffect(() => {
+    if (screen !== "catalog" || !company || !terminal) return;
+    const iv = setInterval(async () => {
+      try {
+        await api.post(`/companies/${company.id}/terminals/${terminal.id}/heartbeat`);
+      } catch { /* silencioso */ }
+    }, 120_000);
+    return () => clearInterval(iv);
+  }, [screen, company, terminal]);
+
+  if (screen === "pin") {
     return (
-      <DeviceSetupScreen
+      <SetupScreen
         T={T}
-        onDone={() => setTerminalId(getStoredTerminalId())}
+        savedTerminalId={savedTerminalId}
+        onDone={handlePinSuccess}
       />
     );
   }
@@ -143,10 +154,6 @@ export default function App() {
             </button>
           </div>
         </div>
-      )}
-
-      {screen === "pin" && (
-        <PinScreen T={T} terminalId={terminalId} onSuccess={handlePinSuccess} />
       )}
 
       {screen === "catalog" && (

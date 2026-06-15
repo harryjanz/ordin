@@ -460,6 +460,53 @@ async def cancel_payment(
     return {"ok": True, "detail": "Transação cancelada"}
 
 
+class TestConnectionOut(BaseModel):
+    success: bool
+    detail: str
+
+
+@app.post(
+    "/payments/test-connection",
+    response_model=TestConnectionOut,
+    tags=["Pagamentos"],
+    summary="Testar conexão com a máquina de pagamento (R$ 0,01 auto-cancelado)",
+)
+async def test_connection(
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    if current_user.role != "kiosk" or current_user.terminal_id is None:
+        raise HTTPException(403, "Apenas kiosk pode testar conexão")
+
+    terminal_cfg = await _get_terminal_config(current_user.terminal_id)
+    provider_name     = terminal_cfg.get("payment_provider", "mock")
+    paygo_terminal_id = terminal_cfg.get("paygo_terminal_id") or ""
+    environment       = terminal_cfg.get("environment", "sandbox")
+    raw_config        = terminal_cfg.get("config") or {}
+
+    if provider_name == "paygo" and not paygo_terminal_id:
+        return TestConnectionOut(success=False, detail="Terminal sem credenciais TEF configuradas")
+
+    config = ProviderConfig(
+        provider=provider_name,
+        environment=environment,
+        api_key=raw_config.get("api_key"),
+        api_secret=raw_config.get("api_secret"),
+        extra_config=raw_config.get("extra_config") or {},
+    )
+    provider = get_provider(config)
+
+    import asyncio
+    try:
+        result = await asyncio.wait_for(
+            provider.test_connection(terminal_ref=paygo_terminal_id),
+            timeout=30.0,
+        )
+    except asyncio.TimeoutError:
+        return TestConnectionOut(success=False, detail="Timeout aguardando máquina de pagamento (30s)")
+
+    return TestConnectionOut(success=result["success"], detail=result.get("detail", ""))
+
+
 @app.get("/health", response_model=HealthOut, tags=["Pagamentos"], summary="Healthcheck")
 def health():
     return {"service": "payment", "status": "ok"}

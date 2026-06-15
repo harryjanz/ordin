@@ -102,9 +102,16 @@ class KioskTokenOut(BaseModel):
     company: CompanyInfo
     terminal: TerminalInfo
 
+class AvailableTerminalInfo(BaseModel):
+    id: int
+    label: str
+    terminal_code: Optional[str] = None
+    tef_number: Optional[str] = None
+
 class ValidatePinOut(BaseModel):
     ok: bool
     company: CompanyInfo
+    terminals: list[AvailableTerminalInfo] = []
 
 class MessageOut(BaseModel):
     detail: str
@@ -171,7 +178,8 @@ async def validate_pin(body: ValidatePinReq, request: Request, response: Respons
         r = await c.post(f"{COMPANY_SVC}/internal/validate-pin", json={"pin": body.pin}, headers=INTERNAL_HEADERS)
     if r.status_code != 200: raise HTTPException(401, "PIN inválido")
     reset_rate_limit(request.client.host, body.pin)
-    return {"ok": True, "company": r.json()["company"]}
+    data = r.json()
+    return {"ok": True, "company": data["company"], "terminals": data.get("terminals", [])}
 
 @app.post(
     "/auth/pin-login",

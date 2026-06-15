@@ -186,3 +186,57 @@ class PayGoProvider(IPaymentProvider):
                 headers=self._headers(),
             )
         return resp.status_code == 200
+
+    async def test_connection(self, terminal_ref: str) -> dict:
+        """Inicia R$ 0,01 via PayGo, aguarda acionamento da máquina, cancela imediatamente."""
+        body = {
+            "formaPagamentoId":              21,  # crédito
+            "terminalId":                    terminal_ref,
+            "referencia":                    "test-connection",
+            "iniciarTransacaoAutomaticamente": True,
+            "quantidadeParcelas":            1,
+            "valorTotalVendido":             "0,01",
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            try:
+                resp = await client.post(
+                    f"{self._base_url}Venda/Vender/",
+                    params=self._params(),
+                    json=body,
+                    headers=self._headers(),
+                )
+            except Exception as exc:
+                return {"success": False, "detail": f"Falha ao conectar ao PayGo: {exc}"}
+
+            if resp.status_code != 200:
+                return {"success": False, "detail": f"PayGo HTTP {resp.status_code}"}
+
+            data = resp.json()
+            intencao_id = str(data.get("intencaoVenda", {}).get("id", ""))
+            if not intencao_id:
+                return {"success": False, "detail": "PayGo não retornou ID de transação"}
+
+            # Aguarda primeiro sinal da máquina (até 25s) e cancela
+            deadline = asyncio.get_event_loop().time() + 25.0
+            while asyncio.get_event_loop().time() < deadline:
+                await asyncio.sleep(2.0)
+                try:
+                    poll = await client.post(
+                        f"{self._base_url}IntencaoVenda/GetById",
+                        params={**self._params(), "intencaoVendaId": intencao_id},
+                        headers=self._headers(),
+                    )
+                    status_id = (poll.json().get("intencaoVenda", {})
+                                 .get("intencaoVendaStatus", {}).get("id", 0))
+                    # status_id != 5 (processando) significa que a máquina respondeu
+                    if status_id and status_id != 5:
+                        await self.cancel_transaction(intencao_id, terminal_ref)
+                        return {"success": True, "detail": f"Máquina respondeu (NSU cancelado, status {status_id})"}
+                    if status_id == 0:
+                        continue
+                except Exception:
+                    continue
+
+            # Timeout — tenta cancelar mesmo assim
+            await self.cancel_transaction(intencao_id, terminal_ref)
+            return {"success": False, "detail": "Timeout: máquina não respondeu em 25s"}

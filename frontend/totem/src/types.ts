@@ -9,6 +9,13 @@ export interface TerminalInfo {
   label: string;
 }
 
+export interface AvailableTerminal {
+  id: number;
+  label: string;
+  terminal_code: string | null;
+  tef_number: string | null;
+}
+
 export interface Category {
   id: number;
   name: string;

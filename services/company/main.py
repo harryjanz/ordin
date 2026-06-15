@@ -1,7 +1,7 @@
 import base64
 import os
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import bcrypt
@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, JSON,
-    UniqueConstraint, select, func,
+    UniqueConstraint, select, func, or_,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
@@ -104,6 +104,7 @@ class Terminal(Base):
     environment       = Column(String(10), default="sandbox")
     active            = Column(Boolean, default=True)
     created_at        = Column(DateTime, default=datetime.utcnow)
+    last_heartbeat    = Column(DateTime, nullable=True)
 
 
 class CompanyPaymentConfig(Base):
@@ -187,6 +188,7 @@ class TerminalOut(BaseModel):
     paygo_terminal_id: Optional[str] = None
     environment: Optional[str] = "sandbox"
     active: bool = True
+    last_heartbeat: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 
@@ -306,6 +308,9 @@ app.add_middleware(
 
 # ── Endpoints internos — acessíveis apenas via VPC ────────────────────────────
 
+_HEARTBEAT_TTL = timedelta(minutes=5)
+
+
 @app.post("/internal/validate-pin", include_in_schema=False)
 async def validate_pin(
     body: dict,
@@ -317,7 +322,22 @@ async def validate_pin(
     co = next((c for c in companies if bcrypt.checkpw(body["pin"].encode(), c.pin_hash.encode())), None)
     if not co:
         raise HTTPException(401, "PIN inválido")
-    return {"company": {"id": co.id, "name": co.name, "plan": co.plan}}
+    avail_cutoff = datetime.utcnow() - _HEARTBEAT_TTL
+    t_result = await db.execute(
+        select(Terminal).where(
+            Terminal.company_id == co.id,
+            Terminal.active == True,
+            or_(Terminal.last_heartbeat == None, Terminal.last_heartbeat < avail_cutoff),
+        )
+    )
+    terminals = t_result.scalars().all()
+    return {
+        "company": {"id": co.id, "name": co.name, "plan": co.plan},
+        "terminals": [
+            {"id": t.id, "label": t.label, "terminal_code": t.terminal_code, "tef_number": t.tef_number}
+            for t in terminals
+        ],
+    }
 
 
 @app.post("/internal/verify-pin", include_in_schema=False)
@@ -664,6 +684,28 @@ async def delete_terminal(
     if not t:
         raise HTTPException(404, "Terminal não encontrado")
     t.active = False
+    await db.commit()
+
+
+@app.post(
+    "/companies/{company_id}/terminals/{terminal_id}/heartbeat",
+    status_code=204,
+    tags=["Terminais"],
+    summary="Heartbeat do terminal ativo (kiosk)",
+)
+async def terminal_heartbeat(
+    company_id: int,
+    terminal_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    if current_user.role != "kiosk" or current_user.terminal_id != terminal_id:
+        raise HTTPException(403, "Apenas o kiosk vinculado a este terminal pode enviar heartbeat")
+    result = await db.execute(select(Terminal).filter_by(id=terminal_id, company_id=company_id, active=True))
+    t = result.scalars().first()
+    if not t:
+        raise HTTPException(404, "Terminal não encontrado")
+    t.last_heartbeat = datetime.utcnow()
     await db.commit()
 
 

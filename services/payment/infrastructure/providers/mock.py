@@ -34,3 +34,8 @@ class MockProvider(IPaymentProvider):
         terminal_ref: str,
     ) -> bool:
         return True
+
+    async def test_connection(self, terminal_ref: str) -> dict:
+        import asyncio
+        await asyncio.sleep(0.4)  # simula latência de rede
+        return {"success": True, "detail": "Máquina mockada respondeu (R$ 0,01 cancelado)"}
