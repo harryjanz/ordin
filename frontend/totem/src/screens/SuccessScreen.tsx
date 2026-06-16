@@ -226,13 +226,14 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
         onClick={newOrder}
         style={{
           marginTop: 28,
-          padding: "14px 48px",
+          padding: "0 64px",
+          minHeight: 80,
           background: T.btn,
           color: T.btnText,
           border: "none",
-          borderRadius: 14,
-          fontSize: 16,
-          fontWeight: 700,
+          borderRadius: 16,
+          fontSize: 20,
+          fontWeight: 800,
           cursor: "pointer",
           boxShadow: T.glow,
         }}

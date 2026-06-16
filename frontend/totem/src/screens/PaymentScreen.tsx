@@ -98,27 +98,33 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
         <p style={{ color: T.teal, fontSize: 28, fontWeight: 800, marginTop: 8 }}>{fmt(total)}</p>
       </div>
 
-      <div style={{ display: "flex", gap: 14 }}>
+      <div style={{ display: "flex", gap: 16 }}>
         {METHODS.map((m) => (
           <button
             key={m.id}
             onClick={() => !processing && setMethod(m.id)}
             style={{
-              padding: "24px 28px",
+              padding: "0 28px",
+              minHeight: 110,
+              minWidth: 150,
               background: method === m.id ? T.btn : T.surface,
               border: `2px solid ${method === m.id ? T.btn : T.border}`,
               borderRadius: 18,
               color: method === m.id ? T.btnText : T.text,
               cursor: processing ? "default" : "pointer",
               textAlign: "center",
-              width: 130,
               transition: "all 0.15s",
               boxShadow: method === m.id ? T.glow : "none",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
             }}
           >
-            <div style={{ fontSize: 36, marginBottom: 8 }}>{m.emoji}</div>
-            <div style={{ fontWeight: 700, fontSize: 15 }}>{m.label}</div>
-            <div style={{ color: method === m.id ? "rgba(255,255,255,0.6)" : T.muted, fontSize: 11, marginTop: 4 }}>{m.desc}</div>
+            <div style={{ fontSize: 40 }}>{m.emoji}</div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{m.label}</div>
+            <div style={{ color: method === m.id ? "rgba(255,255,255,0.6)" : T.muted, fontSize: 13 }}>{m.desc}</div>
           </button>
         ))}
       </div>
@@ -146,17 +152,19 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
           </p>
         </div>
       ) : (
-        <div style={{ display: "flex", gap: 12 }}>
+        <div style={{ display: "flex", gap: 14 }}>
           <button
             onClick={onBack}
             style={{
-              padding: "14px 28px",
+              padding: "0 28px",
+              minHeight: 64,
               background: T.surface,
               border: `1px solid ${T.border}`,
-              borderRadius: 12,
+              borderRadius: 14,
               color: T.muted,
               cursor: "pointer",
-              fontWeight: 600,
+              fontWeight: 700,
+              fontSize: 16,
             }}
           >
             ← Voltar
@@ -165,13 +173,14 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
             onClick={pay}
             disabled={!method}
             style={{
-              padding: "14px 40px",
+              padding: "0 48px",
+              minHeight: 80,
               background: method ? T.btn : "rgba(150,150,150,0.15)",
               color: method ? T.btnText : "rgba(200,200,200,0.4)",
               border: "none",
-              borderRadius: 12,
-              fontSize: 16,
-              fontWeight: 700,
+              borderRadius: 14,
+              fontSize: 20,
+              fontWeight: 800,
               cursor: method ? "pointer" : "default",
               boxShadow: method ? T.glow : "none",
             }}

@@ -4,6 +4,7 @@ import { useStore } from "./store";
 import { THEMES, type ThemeKey } from "./themes";
 import SetupScreen from "./screens/SetupScreen";
 import { getStoredTerminalId } from "./screens/DeviceSetupScreen";
+import WelcomeScreen from "./screens/WelcomeScreen";
 import CatalogScreen from "./screens/CatalogScreen";
 import CpfScreen from "./screens/CpfScreen";
 import PaymentScreen from "./screens/PaymentScreen";
@@ -14,13 +15,14 @@ const INACTIVITY_TIMEOUT_MS = 120_000;
 const INACTIVITY_WARN_SEC   = 10;
 
 export default function App() {
-  const [themeKey, setThemeKey] = useState<ThemeKey>("dark");
+  const [themeKey] = useState<ThemeKey>("dark");
   const T = THEMES[themeKey];
 
   const {
     company, terminal, cart, cpf, completedOrder, screen,
     setToken, setCompany, setTerminal, setScreen,
-    addToCart, removeFromCart, setCpf, setCompletedOrder, newOrder, resetSession, touch,
+    addToCart, removeFromCart, setCpf, setCompletedOrder,
+    newOrder, goIdle, resetSession, touch,
   } = useStore();
 
   const savedTerminalId = getStoredTerminalId();
@@ -28,7 +30,7 @@ export default function App() {
   const [warnCountdown, setWarnCountdown] = useState(0);
   const [showInactivityModal, setShowInactivityModal] = useState(false);
 
-  // ── inatividade ───────────────────────────────────────────────────────────
+  // ── inatividade — apenas nas telas do fluxo do cliente ───────────────────
   const watchedScreens = ["catalog", "cpf", "payment"];
 
   useEffect(() => {
@@ -41,7 +43,7 @@ export default function App() {
       const idle = Date.now() - useStore.getState().lastActivity;
       if (idle >= INACTIVITY_TIMEOUT_MS) {
         setShowInactivityModal(false);
-        resetSession();
+        goIdle();
       } else if (idle >= INACTIVITY_TIMEOUT_MS - INACTIVITY_WARN_SEC * 1000) {
         setWarnCountdown(Math.ceil((INACTIVITY_TIMEOUT_MS - idle) / 1000));
         setShowInactivityModal(true);
@@ -65,7 +67,7 @@ export default function App() {
     setToken(token);
     setCompany(co);
     setTerminal(term);
-    setScreen("catalog");
+    setScreen("welcome");
   }
 
   async function handleCpfDone(c: string | null) {
@@ -90,9 +92,9 @@ export default function App() {
 
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
 
-  // ── heartbeat enquanto em modo kiosk ─────────────────────────────────────
+  // ── heartbeat — ativo em "welcome" e "catalog" (terminal em uso) ──────────
   useEffect(() => {
-    if (screen !== "catalog" || !company || !terminal) return;
+    if ((screen !== "catalog" && screen !== "welcome") || !company || !terminal) return;
     const iv = setInterval(async () => {
       try {
         await api.post(`/companies/${company.id}/terminals/${terminal.id}/heartbeat`);
@@ -126,26 +128,27 @@ export default function App() {
             borderRadius: 20,
             padding: "40px 48px",
             textAlign: "center",
-            maxWidth: 360,
+            maxWidth: 380,
           }}>
             <div style={{ fontSize: 48, marginBottom: 12 }}>⏱️</div>
             <h3 style={{ color: T.text, fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
               Ainda está aí?
             </h3>
-            <p style={{ color: T.muted, fontSize: 14, marginBottom: 20 }}>
-              A sessão será cancelada em{" "}
+            <p style={{ color: T.muted, fontSize: 15, marginBottom: 24 }}>
+              O pedido será cancelado em{" "}
               <strong style={{ color: T.roxo }}>{warnCountdown}s</strong>
             </p>
             <button
               onClick={() => { touch(); setShowInactivityModal(false); }}
               style={{
-                padding: "12px 32px",
+                padding: "0 40px",
+                minHeight: 64,
                 background: T.btn,
                 color: T.btnText,
                 border: "none",
-                borderRadius: 12,
-                fontSize: 16,
-                fontWeight: 700,
+                borderRadius: 14,
+                fontSize: 18,
+                fontWeight: 800,
                 cursor: "pointer",
                 boxShadow: T.glow,
               }}
@@ -156,17 +159,23 @@ export default function App() {
         </div>
       )}
 
+      {screen === "welcome" && (
+        <WelcomeScreen
+          T={T}
+          companyName={company?.name ?? "ordin"}
+          onStart={() => setScreen("catalog")}
+        />
+      )}
+
       {screen === "catalog" && (
         <CatalogScreen
           T={T}
-          themeKey={themeKey}
           companyName={company?.name ?? ""}
-          terminalLabel={terminal?.label ?? ""}
           cart={cart}
           onAdd={(p: Product) => addToCart({ ...p, qty: 1 })}
           onRemove={removeFromCart}
           onCheckout={() => setScreen("cpf")}
-          onThemeToggle={() => setThemeKey((k) => k === "dark" ? "light" : "dark")}
+          onHome={goIdle}
         />
       )}
 
@@ -211,21 +220,23 @@ export default function App() {
           gap: 24,
         }}>
           <div style={{ fontSize: 56 }}>❌</div>
-          <h2 style={{ color: T.text, fontSize: 26, fontWeight: 800, margin: 0 }}>
+          <h2 style={{ color: T.text, fontSize: 28, fontWeight: 800, margin: 0 }}>
             Pagamento não autorizado
           </h2>
-          <p style={{ color: T.muted }}>Verifique os dados do cartão e tente novamente</p>
-          <div style={{ display: "flex", gap: 12 }}>
+          <p style={{ color: T.muted, fontSize: 16 }}>Verifique os dados do cartão e tente novamente</p>
+          <div style={{ display: "flex", gap: 14 }}>
             <button
-              onClick={resetSession}
+              onClick={goIdle}
               style={{
-                padding: "14px 28px",
+                padding: "0 32px",
+                minHeight: 60,
                 background: T.surface,
                 border: `1px solid ${T.border}`,
-                borderRadius: 12,
+                borderRadius: 14,
                 color: T.muted,
                 cursor: "pointer",
-                fontWeight: 600,
+                fontWeight: 700,
+                fontSize: 16,
               }}
             >
               Cancelar
@@ -233,13 +244,14 @@ export default function App() {
             <button
               onClick={() => orderRef && setScreen("payment")}
               style={{
-                padding: "14px 32px",
+                padding: "0 40px",
+                minHeight: 60,
                 background: T.btn,
                 color: T.btnText,
                 border: "none",
-                borderRadius: 12,
-                fontSize: 15,
-                fontWeight: 700,
+                borderRadius: 14,
+                fontSize: 17,
+                fontWeight: 800,
                 cursor: "pointer",
                 boxShadow: T.glow,
               }}

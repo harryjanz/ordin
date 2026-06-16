@@ -89,13 +89,14 @@ export default function CpfScreen({ T, onNext, onSkip }: Props) {
           disabled={!done}
           style={{
             width: "100%",
-            padding: 14,
+            minHeight: 60,
+            padding: "0 16px",
             background: done ? T.btn : "rgba(150,150,150,0.15)",
             color: done ? T.btnText : "rgba(200,200,200,0.4)",
             border: "none",
             borderRadius: 12,
-            fontSize: 16,
-            fontWeight: 700,
+            fontSize: 18,
+            fontWeight: 800,
             cursor: done ? "pointer" : "default",
             marginBottom: 10,
             boxShadow: done ? T.glow : "none",
@@ -107,13 +108,15 @@ export default function CpfScreen({ T, onNext, onSkip }: Props) {
           onClick={onSkip}
           style={{
             width: "100%",
-            padding: 12,
+            minHeight: 56,
+            padding: "0 16px",
             background: "transparent",
             border: `1px solid ${T.border}`,
             borderRadius: 12,
             color: T.muted,
             cursor: "pointer",
-            fontSize: 14,
+            fontSize: 16,
+            fontWeight: 600,
           }}
         >
           Pular esta etapa

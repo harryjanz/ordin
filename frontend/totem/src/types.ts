@@ -53,6 +53,7 @@ export interface CompletedOrder {
 export type Screen =
   | "setup"
   | "pin"
+  | "welcome"
   | "catalog"
   | "cpf"
   | "payment"

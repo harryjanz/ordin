@@ -28,6 +28,7 @@ interface TotemStore {
   setCpf: (c: string | null) => void;
   setCompletedOrder: (o: CompletedOrder) => void;
   newOrder: () => void;
+  goIdle: () => void;
   resetSession: () => void;
   touch: () => void;
 }
@@ -73,6 +74,15 @@ export const useStore = create<TotemStore>((set) => ({
       cpf: null,
       completedOrder: null,
       screen: "catalog",
+      lastActivity: Date.now(),
+    }),
+
+  goIdle: () =>
+    set({
+      cart: [],
+      cpf: null,
+      completedOrder: null,
+      screen: "welcome",
       lastActivity: Date.now(),
     }),
 
