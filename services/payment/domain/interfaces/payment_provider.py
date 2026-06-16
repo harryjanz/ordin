@@ -23,3 +23,11 @@ class IPaymentProvider(ABC):
         provider_transaction_id: str,
         terminal_ref: str,
     ) -> bool: ...
+
+    @abstractmethod
+    async def test_connection(
+        self,
+        terminal_ref: str,
+    ) -> dict: ...
+    """Aciona a máquina com R$ 0,01 e cancela imediatamente.
+    Retorna {"success": bool, "detail": str}."""

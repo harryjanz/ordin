@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import api from "../api";
 import type { Theme } from "../themes";
 import type { CartItem, CompletedOrder } from "../types";
@@ -27,6 +27,20 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
   const [processing, setProcessing] = useState(false);
   const [countdown, setCountdown] = useState(90);
   const [error, setError] = useState("");
+  const [idleCountdown, setIdleCountdown] = useState(60);
+
+  // Volta para o catálogo se o cliente ficar 60s sem selecionar método de pagamento
+  useEffect(() => {
+    if (processing) return;
+    setIdleCountdown(60);
+    const t = setInterval(() => {
+      setIdleCountdown((c) => {
+        if (c <= 1) { clearInterval(t); onBack(); }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, [processing]);
 
   async function pay() {
     if (!method) return;
@@ -165,6 +179,12 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
             Pagar {fmt(total)}
           </button>
         </div>
+      )}
+
+      {!processing && (
+        <p style={{ color: T.muted, fontSize: 12, marginTop: 16, opacity: 0.45 }}>
+          Voltando ao catálogo em {idleCountdown}s…
+        </p>
       )}
     </div>
   );

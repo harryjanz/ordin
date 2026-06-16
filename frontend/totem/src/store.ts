@@ -27,6 +27,7 @@ interface TotemStore {
   removeFromCart: (id: number) => void;
   setCpf: (c: string | null) => void;
   setCompletedOrder: (o: CompletedOrder) => void;
+  newOrder: () => void;
   resetSession: () => void;
   touch: () => void;
 }
@@ -64,6 +65,15 @@ export const useStore = create<TotemStore>((set) => ({
       if (!item) return {};
       if (item.qty === 1) return { cart: s.cart.filter((i) => i.id !== id) };
       return { cart: s.cart.map((i) => i.id === id ? { ...i, qty: i.qty - 1 } : i) };
+    }),
+
+  newOrder: () =>
+    set({
+      cart: [],
+      cpf: null,
+      completedOrder: null,
+      screen: "catalog",
+      lastActivity: Date.now(),
     }),
 
   resetSession: () =>
