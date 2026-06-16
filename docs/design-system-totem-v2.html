@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design System — Totem v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --roxo:         #9900ff;
+  --roxo-hover:   #7a00cc;
+  --roxo-subtle:  rgba(153,0,255,0.12);
+  --roxo-glow:    0 4px 20px rgba(153,0,255,0.35);
+  --teal:         #33cccc;
+  --teal-dark:    #1a9999;
+  --teal-subtle:  rgba(51,204,204,0.15);
+  --color-success:#198737;
+  --color-error:  #ff4d6d;
+  --color-err-bg: rgba(255,77,109,0.10);
+  /* light */
+  --bg:           #DFE8ED;
+  --surface:      #ffffff;
+  --header:       #ffffff;
+  --border:       rgba(153,0,255,0.18);
+  --border-m:     rgba(0,0,0,0.08);
+  --text:         #1d1434;
+  --muted:        rgba(29,20,52,0.45);
+  --btn:          #9900ff;
+  --btn-text:     #ffffff;
+  --num-bg:       rgba(153,0,255,0.10);
+  --price-color:  #1a9999;
+  --card-sh:      0 2px 12px rgba(153,0,255,0.10);
+  /* radius */
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 24px; --r-pill: 999px;
+  --font-d: 'Lexend', sans-serif;
+  --font-b: 'Inter', sans-serif;
+}
+[data-theme="dark"] {
+  --bg:         #0e0b1a;
+  --surface:    #1d1434;
+  --header:     #1d1434;
+  --border:     rgba(153,0,255,0.22);
+  --border-m:   rgba(255,255,255,0.07);
+  --text:       #DFE8ED;
+  --muted:      rgba(223,232,237,0.45);
+  --num-bg:     rgba(153,0,255,0.12);
+  --price-color:#33cccc;
+  --card-sh:    0 2px 16px rgba(153,0,255,0.20);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--font-b);background:var(--bg);color:var(--text);font-size:16px;line-height:1.6;transition:background .25s,color .25s;min-height:100vh}
+
+/* NAV */
+.nav{position:sticky;top:0;z-index:100;background:var(--header);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:4px;padding:10px 24px;flex-wrap:wrap;box-shadow:var(--card-sh);transition:background .25s,border-color .25s}
+.nav-brand{font-family:var(--font-d);font-weight:800;font-size:13px;color:var(--roxo);letter-spacing:.05em;margin-right:10px;white-space:nowrap}
+.tb{background:none;border:1px solid transparent;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:500;color:var(--muted);cursor:pointer;transition:all .15s;white-space:nowrap}
+.tb:hover{color:var(--text);border-color:var(--border)}
+.tb.active{background:var(--roxo-subtle);border-color:var(--roxo);color:var(--roxo);font-weight:600}
+.theme-btn{margin-left:auto;background:var(--num-bg);border:1px solid var(--border);border-radius:var(--r-pill);padding:6px 14px;font-size:12px;font-weight:600;color:var(--roxo);cursor:pointer;transition:all .15s;white-space:nowrap}
+.theme-btn:hover{background:var(--roxo-subtle)}
+
+/* LAYOUT */
+.main{max-width:1080px;margin:0 auto;padding:36px 24px 80px}
+.sec{display:none}.sec.active{display:block}
+.stitle{font-family:var(--font-d);font-weight:800;font-size:25px;color:var(--text);margin-bottom:4px}
+.ssub{font-size:14px;color:var(--muted);margin-bottom:32px}
+.btitle{font-size:11px;font-weight:600;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;margin:26px 0 12px;padding-bottom:7px;border-bottom:1px solid var(--border-m)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:680px){.g2,.g3{grid-template-columns:1fr}}
+.divider{height:1px;background:var(--border-m);margin:28px 0}
+
+/* CARD */
+.card{background:var(--surface);border:1px solid var(--border-m);border-radius:var(--r-lg);padding:20px;transition:background .25s,border-color .25s}
+.card-accent{border-color:var(--border)}
+.note{font-size:12px;color:var(--muted);font-style:italic;margin-top:6px}
+
+/* SWATCHES */
+.swatches{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.sw{display:flex;flex-direction:column;gap:4px;cursor:pointer}
+.sw-c{border-radius:10px;border:1px solid var(--border-m);position:relative;transition:transform .12s}
+.sw:hover .sw-c{transform:scale(1.07)}
+.sw-n{font-size:11px;font-weight:600;color:var(--text)}
+.sw-h{font-size:10px;font-family:monospace;color:var(--muted)}
+.ctip{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);font-size:10px;background:var(--roxo);color:#fff;padding:2px 6px;border-radius:4px;white-space:nowrap;opacity:0;transition:opacity .15s;pointer-events:none}
+.sw-c:hover .ctip{opacity:1}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:var(--r-pill);font-family:var(--font-d);font-weight:700;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn-p{background:var(--btn);color:var(--btn-text);font-size:18px;padding:15px 34px;box-shadow:var(--roxo-glow)}
+.btn-p:hover{background:var(--roxo-hover)}
+.btn-s{background:transparent;color:var(--roxo);font-size:15px;padding:13px 28px;border:2px solid var(--roxo);border-radius:var(--r-pill)}
+.btn-s:hover{background:var(--roxo-subtle)}
+.btn-t{background:var(--teal);color:#0e0b1a;font-size:15px;padding:13px 28px}
+.btn-t:hover{background:var(--teal-dark);color:#fff}
+.btn-g{background:transparent;color:var(--muted);font-size:13px;padding:8px 16px;border:1px solid var(--border-m);border-radius:var(--r-pill)}
+.btn-g:hover{border-color:var(--border);color:var(--text)}
+.btn-err{background:var(--color-error);color:#fff;font-size:14px;padding:10px 22px}
+.btn-add{background:var(--btn);color:#fff;border-radius:50%;font-size:24px;padding:0;box-shadow:var(--roxo-glow)}
+.btn-add:hover{background:var(--roxo-hover);transform:scale(1.08)!important}
+.btn-row{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:10px}
+
+/* CHIPS */
+.cat-bar{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.cat-bar::-webkit-scrollbar{display:none}
+.chip{flex-shrink:0;padding:10px 18px;border-radius:var(--r-pill);font-family:var(--font-d);font-weight:700;font-size:13px;cursor:pointer;border:1px solid var(--border-m);background:var(--surface);color:var(--muted);transition:all .15s}
+.chip.active{background:var(--roxo);color:#fff;border-color:var(--roxo);box-shadow:0 0 12px rgba(153,0,255,.3)}
+.chip:hover:not(.active){border-color:var(--border);color:var(--text)}
+
+/* PRODUCT CARDS */
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;max-width:460px}
+.pcard{background:var(--surface);border:1px solid var(--border-m);border-radius:var(--r-lg);overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s,background .25s;box-shadow:var(--card-sh)}
+.pcard:hover{transform:translateY(-3px);box-shadow:var(--roxo-glow);border-color:var(--border)}
+.pcard:active{transform:scale(.98)}
+.ci{width:100%;height:124px;display:flex;align-items:center;justify-content:center;font-size:50px;position:relative}
+.ci-p{background:linear-gradient(135deg,#3a0080,#9900ff)}
+.ci-t{background:linear-gradient(135deg,#0d3333,#33cccc)}
+[data-theme="dark"] .ci-p{background:linear-gradient(135deg,#1d0040,#9900ff)}
+[data-theme="dark"] .ci-t{background:linear-gradient(135deg,#051212,#33cccc)}
+.cb{padding:11px 13px 13px}
+.cn{font-family:var(--font-d);font-weight:700;font-size:14px;color:var(--text);margin-bottom:2px}
+.cd{font-size:11px;color:var(--muted);margin-bottom:9px}
+.cf{display:flex;justify-content:space-between;align-items:center}
+.cp{font-family:var(--font-d);font-weight:800;font-size:17px;color:var(--price-color)}
+.bdg{position:absolute;top:9px;left:9px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px}
+.bdg-roxo{background:var(--roxo);color:#fff}
+.bdg-teal{background:var(--teal);color:#0e0b1a}
+
+/* CART */
+.cart{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:13px 17px;display:flex;align-items:center;justify-content:space-between;gap:12px;box-shadow:var(--card-sh);transition:background .25s}
+.cart-cnt{background:var(--roxo);color:#fff;font-family:var(--font-d);font-weight:800;font-size:13px;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.cart-lbl{font-size:13px;color:var(--muted)}
+.cart-tot{font-family:var(--font-d);font-weight:800;font-size:19px;color:var(--price-color)}
+
+/* INPUTS */
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.field label{font-size:12px;font-weight:600;color:var(--muted)}
+.inp{background:var(--surface);border:1px solid var(--border-m);color:var(--text);border-radius:var(--r-sm);padding:12px 14px;font-size:15px;font-family:var(--font-b);outline:none;transition:border-color .15s,background .25s,box-shadow .15s;width:100%}
+.inp:focus{border-color:var(--roxo);box-shadow:0 0 0 3px rgba(153,0,255,.12)}
+.inp::placeholder{color:var(--muted)}
+.stepper{display:inline-flex;align-items:center;background:var(--num-bg);border:1px solid var(--border);border-radius:var(--r-pill);overflow:hidden}
+.st-btn{background:none;border:none;color:var(--roxo);font-size:20px;font-weight:700;width:40px;height:40px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .12s}
+.st-btn:hover{background:var(--roxo-subtle)}
+.st-val{font-family:var(--font-d);font-weight:700;font-size:15px;color:var(--text);min-width:34px;text-align:center}
+
+/* ALERTS */
+.alert{border-radius:var(--r-md);padding:12px 15px;display:flex;align-items:flex-start;gap:9px;margin-bottom:9px}
+.al-icon{font-size:17px;flex-shrink:0;line-height:1.4}
+.al-title{font-weight:700;font-size:14px}
+.al-msg{font-size:12px;color:var(--muted);margin-top:1px}
+.al-roxo{background:var(--roxo-subtle);border:1px solid var(--border)}
+.al-roxo .al-title{color:var(--roxo)}
+.al-teal{background:var(--teal-subtle);border:1px solid rgba(51,204,204,.3)}
+.al-teal .al-title{color:var(--teal-dark)}
+[data-theme="dark"] .al-teal .al-title{color:var(--teal)}
+.al-ok{background:rgba(25,135,55,.1);border:1px solid rgba(25,135,55,.3)}
+.al-ok .al-title{color:#198737}
+.al-err{background:var(--color-err-bg);border:1px solid rgba(255,77,109,.3)}
+.al-err .al-title{color:var(--color-error)}
+
+/* TYPE BLOCKS */
+.tblock{background:var(--surface);border:1px solid var(--border-m);border-radius:var(--r-md);padding:16px 20px;margin-bottom:9px;transition:background .25s}
+.tmeta{font-size:10px;color:var(--muted);margin-bottom:5px;font-family:monospace}
+
+/* MOCKUP */
+.screens{display:flex;gap:32px;justify-content:center;flex-wrap:wrap;align-items:flex-start}
+.sf{width:248px;border-radius:22px;overflow:hidden;box-shadow:0 18px 56px rgba(0,0,0,.22);border:1px solid var(--border-m);flex-shrink:0}
+.sf-l{background:#DFE8ED}
+.sf-d{background:#0e0b1a}
+.sh-l{background:#fff;padding:13px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(153,0,255,.15)}
+.sh-d{background:#1d1434;padding:13px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid rgba(153,0,255,.22)}
+.slogo{font-family:var(--font-d);font-weight:800;font-size:13px;color:var(--roxo)}
+.sp-l{background:var(--roxo);padding:6px 10px;font-family:var(--font-d);font-weight:700;font-size:10px;color:#fff;text-align:center}
+.sp-d{background:#3a0080;padding:6px 10px;font-family:var(--font-d);font-weight:700;font-size:10px;color:#33cccc;text-align:center}
+.sc-l{display:flex;gap:5px;padding:7px 9px;background:#fff;overflow-x:auto;scrollbar-width:none}
+.sc-d{display:flex;gap:5px;padding:7px 9px;background:#1d1434;overflow-x:auto;scrollbar-width:none}
+.sc-l::-webkit-scrollbar,.sc-d::-webkit-scrollbar{display:none}
+.cs{flex-shrink:0;padding:5px 10px;border-radius:99px;font-family:var(--font-d);font-weight:700;font-size:10px;border:none;cursor:pointer}
+.cs-l{background:#f0eaf9;color:rgba(29,20,52,.5)}
+.cs-l.active{background:#9900ff;color:#fff}
+.cs-d{background:rgba(153,0,255,.15);color:rgba(223,232,237,.55)}
+.cs-d.active{background:#9900ff;color:#fff}
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:6px 8px}
+.scard-l{background:#fff;border-radius:8px;overflow:hidden;border:1px solid rgba(153,0,255,.12)}
+.scard-d{background:#1d1434;border-radius:8px;overflow:hidden;border:1px solid rgba(153,0,255,.22)}
+.simg{height:62px;display:flex;align-items:center;justify-content:center;font-size:24px}
+.sbd{padding:6px 7px}
+.sn-l{font-family:var(--font-d);font-size:10px;font-weight:700;color:#1d1434;margin-bottom:1px}
+.sn-d{font-family:var(--font-d);font-size:10px;font-weight:700;color:#DFE8ED;margin-bottom:1px}
+.sp2-l{font-family:var(--font-d);font-size:11px;font-weight:800;color:#1a9999}
+.sp2-d{font-family:var(--font-d);font-size:11px;font-weight:800;color:#33cccc}
+.sct-l{background:#fff;border-top:1px solid rgba(153,0,255,.15);padding:9px 11px;display:flex;align-items:center;justify-content:space-between}
+.sct-d{background:#1d1434;border-top:1px solid rgba(153,0,255,.22);padding:9px 11px;display:flex;align-items:center;justify-content:space-between}
+.stot-l{font-family:var(--font-d);font-size:12px;font-weight:800;color:#1a9999}
+.stot-d{font-family:var(--font-d);font-size:12px;font-weight:800;color:#33cccc}
+.sitems{font-size:9px}
+.sitems-l{color:rgba(29,20,52,.45)}
+.sitems-d{color:rgba(223,232,237,.45)}
+.sbtncta{background:#9900ff;color:#fff;font-family:var(--font-d);font-weight:700;font-size:10px;padding:6px 11px;border-radius:99px;border:none;cursor:pointer}
+
+/* COMPARE */
+.cgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:750px){.cgrid{grid-template-columns:1fr}}
+.ccol{background:var(--surface);border:1px solid var(--border-m);border-radius:var(--r-lg);padding:17px;transition:background .25s}
+.ccol.hl{border-color:var(--roxo);box-shadow:0 0 0 3px rgba(153,0,255,.08)}
+.clbl{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-bottom:11px}
+.crow{display:flex;flex-direction:column;gap:1px;margin-bottom:9px}
+.ck{font-size:11px;color:var(--muted)}
+.cv{font-size:13px;font-weight:600;color:var(--text)}
+.cprev{display:inline-block;padding:3px 10px;border-radius:var(--r-pill);font-size:11px;font-weight:700;margin-top:4px}
+
+/* TOKENS */
+.tkbl{background:var(--surface);border:1px solid var(--border-m);border-radius:var(--r-md);padding:17px 20px;overflow-x:auto;transition:background .25s}
+pre{font-family:monospace;font-size:12px;color:var(--roxo);line-height:1.85;white-space:pre}
+.ttable{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:20px}
+.ttable th{text-align:left;padding:7px 11px;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--border-m)}
+.ttable td{padding:9px 11px;border-bottom:1px solid var(--border-m);color:var(--text);vertical-align:middle}
+.ttable tr:hover td{background:var(--roxo-subtle)}
+.ttable code{font-family:monospace;font-size:12px;color:var(--roxo);background:var(--roxo-subtle);padding:2px 6px;border-radius:4px}
+.cdot{width:17px;height:17px;border-radius:50%;display:inline-block;vertical-align:middle;margin-right:7px;border:1px solid var(--border-m)}
+
+/* TOAST */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--roxo);color:#fff;font-family:var(--font-d);font-weight:700;font-size:13px;padding:8px 18px;border-radius:var(--r-pill);opacity:0;transition:opacity .2s;pointer-events:none;z-index:9999;box-shadow:var(--roxo-glow)}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <span class="nav-brand">⬡ DS TOTEM v2</span>
+  <button class="tb active" onclick="showSec('overview',this)">Visão geral</button>
+  <button class="tb" onclick="showSec('colors',this)">Cores</button>
+  <button class="tb" onclick="showSec('type',this)">Tipografia</button>
+  <button class="tb" onclick="showSec('buttons',this)">Botões</button>
+  <button class="tb" onclick="showSec('components',this)">Componentes</button>
+  <button class="tb" onclick="showSec('mockup',this)">Mockup</button>
+  <button class="tb" onclick="showSec('compare',this)">BK / MC / Produto</button>
+  <button class="tb" onclick="showSec('tokens',this)">Tokens CSS</button>
+  <button class="theme-btn" id="thbtn" onclick="toggleTheme()">🌙 Dark</button>
+</nav>
+
+<main class="main">
+
+<!-- ══ OVERVIEW ══ -->
+<section id="overview" class="sec active">
+  <h1 class="stitle">Design System — Totem Fast Food</h1>
+  <p class="ssub">Identidade do seu produto (roxo #9900ff + teal #33cccc) aplicada ao layout de totem com tema light padrão e dark completo. Princípios de BK e McDonald's integrados. Alterne o tema no botão acima.</p>
+
+  <div class="btitle">Identidade do produto</div>
+  <div class="g2" style="margin-bottom:24px">
+    <div class="card card-accent">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Paleta principal</p>
+      <div class="swatches">
+        <div class="sw" onclick="copyHex('#9900ff','Roxo')"><div class="sw-c" style="background:#9900ff;width:74px;height:56px"><span class="ctip">Copiar</span></div><span class="sw-n">Roxo</span><span class="sw-h">#9900ff</span></div>
+        <div class="sw" onclick="copyHex('#7a00cc','Roxo hover')"><div class="sw-c" style="background:#7a00cc;width:74px;height:56px"><span class="ctip">Copiar</span></div><span class="sw-n">Roxo hover</span><span class="sw-h">#7a00cc</span></div>
+        <div class="sw" onclick="copyHex('#33cccc','Teal')"><div class="sw-c" style="background:#33cccc;width:74px;height:56px"><span class="ctip">Copiar</span></div><span class="sw-n">Teal</span><span class="sw-h">#33cccc</span></div>
+        <div class="sw" onclick="copyHex('#1a9999','Teal dark')"><div class="sw-c" style="background:#1a9999;width:74px;height:56px"><span class="ctip">Copiar</span></div><span class="sw-n">Teal dark</span><span class="sw-h">#1a9999</span></div>
+      </div>
+      <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-p">Finalizar pedido</button>
+        <button class="btn btn-t">Ver promoção</button>
+      </div>
+    </div>
+    <div class="card">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Divisão semântica</p>
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <div style="background:var(--roxo-subtle);border:1px solid var(--border);border-radius:var(--r-sm);padding:10px 13px">
+          <span style="font-weight:700;color:var(--roxo);font-size:13px">Roxo #9900ff</span>
+          <span style="font-size:12px;color:var(--muted);display:block">CTAs primários · marca · categoria ativa · spinner</span>
+        </div>
+        <div style="background:var(--teal-subtle);border:1px solid rgba(51,204,204,.3);border-radius:var(--r-sm);padding:10px 13px">
+          <span style="font-weight:700;color:var(--teal-dark);font-size:13px">Teal #33cccc</span>
+          <span style="font-size:12px;color:var(--muted);display:block">Preços · destaques informativos · nunca CTA</span>
+        </div>
+        <div style="background:rgba(255,77,109,.08);border:1px solid rgba(255,77,109,.25);border-radius:var(--r-sm);padding:10px 13px">
+          <span style="font-weight:700;color:var(--color-error);font-size:13px">Erro #ff4d6d</span>
+          <span style="font-size:12px;color:var(--muted);display:block">Mensagens de erro · ações destrutivas · indisponível</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="btitle">Princípios herdados de BK + McDonald's</div>
+  <div class="g3">
+    <div class="card"><div style="font-size:20px;margin-bottom:7px">🎯</div><div style="font-weight:700;font-size:14px;margin-bottom:3px">1 cor de ação por tela</div><div style="font-size:12px;color:var(--muted)">BK usa só laranja, MC usa só vermelho. Roxo é o único CTA em evidência. Teal é informativo, nunca concorre.</div></div>
+    <div class="card"><div style="font-size:20px;margin-bottom:7px">📐</div><div style="font-weight:700;font-size:14px;margin-bottom:3px">Touch targets ≥ 82 px</div><div style="font-size:12px;color:var(--muted)">W3C: mínimo 20mm na tela. Em 21" (~104 PPI) equivale a ~82 px. Gap mínimo de 21 px entre alvos.</div></div>
+    <div class="card"><div style="font-size:20px;margin-bottom:7px">🔤</div><div style="font-weight:700;font-size:14px;margin-bottom:3px">Lexend como display</div><div style="font-size:12px;color:var(--muted)">Substituto open-source de Flame (BK) e Speedee (MC). Alta legibilidade em telas touchscreen.</div></div>
+  </div>
+</section>
+
+<!-- ══ COLORS ══ -->
+<section id="colors" class="sec">
+  <h1 class="stitle">Paleta de cores</h1>
+  <p class="ssub">Tokens completos de cor com uso semântico e comportamento em cada tema. Clique num swatch para copiar o hex.</p>
+
+  <div class="btitle">Cores da marca (iguais nos dois temas)</div>
+  <div class="swatches" style="margin-bottom:24px">
+    <div class="sw" onclick="copyHex('#9900ff','Roxo')"><div class="sw-c" style="background:#9900ff;width:84px;height:64px"><span class="ctip">Copiar</span></div><span class="sw-n">Roxo</span><span class="sw-h">#9900ff · CTA</span></div>
+    <div class="sw" onclick="copyHex('#7a00cc','Roxo hover')"><div class="sw-c" style="background:#7a00cc;width:84px;height:64px"><span class="ctip">Copiar</span></div><span class="sw-n">Roxo hover</span><span class="sw-h">#7a00cc</span></div>
+    <div class="sw" onclick="copyHex('#33cccc','Teal bright')"><div class="sw-c" style="background:#33cccc;width:84px;height:64px"><span class="ctip">Copiar</span></div><span class="sw-n">Teal bright</span><span class="sw-h">#33cccc · dark</span></div>
+    <div class="sw" onclick="copyHex('#1a9999','Teal dark')"><div class="sw-c" style="background:#1a9999;width:84px;height:64px"><span class="ctip">Copiar</span></div><span class="sw-n">Teal dark</span><span class="sw-h">#1a9999 · light</span></div>
+    <div class="sw" onclick="copyHex('#ff4d6d','Erro')"><div class="sw-c" style="background:#ff4d6d;width:84px;height:64px"><span class="ctip">Copiar</span></div><span class="sw-n">Erro</span><span class="sw-h">#ff4d6d</span></div>
+    <div class="sw" onclick="copyHex('#198737','Sucesso')"><div class="sw-c" style="background:#198737;width:84px;height:64px"><span class="ctip">Copiar</span></div><span class="sw-n">Sucesso</span><span class="sw-h">#198737</span></div>
+  </div>
+
+  <div class="btitle">Neutros — Light theme</div>
+  <div class="swatches" style="margin-bottom:24px">
+    <div class="sw" onclick="copyHex('#DFE8ED','BG')"><div class="sw-c" style="background:#DFE8ED;border-color:#bbb"><span class="ctip">Copiar</span></div><span class="sw-n">BG</span><span class="sw-h">#DFE8ED</span></div>
+    <div class="sw" onclick="copyHex('#ffffff','Surface')"><div class="sw-c" style="background:#fff;border-color:#bbb"><span class="ctip">Copiar</span></div><span class="sw-n">Surface / Card</span><span class="sw-h">#ffffff</span></div>
+    <div class="sw" onclick="copyHex('#1d1434','Text')"><div class="sw-c" style="background:#1d1434"><span class="ctip">Copiar</span></div><span class="sw-n">Texto</span><span class="sw-h">#1d1434</span></div>
+    <div class="sw" onclick="copyHex('rgba(29,20,52,0.45)','Muted')"><div class="sw-c" style="background:rgba(29,20,52,.45)"><span class="ctip">Copiar</span></div><span class="sw-n">Muted</span><span class="sw-h">rgba(29,20,52,.45)</span></div>
+    <div class="sw" onclick="copyHex('rgba(153,0,255,0.18)','Border')"><div class="sw-c" style="background:rgba(153,0,255,.18)"><span class="ctip">Copiar</span></div><span class="sw-n">Border</span><span class="sw-h">rgba(153,0,255,.18)</span></div>
+  </div>
+
+  <div class="btitle">Neutros — Dark theme</div>
+  <div class="swatches">
+    <div class="sw" onclick="copyHex('#0e0b1a','BG Dark')"><div class="sw-c" style="background:#0e0b1a;border-color:#3a0080"><span class="ctip">Copiar</span></div><span class="sw-n">BG Dark</span><span class="sw-h">#0e0b1a</span></div>
+    <div class="sw" onclick="copyHex('#1d1434','Surface D')"><div class="sw-c" style="background:#1d1434;border-color:#3a0080"><span class="ctip">Copiar</span></div><span class="sw-n">Surface Dark</span><span class="sw-h">#1d1434</span></div>
+    <div class="sw" onclick="copyHex('#DFE8ED','Text D')"><div class="sw-c" style="background:#DFE8ED"><span class="ctip">Copiar</span></div><span class="sw-n">Texto</span><span class="sw-h">#DFE8ED</span></div>
+    <div class="sw" onclick="copyHex('rgba(223,232,237,0.45)','Muted D')"><div class="sw-c" style="background:rgba(223,232,237,.45)"><span class="ctip">Copiar</span></div><span class="sw-n">Muted</span><span class="sw-h">rgba(223,232,237,.45)</span></div>
+    <div class="sw" onclick="copyHex('rgba(153,0,255,0.22)','Border D')"><div class="sw-c" style="background:rgba(153,0,255,.22)"><span class="ctip">Copiar</span></div><span class="sw-n">Border</span><span class="sw-h">rgba(153,0,255,.22)</span></div>
+  </div>
+</section>
+
+<!-- ══ TYPE ══ -->
+<section id="type" class="sec">
+  <h1 class="stitle">Tipografia</h1>
+  <p class="ssub">Escala calibrada para totem de 21" (104 PPI). Lexend para display — legibilidade máxima em touchscreen.</p>
+
+  <div class="tblock"><div class="tmeta">H1 · Lexend 800 · 42px · instrução principal — 1 por tela</div><div style="font-family:var(--font-d);font-size:42px;font-weight:800;line-height:1.1;color:var(--text)">Toque para começar</div></div>
+  <div class="tblock"><div class="tmeta">H2 · Lexend 700 · 26px · categoria / subcabeçalho</div><div style="font-family:var(--font-d);font-size:26px;font-weight:700;color:var(--text)">Lanches e Combos</div></div>
+  <div class="tblock"><div class="tmeta">H3 · Lexend 700 · 20px · nome de produto</div><div style="font-family:var(--font-d);font-size:20px;font-weight:700;color:var(--text)">Combo Premium com Batata</div></div>
+  <div class="tblock"><div class="tmeta">Preço · Lexend 800 · 28px · teal escuro (light) / teal bright (dark)</div><div style="font-family:var(--font-d);font-size:28px;font-weight:800;color:var(--price-color)">R$ 24,90</div></div>
+  <div class="tblock"><div class="tmeta">CTA label · Lexend 700 · 20px · sempre branco sobre roxo</div><div style="background:var(--btn);display:inline-block;padding:13px 30px;border-radius:var(--r-pill);box-shadow:var(--roxo-glow)"><span style="font-family:var(--font-d);font-size:20px;font-weight:700;color:#fff">Adicionar ao pedido</span></div></div>
+  <div class="tblock"><div class="tmeta">Corpo · Inter 400 · 16px · descrições de produto</div><div style="font-size:16px;color:var(--muted);line-height:1.7">Pão brioche artesanal, blend premium de carnes, queijo fundido, alface, tomate e molho especial da casa.</div></div>
+  <div class="tblock"><div class="tmeta">Badges · Inter 700 · 11px</div><div style="display:flex;gap:7px;flex-wrap:wrap"><span style="background:var(--roxo);color:#fff;font-size:11px;font-weight:700;padding:3px 9px;border-radius:4px">Novo</span><span style="background:var(--teal);color:#0e0b1a;font-size:11px;font-weight:700;padding:3px 9px;border-radius:4px">Mais pedido</span><span style="background:rgba(255,77,109,.15);color:var(--color-error);font-size:11px;font-weight:700;padding:3px 9px;border-radius:4px;border:1px solid rgba(255,77,109,.3)">Esgotado</span></div></div>
+</section>
+
+<!-- ══ BUTTONS ══ -->
+<section id="buttons" class="sec">
+  <h1 class="stitle">Botões e ações</h1>
+  <p class="ssub">Todos os estados e variantes calibrados para touch no totem. CTA principal ≥ 120 px de largura, alvo ≥ 82 px.</p>
+
+  <div class="btitle">CTA primário — roxo sólido, pill</div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="btn-row"><button class="btn btn-p">Finalizar pedido</button><button class="btn btn-p" style="font-size:16px;padding:13px 26px">Adicionar</button><button class="btn btn-p" style="font-size:14px;padding:11px 20px">Confirmar</button></div>
+    <p class="note">Uso: "Finalizar", "Adicionar ao pedido", "Confirmar pagamento". Sempre com glow de roxo.</p>
+  </div>
+
+  <div class="btitle">CTA secundário — outline roxo</div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="btn-row"><button class="btn btn-s">Ver pedido</button><button class="btn btn-s" style="font-size:13px;padding:10px 20px">Editar item</button></div>
+    <p class="note">Uso: ações secundárias, navegação, edição.</p>
+  </div>
+
+  <div class="btitle">Teal — destaque informativo / cross-sell</div>
+  <div class="card" style="margin-bottom:12px">
+    <div class="btn-row"><button class="btn btn-t">Ver promoção</button><button class="btn btn-t" style="font-size:13px;padding:10px 20px">Adicionar bebida</button></div>
+    <p class="note">Nunca na mesma tela que o CTA primário roxo com mesmo peso visual. Teal é informativo.</p>
+  </div>
+
+  <div class="btitle">Destrutivo / Neutro / Add</div>
+  <div class="card">
+    <div class="btn-row">
+      <button class="btn btn-err">Remover item</button>
+      <button class="btn btn-g">Pular</button>
+      <button class="btn btn-g">Cancelar</button>
+      <button class="btn btn-add" style="width:52px;height:52px">+</button>
+    </div>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+      <div style="font-size:13px;color:var(--muted)">Stepper numérico:</div>
+      <div class="stepper"><button class="st-btn" onclick="sd()">−</button><span class="st-val" id="sv">1</span><button class="st-btn" onclick="su()">+</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ COMPONENTS ══ -->
+<section id="components" class="sec">
+  <h1 class="stitle">Componentes</h1>
+  <p class="ssub">Cards, categorias, carrinho, alertas e inputs responsivos ao tema.</p>
+
+  <div class="btitle">Barra de categorias</div>
+  <div class="cat-bar" style="margin-bottom:18px" id="catbar">
+    <button class="chip active" onclick="actCat(this)">🍔 Lanches</button>
+    <button class="chip" onclick="actCat(this)">🍟 Combos</button>
+    <button class="chip" onclick="actCat(this)">🥤 Bebidas</button>
+    <button class="chip" onclick="actCat(this)">🍦 Sobremesas</button>
+    <button class="chip" onclick="actCat(this)">🧂 Extras</button>
+  </div>
+
+  <div class="btitle">Cards de produto — grid 2 colunas</div>
+  <div class="pgrid" style="margin-bottom:24px">
+    <div class="pcard"><div class="ci ci-p"><span>🍔</span><span class="bdg bdg-roxo">Novo</span></div><div class="cb"><div class="cn">Combo Premium</div><div class="cd">Blend especial, queijo duplo</div><div class="cf"><span class="cp">R$ 29,90</span><button class="btn btn-add" style="width:34px;height:34px;font-size:18px">+</button></div></div></div>
+    <div class="pcard"><div class="ci ci-t"><span>🌯</span><span class="bdg bdg-teal">Top</span></div><div class="cb"><div class="cn">Wrap Veggie</div><div class="cd">Opção vegetariana premium</div><div class="cf"><span class="cp">R$ 22,90</span><button class="btn btn-add" style="width:34px;height:34px;font-size:18px">+</button></div></div></div>
+    <div class="pcard" style="opacity:.5"><div class="ci" style="background:var(--surface)"><span style="font-size:50px;filter:grayscale(1)">🍗</span></div><div class="cb"><div class="cn">Frango Crispy</div><div class="cd">Temporariamente indisponível</div><div class="cf"><span class="cp" style="color:var(--muted)">R$ 21,90</span><span style="font-size:11px;font-weight:700;color:var(--muted)">Esgotado</span></div></div></div>
+    <div class="pcard"><div class="ci ci-p"><span>🧀</span></div><div class="cb"><div class="cn">Cheese Duplo</div><div class="cd">Dois hambúrgueres, cheddar</div><div class="cf"><span class="cp">R$ 24,90</span><button class="btn btn-add" style="width:34px;height:34px;font-size:18px">+</button></div></div></div>
+  </div>
+
+  <div class="btitle">Carrinho — fixo no rodapé do totem</div>
+  <div class="cart" style="margin-bottom:24px">
+    <div style="display:flex;align-items:center;gap:9px"><span class="cart-cnt">3</span><span class="cart-lbl">itens no pedido</span></div>
+    <span class="cart-tot">R$ 74,70</span>
+    <button class="btn btn-p" style="font-size:14px;padding:11px 20px">Ver pedido →</button>
+  </div>
+
+  <div class="btitle">Alertas / Feedback</div>
+  <div class="g2" style="margin-bottom:24px">
+    <div>
+      <div class="alert al-roxo"><span class="al-icon">✅</span><div><div class="al-title">Item adicionado!</div><div class="al-msg">Combo Premium incluído no pedido.</div></div></div>
+      <div class="alert al-teal"><span class="al-icon">⭐</span><div><div class="al-title">Promoção disponível</div><div class="al-msg">Adicione bebida por R$ 5,00 a mais.</div></div></div>
+    </div>
+    <div>
+      <div class="alert al-ok"><span class="al-icon">💳</span><div><div class="al-title" style="color:#198737">Pagamento aprovado</div><div class="al-msg">Pedido nº 42. Retire no balcão.</div></div></div>
+      <div class="alert al-err"><span class="al-icon">⚠️</span><div><div class="al-title">Pagamento recusado</div><div class="al-msg">Tente outro cartão ou forma de pagamento.</div></div></div>
+    </div>
+  </div>
+
+  <div class="btitle">Inputs</div>
+  <div class="g2">
+    <div>
+      <div class="field"><label>CPF ou celular</label><input class="inp" placeholder="000.000.000-00" type="text"/></div>
+      <div class="field"><label>Número da mesa</label><input class="inp" placeholder="Ex: Mesa 12" type="text"/></div>
+    </div>
+    <div style="display:flex;flex-direction:column;justify-content:center;gap:10px">
+      <div style="font-size:13px;color:var(--muted)">Stepper de quantidade:</div>
+      <div class="stepper"><button class="st-btn" onclick="sd2()">−</button><span class="st-val" id="sv2">2</span><button class="st-btn" onclick="su2()">+</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ MOCKUP ══ -->
+<section id="mockup" class="sec">
+  <h1 class="stitle">Mockup de tela</h1>
+  <p class="ssub">Light e dark do seu produto lado a lado com header, promoção, categorias, grid e carrinho.</p>
+  <div class="screens">
+    <div>
+      <div style="text-align:center;margin-bottom:11px;font-size:11px;font-weight:700;color:var(--roxo);letter-spacing:.1em;text-transform:uppercase">☀️ Light — padrão de produção</div>
+      <div class="sf sf-l">
+        <div class="sh-l"><span class="slogo">⬡ SEU TOTEM</span><span style="font-size:9px;color:rgba(29,20,52,.4)">🌐 PT</span></div>
+        <div class="sp-l">⚡ Combo do dia por R$ 29,90 — hoje só!</div>
+        <div class="sc-l"><button class="cs cs-l active">🍔 Lanches</button><button class="cs cs-l">🍟 Combos</button><button class="cs cs-l">🥤 Bebidas</button><button class="cs cs-l">🍦 Sobrem.</button></div>
+        <div class="sg">
+          <div class="scard-l"><div class="simg" style="background:linear-gradient(135deg,#3a0080,#9900ff)">🍔</div><div class="sbd"><div class="sn-l">Combo Premium</div><div class="sp2-l">R$ 29,90</div></div></div>
+          <div class="scard-l"><div class="simg" style="background:linear-gradient(135deg,#0d3333,#33cccc)">🌯</div><div class="sbd"><div class="sn-l">Wrap Veggie</div><div class="sp2-l">R$ 22,90</div></div></div>
+          <div class="scard-l"><div class="simg" style="background:linear-gradient(135deg,#3a0080,#9900ff)">🧀</div><div class="sbd"><div class="sn-l">Cheese Duplo</div><div class="sp2-l">R$ 24,90</div></div></div>
+          <div class="scard-l"><div class="simg" style="background:linear-gradient(135deg,#0d3333,#33cccc)">🍗</div><div class="sbd"><div class="sn-l">Frango Crispy</div><div class="sp2-l">R$ 21,90</div></div></div>
+        </div>
+        <div class="sct-l"><div><div class="sitems sitems-l">3 itens</div><div class="stot-l">R$ 74,70</div></div><button class="sbtncta">Ver pedido →</button></div>
+      </div>
+    </div>
+    <div>
+      <div style="text-align:center;margin-bottom:11px;font-size:11px;font-weight:700;color:var(--teal);letter-spacing:.1em;text-transform:uppercase">🌙 Dark — tema alternativo</div>
+      <div class="sf sf-d">
+        <div class="sh-d"><span class="slogo">⬡ SEU TOTEM</span><span style="font-size:9px;color:rgba(223,232,237,.4)">🌐 PT</span></div>
+        <div class="sp-d">⚡ Combo do dia por R$ 29,90 — hoje só!</div>
+        <div class="sc-d"><button class="cs cs-d active">🍔 Lanches</button><button class="cs cs-d">🍟 Combos</button><button class="cs cs-d">🥤 Bebidas</button><button class="cs cs-d">🍦 Sobrem.</button></div>
+        <div class="sg">
+          <div class="scard-d"><div class="simg" style="background:linear-gradient(135deg,#1d0040,#9900ff)">🍔</div><div class="sbd"><div class="sn-d">Combo Premium</div><div class="sp2-d">R$ 29,90</div></div></div>
+          <div class="scard-d"><div class="simg" style="background:linear-gradient(135deg,#051212,#33cccc)">🌯</div><div class="sbd"><div class="sn-d">Wrap Veggie</div><div class="sp2-d">R$ 22,90</div></div></div>
+          <div class="scard-d"><div class="simg" style="background:linear-gradient(135deg,#1d0040,#9900ff)">🧀</div><div class="sbd"><div class="sn-d">Cheese Duplo</div><div class="sp2-d">R$ 24,90</div></div></div>
+          <div class="scard-d"><div class="simg" style="background:linear-gradient(135deg,#051212,#33cccc)">🍗</div><div class="sbd"><div class="sn-d">Frango Crispy</div><div class="sp2-d">R$ 21,90</div></div></div>
+        </div>
+        <div class="sct-d"><div><div class="sitems sitems-d">3 itens</div><div class="stot-d">R$ 74,70</div></div><button class="sbtncta">Ver pedido →</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══ COMPARE ══ -->
+<section id="compare" class="sec">
+  <h1 class="stitle">BK / McDonald's / Seu produto</h1>
+  <p class="ssub">Decisões de design lado a lado: onde seu produto se alinha e onde tem identidade própria.</p>
+  <div class="cgrid">
+    <div class="ccol">
+      <div class="clbl" style="color:#FF8732">🔥 Burger King</div>
+      <div class="crow"><span class="ck">Tema padrão</span><span class="cv">Dark (fundo preto)</span></div>
+      <div class="crow"><span class="ck">CTA principal</span><span class="cv"><span class="cprev" style="background:#FF8732;color:#0E0C0A">Laranja #FF8732</span></span></div>
+      <div class="crow"><span class="ck">Preço</span><span class="cv" style="color:#FF8732;font-family:var(--font-d);font-weight:800">Laranja</span></div>
+      <div class="crow"><span class="ck">Card bg</span><span class="cv">#251E18 (marrom esc.)</span></div>
+      <div class="crow"><span class="ck">Fonte display</span><span class="cv">Flame Bold (proprietária)</span></div>
+      <div class="crow"><span class="ck">Estilo</span><span class="cv">Quente, flamejado, ousado</span></div>
+    </div>
+    <div class="ccol">
+      <div class="clbl" style="color:#DA291C">🍟 McDonald's</div>
+      <div class="crow"><span class="ck">Tema padrão</span><span class="cv">Light (fundo cream)</span></div>
+      <div class="crow"><span class="ck">CTA principal</span><span class="cv"><span class="cprev" style="background:#DA291C;color:#fff">Vermelho #DA291C</span></span></div>
+      <div class="crow"><span class="ck">Preço</span><span class="cv" style="color:#DA291C;font-family:var(--font-d);font-weight:800">Vermelho</span></div>
+      <div class="crow"><span class="ck">Card bg</span><span class="cv">#FFFFFF</span></div>
+      <div class="crow"><span class="ck">Fonte display</span><span class="cv">Speedee (proprietária)</span></div>
+      <div class="crow"><span class="ck">Estilo</span><span class="cv">Limpo, confiante, moderno</span></div>
+    </div>
+    <div class="ccol hl">
+      <div class="clbl" style="color:var(--roxo)">⬡ Seu produto</div>
+      <div class="crow"><span class="ck">Tema padrão</span><span class="cv">Light + dark toggle</span></div>
+      <div class="crow"><span class="ck">CTA principal</span><span class="cv"><span class="cprev" style="background:#9900ff;color:#fff">Roxo #9900ff</span></span></div>
+      <div class="crow"><span class="ck">Preço</span><span class="cv" style="color:var(--price-color);font-family:var(--font-d);font-weight:800">Teal (adapta ao tema)</span></div>
+      <div class="crow"><span class="ck">Card bg</span><span class="cv">#fff (light) / #1d1434 (dark)</span></div>
+      <div class="crow"><span class="ck">Fonte display</span><span class="cv">Lexend (open-source)</span></div>
+      <div class="crow"><span class="ck">Estilo</span><span class="cv">Tech, fluido, premium</span></div>
+    </div>
+  </div>
+
+  <div class="btitle" style="margin-top:28px">Padrões compartilhados (herdados de BK + MC)</div>
+  <div class="g3">
+    <div class="card"><div style="font-weight:700;font-size:13px;margin-bottom:3px">Grid 2 colunas</div><div style="font-size:12px;color:var(--muted)">Foto acima, nome + preço + "+" abaixo. Padrão das duas redes.</div></div>
+    <div class="card"><div style="font-weight:700;font-size:13px;margin-bottom:3px">Carrinho fixo no rodapé</div><div style="font-size:12px;color:var(--muted)">Subtotal sempre visível. CTA à direita (favorece destros).</div></div>
+    <div class="card"><div style="font-weight:700;font-size:13px;margin-bottom:3px">1 cross-sell por fluxo</div><div style="font-size:12px;color:var(--muted)">BK testou 3 telas e confirmou queda no NPS. Máximo: 1 pop-up relevante.</div></div>
+    <div class="card"><div style="font-weight:700;font-size:13px;margin-bottom:3px">Touch ≥ 82 px</div><div style="font-size:12px;color:var(--muted)">W3C 20mm em tela de 21". Gap mínimo de 21 px entre alvos.</div></div>
+    <div class="card"><div style="font-weight:700;font-size:13px;margin-bottom:3px">Lexend para display</div><div style="font-size:12px;color:var(--muted)">Open-source, legibilidade superior em telas de toque.</div></div>
+    <div class="card"><div style="font-weight:700;font-size:13px;margin-bottom:3px">1 cor de CTA por tela</div><div style="font-size:12px;color:var(--muted)">Roxo é o único CTA ativo. Teal informa, não compete.</div></div>
+  </div>
+</section>
+
+<!-- ══ TOKENS ══ -->
+<section id="tokens" class="sec">
+  <h1 class="stitle">Tokens CSS</h1>
+  <p class="ssub">Copie e cole no <code style="color:var(--roxo);background:var(--roxo-subtle);padding:2px 6px;border-radius:4px">:root</code> do seu projeto. Dark é ativado via <code style="color:var(--roxo);background:var(--roxo-subtle);padding:2px 6px;border-radius:4px">[data-theme="dark"]</code> no html.</p>
+
+  <div class="tkbl">
+    <pre>/* ═══════════════════════════════════════════
+   DESIGN SYSTEM — TOTEM FAST FOOD v2
+   Light padrão · dark via [data-theme="dark"]
+═══════════════════════════════════════════ */
+
+:root {
+  /* — Marca (imutáveis entre temas) — */
+  --roxo:           #9900ff;
+  --roxo-hover:     #7a00cc;
+  --roxo-subtle:    rgba(153,0,255,0.12);
+  --roxo-glow:      0 4px 20px rgba(153,0,255,0.35);
+  --teal:           #33cccc;
+  --teal-dark:      #1a9999;
+  --teal-subtle:    rgba(51,204,204,0.15);
+
+  /* — Semânticos — */
+  --color-success:  #198737;
+  --color-error:    #ff4d6d;
+  --color-err-bg:   rgba(255,77,109,0.10);
+
+  /* — LIGHT THEME (padrão) — */
+  --bg:             #DFE8ED;   /* background geral */
+  --surface:        #ffffff;   /* cards, drawers, modais */
+  --header:         #ffffff;   /* header, barra de categorias */
+  --border:         rgba(153,0,255,0.18);
+  --border-m:       rgba(0,0,0,0.08);      /* bordas neutras */
+  --text:           #1d1434;   /* texto principal */
+  --muted:          rgba(29,20,52,0.45);   /* texto secundário */
+  --btn:            #9900ff;   /* fundo dos CTAs primários */
+  --btn-text:       #ffffff;   /* texto dos botões primários */
+  --num-bg:         rgba(153,0,255,0.10);  /* inputs numéricos */
+  --price-color:    #1a9999;   /* teal escuro no light */
+  --card-sh:        0 2px 12px rgba(153,0,255,0.10);
+
+  /* — Tipografia — */
+  --font-d: 'Lexend', sans-serif;   /* headings, botões, preços */
+  --font-b: 'Inter', sans-serif;    /* corpo de texto */
+
+  /* — Escala de fonte (totem 21") — */
+  --text-h1:    42px;   /* instrução principal por tela */
+  --text-h2:    26px;   /* nome de categoria */
+  --text-h3:    20px;   /* nome de produto */
+  --text-price: 28px;   /* preço em destaque */
+  --text-cta:   20px;   /* label de botão CTA */
+  --text-body:  16px;   /* descrições */
+  --text-label: 14px;   /* rótulos de campo */
+  --text-small: 12px;   /* badges */
+
+  /* — Espaçamento — */
+  --s-xs: 8px;  --s-sm: 12px;  --s-md: 16px;
+  --s-lg: 24px; --s-xl: 32px;  --s-2xl: 48px;
+
+  /* — Bordas — */
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px;
+  --r-xl: 24px; --r-pill: 999px;
+
+  /* — Touch targets (totem) — */
+  --touch-min:  82px;    /* W3C 20mm em tela 21" */
+  --touch-add:  52px;    /* botão circular "+" */
+  --touch-cta:  120px;   /* largura mínima CTA principal */
+  --touch-gap:  21px;    /* espaço mínimo entre alvos */
+}
+
+/* — DARK THEME — */
+[data-theme="dark"] {
+  --bg:          #0e0b1a;
+  --surface:     #1d1434;
+  --header:      #1d1434;
+  --border:      rgba(153,0,255,0.22);
+  --border-m:    rgba(255,255,255,0.07);
+  --text:        #DFE8ED;
+  --muted:       rgba(223,232,237,0.45);
+  --num-bg:      rgba(153,0,255,0.12);
+  --price-color: #33cccc;   /* teal bright no dark */
+  --card-sh:     0 2px 16px rgba(153,0,255,0.20);
+  /* roxo, btn, teal — sem alteração entre temas */
+}
+
+/* — Ativar / desativar dark via JS — */
+/* document.documentElement.setAttribute('data-theme','dark')  */
+/* document.documentElement.removeAttribute('data-theme')      */</pre>
+  </div>
+
+  <div class="btitle" style="margin-top:24px">Mapa de tokens semânticos</div>
+  <table class="ttable">
+    <thead><tr><th>Token</th><th>Light</th><th>Dark</th><th>Uso</th></tr></thead>
+    <tbody>
+      <tr><td><code>--roxo</code></td><td><span class="cdot" style="background:#9900ff"></span>#9900ff</td><td><span class="cdot" style="background:#9900ff"></span>#9900ff</td><td>CTA, categoria ativa, marca</td></tr>
+      <tr><td><code>--price-color</code></td><td><span class="cdot" style="background:#1a9999"></span>#1a9999</td><td><span class="cdot" style="background:#33cccc"></span>#33cccc</td><td>Preço dos produtos (teal adapta)</td></tr>
+      <tr><td><code>--bg</code></td><td><span class="cdot" style="background:#DFE8ED;border-color:#bbb"></span>#DFE8ED</td><td><span class="cdot" style="background:#0e0b1a"></span>#0e0b1a</td><td>Background da tela</td></tr>
+      <tr><td><code>--surface</code></td><td><span class="cdot" style="background:#fff;border-color:#bbb"></span>#ffffff</td><td><span class="cdot" style="background:#1d1434"></span>#1d1434</td><td>Cards, header, modais, drawers</td></tr>
+      <tr><td><code>--text</code></td><td><span class="cdot" style="background:#1d1434"></span>#1d1434</td><td><span class="cdot" style="background:#DFE8ED"></span>#DFE8ED</td><td>Texto principal</td></tr>
+      <tr><td><code>--border</code></td><td colspan="2" style="color:var(--roxo);text-align:center">rgba(153,0,255, .18 light · .22 dark)</td><td>Bordas com identidade de marca</td></tr>
+      <tr><td><code>--roxo-glow</code></td><td colspan="2" style="color:var(--roxo);text-align:center">0 4px 20px rgba(153,0,255,0.35)</td><td>Box-shadow de CTAs ativos</td></tr>
+      <tr><td><code>--color-error</code></td><td colspan="2" style="color:#ff4d6d;text-align:center">#ff4d6d</td><td>Erros e ações destrutivas</td></tr>
+      <tr><td><code>--touch-min</code></td><td colspan="2" style="color:var(--muted);text-align:center">82 px (20mm a 104 PPI)</td><td>Alvo mínimo de toque W3C</td></tr>
+    </tbody>
+  </table>
+</section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  let v1=1, v2=2;
+  function showSec(id,btn){
+    document.querySelectorAll('.sec').forEach(s=>s.classList.remove('active'));
+    document.querySelectorAll('.tb').forEach(b=>b.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    btn.classList.add('active');
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+  function toggleTheme(){
+    const h=document.documentElement, b=document.getElementById('thbtn');
+    if(h.getAttribute('data-theme')==='dark'){h.removeAttribute('data-theme');b.textContent='🌙 Dark';}
+    else{h.setAttribute('data-theme','dark');b.textContent='☀️ Light';}
+  }
+  function actCat(el){
+    document.getElementById('catbar').querySelectorAll('.chip').forEach(c=>c.classList.remove('active'));
+    el.classList.add('active');
+  }
+  function copyHex(hex,name){
+    navigator.clipboard.writeText(hex).then(()=>{
+      const t=document.getElementById('toast');
+      t.textContent=name+' copiado: '+hex;
+      t.classList.add('show');
+      setTimeout(()=>t.classList.remove('show'),2000);
+    });
+  }
+  function su(){v1++;document.getElementById('sv').textContent=v1;}
+  function sd(){if(v1>0){v1--;document.getElementById('sv').textContent=v1;}}
+  function su2(){v2++;document.getElementById('sv2').textContent=v2;}
+  function sd2(){if(v2>0){v2--;document.getElementById('sv2').textContent=v2;}}
+</script>
+</body>
+</html>

@@ -3,6 +3,9 @@ import axios from "axios";
 import type { Theme } from "../themes";
 import type { CompanyInfo, TerminalInfo, AvailableTerminal } from "../types";
 
+const FONT_D = "'Lexend', sans-serif";
+const FONT_B = "'Inter', sans-serif";
+
 type Step = "pin" | "terminal" | "testing";
 
 interface Props {
@@ -169,8 +172,8 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
             <circle cx="24" cy="22" r="4" fill="white"/>
             <rect x="14" y="34" width="20" height="3" rx="1.5" fill="white" opacity="0.4"/>
           </svg>
-          <div style={{ fontWeight: 800, fontSize: 26, color: "#9900ff", letterSpacing: "-0.5px" }}>ordin</div>
-          <p style={{ color: T.muted, fontSize: 14, marginTop: 6 }}>Digite o PIN da empresa para começar</p>
+          <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: 26, color: "#9900ff", letterSpacing: "-0.5px" }}>ordin</div>
+          <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: 14, marginTop: 6 }}>Digite o PIN da empresa para começar</p>
         </div>
         <div style={card}>
           <div style={{
@@ -222,10 +225,10 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
         <div style={{ ...card, width: 420 }}>
           <div style={{ textAlign: "center", marginBottom: 24 }}>
             <div style={{ fontSize: 36, marginBottom: 8 }}>🖥️</div>
-            <h2 style={{ color: T.text, fontSize: 20, fontWeight: 800, margin: 0 }}>
+            <h2 style={{ fontFamily: FONT_D, color: T.text, fontSize: 20, fontWeight: 800, margin: 0 }}>
               {company?.name}
             </h2>
-            <p style={{ color: T.muted, fontSize: 13, marginTop: 6 }}>
+            <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: 13, marginTop: 6 }}>
               Selecione o terminal desta máquina
             </p>
           </div>
@@ -249,7 +252,8 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
                 onClick={() => { setStep("pin"); setPin(""); setPinError(""); }}
                 style={{
                   padding: "10px 24px", background: T.btn, color: T.btnText,
-                  border: "none", borderRadius: 10, fontSize: 14, cursor: "pointer",
+                  border: "none", borderRadius: 999, fontFamily: FONT_D, fontSize: 14, fontWeight: 700, cursor: "pointer",
+                  boxShadow: T.glow,
                 }}
               >
                 Tentar novamente
@@ -311,8 +315,8 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
             onClick={() => { setStep("pin"); setPin(""); setPinError(""); }}
             style={{
               marginTop: 20, width: "100%", padding: "10px",
-              background: "transparent", border: `1px solid ${T.border}`,
-              borderRadius: 10, color: T.muted, fontSize: 13, cursor: "pointer",
+              background: "transparent", border: `1px solid ${T.borderNeutral}`,
+              borderRadius: 999, fontFamily: FONT_D, color: T.muted, fontSize: 13, fontWeight: 600, cursor: "pointer",
             }}
           >
             ← Voltar
@@ -346,27 +350,28 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
         {testSuccess === true && (
           <>
             <div style={{ fontSize: 52, marginBottom: 16 }}>✅</div>
-            <h2 style={{ color: "#33cccc", fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>
+            <h2 style={{ fontFamily: FONT_D, color: T.priceColor, fontSize: 20, fontWeight: 800, margin: "0 0 8px" }}>
               Máquina OK!
             </h2>
-            <p style={{ color: T.muted, fontSize: 13 }}>{testDetail}</p>
-            <p style={{ color: T.muted, fontSize: 12, marginTop: 8 }}>Iniciando…</p>
+            <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: 13 }}>{testDetail}</p>
+            <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: 12, marginTop: 8 }}>Iniciando…</p>
           </>
         )}
 
         {testSuccess === false && (
           <>
             <div style={{ fontSize: 52, marginBottom: 16 }}>⚠️</div>
-            <h2 style={{ color: T.errorText, fontSize: 18, fontWeight: 700, margin: "0 0 8px" }}>
+            <h2 style={{ fontFamily: FONT_D, color: T.errorText, fontSize: 18, fontWeight: 700, margin: "0 0 8px" }}>
               Falha na conexão
             </h2>
-            <p style={{ color: T.muted, fontSize: 13, marginBottom: 24 }}>{testDetail}</p>
+            <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: 13, marginBottom: 24 }}>{testDetail}</p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
               <button
                 onClick={retryTest}
                 style={{
                   padding: "12px 20px", background: T.btn, color: T.btnText,
-                  border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer",
+                  border: "none", borderRadius: 999, fontFamily: FONT_D, fontSize: 14, fontWeight: 700, cursor: "pointer",
+                  boxShadow: T.glow,
                 }}
               >
                 Tentar novamente
@@ -375,8 +380,8 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
                 onClick={backToTerminals}
                 style={{
                   padding: "12px 20px", background: "transparent",
-                  border: `1px solid ${T.border}`, borderRadius: 10,
-                  color: T.muted, fontSize: 14, cursor: "pointer",
+                  border: `1px solid ${T.borderNeutral}`, borderRadius: 999,
+                  fontFamily: FONT_D, color: T.muted, fontSize: 14, fontWeight: 600, cursor: "pointer",
                 }}
               >
                 Outro terminal

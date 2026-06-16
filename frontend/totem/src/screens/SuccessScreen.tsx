@@ -8,6 +8,9 @@ const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", curren
 const fmtMethod = (m: string) =>
   ({ credit: "Crédito", debit: "Débito", pix: "PIX", voucher: "Voucher" })[m] ?? m.toUpperCase();
 
+const FONT_D = "'Lexend', sans-serif";
+const FONT_B = "'Inter', sans-serif";
+
 function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string[]): string {
   const now = new Date().toLocaleString("pt-BR");
 
@@ -113,7 +116,6 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       const svgs = Array.from(
         qrContainerRef.current?.querySelectorAll("svg") ?? []
       ).map((el) => {
-        // garante tamanho explícito para impressão
         el.setAttribute("width", "130");
         el.setAttribute("height", "130");
         return el.outerHTML;
@@ -132,7 +134,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
     return () => clearTimeout(timer);
   }, []);
 
-  // Countdown → novo pedido (sem PIN)
+  // Countdown → novo pedido
   useEffect(() => {
     const t = setInterval(() => {
       setCountdown((c) => {
@@ -163,13 +165,13 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
 
       <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
 
-      <h2 style={{ color: T.text, fontSize: 28, fontWeight: 800, margin: 0 }}>
+      <h2 style={{ color: T.successColor, fontFamily: FONT_D, fontSize: 28, fontWeight: 800, margin: 0 }}>
         Pagamento aprovado!
       </h2>
-      <p style={{ color: T.teal ?? "#33cccc", fontWeight: 700, fontSize: 20, marginTop: 8 }}>
+      <p style={{ color: T.priceColor, fontFamily: FONT_D, fontWeight: 800, fontSize: 20, marginTop: 8 }}>
         {fmt(order.total)}
       </p>
-      <p style={{ color: T.muted, fontSize: 13, marginTop: 4 }}>
+      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 13, marginTop: 4 }}>
         {order.order_ref} · {fmtMethod(order.method)}{order.nsu ? ` · NSU ${order.nsu}` : ""}
       </p>
 
@@ -177,14 +179,15 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
         marginTop: 32,
         padding: "18px 28px",
         background: T.surface,
-        border: `1px solid ${T.border}`,
+        border: `1px solid ${T.borderNeutral}`,
         borderRadius: 16,
         maxWidth: 360,
+        boxShadow: T.cardShadow,
       }}>
         {printBlocked ? (
           <>
             <div style={{ fontSize: 28, marginBottom: 8 }}>🖨️</div>
-            <p style={{ color: T.muted, fontSize: 14, marginBottom: 12 }}>
+            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, marginBottom: 12 }}>
               A impressão foi bloqueada pelo navegador.<br/>Toque para imprimir manualmente.
             </p>
             <button
@@ -196,7 +199,9 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
               }}
               style={{
                 padding: "12px 28px", background: T.btn, color: T.btnText,
-                border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer",
+                border: "none", borderRadius: 999,
+                fontFamily: FONT_D, fontSize: 15, fontWeight: 700, cursor: "pointer",
+                boxShadow: T.glow,
               }}
             >
               🖨️ Imprimir tickets
@@ -205,19 +210,20 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
         ) : printed ? (
           <>
             <div style={{ fontSize: 28, marginBottom: 8 }}>🖨️</div>
-            <p style={{ color: T.muted, fontSize: 14 }}>
+            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14 }}>
               Tickets enviados para impressão!<br/>Retire na impressora e apresente no balcão.
             </p>
           </>
         ) : (
           <>
             <div style={{
-              width: 32, height: 32, border: `3px solid ${T.border}`,
-              borderTop: `3px solid ${T.roxo ?? "#9900ff"}`,
+              width: 32, height: 32,
+              border: `3px solid ${T.borderNeutral}`,
+              borderTop: `3px solid ${T.roxo}`,
               borderRadius: "50%", animation: "spin 0.8s linear infinite",
               margin: "0 auto 12px",
             }} />
-            <p style={{ color: T.muted, fontSize: 14 }}>Abrindo impressão…</p>
+            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14 }}>Abrindo impressão…</p>
           </>
         )}
       </div>
@@ -231,7 +237,8 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
           background: T.btn,
           color: T.btnText,
           border: "none",
-          borderRadius: 16,
+          borderRadius: 999,
+          fontFamily: FONT_D,
           fontSize: 20,
           fontWeight: 800,
           cursor: "pointer",
@@ -240,7 +247,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       >
         Novo pedido
       </button>
-      <p style={{ color: T.muted, fontSize: 12, marginTop: 10, opacity: 0.5 }}>
+      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 12, marginTop: 10, opacity: 0.5 }}>
         Novo pedido em {countdown}s…
       </p>
     </div>

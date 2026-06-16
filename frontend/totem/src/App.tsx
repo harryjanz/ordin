@@ -15,7 +15,7 @@ const INACTIVITY_TIMEOUT_MS = 120_000;
 const INACTIVITY_WARN_SEC   = 10;
 
 export default function App() {
-  const [themeKey] = useState<ThemeKey>("dark");
+  const [themeKey, setThemeKey] = useState<ThemeKey>("light");
   const T = THEMES[themeKey];
 
   const {
@@ -146,9 +146,10 @@ export default function App() {
                 background: T.btn,
                 color: T.btnText,
                 border: "none",
-                borderRadius: 14,
+                borderRadius: 999,
                 fontSize: 18,
                 fontWeight: 800,
+                fontFamily: "'Lexend', sans-serif",
                 cursor: "pointer",
                 boxShadow: T.glow,
               }}
@@ -162,8 +163,10 @@ export default function App() {
       {screen === "welcome" && (
         <WelcomeScreen
           T={T}
+          themeKey={themeKey}
           companyName={company?.name ?? "ordin"}
           onStart={() => setScreen("catalog")}
+          onThemeToggle={() => setThemeKey((k) => k === "dark" ? "light" : "dark")}
         />
       )}
 
@@ -231,10 +234,11 @@ export default function App() {
                 padding: "0 32px",
                 minHeight: 60,
                 background: T.surface,
-                border: `1px solid ${T.border}`,
-                borderRadius: 14,
+                border: `1px solid ${T.borderNeutral}`,
+                borderRadius: 999,
                 color: T.muted,
                 cursor: "pointer",
+                fontFamily: "'Lexend', sans-serif",
                 fontWeight: 700,
                 fontSize: 16,
               }}
@@ -249,7 +253,8 @@ export default function App() {
                 background: T.btn,
                 color: T.btnText,
                 border: "none",
-                borderRadius: 14,
+                borderRadius: 999,
+                fontFamily: "'Lexend', sans-serif",
                 fontSize: 17,
                 fontWeight: 800,
                 cursor: "pointer",
