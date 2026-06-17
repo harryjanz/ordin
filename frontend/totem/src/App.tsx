@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import api from "./api";
 import { useStore } from "./store";
-import { THEMES, type ThemeKey } from "./themes";
+import { resolveTheme } from "./themes";
 import SetupScreen from "./screens/SetupScreen";
 import { getStoredTerminalId } from "./screens/DeviceSetupScreen";
 import WelcomeScreen from "./screens/WelcomeScreen";
@@ -9,21 +9,25 @@ import CatalogScreen from "./screens/CatalogScreen";
 import CpfScreen from "./screens/CpfScreen";
 import PaymentScreen from "./screens/PaymentScreen";
 import SuccessScreen from "./screens/SuccessScreen";
+import { useState } from "react";
 import type { CompanyInfo, TerminalInfo, Product, CompletedOrder } from "./types";
 
 const INACTIVITY_TIMEOUT_MS = 120_000;
 const INACTIVITY_WARN_SEC   = 10;
 
 export default function App() {
-  const [themeKey, setThemeKey] = useState<ThemeKey>("light");
-  const T = THEMES[themeKey];
-
   const {
     company, terminal, cart, cpf, completedOrder, screen,
     setToken, setCompany, setTerminal, setScreen,
     addToCart, removeFromCart, setCpf, setCompletedOrder,
     newOrder, goIdle, resetSession, touch,
   } = useStore();
+
+  // Tema derivado da empresa — sem estado local; padrão ordin light antes do login
+  const T = resolveTheme(
+    company?.visual_theme ?? "ordin",
+    company?.visual_mode  ?? "light",
+  );
 
   const savedTerminalId = getStoredTerminalId();
   const [orderRef, setOrderRef] = useState<string | null>(null);
@@ -163,10 +167,8 @@ export default function App() {
       {screen === "welcome" && (
         <WelcomeScreen
           T={T}
-          themeKey={themeKey}
           companyName={company?.name ?? "ordin"}
           onStart={() => setScreen("catalog")}
-          onThemeToggle={() => setThemeKey((k) => k === "dark" ? "light" : "dark")}
         />
       )}
 

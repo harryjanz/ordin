@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design System — Totem de Autoatendimento</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ═══════════════════════════════════════════
+     RESET & BASE
+  ═══════════════════════════════════════════ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #0E0C0A;
+    color: #F5EBDC;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  /* ═══════════════════════════════════════════
+     TOKENS — BURGER KING
+  ═══════════════════════════════════════════ */
+  :root {
+    /* BK Primary */
+    --bk-fiery-red:     #D62300;
+    --bk-flaming-orange:#FF8732;
+    --bk-melty-yellow:  #FFAA00;
+    --bk-bbq-brown:     #502314;
+    --bk-sesame:        #F5EBDC;
+    --bk-crunchy-green: #198737;
+    /* BK Neutrals */
+    --bk-black:         #0E0C0A;
+    --bk-dark:          #1A1612;
+    --bk-card:          #251E18;
+    --bk-border:        #3D3028;
+    --bk-text-primary:  #F5EBDC;
+    --bk-text-secondary:#C4A882;
+    --bk-text-muted:    #7A6554;
+
+    /* MC Primary */
+    --mc-yellow:        #FFC72C;
+    --mc-red:           #DA291C;
+    --mc-black:         #27251F;
+    --mc-cream:         #F5F0E5;
+    --mc-green:         #264F36;
+    /* MC Neutrals */
+    --mc-white:         #FFFFFF;
+    --mc-gray-light:    #F0EDE7;
+    --mc-gray-mid:      #C8C4BC;
+    --mc-gray-dark:     #6B6760;
+    --mc-text-primary:  #27251F;
+    --mc-text-secondary:#6B6760;
+    --mc-card-bg:       #FFFFFF;
+    --mc-border:        #E0DDD8;
+
+    /* Semantic / UI tokens */
+    --radius-sm:  8px;
+    --radius-md:  12px;
+    --radius-lg:  16px;
+    --radius-xl:  24px;
+    --radius-pill:999px;
+  }
+
+  /* ═══════════════════════════════════════════
+     NAV / TABS
+  ═══════════════════════════════════════════ */
+  .ds-nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: #0E0C0Aee;
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid #3D3028;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 32px;
+    flex-wrap: wrap;
+  }
+  .ds-nav-brand {
+    font-family: 'Lexend', sans-serif;
+    font-weight: 800;
+    font-size: 13px;
+    color: #FF8732;
+    letter-spacing: .04em;
+    margin-right: 16px;
+    white-space: nowrap;
+  }
+  .tab-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: #7A6554;
+    cursor: pointer;
+    transition: all .15s;
+    white-space: nowrap;
+  }
+  .tab-btn:hover { color: #C4A882; border-color: #3D3028; }
+  .tab-btn.active { background: #251E18; border-color: #FF8732; color: #F5EBDC; }
+
+  /* ═══════════════════════════════════════════
+     LAYOUT
+  ═══════════════════════════════════════════ */
+  .ds-main { max-width: 1100px; margin: 0 auto; padding: 40px 32px 80px; }
+  .section { display: none; }
+  .section.active { display: block; }
+
+  .section-title {
+    font-family: 'Lexend', sans-serif;
+    font-weight: 800;
+    font-size: 28px;
+    color: #F5EBDC;
+    margin-bottom: 6px;
+  }
+  .section-sub {
+    font-size: 14px;
+    color: #7A6554;
+    margin-bottom: 40px;
+  }
+  .block-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    color: #7A6554;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #3D3028;
+  }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .three-col { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  @media(max-width:700px) { .two-col, .three-col { grid-template-columns: 1fr; } }
+
+  /* ═══════════════════════════════════════════
+     BRAND BLOCKS
+  ═══════════════════════════════════════════ */
+  .brand-block {
+    border-radius: var(--radius-lg);
+    padding: 28px;
+    margin-bottom: 24px;
+  }
+  .bk-block  { background: #1A1612; border: 1px solid #3D3028; }
+  .mc-block  { background: #F5F0E5; border: 1px solid #E0DDD8; }
+  .bk-label  { font-family:'Lexend',sans-serif; font-weight:800; font-size:11px; letter-spacing:.12em; color:#FF8732; text-transform:uppercase; margin-bottom:12px; }
+  .mc-label  { font-family:'Lexend',sans-serif; font-weight:800; font-size:11px; letter-spacing:.12em; color:#DA291C; text-transform:uppercase; margin-bottom:12px; }
+
+  /* ═══════════════════════════════════════════
+     COLOR SWATCHES
+  ═══════════════════════════════════════════ */
+  .swatches { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    cursor: pointer;
+  }
+  .swatch-color {
+    width: 72px;
+    height: 56px;
+    border-radius: 10px;
+    position: relative;
+    border: 1px solid rgba(255,255,255,.08);
+    transition: transform .12s;
+  }
+  .swatch:hover .swatch-color { transform: scale(1.06); }
+  .swatch-name { font-size: 11px; font-weight: 600; color: #C4A882; }
+  .swatch-hex  { font-size: 10px; font-family: 'Inter', monospace; color: #7A6554; }
+  .swatch-copy-tip {
+    position: absolute;
+    bottom: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    background: #FF8732;
+    color: #0E0C0A;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity .2s;
+    pointer-events: none;
+  }
+  .swatch-color:hover .swatch-copy-tip { opacity: 1; }
+
+  /* MC swatches in light context */
+  .mc-block .swatch-name { color: #502314; }
+  .mc-block .swatch-hex  { color: #7A6554; }
+
+  /* ═══════════════════════════════════════════
+     TYPOGRAPHY SPECIMENS
+  ═══════════════════════════════════════════ */
+  .type-specimen {
+    background: #251E18;
+    border: 1px solid #3D3028;
+    border-radius: var(--radius-md);
+    padding: 20px 24px;
+    margin-bottom: 12px;
+  }
+  .type-meta { font-size: 10px; color: #7A6554; margin-bottom: 6px; font-family: monospace; }
+  .type-h1  { font-family:'Lexend',sans-serif; font-size:42px; font-weight:800; line-height:1.1; color:#F5EBDC; }
+  .type-h2  { font-family:'Lexend',sans-serif; font-size:26px; font-weight:700; line-height:1.2; color:#F5EBDC; }
+  .type-h3  { font-family:'Lexend',sans-serif; font-size:20px; font-weight:700; line-height:1.3; color:#F5EBDC; }
+  .type-body{ font-size:16px; font-weight:400; line-height:1.7; color:#C4A882; }
+  .type-label{ font-size:14px; font-weight:600; color:#F5EBDC; }
+  .type-price{ font-family:'Lexend',sans-serif; font-size:28px; font-weight:800; color:#FF8732; }
+  .type-cta { font-family:'Lexend',sans-serif; font-size:20px; font-weight:700; color:#0E0C0A; }
+
+  .mc-type-specimen {
+    background: #fff;
+    border: 1px solid #E0DDD8;
+    border-radius: var(--radius-md);
+    padding: 20px 24px;
+    margin-bottom: 12px;
+  }
+  .mc-type-h1   { font-family:'Lexend',sans-serif; font-size:42px; font-weight:800; line-height:1.1; color:#27251F; }
+  .mc-type-h2   { font-family:'Lexend',sans-serif; font-size:26px; font-weight:700; line-height:1.2; color:#27251F; }
+  .mc-type-body { font-size:16px; font-weight:400; line-height:1.7; color:#6B6760; }
+  .mc-type-price{ font-family:'Lexend',sans-serif; font-size:28px; font-weight:800; color:#DA291C; }
+  .mc-type-cta  { font-family:'Lexend',sans-serif; font-size:20px; font-weight:700; color:#FFFFFF; }
+
+  /* ═══════════════════════════════════════════
+     BUTTONS
+  ═══════════════════════════════════════════ */
+  .btn-grid { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 16px; }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: none;
+    border-radius: var(--radius-pill);
+    font-family: 'Lexend', sans-serif;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all .15s;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .btn:active { transform: scale(.97); }
+
+  /* BK Buttons */
+  .bk-btn-primary { background: #FF8732; color: #0E0C0A; font-size: 18px; padding: 16px 36px; }
+  .bk-btn-primary:hover { background: #FFAA00; }
+  .bk-btn-secondary { background: transparent; color: #FF8732; font-size: 16px; padding: 14px 30px; border: 2px solid #FF8732; border-radius: var(--radius-pill); }
+  .bk-btn-secondary:hover { background: rgba(255,135,50,.12); }
+  .bk-btn-danger { background: #D62300; color: #F5EBDC; font-size: 14px; padding: 10px 22px; }
+  .bk-btn-danger:hover { background: #FF2C00; }
+  .bk-btn-ghost { background: transparent; color: #C4A882; font-size: 13px; padding: 8px 16px; border: 1px solid #3D3028; border-radius: var(--radius-pill); }
+  .bk-btn-ghost:hover { border-color: #7A6554; color: #F5EBDC; }
+  .bk-btn-add { background: #FF8732; color: #0E0C0A; width: 56px; height: 56px; border-radius: 50%; font-size: 28px; padding: 0; border: none; }
+  .bk-btn-add:hover { background: #FFAA00; transform: scale(1.08); }
+
+  /* MC Buttons */
+  .mc-btn-primary { background: #DA291C; color: #FFFFFF; font-size: 18px; padding: 16px 36px; border-radius: var(--radius-pill); }
+  .mc-btn-primary:hover { background: #C02218; }
+  .mc-btn-secondary { background: #FFC72C; color: #27251F; font-size: 16px; padding: 14px 30px; border-radius: var(--radius-pill); }
+  .mc-btn-secondary:hover { background: #FFBB00; }
+  .mc-btn-ghost { background: transparent; color: #27251F; font-size: 13px; padding: 8px 16px; border: 1px solid #C8C4BC; border-radius: var(--radius-pill); }
+  .mc-btn-ghost:hover { background: #F0EDE7; }
+  .mc-btn-add { background: #FFC72C; color: #27251F; width: 56px; height: 56px; border-radius: 50%; font-size: 28px; padding: 0; border: none; }
+  .mc-btn-add:hover { background: #FFBB00; transform: scale(1.08); }
+
+  /* ═══════════════════════════════════════════
+     PRODUCT CARDS
+  ═══════════════════════════════════════════ */
+  .cards-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; max-width: 540px; }
+  .product-card {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform .15s;
+  }
+  .product-card:hover { transform: translateY(-3px); }
+  .product-card:active { transform: scale(.98); }
+
+  /* BK card */
+  .bk-card { background: #251E18; border: 1px solid #3D3028; }
+  .bk-card .card-img {
+    width: 100%; height: 140px;
+    background: linear-gradient(135deg, #502314 0%, #D62300 50%, #FF8732 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 56px; position: relative;
+  }
+  .bk-card .card-body { padding: 14px 16px 16px; }
+  .bk-card .card-name { font-family:'Lexend',sans-serif; font-weight:700; font-size:15px; color:#F5EBDC; margin-bottom:3px; }
+  .bk-card .card-desc { font-size:12px; color:#7A6554; margin-bottom:10px; }
+  .bk-card .card-footer { display:flex; justify-content:space-between; align-items:center; }
+  .bk-card .card-price { font-family:'Lexend',sans-serif; font-weight:800; font-size:18px; color:#FF8732; }
+  .bk-card .badge-new { background:#198737; color:#fff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px; position:absolute; top:10px; left:10px; }
+
+  /* MC card */
+  .mc-card { background: #FFFFFF; border: 1px solid #E0DDD8; }
+  .mc-card .card-img {
+    width:100%; height:140px;
+    background: linear-gradient(135deg, #FFC72C 0%, #DA291C 100%);
+    display:flex; align-items:center; justify-content:center;
+    font-size:56px; position:relative;
+  }
+  .mc-card .card-body { padding:14px 16px 16px; }
+  .mc-card .card-name { font-family:'Lexend',sans-serif; font-weight:700; font-size:15px; color:#27251F; margin-bottom:3px; }
+  .mc-card .card-desc { font-size:12px; color:#6B6760; margin-bottom:10px; }
+  .mc-card .card-footer { display:flex; justify-content:space-between; align-items:center; }
+  .mc-card .card-price { font-family:'Lexend',sans-serif; font-weight:800; font-size:18px; color:#DA291C; }
+  .mc-card .badge-new { background:#264F36; color:#fff; font-size:10px; font-weight:700; padding:2px 8px; border-radius:4px; position:absolute; top:10px; left:10px; }
+
+  /* ═══════════════════════════════════════════
+     CATEGORY NAV (chips)
+  ═══════════════════════════════════════════ */
+  .cat-bar { display:flex; gap:10px; overflow-x:auto; padding-bottom:4px; margin-bottom:24px; scrollbar-width:none; }
+  .cat-bar::-webkit-scrollbar { display:none; }
+
+  .bk-cat-chip {
+    flex-shrink:0; padding:10px 20px;
+    border-radius:var(--radius-pill);
+    font-family:'Lexend',sans-serif; font-weight:700; font-size:14px;
+    cursor:pointer; border:none; transition:all .15s;
+    background:#251E18; color:#C4A882; border:1px solid #3D3028;
+  }
+  .bk-cat-chip.active { background:#FF8732; color:#0E0C0A; border-color:#FF8732; }
+  .bk-cat-chip:hover:not(.active) { border-color:#7A6554; color:#F5EBDC; }
+
+  .mc-cat-chip {
+    flex-shrink:0; padding:10px 20px;
+    border-radius:var(--radius-pill);
+    font-family:'Lexend',sans-serif; font-weight:700; font-size:14px;
+    cursor:pointer; border:none; transition:all .15s;
+    background:#F0EDE7; color:#6B6760; border:1px solid #E0DDD8;
+  }
+  .mc-cat-chip.active { background:#FFC72C; color:#27251F; border-color:#FFC72C; }
+  .mc-cat-chip:hover:not(.active) { background:#E8E4DD; color:#27251F; }
+
+  /* ═══════════════════════════════════════════
+     CART BAR
+  ═══════════════════════════════════════════ */
+  .bk-cart {
+    background:#251E18; border:1px solid #3D3028; border-radius:var(--radius-lg);
+    padding:16px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px;
+  }
+  .bk-cart-info { display:flex; align-items:center; gap:12px; }
+  .bk-cart-count { background:#FF8732; color:#0E0C0A; font-family:'Lexend',sans-serif; font-weight:800; font-size:14px; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+  .bk-cart-label { font-size:14px; color:#C4A882; }
+  .bk-cart-total { font-family:'Lexend',sans-serif; font-weight:800; font-size:22px; color:#FF8732; }
+
+  .mc-cart {
+    background:#FFFFFF; border:1px solid #E0DDD8; border-radius:var(--radius-lg);
+    padding:16px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px;
+  }
+  .mc-cart-count { background:#FFC72C; color:#27251F; font-family:'Lexend',sans-serif; font-weight:800; font-size:14px; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; }
+  .mc-cart-label { font-size:14px; color:#6B6760; }
+  .mc-cart-total { font-family:'Lexend',sans-serif; font-weight:800; font-size:22px; color:#DA291C; }
+
+  /* ═══════════════════════════════════════════
+     FORM / INPUTS
+  ═══════════════════════════════════════════ */
+  .input-row { display:flex; flex-direction:column; gap:6px; margin-bottom:16px; }
+  .input-label { font-size:12px; font-weight:600; color:#C4A882; }
+  .mc-input-label { font-size:12px; font-weight:600; color:#27251F; }
+
+  .bk-input {
+    background:#1A1612; border:1px solid #3D3028; color:#F5EBDC;
+    border-radius:var(--radius-sm); padding:14px 16px; font-size:16px;
+    font-family:'Inter',sans-serif; outline:none; transition:border-color .15s;
+    width:100%;
+  }
+  .bk-input:focus { border-color:#FF8732; }
+  .bk-input::placeholder { color:#7A6554; }
+
+  .mc-input {
+    background:#FFFFFF; border:1px solid #C8C4BC; color:#27251F;
+    border-radius:var(--radius-sm); padding:14px 16px; font-size:16px;
+    font-family:'Inter',sans-serif; outline:none; transition:border-color .15s;
+    width:100%;
+  }
+  .mc-input:focus { border-color:#DA291C; }
+  .mc-input::placeholder { color:#C8C4BC; }
+
+  /* ═══════════════════════════════════════════
+     TOKEN TABLE
+  ═══════════════════════════════════════════ */
+  .token-table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:24px; }
+  .token-table th { text-align:left; padding:8px 12px; font-size:11px; font-weight:600; color:#7A6554; letter-spacing:.06em; text-transform:uppercase; border-bottom:1px solid #3D3028; }
+  .token-table td { padding:10px 12px; border-bottom:1px solid #251E18; color:#C4A882; vertical-align:middle; }
+  .token-table tr:hover td { background:#1A1612; }
+  .token-table code { font-family:monospace; font-size:12px; color:#FF8732; background:#251E18; padding:2px 6px; border-radius:4px; }
+  .color-dot { width:20px; height:20px; border-radius:50%; display:inline-block; vertical-align:middle; margin-right:8px; border:1px solid rgba(255,255,255,.1); }
+
+  /* ═══════════════════════════════════════════
+     SPACING SCALE
+  ═══════════════════════════════════════════ */
+  .spacing-row { display:flex; align-items:center; gap:16px; margin-bottom:10px; }
+  .spacing-bar { background:#FF8732; height:16px; border-radius:2px; opacity:.8; }
+  .spacing-info { font-size:13px; color:#C4A882; white-space:nowrap; }
+  .spacing-name { font-family:monospace; color:#FF8732; font-size:12px; }
+
+  /* ═══════════════════════════════════════════
+     FULLSCREEN MOCKUP
+  ═══════════════════════════════════════════ */
+  .mockup-wrapper {
+    display:flex; gap:32px; flex-wrap:wrap; justify-content:center;
+    align-items:flex-start;
+  }
+  .phone-frame {
+    width:260px; border-radius:28px; overflow:hidden;
+    box-shadow:0 24px 64px rgba(0,0,0,.6);
+    flex-shrink:0; position:relative;
+  }
+  .bk-screen { background:#0E0C0A; }
+  .mc-screen { background:#F5F0E5; }
+
+  .bk-screen .screen-header { background:#1A1612; padding:16px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #3D3028; }
+  .bk-screen .screen-logo { font-family:'Lexend',sans-serif; font-weight:800; font-size:16px; color:#FF8732; }
+  .bk-screen .screen-cats { display:flex; gap:6px; padding:10px 12px; overflow-x:auto; scrollbar-width:none; background:#1A1612; }
+  .bk-screen .screen-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:8px 12px; }
+  .bk-screen .s-card { background:#251E18; border-radius:10px; overflow:hidden; border:1px solid #3D3028; }
+  .bk-screen .s-card-img { height:72px; background:linear-gradient(135deg,#502314,#D62300,#FF8732); display:flex; align-items:center; justify-content:center; font-size:28px; }
+  .bk-screen .s-card-body { padding:8px; }
+  .bk-screen .s-card-name { font-family:'Lexend',sans-serif; font-size:11px; font-weight:700; color:#F5EBDC; margin-bottom:2px; }
+  .bk-screen .s-card-price { font-family:'Lexend',sans-serif; font-size:13px; font-weight:800; color:#FF8732; }
+  .bk-screen .screen-cart { background:#251E18; border-top:1px solid #3D3028; padding:12px; display:flex; align-items:center; justify-content:space-between; }
+  .bk-screen .screen-cart-text { font-family:'Lexend',sans-serif; font-size:11px; color:#C4A882; }
+  .bk-screen .screen-cart-total { font-family:'Lexend',sans-serif; font-size:14px; font-weight:800; color:#FF8732; }
+
+  .mc-screen .screen-header { background:#FFFFFF; padding:16px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #E0DDD8; }
+  .mc-screen .screen-logo { font-family:'Lexend',sans-serif; font-weight:800; font-size:16px; color:#DA291C; }
+  .mc-screen .screen-cats { display:flex; gap:6px; padding:10px 12px; overflow-x:auto; scrollbar-width:none; background:#fff; }
+  .mc-screen .screen-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:8px 12px; }
+  .mc-screen .s-card { background:#FFFFFF; border-radius:10px; overflow:hidden; border:1px solid #E0DDD8; }
+  .mc-screen .s-card-img { height:72px; background:linear-gradient(135deg,#FFC72C,#DA291C); display:flex; align-items:center; justify-content:center; font-size:28px; }
+  .mc-screen .s-card-body { padding:8px; }
+  .mc-screen .s-card-name { font-family:'Lexend',sans-serif; font-size:11px; font-weight:700; color:#27251F; margin-bottom:2px; }
+  .mc-screen .s-card-price { font-family:'Lexend',sans-serif; font-size:13px; font-weight:800; color:#DA291C; }
+  .mc-screen .screen-cart { background:#FFFFFF; border-top:1px solid #E0DDD8; padding:12px; display:flex; align-items:center; justify-content:space-between; }
+  .mc-screen .screen-cart-text { font-family:'Lexend',sans-serif; font-size:11px; color:#6B6760; }
+  .mc-screen .screen-cart-total { font-family:'Lexend',sans-serif; font-size:14px; font-weight:800; color:#DA291C; }
+
+  .chip-mini {
+    font-family:'Lexend',sans-serif; font-size:10px; font-weight:700;
+    padding:5px 10px; border-radius:20px; flex-shrink:0; border:none; cursor:pointer;
+  }
+  .bk-chip-mini        { background:#251E18; color:#C4A882; border:1px solid #3D3028; }
+  .bk-chip-mini.active { background:#FF8732; color:#0E0C0A; border-color:#FF8732; }
+  .mc-chip-mini        { background:#F0EDE7; color:#6B6760; border:1px solid #E0DDD8; }
+  .mc-chip-mini.active { background:#FFC72C; color:#27251F; border-color:#FFC72C; }
+
+  /* ═══════════════════════════════════════════
+     ALERTS / FEEDBACK
+  ═══════════════════════════════════════════ */
+  .alert { border-radius:var(--radius-md); padding:14px 18px; display:flex; align-items:flex-start; gap:12px; margin-bottom:12px; }
+  .alert-icon { font-size:20px; flex-shrink:0; line-height:1; margin-top:1px; }
+  .alert-body { display:flex; flex-direction:column; gap:2px; }
+  .alert-title { font-weight:700; font-size:14px; }
+  .alert-msg   { font-size:13px; opacity:.8; }
+
+  .bk-alert-success { background:rgba(25,135,55,.18); border:1px solid rgba(25,135,55,.4); }
+  .bk-alert-success .alert-title { color:#5DD490; }
+  .bk-alert-error   { background:rgba(214,35,0,.18); border:1px solid rgba(214,35,0,.4); }
+  .bk-alert-error .alert-title   { color:#FF6B4A; }
+  .bk-alert-info    { background:rgba(255,135,50,.12); border:1px solid rgba(255,135,50,.3); }
+  .bk-alert-info .alert-title    { color:#FF8732; }
+
+  .mc-alert-success { background:rgba(38,79,54,.1); border:1px solid rgba(38,79,54,.3); }
+  .mc-alert-success .alert-title { color:#264F36; }
+  .mc-alert-error   { background:rgba(218,41,28,.08); border:1px solid rgba(218,41,28,.25); }
+  .mc-alert-error .alert-title   { color:#DA291C; }
+  .mc-alert-info    { background:rgba(255,199,44,.15); border:1px solid rgba(255,199,44,.4); }
+  .mc-alert-info .alert-title    { color:#856900; }
+
+  /* ═══════════════════════════════════════════
+     MISC
+  ═══════════════════════════════════════════ */
+  .divider { height:1px; background:#3D3028; margin:36px 0; }
+  .note { font-size:12px; color:#7A6554; font-style:italic; margin-top:8px; }
+  .copied-toast {
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:#FF8732; color:#0E0C0A; font-family:'Lexend',sans-serif; font-weight:700; font-size:13px;
+    padding:10px 20px; border-radius:var(--radius-pill);
+    opacity:0; transition:opacity .2s; pointer-events:none; z-index:999;
+  }
+  .copied-toast.show { opacity:1; }
+</style>
+</head>
+<body>
+
+<nav class="ds-nav">
+  <span class="ds-nav-brand">DS · TOTEM</span>
+  <button class="tab-btn active" onclick="showSection('overview',this)">Visão geral</button>
+  <button class="tab-btn" onclick="showSection('colors',this)">Cores</button>
+  <button class="tab-btn" onclick="showSection('typography',this)">Tipografia</button>
+  <button class="tab-btn" onclick="showSection('buttons',this)">Botões</button>
+  <button class="tab-btn" onclick="showSection('components',this)">Componentes</button>
+  <button class="tab-btn" onclick="showSection('mockup',this)">Mockup</button>
+  <button class="tab-btn" onclick="showSection('tokens',this)">Tokens CSS</button>
+</nav>
+
+<main class="ds-main">
+
+  <!-- ═══════ OVERVIEW ═══════ -->
+  <section id="overview" class="section active">
+    <h1 class="section-title">Design System — Totem Fast Food</h1>
+    <p class="section-sub">Dois sistemas de design inspirados nos padrões visuais de Burger King (2021 rebrand) e McDonald's. Cada um com tokens de cor, tipografia, componentes e variantes de estado prontos para aplicar no seu totem.</p>
+
+    <div class="two-col">
+      <div class="brand-block bk-block">
+        <div class="bk-label">🔥 Burger King — Dark & Flame</div>
+        <p style="font-size:14px;color:#C4A882;margin-bottom:16px">Tema escuro com chama. Bold, quente, irreverente. Background preto com laranja e vermelho como acentos. Fonte Lexend como substituta para Flame.</p>
+        <div class="swatches">
+          <div class="swatch" onclick="copyColor('#D62300','Fiery Red')">
+            <div class="swatch-color" style="background:#D62300"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name">Fiery Red</span>
+            <span class="swatch-hex">#D62300</span>
+          </div>
+          <div class="swatch" onclick="copyColor('#FF8732','Flaming Orange')">
+            <div class="swatch-color" style="background:#FF8732"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name">Flaming Orange</span>
+            <span class="swatch-hex">#FF8732</span>
+          </div>
+          <div class="swatch" onclick="copyColor('#FFAA00','Melty Yellow')">
+            <div class="swatch-color" style="background:#FFAA00"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name">Melty Yellow</span>
+            <span class="swatch-hex">#FFAA00</span>
+          </div>
+          <div class="swatch" onclick="copyColor('#502314','BBQ Brown')">
+            <div class="swatch-color" style="background:#502314"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name">BBQ Brown</span>
+            <span class="swatch-hex">#502314</span>
+          </div>
+          <div class="swatch" onclick="copyColor('#F5EBDC','Sesame')">
+            <div class="swatch-color" style="background:#F5EBDC;border-color:#C4A882"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name">Sesame</span>
+            <span class="swatch-hex">#F5EBDC</span>
+          </div>
+        </div>
+        <button class="btn bk-btn-primary" style="width:100%">Adicionar ao pedido — R$ 24,90</button>
+      </div>
+
+      <div class="brand-block mc-block">
+        <div class="mc-label">🍟 McDonald's — Light & Bold</div>
+        <p style="font-size:14px;color:#6B6760;margin-bottom:16px">Tema claro com confiança. Limpo, moderno, otimista. Background cream-white com amarelo dourado e vermelho como acentos principais.</p>
+        <div class="swatches">
+          <div class="swatch" onclick="copyColor('#FFC72C','Golden Yellow')">
+            <div class="swatch-color" style="background:#FFC72C;border-color:#C8C4BC"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name" style="color:#502314">Golden Yellow</span>
+            <span class="swatch-hex">#FFC72C</span>
+          </div>
+          <div class="swatch" onclick="copyColor('#DA291C','McRed')">
+            <div class="swatch-color" style="background:#DA291C"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name" style="color:#502314">McRed</span>
+            <span class="swatch-hex">#DA291C</span>
+          </div>
+          <div class="swatch" onclick="copyColor('#27251F','Near Black')">
+            <div class="swatch-color" style="background:#27251F"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name" style="color:#502314">Near Black</span>
+            <span class="swatch-hex">#27251F</span>
+          </div>
+          <div class="swatch" onclick="copyColor('#F5F0E5','Warm Cream')">
+            <div class="swatch-color" style="background:#F5F0E5;border-color:#C8C4BC"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name" style="color:#502314">Warm Cream</span>
+            <span class="swatch-hex">#F5F0E5</span>
+          </div>
+          <div class="swatch" onclick="copyColor('#264F36','Forest Green')">
+            <div class="swatch-color" style="background:#264F36"><span class="swatch-copy-tip">Copiar</span></div>
+            <span class="swatch-name" style="color:#502314">Forest Green</span>
+            <span class="swatch-hex">#264F36</span>
+          </div>
+        </div>
+        <button class="btn mc-btn-primary" style="width:100%">Adicionar ao pedido — R$ 24,90</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════ COLORS ═══════ -->
+  <section id="colors" class="section">
+    <h1 class="section-title">Paleta de cores</h1>
+    <p class="section-sub">Tokens de cor com valores hex, uso semântico e hierarquia. Clique num swatch para copiar o hex.</p>
+
+    <div class="block-title">🔥 Burger King — Paleta completa</div>
+    <div class="brand-block bk-block" style="margin-bottom:32px">
+      <p style="font-size:13px;color:#C4A882;margin-bottom:20px">Paleta oficial do rebrand de 2021 (Jones Knowles Ritchie). Cores inspiradas na chama, no processo de grelhagem e nos ingredientes frescos.</p>
+      <div class="swatches">
+        <div class="swatch" onclick="copyColor('#D62300','Fiery Red')">
+          <div class="swatch-color" style="background:#D62300;width:88px;height:72px"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Fiery Red</span><span class="swatch-hex">#D62300 — CTA destrutivo</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#FF8732','Flaming Orange')">
+          <div class="swatch-color" style="background:#FF8732;width:88px;height:72px"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Flaming Orange</span><span class="swatch-hex">#FF8732 — CTA primário</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#FFAA00','Melty Yellow')">
+          <div class="swatch-color" style="background:#FFAA00;width:88px;height:72px"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Melty Yellow</span><span class="swatch-hex">#FFAA00 — Destaque / hover</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#502314','BBQ Brown')">
+          <div class="swatch-color" style="background:#502314;width:88px;height:72px"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">BBQ Brown</span><span class="swatch-hex">#502314 — Borders escuras</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#F5EBDC','Sesame')">
+          <div class="swatch-color" style="background:#F5EBDC;width:88px;height:72px;border-color:#C4A882"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Sesame (branco BK)</span><span class="swatch-hex">#F5EBDC — Texto primário</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#198737','Crunchy Green')">
+          <div class="swatch-color" style="background:#198737;width:88px;height:72px"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Crunchy Green</span><span class="swatch-hex">#198737 — Sucesso / badge</span>
+        </div>
+      </div>
+      <div class="block-title" style="margin-top:24px">Neutros BK</div>
+      <div class="swatches">
+        <div class="swatch" onclick="copyColor('#0E0C0A','BK Black')">
+          <div class="swatch-color" style="background:#0E0C0A;border-color:#3D3028"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">BK Black</span><span class="swatch-hex">#0E0C0A — Background</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#1A1612','Dark Brown')">
+          <div class="swatch-color" style="background:#1A1612;border-color:#3D3028"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Dark Brown</span><span class="swatch-hex">#1A1612 — Surface</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#251E18','Card')">
+          <div class="swatch-color" style="background:#251E18;border-color:#3D3028"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Card</span><span class="swatch-hex">#251E18 — Card bg</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#3D3028','Border')">
+          <div class="swatch-color" style="background:#3D3028;border-color:#3D3028"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Border</span><span class="swatch-hex">#3D3028 — Dividers</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#C4A882','Text 2')">
+          <div class="swatch-color" style="background:#C4A882"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Text secundário</span><span class="swatch-hex">#C4A882</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#7A6554','Muted')">
+          <div class="swatch-color" style="background:#7A6554"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name">Muted</span><span class="swatch-hex">#7A6554 — Placeholder</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="block-title">🍟 McDonald's — Paleta completa</div>
+    <div class="brand-block mc-block">
+      <p style="font-size:13px;color:#6B6760;margin-bottom:20px">Paleta oficial. O amarelo dourado lidera como identidade principal, vermelho dá energia e urgência. Preto quase-neutro dá sofisticação.</p>
+      <div class="swatches">
+        <div class="swatch" onclick="copyColor('#FFC72C','Golden Yellow')">
+          <div class="swatch-color" style="background:#FFC72C;width:88px;height:72px;border-color:#C8C4BC"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">Golden Yellow</span><span class="swatch-hex">#FFC72C — CTA secundário</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#DA291C','McRed')">
+          <div class="swatch-color" style="background:#DA291C;width:88px;height:72px"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">McRed</span><span class="swatch-hex">#DA291C — CTA primário</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#27251F','Near Black')">
+          <div class="swatch-color" style="background:#27251F;width:88px;height:72px"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">Near Black</span><span class="swatch-hex">#27251F — Texto prim.</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#F5F0E5','Warm Cream')">
+          <div class="swatch-color" style="background:#F5F0E5;width:88px;height:72px;border-color:#C8C4BC"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">Warm Cream</span><span class="swatch-hex">#F5F0E5 — Background</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#264F36','Forest Green')">
+          <div class="swatch-color" style="background:#264F36;width:88px;height:72px"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">Forest Green</span><span class="swatch-hex">#264F36 — Badge fresco</span>
+        </div>
+      </div>
+      <div class="block-title" style="margin-top:24px">Neutros MC</div>
+      <div class="swatches">
+        <div class="swatch" onclick="copyColor('#FFFFFF','White')">
+          <div class="swatch-color" style="background:#FFFFFF;border-color:#C8C4BC"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">White</span><span class="swatch-hex">#FFFFFF — Card</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#F0EDE7','Gray Light')">
+          <div class="swatch-color" style="background:#F0EDE7;border-color:#C8C4BC"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">Gray Light</span><span class="swatch-hex">#F0EDE7 — Chip idle</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#E0DDD8','Border')">
+          <div class="swatch-color" style="background:#E0DDD8;border-color:#C8C4BC"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">Border</span><span class="swatch-hex">#E0DDD8 — Dividers</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#C8C4BC','Gray Mid')">
+          <div class="swatch-color" style="background:#C8C4BC"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">Gray Mid</span><span class="swatch-hex">#C8C4BC — Placeholder</span>
+        </div>
+        <div class="swatch" onclick="copyColor('#6B6760','Text 2')">
+          <div class="swatch-color" style="background:#6B6760"><span class="swatch-copy-tip">Copiar</span></div>
+          <span class="swatch-name" style="color:#502314">Text sec.</span><span class="swatch-hex">#6B6760</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════ TYPOGRAPHY ═══════ -->
+  <section id="typography" class="section">
+    <h1 class="section-title">Tipografia</h1>
+    <p class="section-sub">Escala tipográfica para totem (calibrada para tela de 21"). Fonte: Lexend (substituta open-source para Flame/Speedee).</p>
+
+    <div class="block-title">🔥 Burger King — Escala tipográfica</div>
+    <div class="type-specimen">
+      <div class="type-meta">H1 · Lexend 800 · 42px · instrução principal por tela</div>
+      <div class="type-h1">Toque para começar</div>
+    </div>
+    <div class="type-specimen">
+      <div class="type-meta">H2 · Lexend 700 · 26px · nome de categoria / subcabeçalho</div>
+      <div class="type-h2">Lanches & Combos</div>
+    </div>
+    <div class="type-specimen">
+      <div class="type-meta">H3 · Lexend 700 · 20px · nome de produto em destaque</div>
+      <div class="type-h3">Whopper Duplo com Queijo</div>
+    </div>
+    <div class="type-specimen">
+      <div class="type-meta">Preço · Lexend 800 · 28px · cor Flaming Orange</div>
+      <div class="type-price">R$ 24,90</div>
+    </div>
+    <div class="type-specimen">
+      <div class="type-meta">CTA · Lexend 700 · 20px · text preto sobre laranja</div>
+      <div style="background:#FF8732;display:inline-block;padding:14px 32px;border-radius:999px">
+        <span class="type-cta">Adicionar ao pedido</span>
+      </div>
+    </div>
+    <div class="type-specimen">
+      <div class="type-meta">Corpo · Inter 400 · 16px · descrições e textos secundários</div>
+      <div class="type-body">Pão brioche artesanal, blend de carnes nobres grelhadas na chama, queijo cheddar, alface americana, tomate, cebola crispy e molho especial da casa.</div>
+    </div>
+    <div class="type-specimen">
+      <div class="type-meta">Label · Inter 600 · 14px · labels de botão e rótulos de campo</div>
+      <div class="type-label">Escolha o tamanho da bebida</div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="block-title">🍟 McDonald's — Escala tipográfica</div>
+
+    <div class="mc-type-specimen">
+      <div class="type-meta" style="color:#C8C4BC">H1 · Lexend 800 · 42px</div>
+      <div class="mc-type-h1">Toque para começar</div>
+    </div>
+    <div class="mc-type-specimen">
+      <div class="type-meta" style="color:#C8C4BC">H2 · Lexend 700 · 26px</div>
+      <div class="mc-type-h2">Lanches & Combos</div>
+    </div>
+    <div class="mc-type-specimen">
+      <div class="type-meta" style="color:#C8C4BC">Preço · Lexend 800 · 28px · McRed</div>
+      <div class="mc-type-price">R$ 24,90</div>
+    </div>
+    <div class="mc-type-specimen">
+      <div class="type-meta" style="color:#C8C4BC">CTA · Lexend 700 · 20px · branco sobre vermelho</div>
+      <div style="background:#DA291C;display:inline-block;padding:14px 32px;border-radius:999px">
+        <span class="mc-type-cta">Adicionar ao pedido</span>
+      </div>
+    </div>
+    <div class="mc-type-specimen">
+      <div class="type-meta" style="color:#C8C4BC">Corpo · Inter 400 · 16px</div>
+      <div class="mc-type-body">Pão brioche artesanal, blend de carnes nobres grelhadas na chama, queijo cheddar, alface americana, tomate, cebola crispy e molho especial da casa.</div>
+    </div>
+  </section>
+
+  <!-- ═══════ BUTTONS ═══════ -->
+  <section id="buttons" class="section">
+    <h1 class="section-title">Botões e ações</h1>
+    <p class="section-sub">Todos os variantes de botão com tamanhos calibrados para toque em totem. Mínimo de 48×48 px; CTAs principais acima de 120 px de largura.</p>
+
+    <div class="block-title">🔥 Burger King — Botões</div>
+    <div class="brand-block bk-block">
+      <p class="note" style="margin-bottom:16px">CTA primário — Fundo laranja, texto preto, fonte Lexend bold. Raio pill. Uso: "Adicionar", "Finalizar", "Confirmar".</p>
+      <div class="btn-grid">
+        <button class="btn bk-btn-primary">Finalizar pedido</button>
+        <button class="btn bk-btn-primary" style="font-size:16px;padding:14px 28px">Adicionar ao pedido</button>
+      </div>
+      <p class="note" style="margin-bottom:16px">CTA secundário — Outline laranja. Uso: "Ver pedido", "Editar".</p>
+      <div class="btn-grid">
+        <button class="btn bk-btn-secondary">Ver pedido</button>
+        <button class="btn bk-btn-secondary">Editar item</button>
+      </div>
+      <p class="note" style="margin-bottom:16px">Botão destrutivo — Fundo vermelho. Uso: "Remover item", "Cancelar".</p>
+      <div class="btn-grid">
+        <button class="btn bk-btn-danger">Remover</button>
+        <button class="btn bk-btn-ghost">Pular</button>
+      </div>
+      <p class="note" style="margin-bottom:16px">Botão "+" para adicionar item ao card — circular, 56×56 px.</p>
+      <div class="btn-grid">
+        <button class="btn bk-btn-add">+</button>
+        <span style="font-size:13px;color:#7A6554">56×56 px · border-radius 50%</span>
+      </div>
+    </div>
+
+    <div class="block-title">🍟 McDonald's — Botões</div>
+    <div class="brand-block mc-block">
+      <p class="note" style="color:#6B6760;margin-bottom:16px">CTA primário — Fundo vermelho, texto branco. Uso: "Adicionar", "Finalizar".</p>
+      <div class="btn-grid">
+        <button class="btn mc-btn-primary">Finalizar pedido</button>
+        <button class="btn mc-btn-primary" style="font-size:16px;padding:14px 28px">Adicionar ao pedido</button>
+      </div>
+      <p class="note" style="color:#6B6760;margin-bottom:16px">CTA secundário — Fundo amarelo, texto preto. Uso: "Ver pedido", upsell.</p>
+      <div class="btn-grid">
+        <button class="btn mc-btn-secondary">Ver pedido</button>
+        <button class="btn mc-btn-secondary">Adicionar bebida</button>
+      </div>
+      <div class="btn-grid" style="margin-top:12px">
+        <button class="btn mc-btn-ghost">Pular</button>
+        <button class="btn mc-btn-add">+</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════ COMPONENTS ═══════ -->
+  <section id="components" class="section">
+    <h1 class="section-title">Componentes</h1>
+    <p class="section-sub">Cards de produto, barra de categorias, carrinho e feedbacks. Prontos para usar no seu layout de totem.</p>
+
+    <div class="block-title">Barra de categorias</div>
+    <div class="brand-block bk-block" style="margin-bottom:12px">
+      <div class="cat-bar">
+        <button class="bk-cat-chip active" onclick="activateChip(this)">🍔 Lanches</button>
+        <button class="bk-cat-chip" onclick="activateChip(this)">🍟 Combos</button>
+        <button class="bk-cat-chip" onclick="activateChip(this)">🥤 Bebidas</button>
+        <button class="bk-cat-chip" onclick="activateChip(this)">🍦 Sobremesas</button>
+        <button class="bk-cat-chip" onclick="activateChip(this)">🧂 Extras</button>
+      </div>
+    </div>
+    <div class="brand-block mc-block" style="margin-bottom:24px">
+      <div class="cat-bar">
+        <button class="mc-cat-chip active" onclick="activateMcChip(this)">🍔 Lanches</button>
+        <button class="mc-cat-chip" onclick="activateMcChip(this)">🍟 Combos</button>
+        <button class="mc-cat-chip" onclick="activateMcChip(this)">🥤 Bebidas</button>
+        <button class="mc-cat-chip" onclick="activateMcChip(this)">🍦 Sobremesas</button>
+        <button class="mc-cat-chip" onclick="activateMcChip(this)">🧂 Extras</button>
+      </div>
+    </div>
+
+    <div class="block-title">Cards de produto (grid 2 colunas)</div>
+    <div class="two-col" style="gap:32px">
+      <div>
+        <div class="bk-label" style="margin-bottom:12px">BK</div>
+        <div class="cards-row">
+          <div class="product-card bk-card">
+            <div class="card-img">🍔<span class="badge-new">Novo</span></div>
+            <div class="card-body">
+              <div class="card-name">Whopper Duplo</div>
+              <div class="card-desc">450g de carne grelhada na chama</div>
+              <div class="card-footer">
+                <span class="card-price">R$ 29,90</span>
+                <button class="btn bk-btn-add" style="width:36px;height:36px;font-size:20px">+</button>
+              </div>
+            </div>
+          </div>
+          <div class="product-card bk-card">
+            <div class="card-img">🌯</div>
+            <div class="card-body">
+              <div class="card-name">BK Frango Crispy</div>
+              <div class="card-desc">Peito de frango empanado crocante</div>
+              <div class="card-footer">
+                <span class="card-price">R$ 22,90</span>
+                <button class="btn bk-btn-add" style="width:36px;height:36px;font-size:20px">+</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="mc-label" style="margin-bottom:12px">MC</div>
+        <div class="cards-row">
+          <div class="product-card mc-card">
+            <div class="card-img">🍔<span class="badge-new">Novo</span></div>
+            <div class="card-body">
+              <div class="card-name">Big Mac</div>
+              <div class="card-desc">Dois hambúrgueres e molho especial</div>
+              <div class="card-footer">
+                <span class="card-price">R$ 27,90</span>
+                <button class="btn mc-btn-add" style="width:36px;height:36px;font-size:20px">+</button>
+              </div>
+            </div>
+          </div>
+          <div class="product-card mc-card">
+            <div class="card-img">🍗</div>
+            <div class="card-body">
+              <div class="card-name">McFrango</div>
+              <div class="card-desc">Frango grelhado com alface e tomate</div>
+              <div class="card-footer">
+                <span class="card-price">R$ 21,90</span>
+                <button class="btn mc-btn-add" style="width:36px;height:36px;font-size:20px">+</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="block-title">Barra de carrinho (fixa no rodapé)</div>
+    <div class="two-col">
+      <div>
+        <div class="bk-label" style="margin-bottom:10px">BK</div>
+        <div class="bk-cart">
+          <div class="bk-cart-info">
+            <span class="bk-cart-count">3</span>
+            <span class="bk-cart-label">itens no pedido</span>
+          </div>
+          <span class="bk-cart-total">R$ 74,70</span>
+          <button class="btn bk-btn-primary" style="font-size:14px;padding:10px 18px">Ver pedido</button>
+        </div>
+      </div>
+      <div>
+        <div class="mc-label" style="margin-bottom:10px">MC</div>
+        <div class="mc-cart">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span class="mc-cart-count">3</span>
+            <span class="mc-cart-label">itens no pedido</span>
+          </div>
+          <span class="mc-cart-total">R$ 74,70</span>
+          <button class="btn mc-btn-primary" style="font-size:14px;padding:10px 18px">Ver pedido</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="block-title">Alertas e feedbacks</div>
+    <div class="two-col">
+      <div>
+        <div class="bk-label" style="margin-bottom:10px">BK</div>
+        <div class="alert bk-alert-success"><span class="alert-icon">✅</span><div class="alert-body"><span class="alert-title">Item adicionado!</span><span style="color:#C4A882;font-size:13px">Whopper Duplo no seu pedido.</span></div></div>
+        <div class="alert bk-alert-error"><span class="alert-icon">⚠️</span><div class="alert-body"><span class="alert-title">Pagamento recusado</span><span style="color:#C4A882;font-size:13px">Tente outro cartão ou forma de pagamento.</span></div></div>
+        <div class="alert bk-alert-info"><span class="alert-icon">🔥</span><div class="alert-body"><span class="alert-title">Promoção disponível</span><span style="color:#C4A882;font-size:13px">Adicione batata para ganhar 10% de desconto.</span></div></div>
+      </div>
+      <div>
+        <div class="mc-label" style="margin-bottom:10px">MC</div>
+        <div class="alert mc-alert-success" style="background:rgba(38,79,54,.1);border:1px solid rgba(38,79,54,.3)"><span class="alert-icon">✅</span><div class="alert-body"><span class="alert-title" style="color:#264F36">Item adicionado!</span><span style="color:#6B6760;font-size:13px">Big Mac no seu pedido.</span></div></div>
+        <div class="alert mc-alert-error" style="background:rgba(218,41,28,.08);border:1px solid rgba(218,41,28,.25)"><span class="alert-icon">⚠️</span><div class="alert-body"><span class="alert-title" style="color:#DA291C">Pagamento recusado</span><span style="color:#6B6760;font-size:13px">Tente outro cartão ou forma de pagamento.</span></div></div>
+        <div class="alert mc-alert-info" style="background:rgba(255,199,44,.15);border:1px solid rgba(255,199,44,.4)"><span class="alert-icon">⭐</span><div class="alert-body"><span class="alert-title" style="color:#856900">Promoção disponível</span><span style="color:#6B6760;font-size:13px">Adicione batata para ganhar 10% de desconto.</span></div></div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+    <div class="block-title">Inputs / Campos de texto</div>
+    <div class="two-col">
+      <div>
+        <div class="bk-label" style="margin-bottom:12px">BK</div>
+        <div class="input-row"><label class="input-label">CPF ou celular</label><input class="bk-input" placeholder="000.000.000-00" type="text"/></div>
+        <div class="input-row"><label class="input-label">Número da mesa</label><input class="bk-input" placeholder="Ex: Mesa 12" type="text"/></div>
+      </div>
+      <div>
+        <div class="mc-label" style="margin-bottom:12px">MC</div>
+        <div class="input-row"><label class="mc-input-label">CPF ou celular</label><input class="mc-input" placeholder="000.000.000-00" type="text"/></div>
+        <div class="input-row"><label class="mc-input-label">Número da mesa</label><input class="mc-input" placeholder="Ex: Mesa 12" type="text"/></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════ MOCKUP ═══════ -->
+  <section id="mockup" class="section">
+    <h1 class="section-title">Mockup de tela</h1>
+    <p class="section-sub">Prévia compacta das duas versões do totem lado a lado. Demonstra o layout de header, categorias, grid 2 colunas e barra de carrinho.</p>
+    <div class="mockup-wrapper">
+      <!-- BK Phone -->
+      <div>
+        <div class="bk-label" style="text-align:center;margin-bottom:12px">🔥 Burger King</div>
+        <div class="phone-frame bk-screen">
+          <div class="screen-header">
+            <span class="screen-logo">BURGER KING®</span>
+            <span style="font-size:11px;color:#7A6554">🌐 PT</span>
+          </div>
+          <div style="background:#D62300;padding:8px 12px;font-family:'Lexend',sans-serif;font-weight:700;font-size:11px;color:#F5EBDC;text-align:center">🔥 Combo Whopper por R$ 29,90 — hoje só!</div>
+          <div class="screen-cats">
+            <button class="chip-mini bk-chip-mini active">🍔 Lanches</button>
+            <button class="chip-mini bk-chip-mini" onclick="activateMiniChip(this,'bk')">🍟 Combos</button>
+            <button class="chip-mini bk-chip-mini" onclick="activateMiniChip(this,'bk')">🥤 Bebidas</button>
+            <button class="chip-mini bk-chip-mini" onclick="activateMiniChip(this,'bk')">🍦 Sobrem.</button>
+          </div>
+          <div class="screen-grid">
+            <div class="s-card"><div class="s-card-img">🍔</div><div class="s-card-body"><div class="s-card-name">Whopper</div><div class="s-card-price">R$ 22,90</div></div></div>
+            <div class="s-card"><div class="s-card-img">🍗</div><div class="s-card-body"><div class="s-card-name">Frango Crispy</div><div class="s-card-price">R$ 19,90</div></div></div>
+            <div class="s-card"><div class="s-card-img">🌯</div><div class="s-card-body"><div class="s-card-name">BK Veggie</div><div class="s-card-price">R$ 21,90</div></div></div>
+            <div class="s-card"><div class="s-card-img">🍔</div><div class="s-card-body"><div class="s-card-name">Big King</div><div class="s-card-price">R$ 25,90</div></div></div>
+          </div>
+          <div class="screen-cart">
+            <div><div class="screen-cart-text">2 itens</div><div class="screen-cart-total">R$ 44,80</div></div>
+            <button class="btn bk-btn-primary" style="font-size:12px;padding:8px 14px">Ver pedido →</button>
+          </div>
+        </div>
+      </div>
+      <!-- MC Phone -->
+      <div>
+        <div class="mc-label" style="text-align:center;margin-bottom:12px">🍟 McDonald's</div>
+        <div class="phone-frame mc-screen">
+          <div class="screen-header">
+            <span class="screen-logo">McDonald's</span>
+            <span style="font-size:11px;color:#6B6760">🌐 PT</span>
+          </div>
+          <div style="background:#FFC72C;padding:8px 12px;font-family:'Lexend',sans-serif;font-weight:700;font-size:11px;color:#27251F;text-align:center">⭐ Big Mac em dobro por R$ 35,90!</div>
+          <div class="screen-cats">
+            <button class="chip-mini mc-chip-mini active">🍔 Lanches</button>
+            <button class="chip-mini mc-chip-mini" onclick="activateMiniChip(this,'mc')">🍟 Combos</button>
+            <button class="chip-mini mc-chip-mini" onclick="activateMiniChip(this,'mc')">🥤 Bebidas</button>
+            <button class="chip-mini mc-chip-mini" onclick="activateMiniChip(this,'mc')">🍦 Sobrem.</button>
+          </div>
+          <div class="screen-grid">
+            <div class="s-card"><div class="s-card-img">🍔</div><div class="s-card-body"><div class="s-card-name">Big Mac</div><div class="s-card-price">R$ 27,90</div></div></div>
+            <div class="s-card"><div class="s-card-img">🍗</div><div class="s-card-body"><div class="s-card-name">McFrango</div><div class="s-card-price">R$ 21,90</div></div></div>
+            <div class="s-card"><div class="s-card-img">🧀</div><div class="s-card-body"><div class="s-card-name">Quarterão</div><div class="s-card-price">R$ 26,90</div></div></div>
+            <div class="s-card"><div class="s-card-img">🥗</div><div class="s-card-body"><div class="s-card-name">McWrap</div><div class="s-card-price">R$ 23,90</div></div></div>
+          </div>
+          <div class="screen-cart">
+            <div><div class="screen-cart-text">2 itens</div><div class="screen-cart-total">R$ 49,80</div></div>
+            <button class="btn mc-btn-primary" style="font-size:12px;padding:8px 14px">Ver pedido →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════ TOKENS ═══════ -->
+  <section id="tokens" class="section">
+    <h1 class="section-title">Tokens CSS</h1>
+    <p class="section-sub">Copie o bloco de variáveis e cole no :root do seu projeto. Escolha o tema BK ou MC, ou crie um híbrido.</p>
+
+    <div class="block-title">🔥 Tema Burger King — variáveis CSS</div>
+    <div style="background:#0E0C0A;border:1px solid #3D3028;border-radius:var(--radius-md);padding:20px 24px;margin-bottom:24px;overflow-x:auto">
+      <pre style="font-family:monospace;font-size:12px;color:#FF8732;line-height:1.8;white-space:pre">:root {
+  /* === CORES PRIMÁRIAS === */
+  --color-primary:        #FF8732;  /* Flaming Orange — CTA principal */
+  --color-primary-hover:  #FFAA00;  /* Melty Yellow — hover state */
+  --color-accent:         #D62300;  /* Fiery Red — destrutivo/urgência */
+  --color-success:        #198737;  /* Crunchy Green */
+  --color-text-on-primary:#0E0C0A;  /* texto sobre botão laranja */
+
+  /* === TEXTO === */
+  --color-text-primary:   #F5EBDC;  /* Sesame — texto principal */
+  --color-text-secondary: #C4A882;  /* texto secundário */
+  --color-text-muted:     #7A6554;  /* placeholders e labels */
+
+  /* === SUPERFÍCIES === */
+  --color-bg:             #0E0C0A;  /* background da tela */
+  --color-surface:        #1A1612;  /* header e áreas elevadas */
+  --color-card:           #251E18;  /* fundo de cards e modais */
+  --color-border:         #3D3028;  /* bordas e dividers */
+
+  /* === TIPOGRAFIA === */
+  --font-display: 'Lexend', sans-serif;  /* headings, botões, preços */
+  --font-body:    'Inter', sans-serif;   /* corpo de texto */
+
+  /* === ESCALA DE FONTES (totem 21") === */
+  --text-h1:     42px;   /* instrução principal por tela */
+  --text-h2:     26px;   /* nome de categoria */
+  --text-h3:     20px;   /* nome de produto destaque */
+  --text-price:  28px;   /* preço em destaque */
+  --text-cta:    20px;   /* label de botão CTA */
+  --text-body:   16px;   /* descrições */
+  --text-label:  14px;   /* labels de campo */
+  --text-small:  12px;   /* badges e metadados */
+
+  /* === ESPAÇAMENTO === */
+  --space-xs:    8px;
+  --space-sm:    12px;
+  --space-md:    16px;
+  --space-lg:    24px;
+  --space-xl:    32px;
+  --space-2xl:   48px;
+
+  /* === BORDAS === */
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   16px;
+  --radius-xl:   24px;
+  --radius-pill: 999px;
+
+  /* === TOUCH TARGETS (totem) === */
+  --touch-min:        82px;    /* mínimo W3C em 21" (20mm) */
+  --touch-cta:        56px;    /* altura mínima de botões primários */
+  --touch-cta-main:   120px;   /* largura mínima de CTA principal */
+  --touch-gap:        21px;    /* espaço mínimo entre alvos */
+}</pre>
+    </div>
+
+    <div class="block-title">🍟 Tema McDonald's — variáveis CSS</div>
+    <div style="background:#F5F0E5;border:1px solid #E0DDD8;border-radius:var(--radius-md);padding:20px 24px;margin-bottom:24px;overflow-x:auto">
+      <pre style="font-family:monospace;font-size:12px;color:#DA291C;line-height:1.8;white-space:pre">:root {
+  /* === CORES PRIMÁRIAS === */
+  --color-primary:        #DA291C;  /* McRed — CTA principal */
+  --color-primary-hover:  #C02218;  /* Red escuro — hover state */
+  --color-accent:         #FFC72C;  /* Golden Yellow — destaque/upsell */
+  --color-success:        #264F36;  /* Forest Green */
+  --color-text-on-primary:#FFFFFF;  /* texto sobre botão vermelho */
+  --color-text-on-accent: #27251F;  /* texto sobre botão amarelo */
+
+  /* === TEXTO === */
+  --color-text-primary:   #27251F;  /* Near Black — texto principal */
+  --color-text-secondary: #6B6760;  /* texto secundário */
+  --color-text-muted:     #C8C4BC;  /* placeholders */
+
+  /* === SUPERFÍCIES === */
+  --color-bg:             #F5F0E5;  /* Warm Cream — background */
+  --color-surface:        #FFFFFF;  /* header e cards */
+  --color-card:           #FFFFFF;  /* fundo de cards */
+  --color-border:         #E0DDD8;  /* bordas e dividers */
+
+  /* === TIPOGRAFIA (mesma escala) === */
+  --font-display: 'Lexend', sans-serif;
+  --font-body:    'Inter', sans-serif;
+  --text-h1:     42px;
+  --text-h2:     26px;
+  --text-h3:     20px;
+  --text-price:  28px;
+  --text-cta:    20px;
+  --text-body:   16px;
+  --text-label:  14px;
+  --text-small:  12px;
+
+  /* === ESPAÇAMENTO E BORDAS (igual BK) === */
+  --space-xs:    8px;
+  --space-sm:    12px;
+  --space-md:    16px;
+  --space-lg:    24px;
+  --space-xl:    32px;
+  --space-2xl:   48px;
+  --radius-sm:   8px;
+  --radius-md:   12px;
+  --radius-lg:   16px;
+  --radius-xl:   24px;
+  --radius-pill: 999px;
+  --touch-min:        82px;
+  --touch-cta:        56px;
+  --touch-cta-main:   120px;
+  --touch-gap:        21px;
+}</pre>
+    </div>
+
+    <div class="block-title">Tabela de tokens semânticos</div>
+    <table class="token-table">
+      <thead>
+        <tr><th>Token</th><th>BK</th><th>MC</th><th>Uso</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>--color-primary</code></td><td><span class="color-dot" style="background:#FF8732"></span>#FF8732</td><td><span class="color-dot" style="background:#DA291C"></span>#DA291C</td><td>CTA principal, botão "Adicionar"</td></tr>
+        <tr><td><code>--color-accent</code></td><td><span class="color-dot" style="background:#D62300"></span>#D62300</td><td><span class="color-dot" style="background:#FFC72C"></span>#FFC72C</td><td>Urgência, upsell, destaque</td></tr>
+        <tr><td><code>--color-success</code></td><td><span class="color-dot" style="background:#198737"></span>#198737</td><td><span class="color-dot" style="background:#264F36"></span>#264F36</td><td>Confirmação, badge "Novo"</td></tr>
+        <tr><td><code>--color-bg</code></td><td><span class="color-dot" style="background:#0E0C0A;border-color:#3D3028"></span>#0E0C0A</td><td><span class="color-dot" style="background:#F5F0E5;border-color:#C8C4BC"></span>#F5F0E5</td><td>Background da tela inteira</td></tr>
+        <tr><td><code>--color-card</code></td><td><span class="color-dot" style="background:#251E18;border-color:#3D3028"></span>#251E18</td><td><span class="color-dot" style="background:#FFFFFF;border-color:#C8C4BC"></span>#FFFFFF</td><td>Cards de produto</td></tr>
+        <tr><td><code>--color-text-primary</code></td><td><span class="color-dot" style="background:#F5EBDC"></span>#F5EBDC</td><td><span class="color-dot" style="background:#27251F"></span>#27251F</td><td>Texto principal, nomes</td></tr>
+        <tr><td><code>--color-border</code></td><td><span class="color-dot" style="background:#3D3028"></span>#3D3028</td><td><span class="color-dot" style="background:#E0DDD8;border-color:#C8C4BC"></span>#E0DDD8</td><td>Bordas, separadores</td></tr>
+        <tr><td><code>--touch-min</code></td><td colspan="2" style="color:#FF8732;text-align:center">82px (tela 21") · 20mm físicos (W3C)</td><td>Alvo mínimo de toque</td></tr>
+        <tr><td><code>--radius-pill</code></td><td colspan="2" style="color:#FF8732;text-align:center">999px</td><td>Botões principais (ambas as marcas)</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</main>
+
+<div class="copied-toast" id="toast"></div>
+
+<script>
+  function showSection(id, btn) {
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    btn.classList.add('active');
+    window.scrollTo({top:0,behavior:'smooth'});
+  }
+
+  function activateChip(el) {
+    el.closest('.cat-bar').querySelectorAll('.bk-cat-chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  }
+  function activateMcChip(el) {
+    el.closest('.cat-bar').querySelectorAll('.mc-cat-chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  }
+  function activateMiniChip(el, brand) {
+    const cls = brand === 'bk' ? 'bk-chip-mini' : 'mc-chip-mini';
+    el.closest('.screen-cats').querySelectorAll('.' + cls).forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+  }
+
+  function copyColor(hex, name) {
+    navigator.clipboard.writeText(hex).then(() => {
+      const t = document.getElementById('toast');
+      t.textContent = `${name} copiado: ${hex}`;
+      t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2000);
+    });
+  }
+</script>
+</body>
+</html>

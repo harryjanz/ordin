@@ -78,6 +78,8 @@ class Company(Base):
     payment_provider = Column(String(20), default="mock")
     active           = Column(Boolean, default=True)
     created_at       = Column(DateTime, default=datetime.utcnow)
+    visual_theme     = Column(String(32), nullable=False, default="ordin")
+    visual_mode      = Column(String(8),  nullable=False, default="light")
 
 
 class User(Base):
@@ -149,9 +151,11 @@ class CompanyOut(BaseModel):
     name: str
     document: Optional[str] = None
     plan: str
-    payment_provider: str = "mock"
+    payment_provider: Optional[str] = "mock"
     active: bool
-    created_at: datetime
+    created_at: Optional[datetime] = None
+    visual_theme: str = "ordin"
+    visual_mode: str = "light"
     model_config = {"from_attributes": True}
 
 
@@ -246,6 +250,15 @@ class RegeneratePinOut(BaseModel):
     pin: str
 
 
+VALID_THEMES = {"ordin", "mc", "bk"}
+VALID_MODES  = {"light", "dark"}
+
+
+class AppearanceIn(BaseModel):
+    theme: str
+    mode: str
+
+
 class PaymentConfigIn(BaseModel):
     provider: str
     environment: str
@@ -332,7 +345,10 @@ async def validate_pin(
     )
     terminals = t_result.scalars().all()
     return {
-        "company": {"id": co.id, "name": co.name, "plan": co.plan},
+        "company": {
+            "id": co.id, "name": co.name, "plan": co.plan,
+            "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
+        },
         "terminals": [
             {"id": t.id, "label": t.label, "terminal_code": t.terminal_code, "tef_number": t.tef_number}
             for t in terminals
@@ -358,7 +374,10 @@ async def verify_pin(
     if not t:
         raise HTTPException(404, "Terminal não encontrado")
     return {
-        "company":  {"id": co.id, "name": co.name, "plan": co.plan},
+        "company": {
+            "id": co.id, "name": co.name, "plan": co.plan,
+            "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
+        },
         "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
     }
 
@@ -484,7 +503,8 @@ async def get_company(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    if current_user.role != "superadmin" and current_user.company_id != company_id:
+        raise HTTPException(403, "Acesso negado")
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
@@ -537,6 +557,32 @@ async def delete_company(
         raise HTTPException(404, "Empresa não encontrada")
     co.active = False
     await db.commit()
+
+
+@app.patch(
+    "/companies/{company_id}/appearance",
+    tags=["Empresas"],
+    summary="Atualizar tema visual do totem",
+)
+async def update_appearance(
+    company_id: int,
+    body: AppearanceIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    if body.theme not in VALID_THEMES:
+        raise HTTPException(422, f"Tema inválido. Disponíveis: {sorted(VALID_THEMES)}")
+    if body.mode not in VALID_MODES:
+        raise HTTPException(422, "Modo inválido. Use 'light' ou 'dark'.")
+    if current_user.company_id != company_id and current_user.role != "superadmin":
+        raise HTTPException(403, "Acesso negado")
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+    co.visual_theme = body.theme
+    co.visual_mode  = body.mode
+    await db.commit()
+    return {"ok": True, "theme": body.theme, "mode": body.mode}
 
 
 @app.post(
