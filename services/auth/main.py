@@ -84,6 +84,8 @@ class CompanyInfo(BaseModel):
     id: int
     name: str
     plan: str
+    visual_theme: str = "ordin"
+    visual_mode: str = "light"
 
 class TerminalInfo(BaseModel):
     id: int
