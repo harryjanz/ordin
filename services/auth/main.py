@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Request, Response
+from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -7,13 +7,17 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
-import hashlib, os, redis, httpx
+import hashlib, json, os, secrets, redis, httpx, string
 from config import require_env, get_cors_origins
 from audit import emit_audit
 
 redis_client = redis.from_url(require_env("REDIS_URL"), decode_responses=True)
-RATE_MAX = 5
-RATE_TTL = 15 * 60  # 15 minutos
+RATE_MAX             = 5
+RATE_TTL             = 15 * 60
+DEVICE_CHALLENGE_TTL = 300
+DEVICE_APPROVED_TTL  = 60
+ADMIN_BASE_URL       = os.getenv("ADMIN_BASE_URL", "http://localhost:3001")
+_CHARSET             = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sem I/O/0/1
 
 def check_rate_limit(ip, key, response):
     bk = f"pin_blocked:{ip}"
@@ -122,6 +126,18 @@ class HealthOut(BaseModel):
     service: str
     status: str
     redis: bool
+
+class DeviceChallengeOut(BaseModel):
+    code: str
+    qr_url: str
+    expires_in: int
+
+class DeviceStatusOut(BaseModel):
+    status: str
+    access_token: Optional[str] = None
+    token_type: Optional[str] = None
+    company: Optional[CompanyInfo] = None
+    terminal: Optional[TerminalInfo] = None
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
@@ -303,6 +319,53 @@ async def logout(body: RefreshReq, request: Request, db: AsyncSession = Depends(
                actor=actor, actor_id=int(actor) if actor else None,
                company_id=company_id, result="success")
     return {"detail":"Logout realizado"}
+
+@app.post(
+    "/auth/device/challenge",
+    response_model=DeviceChallengeOut,
+    tags=["Autenticação"],
+    summary="Gerar código de pareamento para totem",
+)
+async def device_challenge():
+    """Gera um código de 6 caracteres + QR URL para parear o totem sem PIN."""
+    code = "".join(secrets.choice(_CHARSET) for _ in range(6))
+    redis_client.set(f"device_challenge:{code}", json.dumps({"status": "pending"}), ex=DEVICE_CHALLENGE_TTL)
+    return DeviceChallengeOut(
+        code=code,
+        qr_url=f"{ADMIN_BASE_URL}/pair?code={code}",
+        expires_in=DEVICE_CHALLENGE_TTL,
+    )
+
+
+@app.get(
+    "/auth/device/status",
+    response_model=DeviceStatusOut,
+    tags=["Autenticação"],
+    summary="Verificar status do pareamento",
+)
+async def device_status(code: str = Query(..., description="Código de 6 caracteres")):
+    """Polling pelo totem. Retorna pending/approved/expired. Quando approved, gera JWT e consome o código."""
+    raw = redis_client.get(f"device_challenge:{code.upper()}")
+    if not raw:
+        return DeviceStatusOut(status="expired")
+    data = json.loads(raw)
+    if data["status"] == "pending":
+        return DeviceStatusOut(status="pending")
+    co   = data["company"]
+    term = data["terminal"]
+    token = make_token(
+        {"sub": "0", "company": co["id"], "terminal": term["id"], "role": "kiosk"},
+        timedelta(hours=12),
+    )
+    redis_client.delete(f"device_challenge:{code.upper()}")
+    return DeviceStatusOut(
+        status="approved",
+        access_token=token,
+        token_type="bearer",
+        company=CompanyInfo(**co),
+        terminal=TerminalInfo(**term),
+    )
+
 
 @app.get("/health", response_model=HealthOut, tags=["Autenticação"], summary="Healthcheck")
 def health():
