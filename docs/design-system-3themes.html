@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Design System — 3 Temas para Totem</title>
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════
+   BASE
+══════════════════════════════════════ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',sans-serif;background:#0a0a0f;color:#e8e8f0;font-size:15px;line-height:1.6;min-height:100vh}
+
+/* ══════════════════════════════════════
+   SHELL / NAV
+══════════════════════════════════════ */
+.shell-nav{
+  position:sticky;top:0;z-index:200;
+  background:rgba(10,10,15,.92);backdrop-filter:blur(12px);
+  border-bottom:1px solid rgba(255,255,255,.08);
+  display:flex;align-items:center;gap:8px;padding:10px 28px;flex-wrap:wrap;
+}
+.shell-brand{font-family:'Lexend',sans-serif;font-weight:800;font-size:13px;
+  background:linear-gradient(90deg,#9900ff,#33cccc);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  margin-right:12px;white-space:nowrap}
+.tab{background:none;border:1px solid transparent;border-radius:6px;padding:5px 12px;
+  font-size:12px;font-weight:500;color:rgba(255,255,255,.4);cursor:pointer;transition:all .15s;white-space:nowrap}
+.tab:hover{color:rgba(255,255,255,.8);border-color:rgba(255,255,255,.15)}
+.tab.active{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.2);color:#fff;font-weight:600}
+
+/* ══════════════════════════════════════
+   THEME TOKENS (3 temas × 2 modos)
+══════════════════════════════════════ */
+
+/* — ORDIN LIGHT — */
+.t-ordin-light{
+  --bg:#DFE8ED; --surface:#fff; --header:#fff;
+  --border:rgba(153,0,255,.18); --border-m:rgba(0,0,0,.08);
+  --text:#1d1434; --muted:rgba(29,20,52,.45);
+  --primary:#9900ff; --primary-hover:#7a00cc;
+  --primary-subtle:rgba(153,0,255,.12);
+  --primary-glow:0 4px 20px rgba(153,0,255,.35);
+  --primary-text:#fff;
+  --accent:#33cccc; --accent-dark:#1a9999;
+  --accent-subtle:rgba(51,204,204,.15);
+  --price:var(--accent-dark);
+  --cat-active:#9900ff; --cat-text:#fff;
+  --num-bg:rgba(153,0,255,.10);
+  --card-sh:0 2px 12px rgba(153,0,255,.10);
+  --promo-bg:#9900ff; --promo-text:#fff;
+  --cart-bg:#fff; --cart-border:rgba(153,0,255,.18);
+  --btn-add:#9900ff;
+  --error:#ff4d6d; --success:#198737;
+}
+/* — ORDIN DARK — */
+.t-ordin-dark{
+  --bg:#0e0b1a; --surface:#1d1434; --header:#1d1434;
+  --border:rgba(153,0,255,.22); --border-m:rgba(255,255,255,.07);
+  --text:#DFE8ED; --muted:rgba(223,232,237,.45);
+  --primary:#9900ff; --primary-hover:#7a00cc;
+  --primary-subtle:rgba(153,0,255,.15);
+  --primary-glow:0 4px 20px rgba(153,0,255,.4);
+  --primary-text:#fff;
+  --accent:#33cccc; --accent-dark:#1a9999;
+  --accent-subtle:rgba(51,204,204,.15);
+  --price:#33cccc;
+  --cat-active:#9900ff; --cat-text:#fff;
+  --num-bg:rgba(153,0,255,.12);
+  --card-sh:0 2px 16px rgba(153,0,255,.22);
+  --promo-bg:#3a0080; --promo-text:#33cccc;
+  --cart-bg:#1d1434; --cart-border:rgba(153,0,255,.22);
+  --btn-add:#9900ff;
+  --error:#ff4d6d; --success:#198737;
+}
+/* — McDONALD'S LIGHT — */
+.t-mc-light{
+  --bg:#F5F0E5; --surface:#fff; --header:#fff;
+  --border:rgba(218,41,28,.2); --border-m:rgba(0,0,0,.08);
+  --text:#27251F; --muted:rgba(39,37,31,.45);
+  --primary:#DA291C; --primary-hover:#C02218;
+  --primary-subtle:rgba(218,41,28,.08);
+  --primary-glow:0 4px 20px rgba(218,41,28,.3);
+  --primary-text:#fff;
+  --accent:#FFC72C; --accent-dark:#d4a500;
+  --accent-subtle:rgba(255,199,44,.2);
+  --price:#DA291C;
+  --cat-active:#FFC72C; --cat-text:#27251F;
+  --num-bg:rgba(255,199,44,.15);
+  --card-sh:0 2px 12px rgba(218,41,28,.08);
+  --promo-bg:#FFC72C; --promo-text:#27251F;
+  --cart-bg:#fff; --cart-border:rgba(218,41,28,.2);
+  --btn-add:#DA291C;
+  --error:#DA291C; --success:#264F36;
+}
+/* — McDONALD'S DARK — */
+.t-mc-dark{
+  --bg:#1c1a16; --surface:#27251F; --header:#27251F;
+  --border:rgba(255,199,44,.2); --border-m:rgba(255,255,255,.07);
+  --text:#F5F0E5; --muted:rgba(245,240,229,.45);
+  --primary:#DA291C; --primary-hover:#C02218;
+  --primary-subtle:rgba(218,41,28,.15);
+  --primary-glow:0 4px 20px rgba(218,41,28,.4);
+  --primary-text:#fff;
+  --accent:#FFC72C; --accent-dark:#d4a500;
+  --accent-subtle:rgba(255,199,44,.15);
+  --price:#FFC72C;
+  --cat-active:#FFC72C; --cat-text:#27251F;
+  --num-bg:rgba(255,199,44,.12);
+  --card-sh:0 2px 16px rgba(218,41,28,.2);
+  --promo-bg:#DA291C; --promo-text:#FFC72C;
+  --cart-bg:#27251F; --cart-border:rgba(255,199,44,.2);
+  --btn-add:#DA291C;
+  --error:#ff6b5b; --success:#5DD490;
+}
+/* — BURGER KING LIGHT — */
+.t-bk-light{
+  --bg:#FFF8F0; --surface:#fff; --header:#fff;
+  --border:rgba(255,135,50,.25); --border-m:rgba(0,0,0,.08);
+  --text:#1A0A00; --muted:rgba(26,10,0,.45);
+  --primary:#FF8732; --primary-hover:#E06A18;
+  --primary-subtle:rgba(255,135,50,.12);
+  --primary-glow:0 4px 20px rgba(255,135,50,.4);
+  --primary-text:#0E0C0A;
+  --accent:#D62300; --accent-dark:#A51B00;
+  --accent-subtle:rgba(214,35,0,.1);
+  --price:#D62300;
+  --cat-active:#FF8732; --cat-text:#0E0C0A;
+  --num-bg:rgba(255,135,50,.12);
+  --card-sh:0 2px 12px rgba(255,135,50,.12);
+  --promo-bg:#FF8732; --promo-text:#0E0C0A;
+  --cart-bg:#fff; --cart-border:rgba(255,135,50,.25);
+  --btn-add:#FF8732;
+  --error:#D62300; --success:#198737;
+}
+/* — BURGER KING DARK — */
+.t-bk-dark{
+  --bg:#0E0C0A; --surface:#1A1612; --header:#1A1612;
+  --border:rgba(255,135,50,.25); --border-m:rgba(255,255,255,.07);
+  --text:#F5EBDC; --muted:rgba(245,235,220,.4);
+  --primary:#FF8732; --primary-hover:#FFAA00;
+  --primary-subtle:rgba(255,135,50,.14);
+  --primary-glow:0 4px 20px rgba(255,135,50,.4);
+  --primary-text:#0E0C0A;
+  --accent:#D62300; --accent-dark:#FF4A20;
+  --accent-subtle:rgba(214,35,0,.15);
+  --price:#FF8732;
+  --cat-active:#FF8732; --cat-text:#0E0C0A;
+  --num-bg:rgba(255,135,50,.12);
+  --card-sh:0 2px 16px rgba(255,135,50,.2);
+  --promo-bg:#D62300; --promo-text:#F5EBDC;
+  --cart-bg:#251E18; --cart-border:rgba(255,135,50,.25);
+  --btn-add:#FF8732;
+  --error:#FF6B4A; --success:#5DD490;
+}
+
+/* ══════════════════════════════════════
+   MAIN
+══════════════════════════════════════ */
+.main{max-width:1200px;margin:0 auto;padding:36px 24px 100px}
+.sec{display:none}.sec.active{display:block}
+
+/* ══════════════════════════════════════
+   THEME SELECTOR PAGE
+══════════════════════════════════════ */
+.selector-title{font-family:'Lexend',sans-serif;font-weight:800;font-size:24px;color:#fff;margin-bottom:6px}
+.selector-sub{font-size:14px;color:rgba(255,255,255,.4);margin-bottom:36px}
+.themes-row{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;margin-bottom:40px}
+@media(max-width:780px){.themes-row{grid-template-columns:1fr}}
+
+.theme-card{
+  border-radius:16px;overflow:hidden;cursor:pointer;
+  border:2px solid rgba(255,255,255,.06);
+  transition:border-color .2s,transform .15s,box-shadow .2s;
+  position:relative;
+}
+.theme-card:hover{transform:translateY(-3px)}
+.theme-card.selected{border-color:white;box-shadow:0 0 0 4px rgba(255,255,255,.12)}
+.theme-card-header{padding:20px;display:flex;align-items:center;justify-content:space-between}
+.theme-card-name{font-family:'Lexend',sans-serif;font-weight:800;font-size:15px}
+.theme-card-badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;letter-spacing:.06em}
+.theme-card-desc{padding:0 20px 16px;font-size:12px;line-height:1.6;opacity:.7}
+.theme-card-colors{display:flex;gap:6px;padding:0 20px 20px}
+.color-dot{width:24px;height:24px;border-radius:50%;border:2px solid rgba(255,255,255,.15)}
+.selected-check{position:absolute;top:12px;right:12px;width:22px;height:22px;background:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;opacity:0;transition:opacity .2s}
+.theme-card.selected .selected-check{opacity:1}
+
+/* — Theme card specific BGs — */
+.tc-ordin{background:linear-gradient(135deg,#0e0b1a 0%,#1d1434 100%)}
+.tc-mc   {background:linear-gradient(135deg,#1c1a16 0%,#27251F 100%)}
+.tc-bk   {background:linear-gradient(135deg,#0E0C0A 0%,#251E18 100%)}
+
+/* mode toggle */
+.mode-row{display:flex;gap:10px;margin-bottom:32px;align-items:center;flex-wrap:wrap}
+.mode-label{font-size:13px;color:rgba(255,255,255,.5);margin-right:4px}
+.mode-btn{padding:7px 18px;border-radius:999px;font-family:'Lexend',sans-serif;font-weight:700;font-size:12px;border:1px solid rgba(255,255,255,.15);background:none;color:rgba(255,255,255,.5);cursor:pointer;transition:all .15s}
+.mode-btn.active{background:#fff;color:#0a0a0f;border-color:#fff}
+
+/* export button */
+.export-btn{
+  display:inline-flex;align-items:center;gap:8px;
+  background:linear-gradient(90deg,#9900ff,#33cccc);
+  color:#fff;border:none;border-radius:999px;
+  font-family:'Lexend',sans-serif;font-weight:700;font-size:14px;
+  padding:12px 28px;cursor:pointer;transition:opacity .15s;
+  margin-top:8px;
+}
+.export-btn:hover{opacity:.88}
+
+/* ══════════════════════════════════════
+   PREVIEW AREA
+══════════════════════════════════════ */
+.preview-wrap{display:grid;grid-template-columns:1fr 340px;gap:28px;align-items:start}
+@media(max-width:900px){.preview-wrap{grid-template-columns:1fr}}
+
+.preview-label{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:rgba(255,255,255,.35);margin-bottom:14px}
+
+/* ══════════════════════════════════════
+   TOTEM MOCKUP (phone frame)
+══════════════════════════════════════ */
+.totem-frame{
+  width:100%;max-width:300px;border-radius:24px;overflow:hidden;
+  box-shadow:0 24px 60px rgba(0,0,0,.6);
+  border:1px solid rgba(255,255,255,.08);
+  margin:0 auto;
+}
+/* dynamic bg from theme */
+.totem-bg{background:var(--bg);transition:background .3s}
+
+.totem-header{
+  background:var(--header);padding:14px 16px;
+  display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--border);
+  transition:background .3s,border-color .3s;
+}
+.totem-logo{font-family:'Lexend',sans-serif;font-weight:800;font-size:14px;color:var(--primary);transition:color .3s}
+.totem-lang{font-size:10px;color:var(--muted)}
+
+.totem-promo{
+  background:var(--promo-bg);padding:7px 12px;
+  font-family:'Lexend',sans-serif;font-weight:700;font-size:10px;
+  color:var(--promo-text);text-align:center;
+  transition:background .3s,color .3s;
+}
+.totem-cats{
+  display:flex;gap:6px;padding:8px 10px;background:var(--header);
+  overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--border-m);
+  transition:background .3s;
+}
+.totem-cats::-webkit-scrollbar{display:none}
+.tcat{
+  flex-shrink:0;padding:5px 11px;border-radius:99px;
+  font-family:'Lexend',sans-serif;font-weight:700;font-size:10px;
+  cursor:pointer;border:1px solid var(--border-m);
+  background:var(--surface);color:var(--muted);
+  transition:all .3s;
+}
+.tcat.active{background:var(--cat-active);color:var(--cat-text);border-color:var(--cat-active)}
+
+.totem-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:8px 9px;background:var(--bg);transition:background .3s}
+.tcard{
+  background:var(--surface);border:1px solid var(--border-m);
+  border-radius:10px;overflow:hidden;
+  transition:background .3s,border-color .3s;
+}
+.tcard-img{height:72px;display:flex;align-items:center;justify-content:center;font-size:28px;position:relative}
+.tcard-body{padding:7px 8px}
+.tcard-name{font-family:'Lexend',sans-serif;font-size:10px;font-weight:700;color:var(--text);margin-bottom:2px;transition:color .3s}
+.tcard-price{font-family:'Lexend',sans-serif;font-size:12px;font-weight:800;color:var(--price);transition:color .3s}
+.tbdg{position:absolute;top:5px;left:5px;font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;background:var(--primary);color:var(--primary-text)}
+
+.totem-cart{
+  background:var(--cart-bg);border-top:1px solid var(--cart-border);
+  padding:10px 12px;display:flex;align-items:center;justify-content:space-between;
+  transition:background .3s,border-color .3s;
+}
+.tcart-info{display:flex;align-items:center;gap:7px}
+.tcart-cnt{
+  background:var(--primary);color:var(--primary-text);
+  font-family:'Lexend',sans-serif;font-weight:800;font-size:11px;
+  width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  transition:background .3s;
+}
+.tcart-lbl{font-size:9px;color:var(--muted)}
+.tcart-tot{font-family:'Lexend',sans-serif;font-size:13px;font-weight:800;color:var(--price);transition:color .3s}
+.tcart-cta{
+  background:var(--primary);color:var(--primary-text);
+  font-family:'Lexend',sans-serif;font-weight:700;font-size:10px;
+  padding:6px 11px;border-radius:99px;border:none;cursor:pointer;
+  transition:background .3s;
+}
+
+/* ══════════════════════════════════════
+   COMPONENT PANELS (right side)
+══════════════════════════════════════ */
+.comp-panel{display:flex;flex-direction:column;gap:16px}
+
+.cp-block{
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
+  border-radius:12px;padding:16px;
+}
+.cp-title{font-size:10px;font-weight:600;color:rgba(255,255,255,.35);letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
+
+/* color row in panel */
+.color-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.cr-swatch{width:36px;height:36px;border-radius:8px;border:1px solid rgba(255,255,255,.1);cursor:pointer;transition:transform .12s;position:relative;flex-shrink:0}
+.cr-swatch:hover{transform:scale(1.12)}
+.cr-label{font-size:10px;color:rgba(255,255,255,.4);margin-top:3px;font-family:monospace;text-align:center;max-width:36px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr-item{display:flex;flex-direction:column;align-items:center;cursor:pointer}
+
+/* button previews */
+.btn-preview{
+  display:inline-flex;align-items:center;justify-content:center;
+  border-radius:999px;font-family:'Lexend',sans-serif;font-weight:700;
+  border:none;cursor:pointer;transition:all .3s;
+  background:var(--primary);color:var(--primary-text);
+  font-size:13px;padding:10px 22px;width:100%;
+  box-shadow:var(--primary-glow);
+}
+.btn-preview-s{
+  background:transparent;color:var(--primary);
+  border:2px solid var(--primary);
+  font-size:12px;padding:8px 18px;width:100%;
+  border-radius:999px;font-family:'Lexend',sans-serif;font-weight:700;cursor:pointer;transition:all .3s;
+}
+.chip-preview-active{
+  display:inline-flex;padding:7px 14px;border-radius:99px;
+  background:var(--cat-active);color:var(--cat-text);
+  font-family:'Lexend',sans-serif;font-weight:700;font-size:12px;
+  transition:background .3s,color .3s;border:none;cursor:default;
+}
+.price-preview{
+  font-family:'Lexend',sans-serif;font-weight:800;font-size:22px;
+  color:var(--price);transition:color .3s;
+}
+
+/* ══════════════════════════════════════
+   TOKENS PAGE
+══════════════════════════════════════ */
+.tokens-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px}
+@media(max-width:700px){.tokens-grid{grid-template-columns:1fr}}
+.token-block{background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:18px 20px;overflow-x:auto}
+.token-block pre{font-family:monospace;font-size:11.5px;line-height:1.85;white-space:pre;color:#c8b8ff}
+.tokens-export-bar{
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  border-radius:12px;padding:18px 20px;margin-bottom:20px;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
+}
+.current-theme-tag{font-family:'Lexend',sans-serif;font-weight:700;font-size:14px;color:#fff}
+.current-theme-sub{font-size:12px;color:rgba(255,255,255,.4);margin-top:2px}
+.ttable{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:6px}
+.ttable th{text-align:left;padding:7px 11px;font-size:10px;font-weight:600;color:rgba(255,255,255,.35);letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid rgba(255,255,255,.07)}
+.ttable td{padding:8px 11px;border-bottom:1px solid rgba(255,255,255,.05);color:rgba(255,255,255,.7);vertical-align:middle}
+.ttable tr:hover td{background:rgba(255,255,255,.03)}
+.ttable code{font-family:monospace;font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,.06);color:#c8b8ff}
+.tdot{width:16px;height:16px;border-radius:50%;display:inline-block;vertical-align:middle;margin-right:6px;border:1px solid rgba(255,255,255,.15)}
+
+/* ══════════════════════════════════════
+   MISC
+══════════════════════════════════════ */
+.btitle{font-size:11px;font-weight:600;letter-spacing:.1em;color:rgba(255,255,255,.3);text-transform:uppercase;margin:28px 0 12px;padding-bottom:7px;border-bottom:1px solid rgba(255,255,255,.07)}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#9900ff;color:#fff;font-family:'Lexend',sans-serif;font-weight:700;font-size:13px;padding:8px 18px;border-radius:999px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9999}
+.toast.show{opacity:1}
+.g3mini{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.g3mini-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:12px;font-size:12px}
+.g3mini-card strong{display:block;color:#fff;margin-bottom:3px;font-size:13px}
+.g3mini-card span{color:rgba(255,255,255,.45)}
+@media(max-width:700px){.g3mini{grid-template-columns:1fr}}
+
+/* card img gradients per theme (applied via JS) */
+.img-grad-ordin-a{background:linear-gradient(135deg,#3a0080,#9900ff)}
+.img-grad-ordin-b{background:linear-gradient(135deg,#0d3333,#33cccc)}
+.img-grad-mc-a{background:linear-gradient(135deg,#DA291C,#FFC72C)}
+.img-grad-mc-b{background:linear-gradient(135deg,#27251F,#DA291C)}
+.img-grad-bk-a{background:linear-gradient(135deg,#502314,#FF8732)}
+.img-grad-bk-b{background:linear-gradient(135deg,#D62300,#FFAA00)}
+</style>
+</head>
+<body>
+
+<nav class="shell-nav">
+  <span class="shell-brand">⬡ DS · 3 TEMAS</span>
+  <button class="tab active" onclick="showSec('selector',this)">Selecionar tema</button>
+  <button class="tab" onclick="showSec('preview',this)">Preview & Componentes</button>
+  <button class="tab" onclick="showSec('tokens',this)">Tokens CSS</button>
+</nav>
+
+<main class="main">
+
+<!-- ══════════ SELECTOR ══════════ -->
+<section id="selector" class="sec active">
+  <h1 class="selector-title">Escolha o Design System</h1>
+  <p class="selector-sub">Selecione o tema que será aplicado ao totem do cliente. Alterne entre light e dark para ver o mockup em tempo real.</p>
+
+  <div class="themes-row">
+
+    <!-- ORDIN -->
+    <div class="theme-card tc-ordin selected" onclick="selectTheme('ordin',this)">
+      <div class="selected-check">✓</div>
+      <div class="theme-card-header">
+        <span class="theme-card-name" style="color:#9900ff">⬡ Ordin</span>
+        <span class="theme-card-badge" style="background:rgba(153,0,255,.2);color:#bf80ff">Padrão</span>
+      </div>
+      <div class="theme-card-desc">Identidade tecnológica e fluida. Roxo vibrante para CTAs, teal para preços e informações. Tema light limpo com opção dark roxa profunda.</div>
+      <div class="theme-card-colors">
+        <div class="color-dot" style="background:#9900ff"></div>
+        <div class="color-dot" style="background:#33cccc"></div>
+        <div class="color-dot" style="background:#DFE8ED"></div>
+        <div class="color-dot" style="background:#0e0b1a"></div>
+        <div class="color-dot" style="background:#ff4d6d"></div>
+      </div>
+    </div>
+
+    <!-- McDONALD'S -->
+    <div class="theme-card tc-mc" onclick="selectTheme('mc',this)">
+      <div class="selected-check">✓</div>
+      <div class="theme-card-header">
+        <span class="theme-card-name" style="color:#FFC72C">🍟 McDonald's</span>
+        <span class="theme-card-badge" style="background:rgba(218,41,28,.2);color:#ff8a7f">Fast food</span>
+      </div>
+      <div class="theme-card-desc">Paleta icônica de vermelho e amarelo dourado. Background cream no light, dark quase-preto sofisticado. Confiante, limpo, moderno.</div>
+      <div class="theme-card-colors">
+        <div class="color-dot" style="background:#DA291C"></div>
+        <div class="color-dot" style="background:#FFC72C"></div>
+        <div class="color-dot" style="background:#F5F0E5"></div>
+        <div class="color-dot" style="background:#27251F"></div>
+        <div class="color-dot" style="background:#264F36"></div>
+      </div>
+    </div>
+
+    <!-- BURGER KING -->
+    <div class="theme-card tc-bk" onclick="selectTheme('bk',this)">
+      <div class="selected-check">✓</div>
+      <div class="theme-card-header">
+        <span class="theme-card-name" style="color:#FF8732">🔥 Burger King</span>
+        <span class="theme-card-badge" style="background:rgba(255,135,50,.2);color:#ffb380">Fast food</span>
+      </div>
+      <div class="theme-card-desc">Estética flamejada do rebrand 2021. Laranja quente e vermelho intenso sobre fundo dark profundo. Bold, ousado, irresistível.</div>
+      <div class="theme-card-colors">
+        <div class="color-dot" style="background:#FF8732"></div>
+        <div class="color-dot" style="background:#D62300"></div>
+        <div class="color-dot" style="background:#FFAA00"></div>
+        <div class="color-dot" style="background:#0E0C0A"></div>
+        <div class="color-dot" style="background:#F5EBDC"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MODE TOGGLE -->
+  <div class="mode-row">
+    <span class="mode-label">Modo:</span>
+    <button class="mode-btn active" id="mode-light" onclick="setMode('light',this)">☀️ Light</button>
+    <button class="mode-btn" id="mode-dark" onclick="setMode('dark',this)">🌙 Dark</button>
+  </div>
+
+  <!-- MOCKUP PREVIEW INLINE -->
+  <div style="display:flex;gap:32px;flex-wrap:wrap;align-items:flex-start">
+    <div style="flex:1;min-width:260px;max-width:320px">
+      <div class="preview-label">Preview do totem</div>
+      <div id="totem-preview"></div>
+    </div>
+    <div style="flex:1;min-width:260px">
+      <div class="preview-label">Componentes principais</div>
+      <div id="comp-preview"></div>
+      <button class="export-btn" onclick="showSec('tokens',document.querySelectorAll(\'.tab\')[2])">
+        📋 Ver tokens CSS completos →
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════ PREVIEW PAGE ══════════ -->
+<section id="preview" class="sec">
+  <h1 class="selector-title">Preview & Componentes</h1>
+  <p class="selector-sub">Visualização detalhada do tema selecionado em light e dark simultaneamente.</p>
+
+  <div style="display:flex;gap:28px;justify-content:center;flex-wrap:wrap;align-items:flex-start">
+    <div>
+      <div class="preview-label" style="text-align:center">☀️ Light</div>
+      <div id="full-preview-light"></div>
+    </div>
+    <div>
+      <div class="preview-label" style="text-align:center">🌙 Dark</div>
+      <div id="full-preview-dark"></div>
+    </div>
+  </div>
+
+  <div class="btitle" style="margin-top:40px">Padrões herdados de BK + McDonald's</div>
+  <div class="g3mini">
+    <div class="g3mini-card"><strong>Grid 2 colunas</strong><span>Foto + nome + preço + botão add. Padrão das duas redes.</span></div>
+    <div class="g3mini-card"><strong>Carrinho fixo</strong><span>Subtotal sempre visível no rodapé. CTA à direita.</span></div>
+    <div class="g3mini-card"><strong>1 CTA por tela</strong><span>Cor primária única em evidência. Acento é informativo.</span></div>
+    <div class="g3mini-card"><strong>Touch ≥ 82 px</strong><span>W3C 20mm em display 21". Gap mínimo 21 px.</span></div>
+    <div class="g3mini-card"><strong>Lexend display</strong><span>Open-source. Substitui Flame (BK) e Speedee (MC).</span></div>
+    <div class="g3mini-card"><strong>1 cross-sell</strong><span>BK reduziu de 3 para 1 tela e NPS subiu.</span></div>
+  </div>
+</section>
+
+<!-- ══════════ TOKENS PAGE ══════════ -->
+<section id="tokens" class="sec">
+  <h1 class="selector-title">Tokens CSS</h1>
+  <p class="selector-sub">Tokens gerados dinamicamente para o tema e modo selecionados. Copie direto no seu projeto.</p>
+
+  <div class="tokens-export-bar">
+    <div>
+      <div class="current-theme-tag" id="token-theme-name">⬡ Ordin — Light</div>
+      <div class="current-theme-sub">Pronto para colar no :root do seu CSS</div>
+    </div>
+    <button class="export-btn" onclick="copyTokens()">📋 Copiar tokens</button>
+  </div>
+
+  <!-- mode toggle na página de tokens -->
+  <div class="mode-row" style="margin-bottom:20px">
+    <span class="mode-label">Modo:</span>
+    <button class="mode-btn active" id="tok-light" onclick="setMode('light',this);syncModeBtn('light')">☀️ Light</button>
+    <button class="mode-btn" id="tok-dark" onclick="setMode('dark',this);syncModeBtn('dark')">🌙 Dark</button>
+  </div>
+
+  <div class="token-block" style="margin-bottom:24px">
+    <pre id="token-output">/* carregando... */</pre>
+  </div>
+
+  <div class="btitle">Mapa semântico de tokens</div>
+  <table class="ttable">
+    <thead><tr><th>Token</th><th>Uso</th><th>Light</th><th>Dark</th></tr></thead>
+    <tbody id="token-table-body"></tbody>
+  </table>
+</section>
+
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ══════════════════════════════════════
+   STATE
+══════════════════════════════════════ */
+let currentTheme = 'ordin';
+let currentMode  = 'light';
+
+/* ══════════════════════════════════════
+   THEME DEFINITIONS
+══════════════════════════════════════ */
+const THEMES = {
+  ordin: {
+    name: '⬡ Ordin',
+    logoText: '⬡ SEU TOTEM',
+    promoText: '⚡ Combo do dia por R$ 29,90 — hoje só!',
+    imgA: 'img-grad-ordin-a', imgB: 'img-grad-ordin-b',
+    emojis: ['🍔','🌯','🧀','🍗'],
+    cats: ['🍔 Lanches','🍟 Combos','🥤 Bebidas','🍦 Sobrem.'],
+    light: {
+      bg:'#DFE8ED', surface:'#ffffff', header:'#ffffff',
+      border:'rgba(153,0,255,0.18)', borderM:'rgba(0,0,0,0.08)',
+      text:'#1d1434', muted:'rgba(29,20,52,0.45)',
+      primary:'#9900ff', primaryHover:'#7a00cc',
+      primarySubtle:'rgba(153,0,255,0.12)',
+      primaryGlow:'0 4px 20px rgba(153,0,255,0.35)',
+      primaryText:'#ffffff',
+      accent:'#33cccc', accentDark:'#1a9999',
+      accentSubtle:'rgba(51,204,204,0.15)',
+      price:'#1a9999',
+      catActive:'#9900ff', catText:'#ffffff',
+      numBg:'rgba(153,0,255,0.10)',
+      cardSh:'0 2px 12px rgba(153,0,255,0.10)',
+      promoBg:'#9900ff', promoText:'#ffffff',
+      cartBg:'#ffffff', cartBorder:'rgba(153,0,255,0.18)',
+      error:'#ff4d6d', success:'#198737',
+    },
+    dark: {
+      bg:'#0e0b1a', surface:'#1d1434', header:'#1d1434',
+      border:'rgba(153,0,255,0.22)', borderM:'rgba(255,255,255,0.07)',
+      text:'#DFE8ED', muted:'rgba(223,232,237,0.45)',
+      primary:'#9900ff', primaryHover:'#7a00cc',
+      primarySubtle:'rgba(153,0,255,0.15)',
+      primaryGlow:'0 4px 20px rgba(153,0,255,0.40)',
+      primaryText:'#ffffff',
+      accent:'#33cccc', accentDark:'#1a9999',
+      accentSubtle:'rgba(51,204,204,0.15)',
+      price:'#33cccc',
+      catActive:'#9900ff', catText:'#ffffff',
+      numBg:'rgba(153,0,255,0.12)',
+      cardSh:'0 2px 16px rgba(153,0,255,0.22)',
+      promoBg:'#3a0080', promoText:'#33cccc',
+      cartBg:'#1d1434', cartBorder:'rgba(153,0,255,0.22)',
+      error:'#ff4d6d', success:'#198737',
+    }
+  },
+  mc: {
+    name: '🍟 McDonald\'s',
+    logoText: 'McDonald\'s',
+    promoText: '⭐ Big Mac em dobro por R$ 35,90!',
+    imgA: 'img-grad-mc-a', imgB: 'img-grad-mc-b',
+    emojis: ['🍔','🍗','🧀','🥗'],
+    cats: ['🍔 Lanches','🍟 Combos','🥤 Bebidas','🍦 Sobrem.'],
+    light: {
+      bg:'#F5F0E5', surface:'#ffffff', header:'#ffffff',
+      border:'rgba(218,41,28,0.20)', borderM:'rgba(0,0,0,0.08)',
+      text:'#27251F', muted:'rgba(39,37,31,0.45)',
+      primary:'#DA291C', primaryHover:'#C02218',
+      primarySubtle:'rgba(218,41,28,0.08)',
+      primaryGlow:'0 4px 20px rgba(218,41,28,0.30)',
+      primaryText:'#ffffff',
+      accent:'#FFC72C', accentDark:'#d4a500',
+      accentSubtle:'rgba(255,199,44,0.20)',
+      price:'#DA291C',
+      catActive:'#FFC72C', catText:'#27251F',
+      numBg:'rgba(255,199,44,0.15)',
+      cardSh:'0 2px 12px rgba(218,41,28,0.08)',
+      promoBg:'#FFC72C', promoText:'#27251F',
+      cartBg:'#ffffff', cartBorder:'rgba(218,41,28,0.20)',
+      error:'#DA291C', success:'#264F36',
+    },
+    dark: {
+      bg:'#1c1a16', surface:'#27251F', header:'#27251F',
+      border:'rgba(255,199,44,0.20)', borderM:'rgba(255,255,255,0.07)',
+      text:'#F5F0E5', muted:'rgba(245,240,229,0.45)',
+      primary:'#DA291C', primaryHover:'#C02218',
+      primarySubtle:'rgba(218,41,28,0.15)',
+      primaryGlow:'0 4px 20px rgba(218,41,28,0.40)',
+      primaryText:'#ffffff',
+      accent:'#FFC72C', accentDark:'#d4a500',
+      accentSubtle:'rgba(255,199,44,0.15)',
+      price:'#FFC72C',
+      catActive:'#FFC72C', catText:'#27251F',
+      numBg:'rgba(255,199,44,0.12)',
+      cardSh:'0 2px 16px rgba(218,41,28,0.20)',
+      promoBg:'#DA291C', promoText:'#FFC72C',
+      cartBg:'#27251F', cartBorder:'rgba(255,199,44,0.20)',
+      error:'#ff6b5b', success:'#5DD490',
+    }
+  },
+  bk: {
+    name: '🔥 Burger King',
+    logoText: 'BURGER KING®',
+    promoText: '🔥 Combo Whopper por R$ 29,90 — hoje só!',
+    imgA: 'img-grad-bk-a', imgB: 'img-grad-bk-b',
+    emojis: ['🍔','🌯','🍗','🧀'],
+    cats: ['🍔 Lanches','🍟 Combos','🥤 Bebidas','🍦 Sobrem.'],
+    light: {
+      bg:'#FFF8F0', surface:'#ffffff', header:'#ffffff',
+      border:'rgba(255,135,50,0.25)', borderM:'rgba(0,0,0,0.08)',
+      text:'#1A0A00', muted:'rgba(26,10,0,0.45)',
+      primary:'#FF8732', primaryHover:'#E06A18',
+      primarySubtle:'rgba(255,135,50,0.12)',
+      primaryGlow:'0 4px 20px rgba(255,135,50,0.40)',
+      primaryText:'#0E0C0A',
+      accent:'#D62300', accentDark:'#A51B00',
+      accentSubtle:'rgba(214,35,0,0.10)',
+      price:'#D62300',
+      catActive:'#FF8732', catText:'#0E0C0A',
+      numBg:'rgba(255,135,50,0.12)',
+      cardSh:'0 2px 12px rgba(255,135,50,0.12)',
+      promoBg:'#FF8732', promoText:'#0E0C0A',
+      cartBg:'#ffffff', cartBorder:'rgba(255,135,50,0.25)',
+      error:'#D62300', success:'#198737',
+    },
+    dark: {
+      bg:'#0E0C0A', surface:'#1A1612', header:'#1A1612',
+      border:'rgba(255,135,50,0.25)', borderM:'rgba(255,255,255,0.07)',
+      text:'#F5EBDC', muted:'rgba(245,235,220,0.40)',
+      primary:'#FF8732', primaryHover:'#FFAA00',
+      primarySubtle:'rgba(255,135,50,0.14)',
+      primaryGlow:'0 4px 20px rgba(255,135,50,0.40)',
+      primaryText:'#0E0C0A',
+      accent:'#D62300', accentDark:'#FF4A20',
+      accentSubtle:'rgba(214,35,0,0.15)',
+      price:'#FF8732',
+      catActive:'#FF8732', catText:'#0E0C0A',
+      numBg:'rgba(255,135,50,0.12)',
+      cardSh:'0 2px 16px rgba(255,135,50,0.20)',
+      promoBg:'#D62300', promoText:'#F5EBDC',
+      cartBg:'#251E18', cartBorder:'rgba(255,135,50,0.25)',
+      error:'#FF6B4A', success:'#5DD490',
+    }
+  }
+};
+
+/* ══════════════════════════════════════
+   BUILD TOTEM HTML
+══════════════════════════════════════ */
+function buildTotem(themeKey, mode) {
+  const td = THEMES[themeKey];
+  const tk = td[mode];
+  const imgA = td.imgA, imgB = td.imgB;
+  const emojis = td.emojis;
+  const cats   = td.cats;
+
+  return `
+<div class="totem-frame">
+  <div style="background:${tk.bg}">
+    <!-- header -->
+    <div style="background:${tk.header};padding:13px 15px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid ${tk.border}">
+      <span style="font-family:'Lexend',sans-serif;font-weight:800;font-size:13px;color:${tk.primary}">${td.logoText}</span>
+      <span style="font-size:9px;color:${tk.muted}">🌐 PT</span>
+    </div>
+    <!-- promo -->
+    <div style="background:${tk.promoBg};padding:6px 10px;font-family:'Lexend',sans-serif;font-weight:700;font-size:10px;color:${tk.promoText};text-align:center">${td.promoText}</div>
+    <!-- cats -->
+    <div style="display:flex;gap:5px;padding:7px 9px;background:${tk.header};overflow-x:auto;border-bottom:1px solid ${tk.borderM}">
+      ${cats.map((c,i)=>`<button style="flex-shrink:0;padding:5px 10px;border-radius:99px;font-family:'Lexend',sans-serif;font-weight:700;font-size:10px;border:1px solid ${i===0?tk.catActive:tk.borderM};background:${i===0?tk.catActive:tk.surface};color:${i===0?tk.catText:tk.muted}">${c}</button>`).join('')}
+    </div>
+    <!-- grid -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:7px 8px;background:${tk.bg}">
+      ${emojis.map((em,i)=>{
+        const grad = i%2===0 ? imgA : imgB;
+        return `<div style="background:${tk.surface};border:1px solid ${tk.borderM};border-radius:9px;overflow:hidden">
+          <div class="${grad}" style="height:64px;display:flex;align-items:center;justify-content:center;font-size:24px">${em}</div>
+          <div style="padding:6px 7px">
+            <div style="font-family:'Lexend',sans-serif;font-size:10px;font-weight:700;color:${tk.text};margin-bottom:1px">Item ${i+1}</div>
+            <div style="font-family:'Lexend',sans-serif;font-size:11px;font-weight:800;color:${tk.price}">R$ ${(19.9+i*3).toFixed(2).replace('.',',')}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <!-- cart -->
+    <div style="background:${tk.cartBg};border-top:1px solid ${tk.cartBorder};padding:9px 11px;display:flex;align-items:center;justify-content:space-between">
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="background:${tk.primary};color:${tk.primaryText};font-family:'Lexend',sans-serif;font-weight:800;font-size:11px;width:21px;height:21px;border-radius:50%;display:flex;align-items:center;justify-content:center">3</span>
+        <span style="font-size:9px;color:${tk.muted}">itens</span>
+      </div>
+      <span style="font-family:'Lexend',sans-serif;font-size:12px;font-weight:800;color:${tk.price}">R$ 74,70</span>
+      <button style="background:${tk.primary};color:${tk.primaryText};font-family:'Lexend',sans-serif;font-weight:700;font-size:10px;padding:6px 10px;border-radius:99px;border:none;cursor:pointer">Ver pedido →</button>
+    </div>
+  </div>
+</div>`;
+}
+
+/* ══════════════════════════════════════
+   BUILD COMP PANEL
+══════════════════════════════════════ */
+function buildCompPanel(themeKey, mode) {
+  const td = THEMES[themeKey];
+  const tk = td[mode];
+  return `
+<div style="display:flex;flex-direction:column;gap:14px">
+  <!-- swatches -->
+  <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:15px">
+    <div style="font-size:10px;font-weight:600;color:rgba(255,255,255,.35);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Cores principais</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${[
+        {c:tk.primary,   n:'Primary'},
+        {c:tk.accent,    n:'Accent'},
+        {c:tk.price,     n:'Preço'},
+        {c:tk.bg,        n:'BG'},
+        {c:tk.surface,   n:'Surface'},
+        {c:tk.text,      n:'Text'},
+      ].map(s=>`
+        <div style="display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer" onclick="copyVal('${s.c}','${s.n}')">
+          <div style="width:34px;height:34px;border-radius:8px;background:${s.c};border:1px solid rgba(255,255,255,.12);transition:transform .12s" onmouseover="this.style.transform='scale(1.12)'" onmouseout="this.style.transform='scale(1)'"></div>
+          <span style="font-size:9px;color:rgba(255,255,255,.4);font-family:monospace;max-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center">${s.n}</span>
+        </div>`).join('')}
+    </div>
+  </div>
+  <!-- buttons -->
+  <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:15px">
+    <div style="font-size:10px;font-weight:600;color:rgba(255,255,255,.35);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Botões</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button style="background:${tk.primary};color:${tk.primaryText};border:none;border-radius:999px;font-family:'Lexend',sans-serif;font-weight:700;font-size:14px;padding:12px 20px;cursor:pointer;box-shadow:${tk.primaryGlow};transition:background .3s">Finalizar pedido</button>
+      <button style="background:transparent;color:${tk.primary};border:2px solid ${tk.primary};border-radius:999px;font-family:'Lexend',sans-serif;font-weight:700;font-size:13px;padding:10px 18px;cursor:pointer;transition:all .3s">Ver pedido</button>
+      <button style="background:${tk.accent};color:${tk.catText};border:none;border-radius:999px;font-family:'Lexend',sans-serif;font-weight:700;font-size:13px;padding:10px 18px;cursor:pointer;transition:background .3s">Ver promoção</button>
+    </div>
+  </div>
+  <!-- misc -->
+  <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:12px;padding:15px">
+    <div style="font-size:10px;font-weight:600;color:rgba(255,255,255,.35);letter-spacing:.08em;text-transform:uppercase;margin-bottom:10px">Outros elementos</div>
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <div style="font-size:10px;color:rgba(255,255,255,.35);margin-bottom:5px">Categoria ativa</div>
+        <span style="display:inline-block;padding:7px 14px;border-radius:99px;background:${tk.catActive};color:${tk.catText};font-family:'Lexend',sans-serif;font-weight:700;font-size:12px">🍔 Lanches</span>
+      </div>
+      <div>
+        <div style="font-size:10px;color:rgba(255,255,255,.35);margin-bottom:5px">Preço de produto</div>
+        <span style="font-family:'Lexend',sans-serif;font-weight:800;font-size:22px;color:${tk.price}">R$ 29,90</span>
+      </div>
+      <div>
+        <div style="font-size:10px;color:rgba(255,255,255,.35);margin-bottom:5px">Badges</div>
+        <div style="display:flex;gap:6px">
+          <span style="background:${tk.primary};color:${tk.primaryText};font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px">Novo</span>
+          <span style="background:${tk.accent};color:${tk.catText};font-size:10px;font-weight:700;padding:3px 8px;border-radius:4px">Top</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>`;
+}
+
+/* ══════════════════════════════════════
+   BUILD TOKENS STRING
+══════════════════════════════════════ */
+function buildTokens(themeKey, mode) {
+  const td = THEMES[themeKey];
+  const tk = td[mode];
+  const n  = td.name;
+  return `/* ═══════════════════════════════════════════
+   ${n} — ${mode === 'light' ? 'Light' : 'Dark'} Theme
+   Totem de Autoatendimento Fast Food
+═══════════════════════════════════════════ */
+
+:root {
+  /* — Marca — */
+  --primary:          ${tk.primary};
+  --primary-hover:    ${tk.primaryHover};
+  --primary-subtle:   ${tk.primarySubtle};
+  --primary-glow:     ${tk.primaryGlow};
+  --primary-text:     ${tk.primaryText};
+  --accent:           ${tk.accent};
+  --accent-dark:      ${tk.accentDark};
+  --accent-subtle:    ${tk.accentSubtle};
+
+  /* — Semânticos — */
+  --color-error:      ${tk.error};
+  --color-success:    ${tk.success};
+
+  /* — Superfícies — */
+  --bg:               ${tk.bg};
+  --surface:          ${tk.surface};
+  --header:           ${tk.header};
+  --border:           ${tk.border};
+  --border-m:         ${tk.borderM};
+
+  /* — Texto — */
+  --text:             ${tk.text};
+  --muted:            ${tk.muted};
+
+  /* — Componentes — */
+  --price-color:      ${tk.price};
+  --cat-active:       ${tk.catActive};
+  --cat-text:         ${tk.catText};
+  --num-bg:           ${tk.numBg};
+  --card-shadow:      ${tk.cardSh};
+  --promo-bg:         ${tk.promoBg};
+  --promo-text:       ${tk.promoText};
+  --cart-bg:          ${tk.cartBg};
+  --cart-border:      ${tk.cartBorder};
+
+  /* — Tipografia — */
+  --font-display:     'Lexend', sans-serif;
+  --font-body:        'Inter', sans-serif;
+
+  /* — Escala (totem 21") — */
+  --text-h1:          42px;
+  --text-h2:          26px;
+  --text-h3:          20px;
+  --text-price:       28px;
+  --text-cta:         20px;
+  --text-body:        16px;
+  --text-label:       14px;
+  --text-small:       12px;
+
+  /* — Espaçamento — */
+  --s-xs: 8px;   --s-sm: 12px;  --s-md: 16px;
+  --s-lg: 24px;  --s-xl: 32px;  --s-2xl: 48px;
+
+  /* — Bordas — */
+  --r-sm:    8px;   --r-md:   12px;
+  --r-lg:    16px;  --r-xl:   24px;
+  --r-pill:  999px;
+
+  /* — Touch targets — */
+  --touch-min:  82px;
+  --touch-add:  52px;
+  --touch-cta:  120px;
+  --touch-gap:  21px;
+}`;
+}
+
+/* ══════════════════════════════════════
+   BUILD TOKEN TABLE ROWS
+══════════════════════════════════════ */
+function buildTokenTable(themeKey) {
+  const td   = THEMES[themeKey];
+  const lk   = td.light;
+  const dk   = td.dark;
+  const rows = [
+    ['--primary',     'CTA principal, marca, ativo',   lk.primary,      dk.primary],
+    ['--accent',      'Acento / destaque informativo',  lk.accent,       dk.accent],
+    ['--price-color', 'Preço dos produtos',             lk.price,        dk.price],
+    ['--bg',          'Background da tela',             lk.bg,           dk.bg],
+    ['--surface',     'Cards, header, modais',          lk.surface,      dk.surface],
+    ['--text',        'Texto principal',                lk.text,         dk.text],
+    ['--border',      'Bordas com identidade de marca', lk.border,       dk.border],
+    ['--primary-glow','Box-shadow do CTA ativo',        lk.primaryGlow,  dk.primaryGlow],
+    ['--promo-bg',    'Banner de promoção',             lk.promoBg,      dk.promoBg],
+    ['--cat-active',  'Categoria selecionada',          lk.catActive,    dk.catActive],
+  ];
+  return rows.map(([tok,uso,l,d])=>`
+    <tr>
+      <td><code>${tok}</code></td>
+      <td style="color:rgba(255,255,255,.45)">${uso}</td>
+      <td><span class="tdot" style="background:${l}"></span><span style="font-family:monospace;font-size:11px">${l}</span></td>
+      <td><span class="tdot" style="background:${d}"></span><span style="font-family:monospace;font-size:11px">${d}</span></td>
+    </tr>`).join('');
+}
+
+/* ══════════════════════════════════════
+   RENDER
+══════════════════════════════════════ */
+function render() {
+  // selector page
+  const tp = document.getElementById('totem-preview');
+  const cp = document.getElementById('comp-preview');
+  if (tp) tp.innerHTML = buildTotem(currentTheme, currentMode);
+  if (cp) cp.innerHTML = buildCompPanel(currentTheme, currentMode);
+
+  // full preview page
+  const fpl = document.getElementById('full-preview-light');
+  const fpd = document.getElementById('full-preview-dark');
+  if (fpl) fpl.innerHTML = buildTotem(currentTheme, 'light');
+  if (fpd) fpd.innerHTML = buildTotem(currentTheme, 'dark');
+
+  // tokens page
+  const to = document.getElementById('token-output');
+  const tn = document.getElementById('token-theme-name');
+  const tb = document.getElementById('token-table-body');
+  if (to) to.textContent = buildTokens(currentTheme, currentMode);
+  if (tn) tn.textContent = `${THEMES[currentTheme].name} — ${currentMode === 'light' ? 'Light ☀️' : 'Dark 🌙'}`;
+  if (tb) tb.innerHTML  = buildTokenTable(currentTheme);
+}
+
+/* ══════════════════════════════════════
+   CONTROLS
+══════════════════════════════════════ */
+function selectTheme(key, card) {
+  currentTheme = key;
+  document.querySelectorAll('.theme-card').forEach(c => c.classList.remove('selected'));
+  card.classList.add('selected');
+  render();
+}
+
+function setMode(mode, btn) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  // sync all mode buttons
+  const lb = document.getElementById('mode-light');
+  const db = document.getElementById('mode-dark');
+  const tl = document.getElementById('tok-light');
+  const td2= document.getElementById('tok-dark');
+  if(lb && db) { if(mode==='light'){lb.classList.add('active');db.classList.remove('active');}else{db.classList.add('active');lb.classList.remove('active');} }
+  if(tl && td2){ if(mode==='light'){tl.classList.add('active');td2.classList.remove('active');}else{td2.classList.add('active');tl.classList.remove('active');} }
+  render();
+}
+
+function syncModeBtn(mode) {
+  const lb = document.getElementById('mode-light');
+  const db = document.getElementById('mode-dark');
+  if(lb && db) {
+    if(mode==='light'){lb.classList.add('active');db.classList.remove('active');}
+    else{db.classList.add('active');lb.classList.remove('active');}
+  }
+}
+
+function showSec(id, btn) {
+  document.querySelectorAll('.sec').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+  window.scrollTo({top:0,behavior:'smooth'});
+  render();
+}
+
+function copyTokens() {
+  const txt = document.getElementById('token-output').textContent;
+  navigator.clipboard.writeText(txt).then(() => toast('Tokens copiados!'));
+}
+
+function copyVal(val, name) {
+  navigator.clipboard.writeText(val).then(() => toast(`${name} copiado: ${val}`));
+}
+
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+/* init */
+render();
+</script>
+</body>
+</html>

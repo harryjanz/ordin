@@ -2,6 +2,8 @@ export interface CompanyInfo {
   id: number;
   name: string;
   plan: string;
+  visual_theme: string;
+  visual_mode: string;
 }
 
 export interface TerminalInfo {

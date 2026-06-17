@@ -1,18 +1,17 @@
-import type { Theme, ThemeKey } from "../themes";
+import type { Theme } from "../themes";
 
 const FONT_D = "'Lexend', sans-serif";
 
 interface Props {
   T: Theme;
-  themeKey: ThemeKey;
   companyName: string;
   onStart: () => void;
-  onThemeToggle: () => void;
 }
 
-export default function WelcomeScreen({ T, themeKey, companyName, onStart, onThemeToggle }: Props) {
+export default function WelcomeScreen({ T, companyName, onStart }: Props) {
   return (
     <div
+      onClick={onStart}
       style={{
         minHeight: "100vh",
         background: T.radial,
@@ -23,32 +22,10 @@ export default function WelcomeScreen({ T, themeKey, companyName, onStart, onThe
         cursor: "pointer",
         userSelect: "none",
         WebkitUserSelect: "none",
-        position: "relative",
       }}
     >
-      {/* Toggle de tema — canto superior direito */}
-      <button
-        onClick={(e) => { e.stopPropagation(); onThemeToggle(); }}
-        style={{
-          position: "absolute",
-          top: 20,
-          right: 24,
-          padding: "8px 16px",
-          borderRadius: 999,
-          border: `1px solid ${T.border}`,
-          background: T.surface,
-          color: T.muted,
-          cursor: "pointer",
-          fontSize: 13,
-          fontWeight: 600,
-          fontFamily: FONT_D,
-        }}
-      >
-        {themeKey === "dark" ? "☀️ Claro" : "🌙 Escuro"}
-      </button>
-
       {/* Marca */}
-      <div style={{ textAlign: "center", marginBottom: 72 }} onClick={onStart}>
+      <div style={{ textAlign: "center", marginBottom: 72 }}>
         <svg
           width={80}
           height={80}
@@ -56,7 +33,7 @@ export default function WelcomeScreen({ T, themeKey, companyName, onStart, onThe
           fill="none"
           style={{ display: "block", margin: "0 auto 20px" }}
         >
-          <rect width="48" height="48" rx="14" fill="#9900ff" />
+          <rect width="48" height="48" rx="14" fill={T.roxo} />
           <circle cx="24" cy="22" r="10" stroke="white" strokeWidth="3.5" fill="none" />
           <circle cx="24" cy="22" r="4" fill="white" />
           <rect x="14" y="34" width="20" height="3" rx="1.5" fill="white" opacity="0.4" />
@@ -85,16 +62,13 @@ export default function WelcomeScreen({ T, themeKey, companyName, onStart, onThe
       </div>
 
       {/* CTA — pulse */}
-      <div
-        onClick={onStart}
-        style={{
-          animation: "pulse 2.4s ease-in-out infinite",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 16,
-        }}
-      >
+      <div style={{
+        animation: "pulse 2.4s ease-in-out infinite",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 16,
+      }}>
         <div style={{
           width: 88,
           height: 88,
