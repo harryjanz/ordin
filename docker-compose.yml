@@ -60,6 +60,7 @@ services:
       INTERNAL_SECRET: ${INTERNAL_SECRET}
       COMPANY_SERVICE_URL: ${COMPANY_SERVICE_URL}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://localhost:3001}
     networks:
       - ordin
     depends_on:
