@@ -4,6 +4,8 @@ import type { Theme } from "../themes";
 import type { CartItem, CompletedOrder } from "../types";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const FONT_D = "'Lexend', sans-serif";
+const FONT_B = "'Inter', sans-serif";
 
 const METHODS = [
   { id: "credit", label: "Crédito",  emoji: "💳", desc: "À vista ou parcelado" },
@@ -29,7 +31,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
   const [error, setError] = useState("");
   const [idleCountdown, setIdleCountdown] = useState(60);
 
-  // Volta para o catálogo se o cliente ficar 60s sem selecionar método de pagamento
+  // Volta para o catálogo se o cliente ficar 60s sem selecionar método
   useEffect(() => {
     if (processing) return;
     setIdleCountdown(60);
@@ -94,8 +96,12 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
     }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontSize: 44, marginBottom: 8 }}>💰</div>
-        <h2 style={{ color: T.text, fontSize: 26, fontWeight: 800, margin: 0 }}>Forma de pagamento</h2>
-        <p style={{ color: T.teal, fontSize: 28, fontWeight: 800, marginTop: 8 }}>{fmt(total)}</p>
+        <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: 26, fontWeight: 800, margin: 0 }}>
+          Forma de pagamento
+        </h2>
+        <p style={{ color: T.priceColor, fontFamily: FONT_D, fontSize: 28, fontWeight: 800, marginTop: 8 }}>
+          {fmt(total)}
+        </p>
       </div>
 
       <div style={{ display: "flex", gap: 16 }}>
@@ -108,13 +114,13 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
               minHeight: 110,
               minWidth: 150,
               background: method === m.id ? T.btn : T.surface,
-              border: `2px solid ${method === m.id ? T.btn : T.border}`,
+              border: `2px solid ${method === m.id ? T.btn : T.borderNeutral}`,
               borderRadius: 18,
               color: method === m.id ? T.btnText : T.text,
               cursor: processing ? "default" : "pointer",
               textAlign: "center",
               transition: "all 0.15s",
-              boxShadow: method === m.id ? T.glow : "none",
+              boxShadow: method === m.id ? T.glow : T.cardShadow,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
@@ -123,14 +129,16 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
             }}
           >
             <div style={{ fontSize: 40 }}>{m.emoji}</div>
-            <div style={{ fontWeight: 800, fontSize: 17 }}>{m.label}</div>
-            <div style={{ color: method === m.id ? "rgba(255,255,255,0.6)" : T.muted, fontSize: 13 }}>{m.desc}</div>
+            <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: 17 }}>{m.label}</div>
+            <div style={{ fontFamily: FONT_B, color: method === m.id ? "rgba(255,255,255,0.6)" : T.muted, fontSize: 13 }}>
+              {m.desc}
+            </div>
           </button>
         ))}
       </div>
 
       {error && (
-        <div style={{ color: T.errorText, background: T.errorBg, borderRadius: 8, padding: "10px 16px", fontSize: 14 }}>
+        <div style={{ color: T.errorText, background: T.errorBg, borderRadius: 8, padding: "10px 16px", fontSize: 14, fontFamily: FONT_B }}>
           {error}
         </div>
       )}
@@ -138,16 +146,15 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
       {processing ? (
         <div style={{ textAlign: "center" }}>
           <div style={{
-            width: 56,
-            height: 56,
-            border: `4px solid ${T.border}`,
+            width: 56, height: 56,
+            border: `4px solid ${T.borderNeutral}`,
             borderTop: `4px solid ${T.roxo}`,
             borderRadius: "50%",
             animation: "spin 0.8s linear infinite",
             margin: "0 auto 16px",
           }} />
-          <p style={{ color: T.muted, marginBottom: 6 }}>Processando pagamento…</p>
-          <p style={{ color: T.muted, fontSize: 13, opacity: 0.6 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, marginBottom: 6 }}>Processando pagamento…</p>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 13, opacity: 0.6 }}>
             Aguarde a confirmação no terminal TEF ({countdown}s)
           </p>
         </div>
@@ -159,10 +166,11 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
               padding: "0 28px",
               minHeight: 64,
               background: T.surface,
-              border: `1px solid ${T.border}`,
-              borderRadius: 14,
+              border: `1px solid ${T.borderNeutral}`,
+              borderRadius: 999,
               color: T.muted,
               cursor: "pointer",
+              fontFamily: FONT_D,
               fontWeight: 700,
               fontSize: 16,
             }}
@@ -178,7 +186,8 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
               background: method ? T.btn : "rgba(150,150,150,0.15)",
               color: method ? T.btnText : "rgba(200,200,200,0.4)",
               border: "none",
-              borderRadius: 14,
+              borderRadius: 999,
+              fontFamily: FONT_D,
               fontSize: 20,
               fontWeight: 800,
               cursor: method ? "pointer" : "default",
@@ -191,7 +200,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
       )}
 
       {!processing && (
-        <p style={{ color: T.muted, fontSize: 12, marginTop: 16, opacity: 0.45 }}>
+        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 12, marginTop: 16, opacity: 0.45 }}>
           Voltando ao catálogo em {idleCountdown}s…
         </p>
       )}
