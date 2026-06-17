@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import api from "../api";
 import { useStore } from "../store";
-import { THEME_REGISTRY, resolveTheme, type ThemeName, type ThemeMode } from "../../../totem/src/themes";
+import { THEME_REGISTRY, resolveTheme, type ThemeName, type ThemeMode } from "../themes";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -228,7 +228,7 @@ export default function SettingsScreen() {
 
                 {/* Dots de cor */}
                 <div style={{ display: "flex", gap: 6, padding: "0 16px 16px" }}>
-                  {entry.colors.map((c, i) => (
+                  {entry.colors.map((c: string, i: number) => (
                     <div key={i} style={{
                       width: 20, height: 20, borderRadius: "50%",
                       background: c, border: "2px solid rgba(255,255,255,0.15)",
