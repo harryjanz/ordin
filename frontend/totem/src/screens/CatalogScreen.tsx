@@ -63,7 +63,7 @@ export default function CatalogScreen({
         flexShrink: 0,
         zIndex: 10,
       }}>
-        <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: 26, color: "#9900ff", letterSpacing: "-0.5px" }}>
+        <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: 26, color: T.roxo, letterSpacing: "-0.5px" }}>
           {companyName}
         </div>
         <button
