@@ -4,14 +4,17 @@ import { useStore } from "../store";
 import api from "../api";
 
 const MENU = [
-  { to: "/dashboard", label: "Dashboard",   icon: "□",  roles: ["admin", "owner", "manager", "cashier"] },
-  { to: "/catalog",   label: "Catálogo",    icon: "▤",  roles: ["admin", "owner", "manager"] },
-  { to: "/orders",    label: "Pedidos",     icon: "≡",  roles: ["admin", "owner", "manager"] },
-  { to: "/payments",  label: "Transações",  icon: "◈",  roles: ["admin", "owner", "manager"] },
-  { to: "/company",   label: "Empresa",     icon: "◉",  roles: ["admin", "owner"] },
-  { to: "/pair",      label: "Dispositivos",icon: "⊞",  roles: ["admin", "owner", "manager"] },
-  { to: "/settings",  label: "Config.",     icon: "⚙",  roles: ["admin", "owner"] },
+  { to: "/dashboard", label: "Dashboard",    icon: "⊡", roles: ["admin", "owner", "manager", "cashier"] },
+  { to: "/catalog",   label: "Catálogo",     icon: "▤", roles: ["admin", "owner", "manager"] },
+  { to: "/orders",    label: "Pedidos",      icon: "≡", roles: ["admin", "owner", "manager"] },
+  { to: "/payments",  label: "Transações",   icon: "◈", roles: ["admin", "owner", "manager"] },
+  { to: "/company",   label: "Empresa",      icon: "◉", roles: ["admin", "owner"] },
+  { to: "/pair",      label: "Dispositivos", icon: "⊞", roles: ["admin", "owner", "manager"] },
+  { to: "/settings",  label: "Config.",      icon: "⚙", roles: ["admin", "owner"] },
 ] as const;
+
+const W_OPEN   = 220;
+const W_CLOSED = 52;
 
 export default function Sidebar() {
   const { role, logout } = useStore();
@@ -29,131 +32,140 @@ export default function Sidebar() {
   const visibleItems = MENU.filter((m) => role && (m.roles as readonly string[]).includes(role));
 
   return (
-    <>
-      {/* Hamburger button — sempre visível */}
+    <aside
+      style={{
+        width: open ? W_OPEN : W_CLOSED,
+        minWidth: open ? W_OPEN : W_CLOSED,
+        flexShrink: 0,
+        height: "100vh",
+        position: "sticky",
+        top: 0,
+        overflow: "hidden",
+        background: "#1d1434",
+        borderRight: "1px solid rgba(153,0,255,0.2)",
+        display: "flex",
+        flexDirection: "column",
+        transition: "width 220ms ease, min-width 220ms ease",
+        zIndex: 10,
+      }}
+    >
+      {/* Botão hamburger */}
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label={open ? "Fechar menu" : "Abrir menu"}
         style={{
-          position: "fixed",
-          top: 16,
-          left: 16,
-          zIndex: 200,
-          width: 40,
-          height: 40,
-          background: open ? "#2a1f4a" : "#1d1434",
+          flexShrink: 0,
+          alignSelf: "flex-start",
+          margin: "14px 10px 12px",
+          width: 32,
+          height: 32,
+          background: "transparent",
           border: "1px solid rgba(153,0,255,0.35)",
-          borderRadius: 8,
+          borderRadius: 7,
           cursor: "pointer",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          gap: 5,
-          transition: "background 0.15s",
-          flexShrink: 0,
+          gap: 4,
         }}
       >
-        {/* Linhas do sanduíche animadas */}
         {[0, 1, 2].map((i) => (
           <span
             key={i}
             style={{
               display: "block",
-              width: 18,
+              width: 14,
               height: 2,
               background: "#9900ff",
               borderRadius: 2,
-              transition: "transform 0.2s, opacity 0.2s",
+              transition: "transform 0.22s, opacity 0.22s",
               transformOrigin: "center",
-              transform: open
-                ? i === 0 ? "translateY(7px) rotate(45deg)"
-                : i === 1 ? "opacity: 0; scaleX(0)"
-                : "translateY(-7px) rotate(-45deg)"
-                : "none",
-              opacity: open && i === 1 ? 0 : 1,
+              ...(open
+                ? i === 0 ? { transform: "translateY(6px) rotate(45deg)" }
+                : i === 1 ? { opacity: 0, transform: "scaleX(0)" }
+                : { transform: "translateY(-6px) rotate(-45deg)" }
+                : {}),
             }}
           />
         ))}
       </button>
 
-      {/* Overlay — fecha o menu ao clicar fora (mobile) */}
-      {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 150,
-            background: "rgba(0,0,0,0.5)",
-          }}
-        />
-      )}
-
-      {/* Sidebar drawer */}
-      <aside
+      {/* Logo — aparece ao abrir */}
+      <div
         style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          zIndex: 160,
-          width: 220,
-          height: "100vh",
-          background: "#1d1434",
-          borderRight: "1px solid rgba(153,0,255,0.2)",
-          display: "flex",
-          flexDirection: "column",
-          padding: "24px 0",
-          transform: open ? "translateX(0)" : "translateX(-100%)",
-          transition: "transform 200ms ease",
-          boxShadow: open ? "4px 0 32px rgba(0,0,0,0.4)" : "none",
+          paddingLeft: 14,
+          paddingBottom: 16,
+          fontSize: 18,
+          fontWeight: 700,
+          color: "#9900ff",
+          whiteSpace: "nowrap",
+          opacity: open ? 1 : 0,
+          transition: "opacity 150ms ease",
+          flexShrink: 0,
         }}
       >
-        <div style={{ padding: "0 20px 28px", fontSize: 20, fontWeight: 700, color: "#9900ff" }}>
-          ordin
-        </div>
-        <nav style={{ flex: 1 }}>
-          {visibleItems.map((m) => (
-            <NavLink
-              key={m.to}
-              to={m.to}
-              style={({ isActive }) => ({
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-                padding: "12px 20px",
-                color: isActive ? "#9900ff" : "rgba(223,232,237,0.7)",
-                textDecoration: "none",
-                fontSize: 14,
-                fontWeight: isActive ? 600 : 400,
-                background: isActive ? "rgba(153,0,255,0.1)" : "transparent",
-                borderLeft: isActive ? "3px solid #9900ff" : "3px solid transparent",
-              })}
-            >
-              <span style={{ fontSize: 16, width: 20, textAlign: "center" }}>{m.icon}</span>
-              {m.label}
-            </NavLink>
-          ))}
-        </nav>
-        <button
-          onClick={handleLogout}
-          style={{
-            margin: "0 16px",
-            padding: "10px 12px",
-            background: "transparent",
-            border: "1px solid rgba(153,0,255,0.3)",
-            borderRadius: 6,
-            color: "rgba(223,232,237,0.6)",
-            fontSize: 13,
-            cursor: "pointer",
-          }}
-        >
-          Sair
-        </button>
-      </aside>
+        ordin
+      </div>
 
-      {/* Spacer para empurrar o conteúdo principal quando não há sidebar fixo */}
-      <div style={{ width: 0, flexShrink: 0 }} />
-    </>
+      {/* Itens de navegação */}
+      <nav style={{ flex: 1, overflow: "hidden" }}>
+        {visibleItems.map((m) => (
+          <NavLink
+            key={m.to}
+            to={m.to}
+            style={({ isActive }) => ({
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              padding: "11px 14px",
+              color: isActive ? "#9900ff" : "rgba(223,232,237,0.7)",
+              textDecoration: "none",
+              fontSize: 14,
+              fontWeight: isActive ? 600 : 400,
+              background: isActive ? "rgba(153,0,255,0.1)" : "transparent",
+              borderLeft: isActive ? "3px solid #9900ff" : "3px solid transparent",
+              whiteSpace: "nowrap",
+            })}
+          >
+            <span style={{ flexShrink: 0, fontSize: 17, width: 20, textAlign: "center" }}>
+              {m.icon}
+            </span>
+            <span
+              style={{
+                opacity: open ? 1 : 0,
+                transition: "opacity 150ms ease",
+              }}
+            >
+              {m.label}
+            </span>
+          </NavLink>
+        ))}
+      </nav>
+
+      {/* Botão sair */}
+      <button
+        onClick={handleLogout}
+        style={{
+          flexShrink: 0,
+          margin: "0 10px 16px",
+          padding: "9px 10px",
+          background: "transparent",
+          border: "1px solid rgba(153,0,255,0.3)",
+          borderRadius: 6,
+          color: "rgba(223,232,237,0.6)",
+          fontSize: 13,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <span style={{ flexShrink: 0, fontSize: 15 }}>⎋</span>
+        <span style={{ opacity: open ? 1 : 0, transition: "opacity 150ms ease" }}>Sair</span>
+      </button>
+    </aside>
   );
 }

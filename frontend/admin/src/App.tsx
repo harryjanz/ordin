@@ -32,7 +32,7 @@ export default function App() {
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "#0e0b1a" }}>
       <Sidebar />
-      <main style={{ flex: 1, overflow: "auto", paddingTop: 0 }}>
+      <main style={{ flex: 1, overflow: "auto" }}>
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/login" element={<Navigate to="/dashboard" replace />} />
