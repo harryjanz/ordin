@@ -151,9 +151,9 @@ class CompanyOut(BaseModel):
     name: str
     document: Optional[str] = None
     plan: str
-    payment_provider: str = "mock"
+    payment_provider: Optional[str] = "mock"
     active: bool
-    created_at: datetime
+    created_at: Optional[datetime] = None
     visual_theme: str = "ordin"
     visual_mode: str = "light"
     model_config = {"from_attributes": True}
@@ -503,7 +503,8 @@ async def get_company(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    if current_user.role != "superadmin" and current_user.company_id != company_id:
+        raise HTTPException(403, "Acesso negado")
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
