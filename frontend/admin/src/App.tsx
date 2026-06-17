@@ -41,6 +41,7 @@ export default function App() {
           <Route path="/payments"  element={<ProtectedRoute path="/payments"  element={<PaymentsScreen />} />} />
           <Route path="/company"   element={<ProtectedRoute path="/company"   element={<CompanyScreen />} />} />
           <Route path="/settings"  element={<ProtectedRoute path="/settings"  element={<SettingsScreen />} />} />
+          <Route path="/pair"      element={<ProtectedRoute path="/settings"  element={<SettingsScreen />} />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>

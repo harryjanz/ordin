@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import api from "../api";
 import { useStore } from "../store";
 import { THEME_REGISTRY, resolveTheme, type ThemeName, type ThemeMode } from "../themes";
@@ -98,6 +99,7 @@ const S = {
 
 export default function SettingsScreen() {
   const companyId = useStore((s) => s.selectedCompanyId ?? s.companyId);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // ── PIN ───────────────────────────────────────────────────────────────────
   const [pin, setPin] = useState<string | null>(null);
@@ -144,6 +146,47 @@ export default function SettingsScreen() {
   }
 
   const themes = Object.entries(THEME_REGISTRY) as [ThemeName, (typeof THEME_REGISTRY)[ThemeName]][];
+
+  // ── Pareamento de dispositivo ─────────────────────────────────────────────
+  const [pairCode,     setPairCode]     = useState(() => searchParams.get("code") ?? "");
+  const [pairTerminal, setPairTerminal] = useState<string>("");
+  const [pairTerminals, setPairTerminals] = useState<{ id: number; label: string }[]>([]);
+  const [pairLoading,  setPairLoading]  = useState(false);
+  const [pairMsg,      setPairMsg]      = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!companyId) return;
+    api.get(`/companies/${companyId}/terminals`).then((r) => {
+      const list = r.data.terminals ?? [];
+      setPairTerminals(list);
+      if (list.length > 0 && !pairTerminal) setPairTerminal(String(list[0].id));
+    }).catch(() => null);
+  }, [companyId]);
+
+  useEffect(() => {
+    const c = searchParams.get("code");
+    if (c) { setPairCode(c); setSearchParams({}, { replace: true }); }
+  }, [searchParams]);
+
+  async function approveDevice() {
+    if (!companyId || !pairCode.trim() || !pairTerminal) return;
+    setPairLoading(true);
+    setPairMsg(null);
+    try {
+      await api.post(`/companies/${companyId}/devices/approve`, {
+        code: pairCode.trim().toUpperCase(),
+        terminal_id: Number(pairTerminal),
+      });
+      setPairMsg({ ok: true, text: "Totem pareado com sucesso!" });
+      setPairCode("");
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setPairMsg({ ok: false, text: msg ?? "Erro ao parear. Verifique o código." });
+    } finally {
+      setPairLoading(false);
+      setTimeout(() => setPairMsg(null), 4000);
+    }
+  }
 
   return (
     <div style={S.page}>
@@ -295,6 +338,63 @@ export default function SettingsScreen() {
               color: saveMsg.ok ? "#5DD490" : "#ff6b5b",
             }}>
               {saveMsg.text}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Card Pareamento ──────────────────────────────────────────────── */}
+      <div style={S.card}>
+        <div style={S.cardTitle}>Parear totem</div>
+        <div style={S.cardDesc}>
+          Digite o código exibido no totem ou escaneie o QR com o celular para autenticar o dispositivo sem PIN.
+        </div>
+
+        <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+          <input
+            value={pairCode}
+            onChange={(e) => setPairCode(e.target.value.toUpperCase().slice(0, 6))}
+            placeholder="ABC123"
+            maxLength={6}
+            style={{
+              fontFamily: "'Courier New', monospace",
+              fontSize: 22, fontWeight: 700,
+              letterSpacing: 6, textTransform: "uppercase",
+              width: 140, padding: "10px 16px",
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(153,0,255,0.3)",
+              borderRadius: 10, color: "#DFE8ED",
+              outline: "none",
+            }}
+          />
+          <select
+            value={pairTerminal}
+            onChange={(e) => setPairTerminal(e.target.value)}
+            style={{
+              flex: 1, padding: "10px 14px",
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(153,0,255,0.2)",
+              borderRadius: 10, color: "#DFE8ED",
+              fontFamily: FONT_B, fontSize: 13,
+            }}
+          >
+            {pairTerminals.map((t) => (
+              <option key={t.id} value={t.id} style={{ background: "#1d1434" }}>{t.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <button
+            style={{ ...S.btn, opacity: pairLoading || !pairCode.trim() ? 0.5 : 1 }}
+            onClick={approveDevice}
+            disabled={pairLoading || !pairCode.trim() || !pairTerminal || !companyId}
+          >
+            {pairLoading ? "Pareando…" : "Aprovar pareamento"}
+          </button>
+          {pairMsg && (
+            <span style={{ fontFamily: FONT_B, fontSize: 13, color: pairMsg.ok ? "#5DD490" : "#ff6b5b" }}>
+              {pairMsg.text}
             </span>
           )}
         </div>

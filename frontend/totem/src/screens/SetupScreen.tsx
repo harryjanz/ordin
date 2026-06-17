@@ -2,11 +2,12 @@ import { useState } from "react";
 import axios from "axios";
 import type { Theme } from "../themes";
 import type { CompanyInfo, TerminalInfo, AvailableTerminal } from "../types";
+import DevicePairingScreen from "./DevicePairingScreen";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
 
-type Step = "pin" | "terminal" | "testing";
+type Step = "pairing" | "pin" | "terminal" | "testing";
 
 interface Props {
   T: Theme;
@@ -40,7 +41,7 @@ function Numpad({ onPress, onDel, T }: { onPress: (v: string) => void; onDel: ()
 }
 
 export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
-  const [step, setStep] = useState<Step>("pin");
+  const [step, setStep] = useState<Step>("pairing");
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState("");
   const [shake, setShake] = useState(false);
@@ -161,7 +162,18 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
     boxShadow: "0 8px 40px rgba(153,0,255,0.12)",
   };
 
-  // Etapa 1 — PIN
+  // Etapa 0 — Pareamento por código/QR
+  if (step === "pairing") {
+    return (
+      <DevicePairingScreen
+        T={T}
+        onDone={onDone}
+        onUsePIN={() => setStep("pin")}
+      />
+    );
+  }
+
+  // Etapa 1 — PIN (fallback)
   if (step === "pin") {
     return (
       <div style={wrap}>

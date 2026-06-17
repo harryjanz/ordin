@@ -1,8 +1,11 @@
 import base64
+import json
 import os
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
+
+import redis as redis_lib
 
 import bcrypt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -23,6 +26,7 @@ from audit import emit_audit
 
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
+redis_client    = redis_lib.from_url(require_env("REDIS_URL"), decode_responses=True)
 
 
 def require_internal(x_internal_secret: str = Header(default="")) -> None:
@@ -1010,6 +1014,56 @@ async def delete_payment_config(
         raise HTTPException(404, "Config não encontrada")
     cfg.active = False
     await db.commit()
+
+
+# ── Device pairing ───────────────────────────────────────────────────────────
+
+class DeviceApproveIn(BaseModel):
+    code: str
+    terminal_id: int
+
+
+@app.post(
+    "/companies/{company_id}/devices/approve",
+    tags=["Terminais"],
+    summary="Aprovar pareamento de totem por código",
+)
+async def approve_device(
+    company_id: int,
+    body: DeviceApproveIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    if current_user.role != "superadmin" and current_user.company_id != company_id:
+        raise HTTPException(403, "Acesso negado")
+
+    key = f"device_challenge:{body.code.upper()}"
+    raw = redis_client.get(key)
+    if not raw:
+        raise HTTPException(404, "Código inválido ou expirado")
+    data = json.loads(raw)
+    if data["status"] != "pending":
+        raise HTTPException(422, "Código já utilizado")
+
+    t_result = await db.execute(
+        select(Terminal).where(Terminal.id == body.terminal_id, Terminal.company_id == company_id, Terminal.active == True)
+    )
+    t = t_result.scalar_one_or_none()
+    if not t:
+        raise HTTPException(404, "Terminal não encontrado nesta empresa")
+
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    redis_client.set(key, json.dumps({
+        "status": "approved",
+        "company":  {"id": co.id, "name": co.name, "plan": co.plan or "free",
+                     "visual_theme": co.visual_theme, "visual_mode": co.visual_mode},
+        "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
+    }), ex=60)
+
+    return {"ok": True}
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

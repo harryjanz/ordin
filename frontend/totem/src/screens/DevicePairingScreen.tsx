@@ -1,0 +1,175 @@
+import { useEffect, useRef, useState } from "react";
+import axios from "axios";
+import { QRCodeSVG } from "qrcode.react";
+import type { Theme } from "../themes";
+import type { CompanyInfo, TerminalInfo } from "../types";
+
+const FONT_D = "'Lexend', sans-serif";
+const FONT_B = "'Inter', sans-serif";
+const POLL_MS = 5000;
+const TTL     = 300;
+
+interface Props {
+  T: Theme;
+  onDone:   (company: CompanyInfo, terminal: TerminalInfo, token: string) => void;
+  onUsePIN: () => void;
+}
+
+export default function DevicePairingScreen({ T, onDone, onUsePIN }: Props) {
+  const [code,      setCode]      = useState<string | null>(null);
+  const [qrUrl,     setQrUrl]     = useState<string | null>(null);
+  const [expired,   setExpired]   = useState(false);
+  const [countdown, setCountdown] = useState(TTL);
+  const [err,       setErr]       = useState<string | null>(null);
+  const pollRef  = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function clearTimers() {
+    if (pollRef.current)  clearInterval(pollRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+  }
+
+  async function fetchChallenge() {
+    clearTimers();
+    setExpired(false);
+    setErr(null);
+    setCode(null);
+    setQrUrl(null);
+    setCountdown(TTL);
+    try {
+      const r = await axios.post("/auth/device/challenge");
+      setCode(r.data.code);
+      setQrUrl(r.data.qr_url);
+      startPolling(r.data.code);
+      startCountdown();
+    } catch {
+      setErr("Erro ao gerar código. Tente novamente.");
+    }
+  }
+
+  function startPolling(c: string) {
+    pollRef.current = setInterval(async () => {
+      try {
+        const r = await axios.get(`/auth/device/status?code=${c}`);
+        if (r.data.status === "approved") {
+          clearTimers();
+          onDone(r.data.company, r.data.terminal, r.data.access_token);
+        } else if (r.data.status === "expired") {
+          clearTimers();
+          setExpired(true);
+        }
+      } catch { /* ignora erros de polling */ }
+    }, POLL_MS);
+  }
+
+  function startCountdown() {
+    timerRef.current = setInterval(() => {
+      setCountdown((n) => {
+        if (n <= 1) { clearTimers(); setExpired(true); return 0; }
+        return n - 1;
+      });
+    }, 1000);
+  }
+
+  useEffect(() => { fetchChallenge(); return clearTimers; }, []);
+
+  const mins = String(Math.floor(countdown / 60)).padStart(2, "0");
+  const secs = String(countdown % 60).padStart(2, "0");
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: T.radial,
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: 32,
+    }}>
+      <div style={{
+        background: T.surface, borderRadius: 24,
+        border: `1px solid ${T.border}`,
+        padding: "40px 48px", maxWidth: 480, width: "100%",
+        textAlign: "center", boxShadow: T.cardShadow,
+      }}>
+        <svg width={48} height={48} viewBox="0 0 48 48" fill="none" style={{ marginBottom: 16 }}>
+          <rect width="48" height="48" rx="13" fill={T.roxo} />
+          <circle cx="24" cy="22" r="10" stroke="white" strokeWidth="3.5" fill="none" />
+          <circle cx="24" cy="22" r="4" fill="white" />
+          <rect x="14" y="34" width="20" height="3" rx="1.5" fill="white" opacity="0.4" />
+        </svg>
+
+        <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: 20, color: T.text, marginBottom: 6 }}>
+          Parear totem
+        </div>
+        <div style={{ fontFamily: FONT_B, fontSize: 13, color: T.muted, marginBottom: 28, lineHeight: 1.6 }}>
+          Digite o código no admin ou escaneie o QR com o celular
+        </div>
+
+        {err ? (
+          <>
+            <div style={{ color: T.errorText, fontFamily: FONT_B, fontSize: 14, marginBottom: 16 }}>{err}</div>
+            <button onClick={fetchChallenge} style={btnStyle(T)}>Tentar novamente</button>
+          </>
+        ) : expired ? (
+          <>
+            <div style={{ fontFamily: FONT_B, fontSize: 14, color: T.muted, marginBottom: 20 }}>
+              Código expirado.
+            </div>
+            <button onClick={fetchChallenge} style={btnStyle(T)}>Gerar novo código</button>
+          </>
+        ) : code ? (
+          <>
+            <div style={{
+              fontFamily: "'Courier New', monospace",
+              fontSize: 46, fontWeight: 900,
+              letterSpacing: 10, color: T.roxo,
+              background: T.roxoSubtle,
+              borderRadius: 16, padding: "14px 20px",
+              marginBottom: 24, border: `1px solid ${T.border}`,
+            }}>
+              {code}
+            </div>
+
+            {qrUrl && (
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
+                <div style={{ background: "#fff", padding: 12, borderRadius: 12 }}>
+                  <QRCodeSVG value={qrUrl} size={140} />
+                </div>
+              </div>
+            )}
+
+            <div style={{ fontFamily: FONT_B, fontSize: 13, color: T.muted, marginBottom: 8 }}>
+              Expira em{" "}
+              <span style={{ fontWeight: 700, color: countdown < 60 ? T.errorText : T.text }}>
+                {mins}:{secs}
+              </span>
+            </div>
+          </>
+        ) : (
+          <div style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, padding: "20px 0" }}>
+            Gerando código…
+          </div>
+        )}
+
+        <button
+          onClick={onUsePIN}
+          style={{
+            display: "block", margin: "16px auto 0",
+            background: "transparent", border: "none",
+            color: T.muted, fontFamily: FONT_B, fontSize: 13,
+            cursor: "pointer", textDecoration: "underline",
+          }}
+        >
+          Entrar com PIN
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function btnStyle(T: Theme): React.CSSProperties {
+  return {
+    background: T.btn, color: T.btnText, border: "none",
+    borderRadius: 999, padding: "12px 32px",
+    fontFamily: FONT_D, fontWeight: 700, fontSize: 15,
+    cursor: "pointer", boxShadow: T.glow,
+  };
+}
