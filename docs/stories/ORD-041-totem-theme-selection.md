@@ -1,6 +1,6 @@
 # ORD-041 — Seleção de tema visual por empresa no admin
 
-**Status:** New
+**Status:** Done
 **Tipo:** Feature — UX / Design System / Full-stack
 **Referência:** `docs/design-system-3themes.html`
 
