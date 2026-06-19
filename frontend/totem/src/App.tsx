@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, Component } from "react";
+import type { ReactNode } from "react";
 import api from "./api";
 import { useStore } from "./store";
 import { resolveTheme } from "./themes";
@@ -8,9 +9,35 @@ import WelcomeScreen from "./screens/WelcomeScreen";
 import CatalogScreen from "./screens/CatalogScreen";
 import CpfScreen from "./screens/CpfScreen";
 import PaymentScreen from "./screens/PaymentScreen";
+import PIXPaymentScreen from "./screens/PIXPaymentScreen";
 import SuccessScreen from "./screens/SuccessScreen";
 import { useState } from "react";
 import type { CompanyInfo, TerminalInfo, Product, CompletedOrder } from "./types";
+
+class PixErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(e: unknown) {
+    return { error: String(e) };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ minHeight: "100vh", background: "#fff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, padding: 24 }}>
+          <div style={{ fontSize: 48 }}>⚠️</div>
+          <h2 style={{ color: "#c00", margin: 0 }}>Erro ao exibir tela PIX</h2>
+          <pre style={{ background: "#fee", padding: 16, borderRadius: 8, fontSize: 12, maxWidth: 400, wordBreak: "break-all" }}>{this.state.error}</pre>
+          <button onClick={() => this.setState({ error: null })} style={{ padding: "12px 32px", background: "#c00", color: "#fff", border: "none", borderRadius: 8, fontSize: 16, cursor: "pointer" }}>
+            Tentar novamente
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const INACTIVITY_TIMEOUT_MS = 120_000;
 const INACTIVITY_WARN_SEC   = 10;
@@ -31,6 +58,10 @@ export default function App() {
 
   const savedTerminalId = getStoredTerminalId();
   const [orderRef, setOrderRef] = useState<string | null>(null);
+  const [pixData, setPixData] = useState<{
+    transactionId: number; qrCodeBase64: string;
+  } | null>(null);
+  const [refusedMethod, setRefusedMethod] = useState<string>("");
   const [warnCountdown, setWarnCountdown] = useState(0);
   const [showInactivityModal, setShowInactivityModal] = useState(false);
 
@@ -91,7 +122,31 @@ export default function App() {
 
   function handleSuccess(order: CompletedOrder) {
     setCompletedOrder(order);
+    setPixData(null);
     setScreen("success");
+  }
+
+  function handlePix(data: { transactionId: number; qrCode: string; qrCodeBase64: string }) {
+    setPixData({ transactionId: data.transactionId, qrCodeBase64: data.qrCodeBase64 });
+    setScreen("pix");
+  }
+
+  async function handlePixSuccess() {
+    if (!orderRef) return;
+    const ticketsRes = await api.get(`/orders/${orderRef}/tickets`).catch(() => ({ data: { tickets: [] } }));
+    const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
+    handleSuccess({
+      order_ref: orderRef,
+      total,
+      method: "pix",
+      nsu: null,
+      tickets: ticketsRes.data.tickets ?? [],
+    });
+  }
+
+  function handlePixCancel() {
+    setPixData(null);
+    goIdle();
   }
 
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
@@ -200,9 +255,30 @@ export default function App() {
           cpf={cpf}
           orderRef={orderRef}
           onSuccess={handleSuccess}
-          onRefused={() => setScreen("refused")}
+          onRefused={(m) => { setRefusedMethod(m); setScreen("refused"); }}
+          onPix={handlePix}
           onBack={() => setScreen("catalog")}
         />
+      )}
+
+      {screen === "pix" && orderRef && (
+        <PixErrorBoundary>
+          {pixData ? (
+            <PIXPaymentScreen
+              T={T}
+              transactionId={pixData.transactionId}
+              qrCodeBase64={pixData.qrCodeBase64}
+              amount={cartTotal}
+              orderRef={orderRef}
+              onSuccess={handlePixSuccess}
+              onCancel={handlePixCancel}
+            />
+          ) : (
+            <div style={{ minHeight: "100vh", background: "#f5f5f5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <p style={{ color: "#666", fontSize: 16 }}>Carregando PIX…</p>
+            </div>
+          )}
+        </PixErrorBoundary>
       )}
 
       {screen === "success" && completedOrder && (
@@ -225,10 +301,14 @@ export default function App() {
           gap: 24,
         }}>
           <div style={{ fontSize: 56 }}>❌</div>
-          <h2 style={{ color: T.text, fontSize: 28, fontWeight: 800, margin: 0 }}>
-            Pagamento não autorizado
+          <h2 style={{ color: T.text, fontSize: 28, fontWeight: 800, margin: 0, textAlign: "center" }}>
+            {refusedMethod === "pix" ? "Erro ao gerar PIX" : "Pagamento não autorizado"}
           </h2>
-          <p style={{ color: T.muted, fontSize: 16 }}>Verifique os dados do cartão e tente novamente</p>
+          <p style={{ color: T.muted, fontSize: 16, textAlign: "center", maxWidth: 360, margin: 0 }}>
+            {refusedMethod === "pix"
+              ? "Não foi possível gerar o QR Code PIX. Tente novamente ou escolha outra forma de pagamento."
+              : "Pagamento recusado. Verifique os dados e tente novamente."}
+          </p>
           <div style={{ display: "flex", gap: 14 }}>
             <button
               onClick={goIdle}

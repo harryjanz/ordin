@@ -52,10 +52,13 @@ class Transaction(Base):
     provider                = Column(String(20), default="mock")
     provider_transaction_id = Column(String(80), nullable=True)
     paygo_terminal_id       = Column(String(40), nullable=True)
+    mp_device_id            = Column(String(100), nullable=True)
     environment             = Column(String(10), nullable=True)
     nsu                     = Column(String(40))
     authorization           = Column(String(40))
     paygo_response          = Column(String(2000))
+    qr_code                 = Column(String(4000), nullable=True)
+    qr_code_base64          = Column(String(100000), nullable=True)
     cancelled_at            = Column(DateTime)
     cancel_reason           = Column(String(255))
     created_at              = Column(DateTime, default=datetime.utcnow)
@@ -134,6 +137,15 @@ class PaymentApprovedOut(BaseModel):
     order_ref:      Optional[str] = None
     amount:         Optional[float] = None
     error:          Optional[str] = None
+    qr_code:        Optional[str] = None
+    qr_code_base64: Optional[str] = None
+
+
+class PaymentStatusOut(BaseModel):
+    transaction_id: int
+    status:         str
+    qr_code:        Optional[str] = None
+    qr_code_base64: Optional[str] = None
 
 
 class TransactionOut(BaseModel):
@@ -231,11 +243,17 @@ async def create_payment(
 
     provider_name     = terminal_cfg.get("payment_provider", "mock")
     paygo_terminal_id = terminal_cfg.get("paygo_terminal_id")
+    mp_device_id      = terminal_cfg.get("mp_device_id")
     environment       = terminal_cfg.get("environment", "sandbox")
     raw_config        = terminal_cfg.get("config") or {}
 
     if provider_name == "paygo" and not paygo_terminal_id:
         raise HTTPException(400, "Terminal sem paygo_terminal_id configurado")
+    if provider_name == "mercadopago" and body.method in ("credit", "debit") and not mp_device_id:
+        raise HTTPException(400, "Terminal sem mp_device_id configurado para pagamento com cartão")
+
+    # terminal_ref usado pelo provider (PayGo usa paygo_terminal_id; MP usa mp_device_id)
+    terminal_ref = mp_device_id if provider_name == "mercadopago" else (paygo_terminal_id or "")
 
     # 2. Persistir transação (status=pending)
     tx = Transaction(
@@ -248,6 +266,7 @@ async def create_payment(
         status="pending",
         provider=provider_name,
         paygo_terminal_id=paygo_terminal_id,
+        mp_device_id=mp_device_id,
         environment=environment,
     )
     db.add(tx)
@@ -267,7 +286,7 @@ async def create_payment(
     result = await provider.create_transaction(
         amount=Decimal(str(body.amount)),
         method=body.method,
-        terminal_ref=paygo_terminal_id or "",
+        terminal_ref=terminal_ref,
         order_ref=body.order_ref,
     )
 
@@ -276,6 +295,8 @@ async def create_payment(
     tx.nsu                     = result.nsu
     tx.authorization           = result.authorization
     tx.provider_transaction_id = result.provider_transaction_id
+    tx.qr_code                 = result.qr_code
+    tx.qr_code_base64          = result.qr_code_base64
     await db.commit()
 
     # 5. Auditoria MongoDB (best-effort)
@@ -316,6 +337,18 @@ async def create_payment(
             "authorization": result.authorization,
             "order_ref": body.order_ref,
             "amount": body.amount,
+        }
+
+    # PIX criado com sucesso — aguardando pagamento
+    if result.status == TransactionStatus.processing:
+        return {
+            "ok": True,
+            "transaction_id": tx.id,
+            "status": "processing",
+            "order_ref": body.order_ref,
+            "amount": body.amount,
+            "qr_code": result.qr_code,
+            "qr_code_base64": result.qr_code_base64,
         }
 
     await _publish(
@@ -505,6 +538,117 @@ async def test_connection(
         return TestConnectionOut(success=False, detail="Timeout aguardando máquina de pagamento (30s)")
 
     return TestConnectionOut(success=result["success"], detail=result.get("detail", ""))
+
+
+@app.get(
+    "/payments/{tx_id}/status",
+    response_model=PaymentStatusOut,
+    tags=["Pagamentos"],
+    summary="Consultar status de pagamento PIX (polling do totem)",
+)
+async def get_payment_status(
+    tx_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Transaction).where(
+            Transaction.id == tx_id,
+            Transaction.company_id == current_user.company_id,
+        )
+    )
+    tx = result.scalars().first()
+    if not tx:
+        raise HTTPException(404, "Transação não encontrada")
+
+    # Se ainda está em processamento e é MP, consulta a API para atualizar
+    if tx.status == "processing" and tx.provider == "mercadopago" and tx.provider_transaction_id:
+        terminal_cfg = await _get_terminal_config(tx.terminal_id)
+        raw_config   = terminal_cfg.get("config") or {}
+        access_token = raw_config.get("api_key", "")
+
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"https://api.mercadopago.com/v1/payments/{tx.provider_transaction_id}",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                if resp.status_code == 200:
+                    data   = resp.json()
+                    mp_status = data.get("status", "pending")
+
+                    if mp_status == "approved":
+                        tx.status = "approved"
+                        await db.commit()
+                        await _notify_order(tx.order_ref, "paid")
+                        await _publish(
+                            "payment.approved",
+                            PaymentApprovedEvent(
+                                company_id=current_user.company_id,
+                                order_ref=tx.order_ref,
+                                transaction_id=tx.id,
+                                amount=str(tx.amount),
+                                nsu="",
+                                authorization="",
+                                provider=tx.provider,
+                            ).to_dict(),
+                        )
+                    elif mp_status in ("cancelled", "rejected"):
+                        tx.status = "cancelled" if mp_status == "cancelled" else "refused"
+                        await db.commit()
+        except Exception as exc:
+            logger.warning("MP status poll error: %s", exc)
+
+    return {
+        "transaction_id": tx.id,
+        "status": tx.status,
+        "qr_code": tx.qr_code,
+        "qr_code_base64": tx.qr_code_base64,
+    }
+
+
+@app.delete(
+    "/payments/{tx_id}",
+    response_model=CancelOut,
+    tags=["Pagamentos"],
+    summary="Cancelar PIX pendente (timeout ou desistência do cliente)",
+)
+async def delete_payment(
+    tx_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(Transaction).where(
+            Transaction.id == tx_id,
+            Transaction.company_id == current_user.company_id,
+        )
+    )
+    tx = result.scalars().first()
+    if not tx:
+        raise HTTPException(404, "Transação não encontrada")
+    if tx.status not in ("processing", "pending"):
+        raise HTTPException(400, f"Não é possível cancelar transação com status '{tx.status}'")
+
+    tx.status      = "cancelled"
+    tx.cancelled_at = datetime.utcnow()
+    tx.cancel_reason = "Cancelado pelo totem"
+    await db.commit()
+
+    await _notify_order(tx.order_ref, "cancelled")
+    await _publish(
+        "payment.cancelled",
+        PaymentCancelledEvent(
+            company_id=current_user.company_id,
+            order_ref=tx.order_ref,
+            transaction_id=tx.id,
+            amount=str(tx.amount),
+            cancel_reason="Cancelado pelo totem",
+            provider=tx.provider or "mock",
+        ).to_dict(),
+    )
+
+    return {"ok": True, "detail": "PIX cancelado"}
 
 
 @app.get("/health", response_model=HealthOut, tags=["Pagamentos"], summary="Healthcheck")

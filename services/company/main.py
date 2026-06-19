@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, JSON,
-    UniqueConstraint, select, func, or_,
+    UniqueConstraint, select, func, or_, update,
 )
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
@@ -107,6 +107,7 @@ class Terminal(Base):
     tef_number        = Column(String(40))
     tef_serial        = Column(String(40))
     paygo_terminal_id = Column(String(40), nullable=True)
+    mp_device_id      = Column(String(100), nullable=True)
     environment       = Column(String(10), default="sandbox")
     active            = Column(Boolean, default=True)
     created_at        = Column(DateTime, default=datetime.utcnow)
@@ -194,6 +195,7 @@ class TerminalOut(BaseModel):
     tef_number: Optional[str] = None
     tef_serial: Optional[str] = None
     paygo_terminal_id: Optional[str] = None
+    mp_device_id: Optional[str] = None
     environment: Optional[str] = "sandbox"
     active: bool = True
     last_heartbeat: Optional[datetime] = None
@@ -206,6 +208,7 @@ class TerminalIn(BaseModel):
     tef_number: Optional[str] = None
     tef_serial: Optional[str] = None
     paygo_terminal_id: Optional[str] = None
+    mp_device_id: Optional[str] = None
     environment: str = "sandbox"
 
 
@@ -214,6 +217,7 @@ class TerminalUpdate(BaseModel):
     tef_number: Optional[str] = None
     tef_serial: Optional[str] = None
     paygo_terminal_id: Optional[str] = None
+    mp_device_id: Optional[str] = None
     environment: Optional[str] = None
 
 
@@ -417,35 +421,36 @@ async def internal_get_terminal(
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
 
-    provider = co.payment_provider or "mock"
-    config = None
-
-    if provider != "mock":
-        cfg_result = await db.execute(
-            select(CompanyPaymentConfig).filter_by(
-                company_id=t.company_id,
-                provider=provider,
-                environment=t.environment or "sandbox",
-                active=True,
-            )
+    # Fonte de verdade: config ativa na tabela company_payment_configs
+    cfg_result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(
+            company_id=t.company_id,
+            active=True,
         )
-        cfg = cfg_result.scalars().first()
-        if not cfg:
-            raise HTTPException(
-                400,
-                f"Configuração de pagamento não encontrada para provider={provider} "
-                f"environment={t.environment}",
-            )
-        config = {
-            "api_key":      decrypt_credential(cfg.api_key) if cfg.api_key else None,
-            "api_secret":   decrypt_credential(cfg.api_secret) if cfg.api_secret else None,
-            "extra_config": cfg.extra_config or {},
+    )
+    cfg = cfg_result.scalars().first()
+
+    if cfg is None:
+        # Sem config ativa → fallback mock (sem credenciais)
+        return {
+            "paygo_terminal_id": t.paygo_terminal_id,
+            "mp_device_id":      t.mp_device_id,
+            "payment_provider":  "mock",
+            "environment":       t.environment or "sandbox",
+            "config":            None,
         }
+
+    config = {
+        "api_key":      decrypt_credential(cfg.api_key) if cfg.api_key else None,
+        "api_secret":   decrypt_credential(cfg.api_secret) if cfg.api_secret else None,
+        "extra_config": cfg.extra_config or {},
+    }
 
     return {
         "paygo_terminal_id": t.paygo_terminal_id,
-        "payment_provider":  provider,
-        "environment":       t.environment or "sandbox",
+        "mp_device_id":      t.mp_device_id,
+        "payment_provider":  cfg.provider,
+        "environment":       cfg.environment,
         "config":            config,
     }
 
@@ -671,6 +676,7 @@ async def create_terminal(
         tef_number=body.tef_number,
         tef_serial=body.tef_serial,
         paygo_terminal_id=body.paygo_terminal_id,
+        mp_device_id=body.mp_device_id,
         environment=body.environment,
     )
     db.add(t)
@@ -707,6 +713,8 @@ async def update_terminal(
         t.tef_serial = body.tef_serial
     if body.paygo_terminal_id is not None:
         t.paygo_terminal_id = body.paygo_terminal_id
+    if "mp_device_id" in body.model_fields_set:
+        t.mp_device_id = body.mp_device_id or None
     if body.environment is not None:
         t.environment = body.environment
     await db.commit()
@@ -893,7 +901,8 @@ async def list_payment_configs(
     _require_company_admin(current_user, company_id)
     result = await db.execute(
         select(CompanyPaymentConfig)
-        .where(CompanyPaymentConfig.company_id == company_id, CompanyPaymentConfig.active == True)
+        .where(CompanyPaymentConfig.company_id == company_id)
+        .order_by(CompanyPaymentConfig.active.desc(), CompanyPaymentConfig.created_at.desc())
     )
     configs = result.scalars().all()
     return {
@@ -927,6 +936,16 @@ async def create_payment_config(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_company_admin(current_user, company_id)
+    existing = (await db.execute(
+        select(CompanyPaymentConfig).filter_by(
+            company_id=company_id,
+            provider=body.provider,
+            environment=body.environment,
+        )
+    )).scalars().first()
+    if existing:
+        raise HTTPException(409, f"Já existe uma configuração de {body.provider} para o ambiente {body.environment}")
+
     cfg = CompanyPaymentConfig(
         company_id=company_id,
         provider=body.provider,
@@ -934,12 +953,10 @@ async def create_payment_config(
         api_key=encrypt_credential(body.api_key) if body.api_key else None,
         api_secret=encrypt_credential(body.api_secret) if body.api_secret else None,
         extra_config=body.extra_config,
+        active=False,
     )
     db.add(cfg)
-    try:
-        await db.commit()
-    except Exception:
-        raise HTTPException(409, "Já existe config ativa para este provider+environment")
+    await db.commit()
     await db.refresh(cfg)
     return {
         "id": cfg.id,
@@ -1012,8 +1029,41 @@ async def delete_payment_config(
     cfg = result.scalars().first()
     if not cfg:
         raise HTTPException(404, "Config não encontrada")
-    cfg.active = False
+    await db.delete(cfg)
     await db.commit()
+
+
+@app.patch(
+    "/companies/{company_id}/payment-configs/{config_id}/activate",
+    tags=["Pagamento"],
+    summary="Ativar uma configuração de pagamento (desativa as demais do mesmo provider)",
+)
+async def activate_payment_config(
+    company_id: int,
+    config_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(id=config_id, company_id=company_id)
+    )
+    cfg = result.scalars().first()
+    if not cfg:
+        raise HTTPException(404, "Config não encontrada")
+
+    # Desativa todas as outras configs da empresa (só uma pode estar ativa por vez)
+    await db.execute(
+        update(CompanyPaymentConfig)
+        .where(
+            CompanyPaymentConfig.company_id == company_id,
+            CompanyPaymentConfig.id != config_id,
+        )
+        .values(active=False)
+    )
+    cfg.active = True
+    await db.commit()
+    return {"ok": True}
 
 
 # ── Device pairing ───────────────────────────────────────────────────────────

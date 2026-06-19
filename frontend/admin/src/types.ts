@@ -20,7 +20,20 @@ export interface Terminal {
   id: number;
   company_id: number;
   label: string;
+  environment?: string;
+  mp_device_id?: string | null;
   active: boolean;
+}
+
+export interface PaymentConfig {
+  id: number;
+  provider: string;
+  environment: string;
+  api_key: string;
+  api_secret: string;
+  extra_config?: Record<string, string> | null;
+  active: boolean;
+  created_at: string;
 }
 
 export interface User {
