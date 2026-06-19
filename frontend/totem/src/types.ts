@@ -59,5 +59,6 @@ export type Screen =
   | "catalog"
   | "cpf"
   | "payment"
+  | "pix"
   | "success"
   | "refused";

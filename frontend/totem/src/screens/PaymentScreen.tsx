@@ -13,6 +13,12 @@ const METHODS = [
   { id: "pix",    label: "PIX",      emoji: "⚡", desc: "Transferência instantânea" },
 ] as const;
 
+interface PixData {
+  transactionId: number;
+  qrCode: string;
+  qrCodeBase64: string;
+}
+
 interface Props {
   T: Theme;
   cart: CartItem[];
@@ -20,11 +26,12 @@ interface Props {
   cpf: string | null;
   orderRef: string;
   onSuccess: (order: CompletedOrder) => void;
-  onRefused: () => void;
+  onRefused: (method: string) => void;
+  onPix: (data: PixData) => void;
   onBack: () => void;
 }
 
-export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess, onRefused, onBack }: Props) {
+export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess, onRefused, onPix, onBack }: Props) {
   const [method, setMethod] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [countdown, setCountdown] = useState(90);
@@ -62,7 +69,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
       };
       const res = await api.post("/payments", body);
       clearInterval(timer);
-      const { status, nsu } = res.data;
+      const { status, nsu, transaction_id, qr_code, qr_code_base64 } = res.data;
 
       if (status === "approved") {
         const ticketsRes = await api.get(`/orders/${orderRef}/tickets`);
@@ -73,8 +80,10 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
           nsu: nsu ?? null,
           tickets: ticketsRes.data.tickets ?? [],
         });
+      } else if (status === "processing" && method === "pix") {
+        onPix({ transactionId: transaction_id, qrCode: qr_code ?? "", qrCodeBase64: qr_code_base64 ?? "" });
       } else {
-        onRefused();
+        onRefused(method ?? "");
       }
     } catch {
       clearInterval(timer);

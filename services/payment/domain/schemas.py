@@ -27,6 +27,8 @@ class TransactionResult:
     authorization: Optional[str] = None
     error_message: Optional[str] = None
     audit_events: list = field(default_factory=list)
+    qr_code: Optional[str] = None
+    qr_code_base64: Optional[str] = None
 
 
 @dataclass
@@ -42,5 +44,9 @@ PROVIDER_BASE_URLS: dict[str, dict[str, str]] = {
     "paygo": {
         "sandbox":    "https://sandbox.controlpay.com.br/webapi/",
         "production": "https://pos-transac.pgweb.io:31735/webapi/",
+    },
+    "mercadopago": {
+        "sandbox":    "https://api.mercadopago.com",
+        "production": "https://api.mercadopago.com",
     },
 }
