@@ -130,7 +130,7 @@ export default function CatalogScreen({
         padding: "24px 28px",
         paddingBottom: 136,
         display: "grid",
-        gridTemplateColumns: "repeat(2, 1fr)",
+        gridTemplateColumns: "repeat(3, 1fr)",
         gap: 20,
         alignContent: "start",
         overflowY: "auto",
@@ -164,11 +164,11 @@ export default function CatalogScreen({
             >
               {/* Imagem — 60% da altura do card */}
               {p.image_url ? (
-                <img src={p.image_url} alt={p.name} style={{ width: "100%", height: 140, objectFit: "cover" }} />
+                <img src={p.image_url} alt={p.name} style={{ width: "100%", height: 180, objectFit: "cover" }} />
               ) : (
                 <div style={{
                   width: "100%",
-                  height: 140,
+                  height: 180,
                   background: gradient,
                   display: "flex",
                   alignItems: "center",
@@ -181,7 +181,7 @@ export default function CatalogScreen({
 
               {/* Info do produto */}
               <div style={{ padding: "14px 16px 0", display: "flex", flexDirection: "column", gap: 5 }}>
-                <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: 20, lineHeight: 1.2 }}>
+                <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: 17, lineHeight: 1.2 }}>
                   {p.name}
                 </div>
                 {p.description && (
@@ -189,7 +189,7 @@ export default function CatalogScreen({
                     {p.description}
                   </div>
                 )}
-                <div style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: 22, marginTop: 2 }}>
+                <div style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: 19, marginTop: 2 }}>
                   {fmt(p.price)}
                 </div>
               </div>
