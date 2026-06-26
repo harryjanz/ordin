@@ -141,6 +141,7 @@ export default function App() {
       total,
       method: "pix",
       nsu: null,
+      provider: "mock",
       tickets: ticketsRes.data.tickets ?? [],
     });
   }

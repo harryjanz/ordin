@@ -4,6 +4,8 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Theme } from "../themes";
 import type { CompletedOrder } from "../types";
 import { useStore } from "../store";
+import { silentPrint } from "../lib/printService";
+import type { PrintMethod } from "../lib/printService";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtMethod = (m: string) =>
@@ -27,14 +29,19 @@ function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string
   const ticketsHtml = order.tickets.map((tk, i) => {
     const parts = tk.qr_data.split("|");
     const productName = parts[1] ?? "";
-    const svgEl = svgs[i] ?? "";
+    const svgEl = (svgs[i] ?? "").replace(/width="[^"]*"/, 'width="110"').replace(/height="[^"]*"/, 'height="110"');
     return `
       <div class="cut">- &nbsp; - &nbsp; - &nbsp;✂&nbsp; - &nbsp; - &nbsp; -</div>
       <div class="ticket">
-        <div class="ticket-title">${productName}</div>
-        <div class="info">Unidade ${tk.unit_number} de ${tk.total_units}</div>
-        <div class="code">Cód: ${tk.ticket_code}</div>
-        <div class="qr-wrap">${svgEl}</div>
+        <div class="ticket-name">${productName}</div>
+        <table class="ticket-body"><tbody><tr>
+          <td class="ticket-qr">${svgEl}</td>
+          <td class="ticket-info">
+            <div class="unit">Unidade ${tk.unit_number} de ${tk.total_units}</div>
+            <div class="code">Cód: ${tk.ticket_code}</div>
+            <div class="ref">Pedido: ${order.order_ref}</div>
+          </td>
+        </tr></tbody></table>
       </div>`;
   }).join("");
 
@@ -62,18 +69,26 @@ function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string
   .cut{
     text-align:center;
     border-top:1px dashed #000;
-    margin:10px 0 6px;
+    margin:10px 0 4px;
     padding-top:5px;
     font-size:10px;
     letter-spacing:3px;
     color:#444;
   }
   .ticket{padding:2px 0 6px;}
-  .ticket-title{font-size:13px;font-weight:bold;margin-bottom:3px;}
-  .info{font-size:10px;color:#333;margin:1px 0;}
-  .code{font-size:11px;letter-spacing:1px;margin:3px 0 2px;}
-  .qr-wrap{text-align:center;margin:6px 0 2px;}
-  .qr-wrap svg{width:130px;height:130px;}
+  .ticket-name{
+    font-size:15px;font-weight:bold;
+    text-transform:uppercase;letter-spacing:.5px;
+    margin-bottom:5px;text-align:center;
+    border-bottom:1px solid #eee;padding-bottom:4px;
+  }
+  .ticket-body{width:100%;border-collapse:collapse;table-layout:fixed;}
+  .ticket-qr{width:40%;text-align:center;vertical-align:middle;padding:2px 2px 2px 0;}
+  .ticket-qr svg{width:110px;height:110px;display:block;margin:0 auto;}
+  .ticket-info{width:60%;vertical-align:middle;padding:2px 0 2px 6px;}
+  .unit{font-size:12px;font-weight:bold;margin-bottom:6px;color:#111;}
+  .code{font-size:10px;letter-spacing:.5px;color:#444;word-break:break-all;}
+  .ref{font-size:9px;color:#888;margin-top:6px;}
   .footer{text-align:center;margin-top:10px;padding-top:8px;
     border-top:1px dashed #000;font-size:10px;color:#555;line-height:1.6;}
   @media print{
@@ -116,14 +131,13 @@ interface Props {
 export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
   const newOrder = useStore((s) => s.newOrder);
   const [countdown, setCountdown] = useState(30);
-  const [printed, setPrinted] = useState(false);
-  const [printBlocked, setPrintBlocked] = useState(false);
+  const [printMethod, setPrintMethod] = useState<PrintMethod | "pending">("pending");
   const qrContainerRef = useRef<HTMLDivElement>(null);
 
   const orderNumber = extractOrderNumber(order.order_ref);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       const svgs = Array.from(
         qrContainerRef.current?.querySelectorAll("svg") ?? []
       ).map((el) => {
@@ -132,16 +146,21 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
         return el.outerHTML;
       });
 
-      const html = buildPrintHtml(order, companyName, svgs);
-      const w = window.open("", "_blank");
-      if (w) {
-        w.document.write(html);
-        w.document.close();
-        setPrinted(true);
-      } else {
-        setPrintBlocked(true);
+      if (order.provider === "mock") {
+        // Em modo mock: abre preview HTML direto, sem tentar QZ Tray
+        const html = buildPrintHtml(order, companyName, svgs);
+        const w = window.open("", "_blank");
+        if (w) { w.document.write(html); w.document.close(); setPrintMethod("browser"); }
+        else setPrintMethod("blocked");
+        return;
       }
-    }, 200);
+
+      const result = await silentPrint(order, companyName, {
+        buildHtml: (s) => buildPrintHtml(order, companyName, s),
+        svgs,
+      });
+      setPrintMethod(result);
+    }, 300);
     return () => clearTimeout(timer);
   }, []);
 
@@ -228,18 +247,56 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
           borderRadius: 12,
           textAlign: "center",
         }}>
-          {printBlocked ? (
+          {printMethod === "pending" && (
+            <>
+              <div style={{
+                width: 36, height: 36,
+                border: `3px solid ${T.border}`,
+                borderTop: `3px solid ${T.roxo}`,
+                borderRadius: "50%", animation: "spin 0.8s linear infinite",
+                margin: "0 auto 12px",
+              }} />
+              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>Enviando para impressora…</p>
+            </>
+          )}
+
+          {printMethod === "escpos" && (
+            <>
+              <Printer size={36} color={T.successColor} strokeWidth={1.5} style={{ marginBottom: 10 }} />
+              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>
+                Ticket impresso!<br />Retire na impressora e apresente no balcão.
+              </p>
+            </>
+          )}
+
+          {printMethod === "browser" && (
+            <>
+              <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 10 }} />
+              {order.provider === "mock" ? (
+                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>
+                  Preview aberto — modo mock.<br />
+                  <span style={{ fontSize: 14, opacity: 0.6 }}>Em produção, imprime diretamente na impressora.</span>
+                </p>
+              ) : (
+                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>
+                  Tickets enviados para impressão!<br />Retire na impressora e apresente no balcão.
+                </p>
+              )}
+            </>
+          )}
+
+          {printMethod === "blocked" && (
             <>
               <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 12 }} />
               <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, marginBottom: 16 }}>
                 A impressão foi bloqueada pelo navegador.<br />Toque para imprimir manualmente.
               </p>
               <button
-                onClick={() => {
+                onClick={async () => {
                   const svgs = Array.from(qrContainerRef.current?.querySelectorAll("svg") ?? []).map((el) => el.outerHTML);
                   const html = buildPrintHtml(order, companyName, svgs);
                   const w = window.open("", "_blank");
-                  if (w) { w.document.write(html); w.document.close(); setPrintBlocked(false); setPrinted(true); }
+                  if (w) { w.document.write(html); w.document.close(); setPrintMethod("browser"); }
                 }}
                 style={{
                   padding: "0 40px", height: 72, background: T.btn, color: T.btnText,
@@ -250,24 +307,6 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
               >
                 Imprimir tickets
               </button>
-            </>
-          ) : printed ? (
-            <>
-              <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 10 }} />
-              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>
-                Tickets enviados para impressão!<br />Retire na impressora e apresente no balcão.
-              </p>
-            </>
-          ) : (
-            <>
-              <div style={{
-                width: 36, height: 36,
-                border: `3px solid ${T.border}`,
-                borderTop: `3px solid ${T.roxo}`,
-                borderRadius: "50%", animation: "spin 0.8s linear infinite",
-                margin: "0 auto 12px",
-              }} />
-              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>Abrindo impressão…</p>
             </>
           )}
         </div>
