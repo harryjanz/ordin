@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { Wallet, CreditCard, Landmark, XCircle } from "lucide-react";
+import { PixLogo } from "../assets/PixLogo";
 import api from "../api";
 import type { Theme } from "../themes";
 import type { CartItem, CompletedOrder } from "../types";
@@ -8,10 +10,106 @@ const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
 
 const METHODS = [
-  { id: "credit", label: "Crédito",  emoji: "💳", desc: "À vista ou parcelado" },
-  { id: "debit",  label: "Débito",   emoji: "🏦", desc: "Débito em conta" },
-  { id: "pix",    label: "PIX",      emoji: "⚡", desc: "Transferência instantânea" },
+  { id: "credit", label: "Crédito",  desc: "À vista ou parcelado" },
+  { id: "debit",  label: "Débito",   desc: "Débito em conta" },
+  { id: "pix",    label: "PIX",      desc: "Transferência instantânea" },
 ] as const;
+
+function MethodIcon({ id, size, color }: { id: string; size: number; color: string }) {
+  if (id === "credit") return <CreditCard size={size} color={color} strokeWidth={1.5} />;
+  if (id === "debit")  return <Landmark   size={size} color={color} strokeWidth={1.5} />;
+  return <PixLogo size={size} color={color} />;
+}
+
+// Animação de três pontos enquanto aguarda terminal físico
+function DotsAnimation({ T }: { T: Theme }) {
+  return (
+    <div style={{ display: "flex", gap: 10 }}>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          style={{
+            width: 12,
+            height: 12,
+            borderRadius: "50%",
+            background: T.roxo,
+            opacity: 0.7,
+            animation: `pulse 1.2s ease-in-out ${i * 0.22}s infinite`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// Tela de foco único durante processamento com terminal físico (crédito/débito)
+function CardProcessingView({
+  T, countdown, error, onRetry,
+}: {
+  T: Theme;
+  countdown: number;
+  error: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: T.radial,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 28,
+      textAlign: "center",
+      position: "relative",
+    }}>
+      {error ? (
+        <>
+          <XCircle size={100} color={T.errorText} strokeWidth={1.2} />
+          <p style={{ color: T.text, fontFamily: FONT_D, fontSize: 22, fontWeight: 700, margin: 0 }}>
+            {error}
+          </p>
+          <button
+            onClick={onRetry}
+            style={{
+              padding: "0 48px",
+              minHeight: 72,
+              background: T.btn,
+              color: T.btnText,
+              border: "none",
+              borderRadius: 999,
+              fontFamily: FONT_D,
+              fontSize: 18,
+              fontWeight: 800,
+              cursor: "pointer",
+              boxShadow: T.glow,
+            }}
+          >
+            Tentar novamente
+          </button>
+        </>
+      ) : (
+        <>
+          <CreditCard size={120} color={T.roxo} strokeWidth={1.2} />
+          <p style={{ color: T.text, fontFamily: FONT_D, fontSize: 24, fontWeight: 700, margin: 0 }}>
+            Insira ou aproxime o cartão
+          </p>
+          <DotsAnimation T={T} />
+          <p style={{
+            color: T.muted,
+            fontFamily: FONT_B,
+            fontSize: 13,
+            opacity: 0.45,
+            position: "absolute",
+            bottom: 32,
+          }}>
+            Aguardando terminal… {countdown}s
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
 
 interface PixData {
   transactionId: number;
@@ -37,6 +135,14 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
   const [countdown, setCountdown] = useState(90);
   const [error, setError] = useState("");
   const [idleCountdown, setIdleCountdown] = useState(60);
+
+  // Timeout de processamento: dispara erro ao chegar a 0
+  useEffect(() => {
+    if (!processing) return;
+    if (countdown <= 0) {
+      setError("Tempo esgotado. Tente novamente.");
+    }
+  }, [countdown, processing]);
 
   // Volta para o catálogo se o cliente ficar 60s sem selecionar método
   useEffect(() => {
@@ -88,8 +194,19 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
     } catch {
       clearInterval(timer);
       setError("Erro ao processar pagamento. Tente novamente.");
-      setProcessing(false);
     }
+  }
+
+  function handleRetry() {
+    setProcessing(false);
+    setError("");
+    setMethod(null);
+    setCountdown(90);
+  }
+
+  // Tela de foco único para crédito/débito em processamento
+  if (processing && method !== "pix") {
+    return <CardProcessingView T={T} countdown={countdown} error={error} onRetry={handleRetry} />;
   }
 
   return (
@@ -104,7 +221,9 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
       transition: "background 0.3s",
     }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 44, marginBottom: 8 }}>💰</div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
+          <Wallet size={44} color={T.roxo} strokeWidth={1.5} />
+        </div>
         <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: 26, fontWeight: 800, margin: 0 }}>
           Forma de pagamento
         </h2>
@@ -120,13 +239,13 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
             onClick={() => !processing && setMethod(m.id)}
             style={{
               padding: "0 28px",
-              minHeight: 110,
+              minHeight: 120,
               minWidth: 150,
               background: method === m.id ? T.btn : T.surface,
               border: `2px solid ${method === m.id ? T.btn : T.borderNeutral}`,
               borderRadius: 18,
               color: method === m.id ? T.btnText : T.text,
-              cursor: processing ? "default" : "pointer",
+              cursor: "pointer",
               textAlign: "center",
               transition: "all 0.15s",
               boxShadow: method === m.id ? T.glow : T.cardShadow,
@@ -134,10 +253,14 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              gap: 8,
+              gap: 10,
             }}
           >
-            <div style={{ fontSize: 40 }}>{m.emoji}</div>
+            <MethodIcon
+              id={m.id}
+              size={44}
+              color={method === m.id ? T.btnText : T.roxo}
+            />
             <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: 17 }}>{m.label}</div>
             <div style={{ fontFamily: FONT_B, color: method === m.id ? "rgba(255,255,255,0.6)" : T.muted, fontSize: 13 }}>
               {m.desc}
@@ -152,67 +275,48 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
         </div>
       )}
 
-      {processing ? (
-        <div style={{ textAlign: "center" }}>
-          <div style={{
-            width: 56, height: 56,
-            border: `4px solid ${T.borderNeutral}`,
-            borderTop: `4px solid ${T.roxo}`,
-            borderRadius: "50%",
-            animation: "spin 0.8s linear infinite",
-            margin: "0 auto 16px",
-          }} />
-          <p style={{ color: T.muted, fontFamily: FONT_B, marginBottom: 6 }}>Processando pagamento…</p>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 13, opacity: 0.6 }}>
-            Aguarde a confirmação no terminal TEF ({countdown}s)
-          </p>
-        </div>
-      ) : (
-        <div style={{ display: "flex", gap: 14 }}>
-          <button
-            onClick={onBack}
-            style={{
-              padding: "0 28px",
-              minHeight: 64,
-              background: T.surface,
-              border: `1px solid ${T.borderNeutral}`,
-              borderRadius: 999,
-              color: T.muted,
-              cursor: "pointer",
-              fontFamily: FONT_D,
-              fontWeight: 700,
-              fontSize: 16,
-            }}
-          >
-            ← Voltar
-          </button>
-          <button
-            onClick={pay}
-            disabled={!method}
-            style={{
-              padding: "0 48px",
-              minHeight: 80,
-              background: method ? T.btn : "rgba(150,150,150,0.15)",
-              color: method ? T.btnText : "rgba(200,200,200,0.4)",
-              border: "none",
-              borderRadius: 999,
-              fontFamily: FONT_D,
-              fontSize: 20,
-              fontWeight: 800,
-              cursor: method ? "pointer" : "default",
-              boxShadow: method ? T.glow : "none",
-            }}
-          >
-            Pagar {fmt(total)}
-          </button>
-        </div>
-      )}
+      <div style={{ display: "flex", gap: 14 }}>
+        <button
+          onClick={onBack}
+          style={{
+            padding: "0 28px",
+            minHeight: 64,
+            background: T.surface,
+            border: `1px solid ${T.borderNeutral}`,
+            borderRadius: 999,
+            color: T.muted,
+            cursor: "pointer",
+            fontFamily: FONT_D,
+            fontWeight: 700,
+            fontSize: 16,
+          }}
+        >
+          ← Voltar
+        </button>
+        <button
+          onClick={pay}
+          disabled={!method}
+          style={{
+            padding: "0 48px",
+            minHeight: 80,
+            background: method ? T.btn : "rgba(150,150,150,0.15)",
+            color: method ? T.btnText : "rgba(200,200,200,0.4)",
+            border: "none",
+            borderRadius: 999,
+            fontFamily: FONT_D,
+            fontSize: 20,
+            fontWeight: 800,
+            cursor: method ? "pointer" : "default",
+            boxShadow: method ? T.glow : "none",
+          }}
+        >
+          Pagar {fmt(total)}
+        </button>
+      </div>
 
-      {!processing && (
-        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 12, marginTop: 16, opacity: 0.45 }}>
-          Voltando ao catálogo em {idleCountdown}s…
-        </p>
-      )}
+      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 12, opacity: 0.45 }}>
+        Voltando ao catálogo em {idleCountdown}s…
+      </p>
     </div>
   );
 }

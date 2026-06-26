@@ -3,6 +3,9 @@ import axios from "axios";
 import type { Theme } from "../themes";
 import type { CompanyInfo, TerminalInfo } from "../types";
 
+// Layout ATM: 7-8-9 no topo (igual a terminais físicos e caixas eletrônicos)
+const KEYS = [7, 8, 9, 4, 5, 6, 1, 2, 3, "", 0, "⌫"] as const;
+
 interface Props {
   T: Theme;
   terminalId: number;
@@ -11,19 +14,26 @@ interface Props {
 
 function Numpad({ onPress, onDel, T }: { onPress: (v: string) => void; onDel: () => void; T: Theme }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10 }}>
-      {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((k, i) => (
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      border: `1px solid ${T.border}`,
+      borderRadius: 16,
+      overflow: "hidden",
+    }}>
+      {KEYS.map((k, i) => (
         <button
           key={i}
           onClick={() => k === "⌫" ? onDel() : k !== "" ? onPress(String(k)) : undefined}
           style={{
-            padding: "18px 0",
-            fontSize: 22,
+            minHeight: 84,
+            fontSize: 26,
             fontWeight: 600,
             background: k === "" ? "transparent" : T.numBg,
             color: T.text,
-            border: `1px solid ${k === "" ? "transparent" : T.border}`,
-            borderRadius: 12,
+            border: "none",
+            borderRight: (i + 1) % 3 !== 0 ? `1px solid ${T.border}` : "none",
+            borderBottom: i < 9 ? `1px solid ${T.border}` : "none",
             cursor: k === "" ? "default" : "pointer",
             transition: "background 0.12s",
           }}
@@ -96,14 +106,8 @@ export default function PinScreen({ T, terminalId, onSuccess }: Props) {
         <p style={{ color: T.muted, fontSize: 14, marginTop: 6 }}>Digite o PIN da empresa para começar</p>
       </div>
 
-      <div style={{
-        background: T.surface,
-        border: `1px solid ${T.border}`,
-        borderRadius: 24,
-        padding: 32,
-        width: 320,
-        boxShadow: "0 8px 40px rgba(153,0,255,0.12)",
-      }}>
+      <div style={{ width: "min(400px, 92vw)" }}>
+        {/* Indicadores de dígitos */}
         <div style={{
           display: "flex",
           justifyContent: "center",
@@ -111,7 +115,7 @@ export default function PinScreen({ T, terminalId, onSuccess }: Props) {
           marginBottom: 24,
           animation: shake ? "shake 0.4s" : "none",
         }}>
-          {[0,1,2,3].map((i) => (
+          {[0, 1, 2, 3].map((i) => (
             <div key={i} style={{
               width: 16,
               height: 16,
@@ -142,7 +146,11 @@ export default function PinScreen({ T, terminalId, onSuccess }: Props) {
             }} />
           </div>
         ) : (
-          <Numpad onPress={press} onDel={() => { if (!blocked) setPin((p) => p.slice(0, -1)); }} T={T} />
+          <Numpad
+            onPress={press}
+            onDel={() => { if (!blocked) setPin((p) => p.slice(0, -1)); }}
+            T={T}
+          />
         )}
       </div>
     </div>

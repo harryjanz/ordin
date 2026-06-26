@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { CheckCircle2, Printer } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Theme } from "../themes";
 import type { CompletedOrder } from "../types";
@@ -10,6 +11,15 @@ const fmtMethod = (m: string) =>
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
+
+// Extrai o número sequencial do order_ref (ex: "ORD-20240626-007" → "7")
+// Fallback para o ref completo se o formato mudar
+function extractOrderNumber(ref: string): string {
+  const parts = ref.split("-");
+  const suffix = parts[parts.length - 1] ?? "";
+  const num = parseInt(suffix, 10);
+  return Number.isNaN(num) ? ref : String(num);
+}
 
 function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string[]): string {
   const now = new Date().toLocaleString("pt-BR");
@@ -110,7 +120,8 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
   const [printBlocked, setPrintBlocked] = useState(false);
   const qrContainerRef = useRef<HTMLDivElement>(null);
 
-  // Abre aba de impressão após DOM renderizar os QRs
+  const orderNumber = extractOrderNumber(order.order_ref);
+
   useEffect(() => {
     const timer = setTimeout(() => {
       const svgs = Array.from(
@@ -134,7 +145,6 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
     return () => clearTimeout(timer);
   }, []);
 
-  // Countdown → novo pedido
   useEffect(() => {
     const t = setInterval(() => {
       setCountdown((c) => {
@@ -155,6 +165,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       justifyContent: "center",
       textAlign: "center",
       padding: 32,
+      gap: 0,
     }}>
       {/* QRs ocultos para extração de SVG */}
       <div ref={qrContainerRef} style={{ position: "fixed", left: -9999, top: 0, opacity: 0, pointerEvents: "none" }} aria-hidden="true">
@@ -163,30 +174,50 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
         ))}
       </div>
 
-      <div style={{ fontSize: 64, marginBottom: 16 }}>✅</div>
+      {/* Ícone de sucesso */}
+      <CheckCircle2 size={64} color={T.successColor} strokeWidth={1.5} style={{ marginBottom: 12 }} />
 
-      <h2 style={{ color: T.successColor, fontFamily: FONT_D, fontSize: 28, fontWeight: 800, margin: 0 }}>
+      <h2 style={{ color: T.successColor, fontFamily: FONT_D, fontSize: 28, fontWeight: 800, margin: "0 0 24px" }}>
         Pagamento aprovado!
       </h2>
-      <p style={{ color: T.priceColor, fontFamily: FONT_D, fontWeight: 800, fontSize: 20, marginTop: 8 }}>
+
+      {/* Número do pedido em destaque — legível a distância para retirada no balcão */}
+      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, margin: "0 0 4px", letterSpacing: "1px", textTransform: "uppercase" }}>
+        Número do pedido
+      </p>
+      <div style={{
+        fontFamily: FONT_D,
+        fontWeight: 900,
+        fontSize: 88,
+        lineHeight: 1,
+        color: T.text,
+        marginBottom: 8,
+        letterSpacing: "-2px",
+      }}>
+        {orderNumber}
+      </div>
+
+      {/* Informações secundárias */}
+      <p style={{ color: T.priceColor, fontFamily: FONT_D, fontWeight: 800, fontSize: 20, margin: "0 0 4px" }}>
         {fmt(order.total)}
       </p>
-      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 13, marginTop: 4 }}>
+      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 13, margin: "0 0 28px" }}>
         {order.order_ref} · {fmtMethod(order.method)}{order.nsu ? ` · NSU ${order.nsu}` : ""}
       </p>
 
+      {/* Status de impressão */}
       <div style={{
-        marginTop: 32,
         padding: "18px 28px",
         background: T.surface,
         border: `1px solid ${T.borderNeutral}`,
         borderRadius: 16,
         maxWidth: 360,
         boxShadow: T.cardShadow,
+        marginBottom: 24,
       }}>
         {printBlocked ? (
           <>
-            <div style={{ fontSize: 28, marginBottom: 8 }}>🖨️</div>
+            <Printer size={28} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 8 }} />
             <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, marginBottom: 12 }}>
               A impressão foi bloqueada pelo navegador.<br/>Toque para imprimir manualmente.
             </p>
@@ -204,12 +235,12 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
                 boxShadow: T.glow,
               }}
             >
-              🖨️ Imprimir tickets
+              Imprimir tickets
             </button>
           </>
         ) : printed ? (
           <>
-            <div style={{ fontSize: 28, marginBottom: 8 }}>🖨️</div>
+            <Printer size={28} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 8 }} />
             <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14 }}>
               Tickets enviados para impressão!<br/>Retire na impressora e apresente no balcão.
             </p>
@@ -231,7 +262,6 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       <button
         onClick={newOrder}
         style={{
-          marginTop: 28,
           padding: "0 64px",
           minHeight: 80,
           background: T.btn,

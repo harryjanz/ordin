@@ -1,3 +1,4 @@
+import { Hand } from "lucide-react";
 import type { Theme } from "../themes";
 
 const FONT_D = "'Lexend', sans-serif";
@@ -78,10 +79,9 @@ export default function WelcomeScreen({ T, companyName, onStart }: Props) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 40,
           animation: "glow 2.4s ease-in-out infinite",
         }}>
-          👆
+          <Hand size={44} color={T.roxo} strokeWidth={1.5} />
         </div>
         <div style={{
           fontFamily: FONT_D,
