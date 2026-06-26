@@ -1,6 +1,6 @@
 # ORD-046 — Backend: MPProvider (crédito, débito e PIX)
 
-**Status:** Ready  
+**Status:** Done  
 **Pontos:** 5  
 **Sprint:** Pagamentos MP
 

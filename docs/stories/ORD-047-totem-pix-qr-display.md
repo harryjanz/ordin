@@ -1,6 +1,6 @@
 # ORD-047 — Totem: exibição do QR PIX na tela de pagamento
 
-**Status:** Ready  
+**Status:** Done  
 **Pontos:** 3  
 **Sprint:** Pagamentos MP
 
