@@ -163,9 +163,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      textAlign: "center",
-      padding: 32,
-      gap: 0,
+      padding: "32px 0 28px",
     }}>
       {/* QRs ocultos para extração de SVG */}
       <div ref={qrContainerRef} style={{ position: "fixed", left: -9999, top: 0, opacity: 0, pointerEvents: "none" }} aria-hidden="true">
@@ -174,112 +172,126 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
         ))}
       </div>
 
-      {/* Ícone de sucesso */}
-      <CheckCircle2 size={64} color={T.successColor} strokeWidth={1.5} style={{ marginBottom: 12 }} />
+      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
 
-      <h2 style={{ color: T.successColor, fontFamily: FONT_D, fontSize: 28, fontWeight: 800, margin: "0 0 24px" }}>
-        Pagamento aprovado!
-      </h2>
+        {/* Ícone + título */}
+        <CheckCircle2 size={88} color={T.successColor} strokeWidth={1.3} />
+        <h2 style={{ color: T.successColor, fontFamily: FONT_D, fontSize: 52, fontWeight: 800, margin: 0 }}>
+          Pagamento aprovado!
+        </h2>
 
-      {/* Número do pedido em destaque — legível a distância para retirada no balcão */}
-      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, margin: "0 0 4px", letterSpacing: "1px", textTransform: "uppercase" }}>
-        Número do pedido
-      </p>
-      <div style={{
-        fontFamily: FONT_D,
-        fontWeight: 900,
-        fontSize: 88,
-        lineHeight: 1,
-        color: T.text,
-        marginBottom: 8,
-        letterSpacing: "-2px",
-      }}>
-        {orderNumber}
+        {/* Número do pedido */}
+        <div style={{ lineHeight: 1 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: "0 0 6px", letterSpacing: 2, textTransform: "uppercase" }}>
+            Número do pedido
+          </p>
+          <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: 100, lineHeight: 1, color: T.text, letterSpacing: "-2px" }}>
+            {orderNumber}
+          </div>
+        </div>
+
+        {/* Valor em destaque */}
+        <div style={{
+          width: "100%",
+          padding: "20px 28px",
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          borderRadius: 12,
+        }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 16, margin: "0 0 4px", textTransform: "uppercase", letterSpacing: 1 }}>
+            Valor pago
+          </p>
+          <p style={{ color: T.priceColor, fontFamily: FONT_D, fontWeight: 900, fontSize: 52, margin: "0 0 12px", lineHeight: 1 }}>
+            {fmt(order.total)}
+          </p>
+          <div style={{ display: "flex", justifyContent: "center", gap: 24, flexWrap: "wrap" }}>
+            <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: 20, fontWeight: 600 }}>
+              {fmtMethod(order.method)}
+            </span>
+            {order.nsu && (
+              <span style={{ color: T.muted, fontFamily: FONT_D, fontSize: 20, fontWeight: 700 }}>
+                NSU {order.nsu}
+              </span>
+            )}
+            <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: 16, opacity: 0.6 }}>
+              {order.order_ref}
+            </span>
+          </div>
+        </div>
+
+        {/* Status de impressão */}
+        <div style={{
+          width: "100%",
+          padding: "20px 28px",
+          background: T.surface,
+          border: `1px solid ${T.border}`,
+          borderRadius: 12,
+          textAlign: "center",
+        }}>
+          {printBlocked ? (
+            <>
+              <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 12 }} />
+              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, marginBottom: 16 }}>
+                A impressão foi bloqueada pelo navegador.<br />Toque para imprimir manualmente.
+              </p>
+              <button
+                onClick={() => {
+                  const svgs = Array.from(qrContainerRef.current?.querySelectorAll("svg") ?? []).map((el) => el.outerHTML);
+                  const html = buildPrintHtml(order, companyName, svgs);
+                  const w = window.open("", "_blank");
+                  if (w) { w.document.write(html); w.document.close(); setPrintBlocked(false); setPrinted(true); }
+                }}
+                style={{
+                  padding: "0 40px", height: 72, background: T.btn, color: T.btnText,
+                  border: "none", borderRadius: 12, fontFamily: FONT_D,
+                  fontSize: 20, fontWeight: 800, cursor: "pointer", boxShadow: T.glow,
+                  textTransform: "uppercase", letterSpacing: 1,
+                }}
+              >
+                Imprimir tickets
+              </button>
+            </>
+          ) : printed ? (
+            <>
+              <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 10 }} />
+              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>
+                Tickets enviados para impressão!<br />Retire na impressora e apresente no balcão.
+              </p>
+            </>
+          ) : (
+            <>
+              <div style={{
+                width: 36, height: 36,
+                border: `3px solid ${T.border}`,
+                borderTop: `3px solid ${T.roxo}`,
+                borderRadius: "50%", animation: "spin 0.8s linear infinite",
+                margin: "0 auto 12px",
+              }} />
+              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>Abrindo impressão…</p>
+            </>
+          )}
+        </div>
+
+        {/* Botão novo pedido */}
+        <button
+          onClick={newOrder}
+          style={{
+            width: "100%", height: 88,
+            background: T.btn, color: T.btnText,
+            border: "none", borderRadius: 12,
+            fontFamily: FONT_D, fontSize: 24, fontWeight: 800,
+            cursor: "pointer", boxShadow: T.glow,
+            textTransform: "uppercase", letterSpacing: 1,
+          }}
+        >
+          Novo pedido
+        </button>
+
+        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, opacity: 0.4, margin: 0 }}>
+          Novo pedido em {countdown}s…
+        </p>
+
       </div>
-
-      {/* Informações secundárias */}
-      <p style={{ color: T.priceColor, fontFamily: FONT_D, fontWeight: 800, fontSize: 20, margin: "0 0 4px" }}>
-        {fmt(order.total)}
-      </p>
-      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 13, margin: "0 0 28px" }}>
-        {order.order_ref} · {fmtMethod(order.method)}{order.nsu ? ` · NSU ${order.nsu}` : ""}
-      </p>
-
-      {/* Status de impressão */}
-      <div style={{
-        padding: "18px 28px",
-        background: T.surface,
-        border: `1px solid ${T.borderNeutral}`,
-        borderRadius: 16,
-        maxWidth: 360,
-        boxShadow: T.cardShadow,
-        marginBottom: 24,
-      }}>
-        {printBlocked ? (
-          <>
-            <Printer size={28} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 8 }} />
-            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, marginBottom: 12 }}>
-              A impressão foi bloqueada pelo navegador.<br/>Toque para imprimir manualmente.
-            </p>
-            <button
-              onClick={() => {
-                const svgs = Array.from(qrContainerRef.current?.querySelectorAll("svg") ?? []).map((el) => el.outerHTML);
-                const html = buildPrintHtml(order, companyName, svgs);
-                const w = window.open("", "_blank");
-                if (w) { w.document.write(html); w.document.close(); setPrintBlocked(false); setPrinted(true); }
-              }}
-              style={{
-                padding: "12px 28px", background: T.btn, color: T.btnText,
-                border: "none", borderRadius: 999,
-                fontFamily: FONT_D, fontSize: 15, fontWeight: 700, cursor: "pointer",
-                boxShadow: T.glow,
-              }}
-            >
-              Imprimir tickets
-            </button>
-          </>
-        ) : printed ? (
-          <>
-            <Printer size={28} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 8 }} />
-            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14 }}>
-              Tickets enviados para impressão!<br/>Retire na impressora e apresente no balcão.
-            </p>
-          </>
-        ) : (
-          <>
-            <div style={{
-              width: 32, height: 32,
-              border: `3px solid ${T.borderNeutral}`,
-              borderTop: `3px solid ${T.roxo}`,
-              borderRadius: "50%", animation: "spin 0.8s linear infinite",
-              margin: "0 auto 12px",
-            }} />
-            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14 }}>Abrindo impressão…</p>
-          </>
-        )}
-      </div>
-
-      <button
-        onClick={newOrder}
-        style={{
-          padding: "0 64px",
-          minHeight: 80,
-          background: T.btn,
-          color: T.btnText,
-          border: "none",
-          borderRadius: 999,
-          fontFamily: FONT_D,
-          fontSize: 20,
-          fontWeight: 800,
-          cursor: "pointer",
-          boxShadow: T.glow,
-        }}
-      >
-        Novo pedido
-      </button>
-      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 12, marginTop: 10, opacity: 0.5 }}>
-        Novo pedido em {countdown}s…
-      </p>
     </div>
   );
 }

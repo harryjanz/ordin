@@ -1,4 +1,5 @@
 import { useEffect, Component } from "react";
+import { XCircle } from "lucide-react";
 import type { ReactNode } from "react";
 import api from "./api";
 import { useStore } from "./store";
@@ -244,6 +245,7 @@ export default function App() {
           T={T}
           onNext={(c) => handleCpfDone(c)}
           onSkip={() => handleCpfDone(null)}
+          onBack={() => setScreen("catalog")}
         />
       )}
 
@@ -293,58 +295,50 @@ export default function App() {
       {screen === "refused" && (
         <div style={{
           minHeight: "100vh",
-          background: T.bg,
+          background: T.radial,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          gap: 24,
+          padding: "32px 0",
         }}>
-          <div style={{ fontSize: 56 }}>❌</div>
-          <h2 style={{ color: T.text, fontSize: 28, fontWeight: 800, margin: 0, textAlign: "center" }}>
-            {refusedMethod === "pix" ? "Erro ao gerar PIX" : "Pagamento não autorizado"}
-          </h2>
-          <p style={{ color: T.muted, fontSize: 16, textAlign: "center", maxWidth: 360, margin: 0 }}>
-            {refusedMethod === "pix"
-              ? "Não foi possível gerar o QR Code PIX. Tente novamente ou escolha outra forma de pagamento."
-              : "Pagamento recusado. Verifique os dados e tente novamente."}
-          </p>
-          <div style={{ display: "flex", gap: 14 }}>
-            <button
-              onClick={goIdle}
-              style={{
-                padding: "0 32px",
-                minHeight: 60,
-                background: T.surface,
-                border: `1px solid ${T.borderNeutral}`,
-                borderRadius: 999,
-                color: T.muted,
-                cursor: "pointer",
-                fontFamily: "'Lexend', sans-serif",
-                fontWeight: 700,
-                fontSize: 16,
-              }}
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={() => orderRef && setScreen("payment")}
-              style={{
-                padding: "0 40px",
-                minHeight: 60,
-                background: T.btn,
-                color: T.btnText,
-                border: "none",
-                borderRadius: 999,
-                fontFamily: "'Lexend', sans-serif",
-                fontSize: 17,
-                fontWeight: 800,
-                cursor: "pointer",
-                boxShadow: T.glow,
-              }}
-            >
-              Tentar novamente
-            </button>
+          <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", alignItems: "center", gap: 24, textAlign: "center" }}>
+            <XCircle size={100} color={T.errorText} strokeWidth={1.2} />
+            <h2 style={{ color: T.text, fontFamily: "'Lexend', sans-serif", fontSize: 52, fontWeight: 800, margin: 0 }}>
+              {refusedMethod === "pix" ? "Erro ao gerar PIX" : "Pagamento não autorizado"}
+            </h2>
+            <p style={{ color: T.muted, fontFamily: "'Inter', sans-serif", fontSize: 22, margin: 0, lineHeight: 1.5 }}>
+              {refusedMethod === "pix"
+                ? "Não foi possível gerar o QR Code PIX.\nTente novamente ou escolha outra forma de pagamento."
+                : "Pagamento recusado pelo terminal.\nVerifique o cartão e tente novamente."}
+            </p>
+            <div style={{ display: "flex", gap: 12, width: "100%", marginTop: 8 }}>
+              <button
+                onClick={goIdle}
+                style={{
+                  padding: "0 28px", height: 88, flexShrink: 0,
+                  background: T.surface, border: `1.5px solid ${T.border}`,
+                  borderRadius: 12, color: T.text, cursor: "pointer",
+                  fontFamily: "'Lexend', sans-serif", fontWeight: 700, fontSize: 20,
+                  textTransform: "uppercase", letterSpacing: 1,
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => orderRef && setScreen("payment")}
+                style={{
+                  flex: 1, height: 88,
+                  background: T.btn, color: T.btnText,
+                  border: "none", borderRadius: 12,
+                  fontFamily: "'Lexend', sans-serif", fontSize: 22,
+                  fontWeight: 800, cursor: "pointer", boxShadow: T.glow,
+                  textTransform: "uppercase", letterSpacing: 1,
+                }}
+              >
+                Tentar novamente
+              </button>
+            </div>
           </div>
         </div>
       )}

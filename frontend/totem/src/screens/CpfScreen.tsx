@@ -1,12 +1,13 @@
 import { useState } from "react";
-import { FileText } from "lucide-react";
 import type { Theme } from "../themes";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
 
-// Layout ATM: 7-8-9 no topo (igual a terminais físicos e caixas eletrônicos)
-const KEYS = [7, 8, 9, 4, 5, 6, 1, 2, 3, "", 0, "⌫"] as const;
+const NUM_KEYS = [7, 8, 9, 4, 5, 6, 1, 2, 3] as const;
+
+// Altura fixa por tecla — nunca cresce além disso
+const KEY_H = 114;
 
 function fmtCpf(d: string) {
   return d.slice(0, 11)
@@ -19,15 +20,36 @@ interface Props {
   T: Theme;
   onNext: (cpf: string) => void;
   onSkip: () => void;
+  onBack: () => void;
 }
 
-export default function CpfScreen({ T, onNext, onSkip }: Props) {
+export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
   const [digits, setDigits] = useState("");
   const done = digits.length === 11;
 
-  function press(v: string) {
-    setDigits((d) => d.length < 11 ? d + v : d);
+  function press(v: number) {
+    setDigits((d) => d.length < 11 ? d + String(v) : d);
   }
+
+  function del() {
+    setDigits((d) => d.slice(0, -1));
+  }
+
+  const KEY: React.CSSProperties = {
+    height: KEY_H,
+    fontSize: 46,
+    fontWeight: 700,
+    fontFamily: FONT_D,
+    background: T.numBg,
+    color: T.text,
+    border: "none",
+    cursor: "pointer",
+    transition: "background 0.1s",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+  };
 
   return (
     <div style={{
@@ -38,111 +60,156 @@ export default function CpfScreen({ T, onNext, onSkip }: Props) {
       alignItems: "center",
       justifyContent: "center",
       transition: "background 0.3s",
-      gap: 24,
+      padding: "32px 0 24px",
     }}>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
-          <FileText size={44} color={T.roxo} strokeWidth={1.5} />
-        </div>
-        <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: 26, fontWeight: 800, margin: 0 }}>CPF na nota?</h2>
-        <p style={{ color: T.muted, fontFamily: FONT_B, marginTop: 8, fontSize: 14 }}>Opcional — para participar de promoções</p>
-      </div>
+      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 26 }}>
 
-      {/* Container do numpad expandido — sem card wrapper estreito */}
-      <div style={{ width: "min(480px, 92vw)" }}>
-        {/* Display do CPF */}
+        {/* Título */}
+        <div style={{ textAlign: "center" }}>
+          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: 38, fontWeight: 800, margin: "0 0 8px" }}>
+            Informe seu documento
+          </h2>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 20, margin: 0 }}>
+            Digite seu CPF
+          </p>
+        </div>
+
+        {/* Campo display — altura generosa, fonte grande */}
         <div style={{
-          textAlign: "center",
-          padding: "16px 0",
-          marginBottom: 8,
+          display: "flex",
+          alignItems: "center",
+          gap: 14,
+          padding: "22px 28px",
+          border: `2px solid ${T.border}`,
+          borderRadius: 12,
           background: T.numBg,
+        }}>
+          <span style={{
+            color: T.muted, fontFamily: FONT_B,
+            fontSize: 22, fontWeight: 700, whiteSpace: "nowrap",
+          }}>
+            CPF:
+          </span>
+          <span style={{
+            fontFamily: FONT_D, fontSize: 44, fontWeight: 800,
+            letterSpacing: 4, flex: 1,
+            color: digits.length > 0 ? T.text : T.muted,
+          }}>
+            {digits.length > 0 ? fmtCpf(digits) : "___.___.___-__"}
+          </span>
+        </div>
+
+        {/* Numpad — altura fixa por tecla, nunca cresce */}
+        <div style={{
           border: `1px solid ${T.border}`,
           borderRadius: 12,
-          letterSpacing: 3,
-          fontSize: 22,
-          fontWeight: 700,
-          fontFamily: FONT_D,
-          color: done ? T.text : T.muted,
-        }}>
-          {fmtCpf(digits) || "000.000.000-00"}
-        </div>
-
-        {/* Numpad — layout ATM com bordas internas, sem borda individual por tecla */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          border: `1px solid ${T.border}`,
-          borderRadius: 16,
           overflow: "hidden",
-          marginBottom: 16,
         }}>
-          {KEYS.map((k, i) => (
+          {/* Linhas 7-8-9 / 4-5-6 / 1-2-3 */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)" }}>
+            {NUM_KEYS.map((k, i) => (
+              <button
+                key={k}
+                onClick={() => press(k)}
+                style={{
+                  ...KEY,
+                  borderRight: (i + 1) % 3 !== 0 ? `1px solid ${T.border}` : "none",
+                  borderBottom: `1px solid ${T.border}`,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = T.numHover; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = T.numBg; }}
+              >
+                {k}
+              </button>
+            ))}
+          </div>
+
+          {/* Última linha: [0 — 1 col] [⌫ — 2 cols] */}
+          <div style={{ display: "flex" }}>
             <button
-              key={i}
-              onClick={() => {
-                if (k === "⌫") setDigits((d) => d.slice(0, -1));
-                else if (k !== "") press(String(k));
-              }}
-              style={{
-                minHeight: 84,
-                fontSize: 26,
-                fontWeight: 600,
-                fontFamily: FONT_D,
-                background: k === "" ? "transparent" : T.numBg,
-                color: T.text,
-                border: "none",
-                borderRight: (i + 1) % 3 !== 0 ? `1px solid ${T.border}` : "none",
-                borderBottom: i < 9 ? `1px solid ${T.border}` : "none",
-                cursor: k === "" ? "default" : "pointer",
-                transition: "background 0.12s",
-              }}
-              onMouseEnter={(e) => { if (k !== "") e.currentTarget.style.background = T.numHover; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = k === "" ? "transparent" : T.numBg; }}
+              onClick={() => press(0)}
+              style={{ ...KEY, flex: 1, borderRight: `1px solid ${T.border}` }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = T.numHover; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = T.numBg; }}
             >
-              {k}
+              0
             </button>
-          ))}
+            <button
+              onClick={del}
+              style={{ ...KEY, flex: 2, fontSize: 36 }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = T.numHover; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = T.numBg; }}
+            >
+              ⌫
+            </button>
+          </div>
         </div>
 
-        <button
-          onClick={() => done && onNext(digits)}
-          disabled={!done}
-          style={{
-            width: "100%",
-            minHeight: 64,
-            padding: "0 16px",
-            background: done ? T.btn : "rgba(150,150,150,0.15)",
-            color: done ? T.btnText : "rgba(200,200,200,0.4)",
-            border: "none",
-            borderRadius: 999,
-            fontSize: 18,
-            fontWeight: 800,
-            fontFamily: FONT_D,
-            cursor: done ? "pointer" : "default",
-            marginBottom: 12,
-            boxShadow: done ? T.glow : "none",
-          }}
-        >
-          Confirmar CPF
-        </button>
-
-        {/* Ação secundária: texto puro sem borda — hierarquia clara */}
+        {/* Prefiro não informar — cor do tema, sublinhado, bem visível */}
         <button
           onClick={onSkip}
           style={{
-            width: "100%",
-            minHeight: 48,
             background: "transparent",
             border: "none",
             color: T.muted,
             cursor: "pointer",
-            fontSize: 15,
-            fontWeight: 500,
-            fontFamily: FONT_B,
+            fontSize: 22,
+            fontWeight: 600,
+            fontFamily: FONT_D,
+            padding: "6px 0",
+            textAlign: "center",
           }}
         >
           Prefiro não informar
         </button>
+
+        {/* Botões: Voltar + Confirmar */}
+        <div style={{ display: "flex", gap: 12 }}>
+          <button
+            onClick={onBack}
+            style={{
+              padding: "0 28px",
+              height: 88,
+              background: T.surface,
+              border: `1.5px solid ${T.border}`,
+              borderRadius: 12,
+              color: T.text,
+              cursor: "pointer",
+              fontFamily: FONT_D,
+              fontSize: 22,
+              textTransform: "uppercase",
+              letterSpacing: 1,
+              fontWeight: 700,
+              flexShrink: 0,
+              whiteSpace: "nowrap",
+            }}
+          >
+            ← Voltar
+          </button>
+          <button
+            onClick={() => done && onNext(digits)}
+            disabled={!done}
+            style={{
+              flex: 1,
+              height: 88,
+              background: done ? T.btn : T.surface,
+              color: done ? T.btnText : T.muted,
+              border: done ? "none" : `1.5px solid ${T.border}`,
+              borderRadius: 12,
+              fontFamily: FONT_D,
+              fontSize: 24,
+              fontWeight: 800,
+              textTransform: "uppercase",
+              letterSpacing: 1,
+              cursor: done ? "pointer" : "default",
+              boxShadow: done ? T.glow : "none",
+              transition: "all 0.15s",
+            }}
+          >
+            Confirmar
+          </button>
+        </div>
+
       </div>
     </div>
   );
