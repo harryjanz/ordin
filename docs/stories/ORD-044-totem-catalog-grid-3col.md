@@ -1,6 +1,6 @@
 # ORD-044 — Totem: grid de produtos 3 colunas + imagens mais altas
 
-**Status:** Ready  
+**Status:** Done  
 **Pontos:** 1  
 **Sprint:** UX
 

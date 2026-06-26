@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import json as _json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -6,7 +9,7 @@ from decimal import Decimal
 from typing import Optional, List
 
 import httpx
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import Column, Integer, String, Numeric, DateTime, select
@@ -24,11 +27,12 @@ from infrastructure.mongo import save_audit
 
 logger = logging.getLogger(__name__)
 
-DB_URL           = require_env("DB_URL")
-ORDER_SVC        = require_env("ORDER_SERVICE_URL")
-COMPANY_SVC      = require_env("COMPANY_SERVICE_URL")
-INTERNAL_SECRET  = require_env("INTERNAL_SECRET")
-INTERNAL_HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
+DB_URL              = require_env("DB_URL")
+ORDER_SVC           = require_env("ORDER_SERVICE_URL")
+COMPANY_SVC         = require_env("COMPANY_SERVICE_URL")
+INTERNAL_SECRET     = require_env("INTERNAL_SECRET")
+INTERNAL_HEADERS    = {"X-Internal-Secret": INTERNAL_SECRET}
+MP_WEBHOOK_SECRET   = os.getenv("MP_WEBHOOK_SECRET", "")
 
 engine = create_async_engine(DB_URL.replace("mysql+pymysql://", "mysql+aiomysql://"), pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -172,6 +176,10 @@ class CancelOut(BaseModel):
 class HealthOut(BaseModel):
     service: str
     status:  str
+
+
+class WebhookOut(BaseModel):
+    ok: bool
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -649,6 +657,157 @@ async def delete_payment(
     )
 
     return {"ok": True, "detail": "PIX cancelado"}
+
+
+# ── Webhook helpers ───────────────────────────────────────────────────────────
+
+def _verify_mp_signature(secret: str, request_id: str, ts: str, v1: str) -> bool:
+    manifest = f"id:{request_id};request-date:{ts};"
+    expected = hmac.new(secret.encode(), manifest.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, v1)
+
+
+async def _mp_fetch_and_update(tx: Transaction, payment_id: str, db: AsyncSession) -> None:
+    """Consulta /v1/payments na MP e atualiza a transação conforme o status retornado."""
+    try:
+        terminal_cfg = await _get_terminal_config(tx.terminal_id)
+        access_token = (terminal_cfg.get("config") or {}).get("api_key", "")
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.mercadopago.com/v1/payments/{payment_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if resp.status_code != 200:
+                return
+
+            mp_status = resp.json().get("status", "")
+
+            if mp_status == "approved" and tx.status not in ("approved",):
+                tx.status = "approved"
+                await db.commit()
+                await _notify_order(tx.order_ref, "paid")
+                await _publish(
+                    "payment.approved",
+                    PaymentApprovedEvent(
+                        company_id=tx.company_id,
+                        order_ref=tx.order_ref,
+                        transaction_id=tx.id,
+                        amount=str(tx.amount),
+                        nsu="",
+                        authorization="",
+                        provider=tx.provider,
+                    ).to_dict(),
+                )
+            elif mp_status in ("cancelled", "rejected") and tx.status not in ("approved", "cancelled", "refused"):
+                tx.status = "cancelled" if mp_status == "cancelled" else "refused"
+                await db.commit()
+    except Exception as exc:
+        logger.warning("Webhook _mp_fetch_and_update error: %s", exc)
+
+
+async def _handle_mp_notification(payload: dict) -> None:
+    """Processa notificação MP em background com sessão DB própria."""
+    notification_type = payload.get("type", "")
+    data_id = str(payload.get("data", {}).get("id", ""))
+    if not data_id:
+        return
+
+    async with AsyncSessionLocal() as db:
+        try:
+            if notification_type == "payment":
+                # PIX aprovado via /v1/payments
+                result = await db.execute(
+                    select(Transaction).where(Transaction.provider_transaction_id == data_id)
+                )
+                tx = result.scalars().first()
+                if tx and tx.status == "processing":
+                    await _mp_fetch_and_update(tx, data_id, db)
+
+            elif notification_type == "point_integration_ipn":
+                # MP Point: intent UUID → buscar payment_id associado
+                action = payload.get("action", "")  # ex: "state_FINISHED"
+                result = await db.execute(
+                    select(Transaction).where(Transaction.provider_transaction_id == data_id)
+                )
+                tx = result.scalars().first()
+                if not tx:
+                    return
+
+                state = action[len("state_"):] if action.startswith("state_") else action
+
+                if state == "FINISHED" and tx.status == "pending":
+                    terminal_cfg = await _get_terminal_config(tx.terminal_id)
+                    access_token = (terminal_cfg.get("config") or {}).get("api_key", "")
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        poll = await client.get(
+                            f"https://api.mercadopago.com/point/integration-api/payment-intents/{data_id}",
+                            headers={"Authorization": f"Bearer {access_token}"},
+                        )
+                        if poll.status_code == 200:
+                            pay_id = poll.json().get("payment", {}).get("id")
+                            if pay_id:
+                                await _mp_fetch_and_update(tx, str(pay_id), db)
+
+                elif state in ("CANCELED", "ERROR") and tx.status == "pending":
+                    tx.status = "cancelled" if state == "CANCELED" else "refused"
+                    await db.commit()
+
+        except Exception as exc:
+            logger.warning("Webhook MP handler error: %s", exc)
+
+
+@app.post(
+    "/payments/webhook",
+    status_code=200,
+    response_model=WebhookOut,
+    tags=["Pagamentos"],
+    summary="Webhook de notificações (MP PIX, MP Point, PayGo)",
+    description=(
+        "Recebe notificações push dos provedores de pagamento.\n\n"
+        "**Mercado Pago:** `?source=mercadopago` (padrão). Valida `x-signature` se "
+        "`MP_WEBHOOK_SECRET` estiver configurado. Suporta `type=payment` (PIX) e "
+        "`type=point_integration_ipn` (MP Point cartão).\n\n"
+        "**PayGo:** `?source=paygo`. Estrutura a confirmar com ControlPay Webservice.\n\n"
+        "Sempre retorna HTTP 200 para não bloquear reentregas do provider."
+    ),
+)
+async def payment_webhook(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    source: str = "mercadopago",
+):
+    body = await request.body()
+
+    if source == "mercadopago" and MP_WEBHOOK_SECRET:
+        sig_header = request.headers.get("x-signature", "")
+        request_id = request.headers.get("x-request-id", "")
+        ts = v1 = ""
+        for part in sig_header.split(","):
+            k, _, v = part.partition("=")
+            if k.strip() == "ts":
+                ts = v.strip()
+            elif k.strip() == "v1":
+                v1 = v.strip()
+        if not _verify_mp_signature(MP_WEBHOOK_SECRET, request_id, ts, v1):
+            logger.warning("Webhook MP: assinatura inválida — descartando")
+            raise HTTPException(401, "Assinatura inválida")
+
+    try:
+        payload = _json.loads(body)
+    except Exception:
+        return {"ok": True}
+
+    logger.info("Webhook recebido: source=%s type=%s", source, payload.get("type"))
+
+    if source == "mercadopago":
+        background_tasks.add_task(_handle_mp_notification, payload)
+    elif source == "paygo":
+        # PayGo notifica via callback configurado no request de pagamento.
+        # Estrutura do payload a confirmar com ControlPay — implementar quando disponível.
+        logger.info("Webhook PayGo: %s", payload)
+
+    return {"ok": True}
 
 
 @app.get("/health", response_model=HealthOut, tags=["Pagamentos"], summary="Healthcheck")

@@ -1,6 +1,6 @@
 # ORD-045 — Admin: configuração Mercado Pago por empresa
 
-**Status:** Ready  
+**Status:** Done  
 **Pontos:** 3  
 **Sprint:** Pagamentos MP
 
