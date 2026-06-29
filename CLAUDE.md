@@ -67,7 +67,7 @@ O gateway Nginx fica em `http://localhost:8000`. Cada serviço também expõe su
 3. Caixa coleta ticket → `POST /tickets/{code}/collect` com `SELECT FOR UPDATE` (previne dupla coleta)
 4. Quando todos os tickets de um pedido são coletados → ordem marcada automaticamente como `completed`
 
-**QR format:** `{ticket_code}|{order_ref}|{product_name}|{unit}/{total}|{HMAC-SHA256(payload, QR_SECRET)}`
+**QR format:** `{ticket_code}|{product_name}|{order_ref}|{unit}/{total}|{HMAC-SHA256(payload, QR_SECRET)}`
 
 ### WebSocket
 

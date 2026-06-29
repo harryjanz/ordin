@@ -49,6 +49,7 @@ export interface CompletedOrder {
   total: number;
   method: string;
   nsu: string | null;
+  provider: string;
   tickets: Ticket[];
 }
 
