@@ -17,3 +17,4 @@ structlog==24.1.0
 aiomysql==0.2.0
 alembic==1.13.1
 motor==3.4.0
+pymongo>=4.5,<4.7

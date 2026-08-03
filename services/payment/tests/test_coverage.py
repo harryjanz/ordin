@@ -145,6 +145,41 @@ def test_get_client_com_url_vazia():
     mongo_mod._client = orig_client
 
 
+def test_get_client_falha_na_criacao_loga_error(caplog):
+    """Se motor/pymongo forem incompatíveis (ou qualquer erro na criação do
+    cliente), _get_client captura a exceção, loga em nível ERROR (visível em
+    qualquer pipeline de alerta) e retorna None sem propagar."""
+    from infrastructure import mongo as mongo_mod
+    orig_client = mongo_mod._client
+    mongo_mod._client = None
+    with patch.dict(os.environ, {"MONGO_URL": "mongodb://localhost:27017/"}), \
+         patch("motor.motor_asyncio.AsyncIOMotorClient",
+               side_effect=ImportError("cannot import name '_QUERY_OPTIONS' from 'pymongo.cursor'")):
+        with caplog.at_level("ERROR"):
+            result = mongo_mod._get_client()
+    assert result is None
+    assert any(r.levelname == "ERROR" and "falha ao criar cliente" in r.message
+               for r in caplog.records)
+    mongo_mod._client = orig_client
+
+
+async def test_save_audit_falha_no_insert_nao_propaga():
+    """Se insert_one falhar (ex: Mongo genuinamente indisponível em runtime),
+    save_audit não deve derrubar o fluxo de pagamento que a chamou."""
+    from infrastructure import mongo as mongo_mod
+    orig_client = mongo_mod._client
+    mock_client = MagicMock()
+    mock_collection = AsyncMock()
+    mock_collection.insert_one = AsyncMock(side_effect=ConnectionError("Mongo indisponível"))
+    mock_client.__getitem__ = MagicMock(return_value=MagicMock(
+        payment_events=mock_collection
+    ))
+    mongo_mod._client = mock_client
+    # não deve lançar exceção
+    await mongo_mod.save_audit({"transaction_id": 1, "order_ref": "ORD-001"})
+    mongo_mod._client = orig_client
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # infrastructure/brokers/rabbitmq.py
 # ═══════════════════════════════════════════════════════════════════════════════
