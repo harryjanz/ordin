@@ -154,9 +154,9 @@ def test_get_client_falha_na_criacao_loga_error(caplog):
     mongo_mod._client = None
     with patch.dict(os.environ, {"MONGO_URL": "mongodb://localhost:27017/"}), \
          patch("motor.motor_asyncio.AsyncIOMotorClient",
-               side_effect=ImportError("cannot import name '_QUERY_OPTIONS' from 'pymongo.cursor'")):
-        with caplog.at_level("ERROR"):
-            result = mongo_mod._get_client()
+               side_effect=ImportError("cannot import name '_QUERY_OPTIONS' from 'pymongo.cursor'")), \
+         caplog.at_level("ERROR"):
+        result = mongo_mod._get_client()
     assert result is None
     assert any(r.levelname == "ERROR" and "falha ao criar cliente" in r.message
                for r in caplog.records)
