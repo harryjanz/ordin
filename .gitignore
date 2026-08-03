@@ -13,3 +13,4 @@ venv/
 *.tfstate.backup
 *.tfvars
 node_modules/
+docs/exemples/
