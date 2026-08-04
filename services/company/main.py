@@ -22,6 +22,7 @@ from sqlalchemy.orm import DeclarativeBase
 from config import require_env, get_cors_origins
 from domain.cnpj import normalize_cnpj, is_valid_cnpj
 from domain.address import normalize_cep, is_valid_cep
+from domain.cpf import normalize_cpf, is_valid_cpf
 from infrastructure.cnpj_lookup import lookup_cnpj
 from fastapi import Request
 from auth import get_current_user, TokenPayload
@@ -48,7 +49,7 @@ def _encryption_key() -> bytes | None:
     return bytes.fromhex(key_hex) if len(key_hex) == 64 else None
 
 
-def encrypt_credential(plaintext: str) -> str:
+def encrypt_field(plaintext: str) -> str:
     key = _encryption_key()
     if key is None:
         return plaintext  # plaintext only in local dev (no key configured)
@@ -57,7 +58,7 @@ def encrypt_credential(plaintext: str) -> str:
     return "enc:" + base64.b64encode(nonce + ct).decode()
 
 
-def decrypt_credential(stored: str) -> str:
+def decrypt_field(stored: str) -> str:
     if stored.startswith("arn:aws:secretsmanager:"):
         raise NotImplementedError("Secrets Manager — Fase 2")
     if stored.startswith("enc:"):
@@ -146,6 +147,30 @@ class CompanyPaymentConfig(Base):
     __table_args__ = (
         UniqueConstraint("company_id", "provider", "environment", name="uq_company_provider_env"),
     )
+
+
+class CompanyContact(Base):
+    __tablename__ = "company_contacts"
+    id           = Column(Integer, primary_key=True)
+    company_id   = Column(Integer, nullable=False, index=True)
+    contact_type = Column(String(20), nullable=False)
+    name_enc     = Column(String(500), nullable=False)
+    role_title   = Column(String(80), nullable=True)
+    email_enc    = Column(String(500), nullable=False)
+    phone_enc    = Column(String(500), nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+
+class CompanyLegalRepresentative(Base):
+    __tablename__ = "company_legal_representatives"
+    id          = Column(Integer, primary_key=True)
+    company_id  = Column(Integer, nullable=False, unique=True)
+    name_enc    = Column(String(500), nullable=False)
+    cpf_enc     = Column(String(500), nullable=False)
+    role_title  = Column(String(80), nullable=True)
+    email_enc   = Column(String(500), nullable=False)
+    phone_enc   = Column(String(500), nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
 
 
 async def get_db():
@@ -373,6 +398,66 @@ class PaymentConfigListOut(BaseModel):
     configs: list[PaymentConfigOut]
 
 
+VALID_CONTACT_TYPES = {"comercial", "financeiro", "tecnico"}
+
+
+class ContactIn(BaseModel):
+    contact_type: str
+    name: str
+    role_title: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+
+    @field_validator("contact_type")
+    @classmethod
+    def validate_contact_type(cls, v: str) -> str:
+        if v not in VALID_CONTACT_TYPES:
+            raise ValueError(f"contact_type deve ser um de: {sorted(VALID_CONTACT_TYPES)}")
+        return v
+
+
+class ContactOut(BaseModel):
+    id: int
+    company_id: int
+    contact_type: str
+    name: str
+    role_title: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+    created_at: datetime
+
+
+class ContactListOut(BaseModel):
+    contacts: list[ContactOut]
+
+
+class LegalRepresentativeIn(BaseModel):
+    name: str
+    cpf: str
+    role_title: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+
+    @field_validator("cpf")
+    @classmethod
+    def validate_cpf(cls, v: str) -> str:
+        normalized = normalize_cpf(v)
+        if not is_valid_cpf(normalized):
+            raise ValueError("CPF inválido (formato ou dígito verificador)")
+        return normalized  # banco armazena sempre sem máscara (antes de criptografar)
+
+
+class LegalRepresentativeOut(BaseModel):
+    id: int
+    company_id: int
+    name: str
+    cpf: str
+    role_title: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+    created_at: datetime
+
+
 class HealthOut(BaseModel):
     service: str
     status: str
@@ -523,8 +608,8 @@ async def internal_get_terminal(
         }
 
     config = {
-        "api_key":      decrypt_credential(cfg.api_key) if cfg.api_key else None,
-        "api_secret":   decrypt_credential(cfg.api_secret) if cfg.api_secret else None,
+        "api_key":      decrypt_field(cfg.api_key) if cfg.api_key else None,
+        "api_secret":   decrypt_field(cfg.api_secret) if cfg.api_secret else None,
         "extra_config": cfg.extra_config or {},
     }
 
@@ -1080,8 +1165,8 @@ async def create_payment_config(
         company_id=company_id,
         provider=body.provider,
         environment=body.environment,
-        api_key=encrypt_credential(body.api_key) if body.api_key else None,
-        api_secret=encrypt_credential(body.api_secret) if body.api_secret else None,
+        api_key=encrypt_field(body.api_key) if body.api_key else None,
+        api_secret=encrypt_field(body.api_secret) if body.api_secret else None,
         extra_config=body.extra_config,
         active=False,
     )
@@ -1121,9 +1206,9 @@ async def update_payment_config(
     if not cfg:
         raise HTTPException(404, "Config não encontrada")
     if body.api_key is not None:
-        cfg.api_key = encrypt_credential(body.api_key)
+        cfg.api_key = encrypt_field(body.api_key)
     if body.api_secret is not None:
-        cfg.api_secret = encrypt_credential(body.api_secret)
+        cfg.api_secret = encrypt_field(body.api_secret)
     if body.extra_config is not None:
         cfg.extra_config = body.extra_config
     await db.commit()
@@ -1194,6 +1279,131 @@ async def activate_payment_config(
     cfg.active = True
     await db.commit()
     return {"ok": True}
+
+
+# ── Contatos e responsável legal (ORD-058) ────────────────────────────────────
+
+def _require_owner_or_superadmin(u: TokenPayload, company_id: int) -> None:
+    if u.role == "superadmin":
+        return
+    if u.company_id != company_id or u.role != "owner":
+        raise HTTPException(403, "Acesso negado")
+
+
+@app.post(
+    "/companies/{company_id}/contacts",
+    response_model=ContactOut,
+    status_code=201,
+    tags=["Empresas"],
+    summary="Criar contato da empresa (comercial/financeiro/tecnico)",
+)
+async def create_contact(
+    company_id: int,
+    body: ContactIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+    contact = CompanyContact(
+        company_id=company_id,
+        contact_type=body.contact_type,
+        name_enc=encrypt_field(body.name),
+        role_title=body.role_title,
+        email_enc=encrypt_field(body.email),
+        phone_enc=encrypt_field(body.phone) if body.phone else None,
+    )
+    db.add(contact)
+    await db.commit()
+    await db.refresh(contact)
+    return ContactOut(
+        id=contact.id, company_id=contact.company_id, contact_type=contact.contact_type,
+        name=body.name, role_title=contact.role_title, email=body.email, phone=body.phone,
+        created_at=contact.created_at,
+    )
+
+
+@app.get(
+    "/companies/{company_id}/contacts",
+    response_model=ContactListOut,
+    tags=["Empresas"],
+    summary="Listar contatos da empresa",
+)
+async def list_contacts(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(CompanyContact).filter_by(company_id=company_id))
+    contacts = result.scalars().all()
+    return {"contacts": [
+        ContactOut(
+            id=c.id, company_id=c.company_id, contact_type=c.contact_type,
+            name=decrypt_field(c.name_enc), role_title=c.role_title,
+            email=decrypt_field(c.email_enc), phone=decrypt_field(c.phone_enc) if c.phone_enc else None,
+            created_at=c.created_at,
+        ) for c in contacts
+    ]}
+
+
+@app.post(
+    "/companies/{company_id}/legal-representative",
+    response_model=LegalRepresentativeOut,
+    tags=["Empresas"],
+    summary="Cadastrar/atualizar responsável legal da empresa",
+)
+async def upsert_legal_representative(
+    company_id: int,
+    body: LegalRepresentativeIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_owner_or_superadmin(current_user, company_id)
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+    result = await db.execute(select(CompanyLegalRepresentative).filter_by(company_id=company_id))
+    rep = result.scalars().first()
+    if rep is None:
+        rep = CompanyLegalRepresentative(company_id=company_id)
+        db.add(rep)
+    rep.name_enc = encrypt_field(body.name)
+    rep.cpf_enc = encrypt_field(body.cpf)
+    rep.role_title = body.role_title
+    rep.email_enc = encrypt_field(body.email)
+    rep.phone_enc = encrypt_field(body.phone) if body.phone else None
+    await db.commit()
+    await db.refresh(rep)
+    return LegalRepresentativeOut(
+        id=rep.id, company_id=rep.company_id, name=body.name, cpf=body.cpf,
+        role_title=rep.role_title, email=body.email, phone=body.phone, created_at=rep.created_at,
+    )
+
+
+@app.get(
+    "/companies/{company_id}/legal-representative",
+    response_model=LegalRepresentativeOut,
+    tags=["Empresas"],
+    summary="Consultar responsável legal da empresa",
+)
+async def get_legal_representative(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_owner_or_superadmin(current_user, company_id)
+    result = await db.execute(select(CompanyLegalRepresentative).filter_by(company_id=company_id))
+    rep = result.scalars().first()
+    if not rep:
+        raise HTTPException(404, "Responsável legal não cadastrado")
+    return LegalRepresentativeOut(
+        id=rep.id, company_id=rep.company_id, name=decrypt_field(rep.name_enc), cpf=decrypt_field(rep.cpf_enc),
+        role_title=rep.role_title, email=decrypt_field(rep.email_enc),
+        phone=decrypt_field(rep.phone_enc) if rep.phone_enc else None, created_at=rep.created_at,
+    )
 
 
 # ── Device pairing ───────────────────────────────────────────────────────────
