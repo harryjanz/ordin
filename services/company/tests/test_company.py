@@ -188,14 +188,14 @@ async def test_payment_config_wrong_company_forbidden(client, seed):
 
 # ── Encryption helpers ────────────────────────────────────────────────────────
 
-def test_encrypt_decrypt_credential():
-    from main import encrypt_credential, decrypt_credential
+def test_encrypt_decrypt_field():
+    from main import encrypt_field, decrypt_field
     plaintext = "minha-chave-secreta"
-    encrypted = encrypt_credential(plaintext)
+    encrypted = encrypt_field(plaintext)
     assert encrypted.startswith("enc:")
-    assert decrypt_credential(encrypted) == plaintext
+    assert decrypt_field(encrypted) == plaintext
 
 
 def test_decrypt_plaintext_passthrough():
-    from main import decrypt_credential
-    assert decrypt_credential("plaintext-sem-prefixo") == "plaintext-sem-prefixo"
+    from main import decrypt_field
+    assert decrypt_field("plaintext-sem-prefixo") == "plaintext-sem-prefixo"

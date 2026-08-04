@@ -110,21 +110,21 @@ async def _cleanup_seed(SessionLocal, co_id):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_encryption_key_sem_configuracao():
-    """Linha 47: encrypt_credential retorna plaintext quando key is None."""
+    """Linha 47: encrypt_field retorna plaintext quando key is None."""
     import main as svc
     from unittest.mock import patch
     with patch.object(svc, '_encryption_key', return_value=None):
-        result = svc.encrypt_credential("minha-senha")
+        result = svc.encrypt_field("minha-senha")
     assert result == "minha-senha"
 
 
 def test_decrypt_enc_sem_key_levanta_runtime_error():
-    """Linha 59: decrypt_credential levanta RuntimeError quando key é None mas valor tem enc:."""
+    """Linha 59: decrypt_field levanta RuntimeError quando key é None mas valor tem enc:."""
     import main as svc
     from unittest.mock import patch
     with patch.object(svc, '_encryption_key', return_value=None):
         with pytest.raises(RuntimeError, match="CREDENTIAL_ENCRYPTION_KEY"):
-            svc.decrypt_credential("enc:YWJj")
+            svc.decrypt_field("enc:YWJj")
 
 
 def test_require_superadmin_raises_for_owner():
@@ -291,7 +291,7 @@ async def test_dir_list_companies(db_session):
 async def test_dir_create_company(db_session):
     import main as svc
     from main import CompanyIn
-    body = CompanyIn(name="__dir_co__", document="77777777777",
+    body = CompanyIn(name="__dir_co__", document="11.222.333/0001-81",
                      plan="free", payment_provider="mock")
     async with db_session() as db:
         result = await svc.create_company(body, db, _user("superadmin"))

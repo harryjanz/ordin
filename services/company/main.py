@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import pathlib
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
@@ -9,9 +10,9 @@ import redis as redis_lib
 
 import bcrypt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fastapi import FastAPI, HTTPException, Depends, Header, Query
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Form, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, JSON,
     UniqueConstraint, select, func, or_, update,
@@ -20,6 +21,10 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from config import require_env, get_cors_origins
+from domain.cnpj import normalize_cnpj, is_valid_cnpj
+from domain.address import normalize_cep, is_valid_cep
+from domain.cpf import normalize_cpf, is_valid_cpf
+from infrastructure.cnpj_lookup import lookup_cnpj
 from fastapi import Request
 from auth import get_current_user, TokenPayload
 from audit import emit_audit
@@ -45,7 +50,7 @@ def _encryption_key() -> bytes | None:
     return bytes.fromhex(key_hex) if len(key_hex) == 64 else None
 
 
-def encrypt_credential(plaintext: str) -> str:
+def encrypt_field(plaintext: str) -> str:
     key = _encryption_key()
     if key is None:
         return plaintext  # plaintext only in local dev (no key configured)
@@ -54,7 +59,7 @@ def encrypt_credential(plaintext: str) -> str:
     return "enc:" + base64.b64encode(nonce + ct).decode()
 
 
-def decrypt_credential(stored: str) -> str:
+def decrypt_field(stored: str) -> str:
     if stored.startswith("arn:aws:secretsmanager:"):
         raise NotImplementedError("Secrets Manager — Fase 2")
     if stored.startswith("enc:"):
@@ -74,16 +79,35 @@ class Base(DeclarativeBase): pass
 
 class Company(Base):
     __tablename__ = "companies"
-    id               = Column(Integer, primary_key=True)
-    name             = Column(String(120))
-    document         = Column(String(20))
-    pin_hash         = Column(String(128), nullable=False)
-    plan             = Column(String(20), default="free")
-    payment_provider = Column(String(20), default="mock")
-    active           = Column(Boolean, default=True)
-    created_at       = Column(DateTime, default=datetime.utcnow)
-    visual_theme     = Column(String(32), nullable=False, default="ordin")
-    visual_mode      = Column(String(8),  nullable=False, default="light")
+    id                      = Column(Integer, primary_key=True)
+    name                    = Column(String(120))
+    document                = Column(String(20))
+    pin_hash                = Column(String(128), nullable=False)
+    plan                    = Column(String(20), default="free")
+    payment_provider        = Column(String(20), default="mock")
+    active                  = Column(Boolean, default=True)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+    visual_theme            = Column(String(32), nullable=False, default="ordin")
+    visual_mode             = Column(String(8),  nullable=False, default="light")
+    legal_name              = Column(String(160), nullable=True)
+    state_registration      = Column(String(20), nullable=True)
+    municipal_registration  = Column(String(20), nullable=True)
+    tax_regime              = Column(String(20), nullable=True)
+    company_size            = Column(String(10), nullable=True)
+    cnae_code                = Column(String(10), nullable=True)
+    cadastral_status         = Column(String(20), nullable=True)
+    zip_code                 = Column(String(9),  nullable=True)
+    street                   = Column(String(160), nullable=True)
+    address_number           = Column(String(20), nullable=True)
+    complement               = Column(String(80), nullable=True)
+    neighborhood             = Column(String(80), nullable=True)
+    city                     = Column(String(80), nullable=True)
+    state                    = Column(String(2),  nullable=True)
+    country                  = Column(String(60), nullable=True, default="Brasil")
+    contract_status          = Column(String(20), nullable=False, default="pendente")
+    contract_sent_at         = Column(DateTime, nullable=True)
+    contract_signed_at       = Column(DateTime, nullable=True)
+    contract_document_url    = Column(String(255), nullable=True)
 
 
 class User(Base):
@@ -130,6 +154,30 @@ class CompanyPaymentConfig(Base):
     )
 
 
+class CompanyContact(Base):
+    __tablename__ = "company_contacts"
+    id           = Column(Integer, primary_key=True)
+    company_id   = Column(Integer, nullable=False, index=True)
+    contact_type = Column(String(20), nullable=False)
+    name_enc     = Column(String(500), nullable=False)
+    role_title   = Column(String(80), nullable=True)
+    email_enc    = Column(String(500), nullable=False)
+    phone_enc    = Column(String(500), nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+
+class CompanyLegalRepresentative(Base):
+    __tablename__ = "company_legal_representatives"
+    id          = Column(Integer, primary_key=True)
+    company_id  = Column(Integer, nullable=False, unique=True)
+    name_enc    = Column(String(500), nullable=False)
+    cpf_enc     = Column(String(500), nullable=False)
+    role_title  = Column(String(80), nullable=True)
+    email_enc   = Column(String(500), nullable=False)
+    phone_enc   = Column(String(500), nullable=True)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
@@ -161,6 +209,25 @@ class CompanyOut(BaseModel):
     created_at: Optional[datetime] = None
     visual_theme: str = "ordin"
     visual_mode: str = "light"
+    legal_name: Optional[str] = None
+    state_registration: Optional[str] = None
+    municipal_registration: Optional[str] = None
+    tax_regime: Optional[str] = None
+    company_size: Optional[str] = None
+    cnae_code: Optional[str] = None
+    cadastral_status: Optional[str] = None
+    zip_code: Optional[str] = None
+    street: Optional[str] = None
+    address_number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    contract_status: str = "pendente"
+    contract_sent_at: Optional[datetime] = None
+    contract_signed_at: Optional[datetime] = None
+    contract_document_url: Optional[str] = None
     model_config = {"from_attributes": True}
 
 
@@ -169,6 +236,39 @@ class CompanyIn(BaseModel):
     document: Optional[str] = None
     plan: str = "free"
     payment_provider: str = "mock"
+    legal_name: Optional[str] = None
+    state_registration: Optional[str] = None
+    municipal_registration: Optional[str] = None
+    tax_regime: Optional[str] = None
+    company_size: Optional[str] = None
+    cnae_code: Optional[str] = None
+    zip_code: Optional[str] = None
+    street: Optional[str] = None
+    address_number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+
+    @field_validator("document")
+    @classmethod
+    def validate_document(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v
+        normalized = normalize_cnpj(v)
+        if not is_valid_cnpj(normalized):
+            raise ValueError("CNPJ inválido (formato ou dígito verificador)")
+        return normalized  # banco armazena sempre sem máscara
+
+    @field_validator("zip_code")
+    @classmethod
+    def validate_zip_code(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v
+        normalized = normalize_cep(v)
+        if not is_valid_cep(normalized):
+            raise ValueError("CEP inválido — deve conter 8 dígitos")
+        return normalized  # banco armazena sempre sem máscara
 
 
 class CompanyUpdate(BaseModel):
@@ -186,6 +286,22 @@ class CompanyListOut(BaseModel):
 class CompanyCreateOut(BaseModel):
     company: CompanyOut
     pin: str
+
+
+class CnpjLookupOut(BaseModel):
+    found: bool
+    reason: Optional[str] = None
+    cadastral_status: str = "NAO_VERIFICADA"
+    legal_name: Optional[str] = None
+    trade_name: Optional[str] = None
+    zip_code: Optional[str] = None
+    street: Optional[str] = None
+    address_number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    model_config = {"from_attributes": True}
 
 
 class TerminalOut(BaseModel):
@@ -289,6 +405,66 @@ class PaymentConfigOut(BaseModel):
 
 class PaymentConfigListOut(BaseModel):
     configs: list[PaymentConfigOut]
+
+
+VALID_CONTACT_TYPES = {"comercial", "financeiro", "tecnico"}
+
+
+class ContactIn(BaseModel):
+    contact_type: str
+    name: str
+    role_title: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+
+    @field_validator("contact_type")
+    @classmethod
+    def validate_contact_type(cls, v: str) -> str:
+        if v not in VALID_CONTACT_TYPES:
+            raise ValueError(f"contact_type deve ser um de: {sorted(VALID_CONTACT_TYPES)}")
+        return v
+
+
+class ContactOut(BaseModel):
+    id: int
+    company_id: int
+    contact_type: str
+    name: str
+    role_title: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+    created_at: datetime
+
+
+class ContactListOut(BaseModel):
+    contacts: list[ContactOut]
+
+
+class LegalRepresentativeIn(BaseModel):
+    name: str
+    cpf: str
+    role_title: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+
+    @field_validator("cpf")
+    @classmethod
+    def validate_cpf(cls, v: str) -> str:
+        normalized = normalize_cpf(v)
+        if not is_valid_cpf(normalized):
+            raise ValueError("CPF inválido (formato ou dígito verificador)")
+        return normalized  # banco armazena sempre sem máscara (antes de criptografar)
+
+
+class LegalRepresentativeOut(BaseModel):
+    id: int
+    company_id: int
+    name: str
+    cpf: str
+    role_title: Optional[str] = None
+    email: str
+    phone: Optional[str] = None
+    created_at: datetime
 
 
 class HealthOut(BaseModel):
@@ -441,8 +617,8 @@ async def internal_get_terminal(
         }
 
     config = {
-        "api_key":      decrypt_credential(cfg.api_key) if cfg.api_key else None,
-        "api_secret":   decrypt_credential(cfg.api_secret) if cfg.api_secret else None,
+        "api_key":      decrypt_field(cfg.api_key) if cfg.api_key else None,
+        "api_secret":   decrypt_field(cfg.api_secret) if cfg.api_secret else None,
         "extra_config": cfg.extra_config or {},
     }
 
@@ -487,6 +663,20 @@ async def create_company(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_superadmin(current_user)
+    cadastral_status = "NAO_VERIFICADA"
+    if body.document:
+        # reconsulta server-side — nunca confia apenas no que o front enviou (janela lookup → submit)
+        result = await lookup_cnpj(body.document)
+        if result.found:
+            if result.cadastral_status != "ATIVA":
+                raise HTTPException(
+                    422,
+                    f"CNPJ com situação cadastral '{result.cadastral_status}' na Receita Federal — cadastro não pode prosseguir",
+                )
+            cadastral_status = "ATIVA"
+        elif result.reason == "cnpj_not_found":
+            raise HTTPException(422, "CNPJ não encontrado na Receita Federal")
+        # reason == "lookup_unavailable" → segue o cadastro com cadastral_status = "NAO_VERIFICADA"
     pin = str(secrets.randbelow(900000) + 100000)
     co = Company(
         name=body.name,
@@ -494,11 +684,45 @@ async def create_company(
         plan=body.plan,
         payment_provider=body.payment_provider,
         pin_hash=bcrypt.hashpw(pin.encode(), bcrypt.gensalt(12)).decode(),
+        legal_name=body.legal_name,
+        state_registration=body.state_registration,
+        municipal_registration=body.municipal_registration,
+        tax_regime=body.tax_regime,
+        company_size=body.company_size,
+        cnae_code=body.cnae_code,
+        cadastral_status=cadastral_status,
+        zip_code=body.zip_code,
+        street=body.street,
+        address_number=body.address_number,
+        complement=body.complement,
+        neighborhood=body.neighborhood,
+        city=body.city,
+        state=body.state,
     )
     db.add(co)
     await db.commit()
     await db.refresh(co)
     return {"company": co, "pin": pin}
+
+
+@app.get(
+    "/companies/cnpj-lookup/{cnpj}",
+    response_model=CnpjLookupOut,
+    tags=["Empresas"],
+    summary="Consultar CNPJ na Receita Federal",
+)
+async def cnpj_lookup(
+    cnpj: str,
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_superadmin(current_user)
+    normalized = normalize_cnpj(cnpj)
+    if not is_valid_cnpj(normalized):
+        raise HTTPException(422, "CNPJ inválido (formato ou dígito verificador)")
+    result = await lookup_cnpj(normalized)
+    if not result.found and result.reason == "cnpj_not_found":
+        raise HTTPException(404, "CNPJ não encontrado na Receita Federal")
+    return result
 
 
 @app.get(
@@ -950,8 +1174,8 @@ async def create_payment_config(
         company_id=company_id,
         provider=body.provider,
         environment=body.environment,
-        api_key=encrypt_credential(body.api_key) if body.api_key else None,
-        api_secret=encrypt_credential(body.api_secret) if body.api_secret else None,
+        api_key=encrypt_field(body.api_key) if body.api_key else None,
+        api_secret=encrypt_field(body.api_secret) if body.api_secret else None,
         extra_config=body.extra_config,
         active=False,
     )
@@ -991,9 +1215,9 @@ async def update_payment_config(
     if not cfg:
         raise HTTPException(404, "Config não encontrada")
     if body.api_key is not None:
-        cfg.api_key = encrypt_credential(body.api_key)
+        cfg.api_key = encrypt_field(body.api_key)
     if body.api_secret is not None:
-        cfg.api_secret = encrypt_credential(body.api_secret)
+        cfg.api_secret = encrypt_field(body.api_secret)
     if body.extra_config is not None:
         cfg.extra_config = body.extra_config
     await db.commit()
@@ -1064,6 +1288,192 @@ async def activate_payment_config(
     cfg.active = True
     await db.commit()
     return {"ok": True}
+
+
+# ── Contatos e responsável legal (ORD-058) ────────────────────────────────────
+
+def _require_owner_or_superadmin(u: TokenPayload, company_id: int) -> None:
+    if u.role == "superadmin":
+        return
+    if u.company_id != company_id or u.role != "owner":
+        raise HTTPException(403, "Acesso negado")
+
+
+@app.post(
+    "/companies/{company_id}/contacts",
+    response_model=ContactOut,
+    status_code=201,
+    tags=["Empresas"],
+    summary="Criar contato da empresa (comercial/financeiro/tecnico)",
+)
+async def create_contact(
+    company_id: int,
+    body: ContactIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+    contact = CompanyContact(
+        company_id=company_id,
+        contact_type=body.contact_type,
+        name_enc=encrypt_field(body.name),
+        role_title=body.role_title,
+        email_enc=encrypt_field(body.email),
+        phone_enc=encrypt_field(body.phone) if body.phone else None,
+    )
+    db.add(contact)
+    await db.commit()
+    await db.refresh(contact)
+    return ContactOut(
+        id=contact.id, company_id=contact.company_id, contact_type=contact.contact_type,
+        name=body.name, role_title=contact.role_title, email=body.email, phone=body.phone,
+        created_at=contact.created_at,
+    )
+
+
+@app.get(
+    "/companies/{company_id}/contacts",
+    response_model=ContactListOut,
+    tags=["Empresas"],
+    summary="Listar contatos da empresa",
+)
+async def list_contacts(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(CompanyContact).filter_by(company_id=company_id))
+    contacts = result.scalars().all()
+    return {"contacts": [
+        ContactOut(
+            id=c.id, company_id=c.company_id, contact_type=c.contact_type,
+            name=decrypt_field(c.name_enc), role_title=c.role_title,
+            email=decrypt_field(c.email_enc), phone=decrypt_field(c.phone_enc) if c.phone_enc else None,
+            created_at=c.created_at,
+        ) for c in contacts
+    ]}
+
+
+@app.post(
+    "/companies/{company_id}/legal-representative",
+    response_model=LegalRepresentativeOut,
+    tags=["Empresas"],
+    summary="Cadastrar/atualizar responsável legal da empresa",
+)
+async def upsert_legal_representative(
+    company_id: int,
+    body: LegalRepresentativeIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_owner_or_superadmin(current_user, company_id)
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+    result = await db.execute(select(CompanyLegalRepresentative).filter_by(company_id=company_id))
+    rep = result.scalars().first()
+    if rep is None:
+        rep = CompanyLegalRepresentative(company_id=company_id)
+        db.add(rep)
+    rep.name_enc = encrypt_field(body.name)
+    rep.cpf_enc = encrypt_field(body.cpf)
+    rep.role_title = body.role_title
+    rep.email_enc = encrypt_field(body.email)
+    rep.phone_enc = encrypt_field(body.phone) if body.phone else None
+    await db.commit()
+    await db.refresh(rep)
+    return LegalRepresentativeOut(
+        id=rep.id, company_id=rep.company_id, name=body.name, cpf=body.cpf,
+        role_title=rep.role_title, email=body.email, phone=body.phone, created_at=rep.created_at,
+    )
+
+
+@app.get(
+    "/companies/{company_id}/legal-representative",
+    response_model=LegalRepresentativeOut,
+    tags=["Empresas"],
+    summary="Consultar responsável legal da empresa",
+)
+async def get_legal_representative(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_owner_or_superadmin(current_user, company_id)
+    result = await db.execute(select(CompanyLegalRepresentative).filter_by(company_id=company_id))
+    rep = result.scalars().first()
+    if not rep:
+        raise HTTPException(404, "Responsável legal não cadastrado")
+    return LegalRepresentativeOut(
+        id=rep.id, company_id=rep.company_id, name=decrypt_field(rep.name_enc), cpf=decrypt_field(rep.cpf_enc),
+        role_title=rep.role_title, email=decrypt_field(rep.email_enc),
+        phone=decrypt_field(rep.phone_enc) if rep.phone_enc else None, created_at=rep.created_at,
+    )
+
+
+# ── Status do contrato (ORD-059) ──────────────────────────────────────────────
+# Envio por e-mail e assinatura (via gov.br) são processos externos e manuais.
+# Este endpoint só rastreia o status; não envia e-mail nem integra assinatura eletrônica.
+
+VALID_CONTRACT_STATUSES = {"enviado", "assinado"}
+_CONTRACT_STATUS_RANK = {"pendente": 0, "enviado": 1, "assinado": 2}
+_UPLOADS_DIR = pathlib.Path(os.getenv("UPLOADS_DIR", "/app/uploads"))
+
+
+@app.patch(
+    "/companies/{company_id}/contract-status",
+    response_model=CompanyOut,
+    tags=["Empresas"],
+    summary="Atualizar status do contrato (envio/assinatura externos, rastreio manual)",
+)
+async def update_contract_status(
+    company_id: int,
+    request: Request,
+    status: str = Form(...),
+    signed_document: Optional[UploadFile] = File(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_superadmin(current_user)
+    if status not in VALID_CONTRACT_STATUSES:
+        raise HTTPException(422, f"status deve ser um de: {sorted(VALID_CONTRACT_STATUSES)}")
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    if _CONTRACT_STATUS_RANK[status] < _CONTRACT_STATUS_RANK[co.contract_status]:
+        raise HTTPException(
+            422, f"Não é possível regredir o status do contrato de '{co.contract_status}' para '{status}'"
+        )
+
+    if status == "assinado":
+        if signed_document is None:
+            raise HTTPException(422, "signed_document é obrigatório quando status='assinado'")
+        contract_dir = _UPLOADS_DIR / "contracts" / str(company_id)
+        contract_dir.mkdir(parents=True, exist_ok=True)
+        dest = contract_dir / signed_document.filename
+        dest.write_bytes(await signed_document.read())
+        co.contract_document_url = str(dest)
+        co.contract_signed_at = datetime.utcnow()
+    elif status == "enviado":
+        co.contract_sent_at = datetime.utcnow()
+
+    status_anterior = co.contract_status
+    co.contract_status = status
+    await db.commit()
+    await db.refresh(co)
+
+    emit_audit("contract_status_changed", request,
+               actor=current_user.sub,
+               actor_id=int(current_user.sub),
+               company_id=company_id,
+               result="success",
+               detail={"from": status_anterior, "to": status})
+    return co
 
 
 # ── Device pairing ───────────────────────────────────────────────────────────
