@@ -19,7 +19,7 @@ def _get_client():
         _client = motor.motor_asyncio.AsyncIOMotorClient(mongo_url)
         return _client
     except Exception as exc:
-        logger.warning("MongoDB: falha ao criar cliente — %s", exc)
+        logger.error("MongoDB: falha ao criar cliente — %s", exc)
         return None
 
 
@@ -32,4 +32,7 @@ async def save_audit(document: dict) -> None:
         document.setdefault("created_at", datetime.utcnow().isoformat())
         await client[mongo_db].payment_events.insert_one(document)
     except Exception as exc:
-        logger.warning("MongoDB: falha ao salvar audit — %s", exc)
+        logger.error(
+            "MongoDB: falha ao salvar audit — transaction_id=%s order_ref=%s — %s",
+            document.get("transaction_id"), document.get("order_ref"), exc,
+        )
