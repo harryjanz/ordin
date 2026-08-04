@@ -291,7 +291,7 @@ async def test_dir_list_companies(db_session):
 async def test_dir_create_company(db_session):
     import main as svc
     from main import CompanyIn
-    body = CompanyIn(name="__dir_co__", document="77777777777",
+    body = CompanyIn(name="__dir_co__", document="11.222.333/0001-81",
                      plan="free", payment_provider="mock")
     async with db_session() as db:
         result = await svc.create_company(body, db, _user("superadmin"))

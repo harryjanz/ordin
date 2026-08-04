@@ -11,7 +11,7 @@ import bcrypt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI, HTTPException, Depends, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, JSON,
     UniqueConstraint, select, func, or_, update,
@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from config import require_env, get_cors_origins
+from domain.cnpj import normalize_cnpj, is_valid_cnpj
+from domain.address import normalize_cep, is_valid_cep
 from fastapi import Request
 from auth import get_current_user, TokenPayload
 from audit import emit_audit
@@ -74,16 +76,31 @@ class Base(DeclarativeBase): pass
 
 class Company(Base):
     __tablename__ = "companies"
-    id               = Column(Integer, primary_key=True)
-    name             = Column(String(120))
-    document         = Column(String(20))
-    pin_hash         = Column(String(128), nullable=False)
-    plan             = Column(String(20), default="free")
-    payment_provider = Column(String(20), default="mock")
-    active           = Column(Boolean, default=True)
-    created_at       = Column(DateTime, default=datetime.utcnow)
-    visual_theme     = Column(String(32), nullable=False, default="ordin")
-    visual_mode      = Column(String(8),  nullable=False, default="light")
+    id                      = Column(Integer, primary_key=True)
+    name                    = Column(String(120))
+    document                = Column(String(20))
+    pin_hash                = Column(String(128), nullable=False)
+    plan                    = Column(String(20), default="free")
+    payment_provider        = Column(String(20), default="mock")
+    active                  = Column(Boolean, default=True)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+    visual_theme            = Column(String(32), nullable=False, default="ordin")
+    visual_mode             = Column(String(8),  nullable=False, default="light")
+    legal_name              = Column(String(160), nullable=True)
+    state_registration      = Column(String(20), nullable=True)
+    municipal_registration  = Column(String(20), nullable=True)
+    tax_regime              = Column(String(20), nullable=True)
+    company_size            = Column(String(10), nullable=True)
+    cnae_code                = Column(String(10), nullable=True)
+    cadastral_status         = Column(String(20), nullable=True)
+    zip_code                 = Column(String(9),  nullable=True)
+    street                   = Column(String(160), nullable=True)
+    address_number           = Column(String(20), nullable=True)
+    complement               = Column(String(80), nullable=True)
+    neighborhood             = Column(String(80), nullable=True)
+    city                     = Column(String(80), nullable=True)
+    state                    = Column(String(2),  nullable=True)
+    country                  = Column(String(60), nullable=True, default="Brasil")
 
 
 class User(Base):
@@ -161,6 +178,21 @@ class CompanyOut(BaseModel):
     created_at: Optional[datetime] = None
     visual_theme: str = "ordin"
     visual_mode: str = "light"
+    legal_name: Optional[str] = None
+    state_registration: Optional[str] = None
+    municipal_registration: Optional[str] = None
+    tax_regime: Optional[str] = None
+    company_size: Optional[str] = None
+    cnae_code: Optional[str] = None
+    cadastral_status: Optional[str] = None
+    zip_code: Optional[str] = None
+    street: Optional[str] = None
+    address_number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
     model_config = {"from_attributes": True}
 
 
@@ -169,6 +201,39 @@ class CompanyIn(BaseModel):
     document: Optional[str] = None
     plan: str = "free"
     payment_provider: str = "mock"
+    legal_name: Optional[str] = None
+    state_registration: Optional[str] = None
+    municipal_registration: Optional[str] = None
+    tax_regime: Optional[str] = None
+    company_size: Optional[str] = None
+    cnae_code: Optional[str] = None
+    zip_code: Optional[str] = None
+    street: Optional[str] = None
+    address_number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+
+    @field_validator("document")
+    @classmethod
+    def validate_document(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v
+        normalized = normalize_cnpj(v)
+        if not is_valid_cnpj(normalized):
+            raise ValueError("CNPJ inválido (formato ou dígito verificador)")
+        return normalized  # banco armazena sempre sem máscara
+
+    @field_validator("zip_code")
+    @classmethod
+    def validate_zip_code(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v
+        normalized = normalize_cep(v)
+        if not is_valid_cep(normalized):
+            raise ValueError("CEP inválido — deve conter 8 dígitos")
+        return normalized  # banco armazena sempre sem máscara
 
 
 class CompanyUpdate(BaseModel):
@@ -494,6 +559,19 @@ async def create_company(
         plan=body.plan,
         payment_provider=body.payment_provider,
         pin_hash=bcrypt.hashpw(pin.encode(), bcrypt.gensalt(12)).decode(),
+        legal_name=body.legal_name,
+        state_registration=body.state_registration,
+        municipal_registration=body.municipal_registration,
+        tax_regime=body.tax_regime,
+        company_size=body.company_size,
+        cnae_code=body.cnae_code,
+        zip_code=body.zip_code,
+        street=body.street,
+        address_number=body.address_number,
+        complement=body.complement,
+        neighborhood=body.neighborhood,
+        city=body.city,
+        state=body.state,
     )
     db.add(co)
     await db.commit()
