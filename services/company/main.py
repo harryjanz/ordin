@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import pathlib
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
@@ -9,7 +10,7 @@ import redis as redis_lib
 
 import bcrypt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fastapi import FastAPI, HTTPException, Depends, Header, Query
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Form, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from sqlalchemy import (
@@ -103,6 +104,10 @@ class Company(Base):
     city                     = Column(String(80), nullable=True)
     state                    = Column(String(2),  nullable=True)
     country                  = Column(String(60), nullable=True, default="Brasil")
+    contract_status          = Column(String(20), nullable=False, default="pendente")
+    contract_sent_at         = Column(DateTime, nullable=True)
+    contract_signed_at       = Column(DateTime, nullable=True)
+    contract_document_url    = Column(String(255), nullable=True)
 
 
 class User(Base):
@@ -219,6 +224,10 @@ class CompanyOut(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     country: Optional[str] = None
+    contract_status: str = "pendente"
+    contract_sent_at: Optional[datetime] = None
+    contract_signed_at: Optional[datetime] = None
+    contract_document_url: Optional[str] = None
     model_config = {"from_attributes": True}
 
 
@@ -1404,6 +1413,67 @@ async def get_legal_representative(
         role_title=rep.role_title, email=decrypt_field(rep.email_enc),
         phone=decrypt_field(rep.phone_enc) if rep.phone_enc else None, created_at=rep.created_at,
     )
+
+
+# ── Status do contrato (ORD-059) ──────────────────────────────────────────────
+# Envio por e-mail e assinatura (via gov.br) são processos externos e manuais.
+# Este endpoint só rastreia o status; não envia e-mail nem integra assinatura eletrônica.
+
+VALID_CONTRACT_STATUSES = {"enviado", "assinado"}
+_CONTRACT_STATUS_RANK = {"pendente": 0, "enviado": 1, "assinado": 2}
+_UPLOADS_DIR = pathlib.Path(os.getenv("UPLOADS_DIR", "/app/uploads"))
+
+
+@app.patch(
+    "/companies/{company_id}/contract-status",
+    response_model=CompanyOut,
+    tags=["Empresas"],
+    summary="Atualizar status do contrato (envio/assinatura externos, rastreio manual)",
+)
+async def update_contract_status(
+    company_id: int,
+    request: Request,
+    status: str = Form(...),
+    signed_document: Optional[UploadFile] = File(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_superadmin(current_user)
+    if status not in VALID_CONTRACT_STATUSES:
+        raise HTTPException(422, f"status deve ser um de: {sorted(VALID_CONTRACT_STATUSES)}")
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    if _CONTRACT_STATUS_RANK[status] < _CONTRACT_STATUS_RANK[co.contract_status]:
+        raise HTTPException(
+            422, f"Não é possível regredir o status do contrato de '{co.contract_status}' para '{status}'"
+        )
+
+    if status == "assinado":
+        if signed_document is None:
+            raise HTTPException(422, "signed_document é obrigatório quando status='assinado'")
+        contract_dir = _UPLOADS_DIR / "contracts" / str(company_id)
+        contract_dir.mkdir(parents=True, exist_ok=True)
+        dest = contract_dir / signed_document.filename
+        dest.write_bytes(await signed_document.read())
+        co.contract_document_url = str(dest)
+        co.contract_signed_at = datetime.utcnow()
+    elif status == "enviado":
+        co.contract_sent_at = datetime.utcnow()
+
+    status_anterior = co.contract_status
+    co.contract_status = status
+    await db.commit()
+    await db.refresh(co)
+
+    emit_audit("contract_status_changed", request,
+               actor=current_user.sub,
+               actor_id=int(current_user.sub),
+               company_id=company_id,
+               result="success",
+               detail={"from": status_anterior, "to": status})
+    return co
 
 
 # ── Device pairing ───────────────────────────────────────────────────────────
