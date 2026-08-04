@@ -47,6 +47,20 @@ def superadmin_token():
     return _make_token("superadmin", 0)
 
 
+@pytest.fixture(autouse=True)
+def _mock_cnpj_lookup_ativa(monkeypatch):
+    """ORD-057 faz create_company reconsultar a Receita — nos testes do ORD-056,
+    que só validam formato/DV localmente, mocka a consulta como sempre ATIVA
+    para não depender de rede real nem se acoplar ao ORD-057."""
+    import main as svc
+    from infrastructure.cnpj_lookup import CnpjLookupResult
+
+    async def _fake_lookup(cnpj):
+        return CnpjLookupResult(found=True, cadastral_status="ATIVA")
+
+    monkeypatch.setattr(svc, "lookup_cnpj", _fake_lookup)
+
+
 @pytest.fixture
 async def _cleanup_company(client):
     import main as svc

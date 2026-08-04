@@ -22,6 +22,7 @@ from sqlalchemy.orm import DeclarativeBase
 from config import require_env, get_cors_origins
 from domain.cnpj import normalize_cnpj, is_valid_cnpj
 from domain.address import normalize_cep, is_valid_cep
+from infrastructure.cnpj_lookup import lookup_cnpj
 from fastapi import Request
 from auth import get_current_user, TokenPayload
 from audit import emit_audit
@@ -251,6 +252,22 @@ class CompanyListOut(BaseModel):
 class CompanyCreateOut(BaseModel):
     company: CompanyOut
     pin: str
+
+
+class CnpjLookupOut(BaseModel):
+    found: bool
+    reason: Optional[str] = None
+    cadastral_status: str = "NAO_VERIFICADA"
+    legal_name: Optional[str] = None
+    trade_name: Optional[str] = None
+    zip_code: Optional[str] = None
+    street: Optional[str] = None
+    address_number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    model_config = {"from_attributes": True}
 
 
 class TerminalOut(BaseModel):
@@ -552,6 +569,20 @@ async def create_company(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_superadmin(current_user)
+    cadastral_status = "NAO_VERIFICADA"
+    if body.document:
+        # reconsulta server-side — nunca confia apenas no que o front enviou (janela lookup → submit)
+        result = await lookup_cnpj(body.document)
+        if result.found:
+            if result.cadastral_status != "ATIVA":
+                raise HTTPException(
+                    422,
+                    f"CNPJ com situação cadastral '{result.cadastral_status}' na Receita Federal — cadastro não pode prosseguir",
+                )
+            cadastral_status = "ATIVA"
+        elif result.reason == "cnpj_not_found":
+            raise HTTPException(422, "CNPJ não encontrado na Receita Federal")
+        # reason == "lookup_unavailable" → segue o cadastro com cadastral_status = "NAO_VERIFICADA"
     pin = str(secrets.randbelow(900000) + 100000)
     co = Company(
         name=body.name,
@@ -565,6 +596,7 @@ async def create_company(
         tax_regime=body.tax_regime,
         company_size=body.company_size,
         cnae_code=body.cnae_code,
+        cadastral_status=cadastral_status,
         zip_code=body.zip_code,
         street=body.street,
         address_number=body.address_number,
@@ -577,6 +609,26 @@ async def create_company(
     await db.commit()
     await db.refresh(co)
     return {"company": co, "pin": pin}
+
+
+@app.get(
+    "/companies/cnpj-lookup/{cnpj}",
+    response_model=CnpjLookupOut,
+    tags=["Empresas"],
+    summary="Consultar CNPJ na Receita Federal",
+)
+async def cnpj_lookup(
+    cnpj: str,
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_superadmin(current_user)
+    normalized = normalize_cnpj(cnpj)
+    if not is_valid_cnpj(normalized):
+        raise HTTPException(422, "CNPJ inválido (formato ou dígito verificador)")
+    result = await lookup_cnpj(normalized)
+    if not result.found and result.reason == "cnpj_not_found":
+        raise HTTPException(404, "CNPJ não encontrado na Receita Federal")
+    return result
 
 
 @app.get(
