@@ -35,9 +35,14 @@ mypy services/<nome>/
 pytest services/<nome>/tests/ -v
 pytest services/<nome>/tests/unit/ -v
 pytest services/<nome>/tests/integration/ -v
+
+# E2E (Playwright) — ORD_ID aponta a evidência pra pasta certa da história
+ORD_ID=ORD-XXX npx playwright test
 ```
 
 O gateway Nginx fica em `http://localhost:8000`. Cada serviço também expõe sua porta diretamente (8001–8005).
+
+**Evidências de teste (regra permanente, vale para toda história):** screenshots, vídeos e traces do Playwright, e prints de validação manual de QA, são salvos **dentro do repositório** em `docs/stories/<ID>/evidencias/` — nunca em diretório temporário fora do projeto. Detalhe da convenção em `docs/roles/qa.md`; critério de saída obrigatório no step QA do downstream (`docs/WORKFLOW.md`).
 
 ## Arquitetura
 

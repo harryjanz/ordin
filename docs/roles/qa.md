@@ -87,6 +87,34 @@ services/<nome>/tests/
   conftest.py       → fixtures: db session, httpx client, factory-boy factories
 ```
 
+## Evidências de teste (E2E e QA manual)
+
+Toda evidência de execução de teste — screenshots, vídeos e traces do Playwright, e prints de validação manual de QA — é salva **dentro do repositório**, nunca em diretório temporário fora do projeto:
+
+```
+docs/stories/<ID>/evidencias/
+  e2e/       screenshots, vídeos e traces do Playwright
+  manual/    prints de validação manual (quando o cenário ainda não está automatizado)
+```
+
+`<ID>` é o código curto da história (ex: `ORD-060`), não o slug completo do arquivo `.md` da história.
+
+`playwright.config.ts` de cada frontend aponta `outputDir` para essa pasta via variável de ambiente `ORD_ID`, definida antes de rodar a suíte:
+
+```bash
+ORD_ID=ORD-060 npx playwright test
+```
+
+```ts
+// playwright.config.ts
+export default defineConfig({
+  outputDir: `../../docs/stories/${process.env.ORD_ID}/evidencias/e2e`,
+  use: { screenshot: "only-on-failure", trace: "retain-on-failure" },
+});
+```
+
+Essa pasta faz parte do PR da história — evidência de teste é entregável, não artefato descartável. Regra vale tanto para execução automatizada (CI/local) quanto para prints tirados manualmente durante o step **QA** do downstream (`docs/WORKFLOW.md`).
+
 ## Slash command
 
 Use `/qa <tarefa>` para acionar o Claude no papel de QA.

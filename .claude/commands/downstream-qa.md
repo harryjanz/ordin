@@ -14,7 +14,26 @@ Você está atuando no step **QA** da esteira **Downstream** do projeto Ordin, n
 - [ ] Cenários de erro passando
 - [ ] Cenário de isolamento multi-tenant passando (empresa A não acessa dados da empresa B)
 - [ ] Regressão nos fluxos críticos verificada (happy path completo: PIN → pedido → pagamento → coleta)
+- [ ] Evidências de teste (E2E/Playwright e prints manuais) salvas em `docs/stories/<ID>/evidencias/`
 - [ ] Nenhum bug bloqueador em aberto
+
+## Onde salvar evidências (obrigatório, todo step QA)
+
+Nunca deixar screenshot/vídeo/trace de teste em diretório temporário fora do projeto. Salvar sempre em:
+
+```
+docs/stories/<ID>/evidencias/
+  e2e/       screenshots, vídeos e traces do Playwright
+  manual/    prints de validação manual (cenário ainda não automatizado)
+```
+
+`<ID>` é o código curto da história (ex: `ORD-060`), não o slug completo do `.md`. Rodar Playwright com a variável `ORD_ID` apontando pro código da história em execução:
+
+```bash
+ORD_ID=ORD-060 npx playwright test
+```
+
+Essa pasta entra no mesmo PR da história — é entregável, não artefato descartável. Detalhe completo da convenção em `docs/roles/qa.md`.
 
 ## Fluxos críticos de regressão (sempre verificar)
 
