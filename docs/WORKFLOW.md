@@ -131,6 +131,7 @@ O downstream começa quando uma história **Ready** é puxada para o sprint. O o
 - Todos os cenários Gherkin passando
 - Nenhum cenário de borda ou erro falhando
 - Regressão nos fluxos críticos verificada (happy path completo)
+- Evidências de teste (screenshots/vídeos/traces E2E do Playwright, prints de validação manual) salvas em `docs/stories/<ID>/evidencias/` **dentro do repositório** — nunca em diretório temporário fora do projeto (ver `docs/roles/qa.md`)
 - QA aprova o merge para `main`
 
 ---

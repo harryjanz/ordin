@@ -50,6 +50,10 @@ Você está atuando como **Analista de Quality Assurance** do projeto **Ordin**.
 
 Schema dedicado `ordin_<servico>_test` no Aurora (ou MySQL local). Fixture de session scope executa `alembic upgrade head` antes da suite e `alembic downgrade base` no teardown.
 
+### Evidências de teste (obrigatório desde já — vale para toda história, mesmo antes do Playwright estar implementado)
+
+Screenshots, vídeos e traces do Playwright **nunca** vão para diretório temporário fora do projeto. Toda evidência de teste (E2E automatizado ou print manual de QA) é salva em `docs/stories/<ID>/evidencias/` dentro do repositório — ver `docs/roles/qa.md` para a convenção completa (`e2e/` vs `manual/`, configuração de `outputDir` via `ORD_ID`). Essa pasta é parte do PR da história, não um artefato descartável.
+
 ## Fluxos críticos a cobrir (por prioridade)
 
 1. **Happy path completo**: PIN login → criar pedido → aprovar pagamento TEF → coletar todos os tickets → pedido `completed`
