@@ -9,15 +9,15 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 const S = {
-  page: { padding: 32, color: "#DFE8ED" } as React.CSSProperties,
+  page: { padding: 32, color: "var(--a-text)" } as React.CSSProperties,
   title: { fontSize: 22, fontWeight: 700, marginBottom: 20 } as React.CSSProperties,
   filters: { display: "flex", gap: 12, marginBottom: 20 } as React.CSSProperties,
   select: {
     padding: "6px 12px",
-    background: "#1d1434",
+    background: "var(--a-surface)",
     border: "1px solid rgba(153,0,255,0.3)",
     borderRadius: 6,
-    color: "#DFE8ED",
+    color: "var(--a-text)",
     fontSize: 13,
   } as React.CSSProperties,
   table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 13 },
@@ -25,7 +25,7 @@ const S = {
     textAlign: "left" as const,
     padding: "8px 12px",
     borderBottom: "1px solid rgba(153,0,255,0.15)",
-    color: "rgba(223,232,237,0.5)",
+    color: "rgba(var(--a-text-rgb),0.5)",
     fontWeight: 500,
   } as React.CSSProperties,
   td: {
@@ -45,7 +45,7 @@ const S = {
     background: "rgba(153,0,255,0.1)",
     border: "none",
     borderRadius: 4,
-    color: "#DFE8ED",
+    color: "var(--a-text)",
     fontSize: 12,
     cursor: "pointer",
   } as React.CSSProperties,
@@ -100,7 +100,7 @@ export default function OrdersScreen() {
       </div>
 
       {loading ? (
-        <div style={{ color: "rgba(223,232,237,0.4)" }}>Carregando…</div>
+        <div style={{ color: "rgba(var(--a-text-rgb),0.4)" }}>Carregando…</div>
       ) : (
         <table style={S.table}>
           <thead>
@@ -141,7 +141,7 @@ export default function OrdersScreen() {
                     <td colSpan={7} style={{ padding: "0 12px 8px" }}>
                       <div style={S.ticketPanel}>
                         {(tickets[o.order_ref] ?? []).length === 0 ? (
-                          <span style={{ color: "rgba(223,232,237,0.4)", fontSize: 13 }}>Carregando tickets…</span>
+                          <span style={{ color: "rgba(var(--a-text-rgb),0.4)", fontSize: 13 }}>Carregando tickets…</span>
                         ) : (
                           <table style={{ ...S.table, fontSize: 12 }}>
                             <thead>
@@ -185,7 +185,7 @@ export default function OrdersScreen() {
         </table>
       )}
       {!loading && orders.length === 0 && (
-        <div style={{ color: "rgba(223,232,237,0.35)", fontSize: 14, marginTop: 24 }}>
+        <div style={{ color: "rgba(var(--a-text-rgb),0.35)", fontSize: 14, marginTop: 24 }}>
           Nenhum pedido encontrado.
         </div>
       )}

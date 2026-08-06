@@ -3,16 +3,16 @@ import api from "../api";
 import type { Category, Product } from "../types";
 
 const S = {
-  page: { padding: 32, color: "#DFE8ED" } as React.CSSProperties,
+  page: { padding: 32, color: "var(--a-text)" } as React.CSSProperties,
   title: { fontSize: 22, fontWeight: 700, marginBottom: 24 } as React.CSSProperties,
   row: { display: "flex", gap: 24 } as React.CSSProperties,
   col: { flex: 1 } as React.CSSProperties,
-  sectionTitle: { fontSize: 15, fontWeight: 600, color: "rgba(223,232,237,0.8)", marginBottom: 12 } as React.CSSProperties,
+  sectionTitle: { fontSize: 15, fontWeight: 600, color: "rgba(var(--a-text-rgb),0.8)", marginBottom: 12 } as React.CSSProperties,
   item: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    background: "#1d1434",
+    background: "var(--a-surface)",
     border: "1px solid rgba(153,0,255,0.15)",
     borderRadius: 8,
     padding: "10px 14px",
@@ -39,10 +39,10 @@ const S = {
       : variant === "danger" ? "rgba(255,77,109,0.2)"
       : "rgba(153,0,255,0.1)",
     color:
-      variant === "danger" ? "#ff4d6d" : "#DFE8ED",
+      variant === "danger" ? "#ff4d6d" : "var(--a-text)",
   } as React.CSSProperties),
   form: {
-    background: "#1d1434",
+    background: "var(--a-surface)",
     border: "1px solid rgba(153,0,255,0.2)",
     borderRadius: 10,
     padding: "16px 20px",
@@ -54,7 +54,7 @@ const S = {
     background: "rgba(153,0,255,0.08)",
     border: "1px solid rgba(153,0,255,0.25)",
     borderRadius: 6,
-    color: "#DFE8ED",
+    color: "var(--a-text)",
     fontSize: 14,
     marginBottom: 8,
     outline: "none",
@@ -164,7 +164,7 @@ export default function CatalogScreen() {
 
           {editCat && (
             <form style={S.form} onSubmit={saveEditCat}>
-              <div style={{ fontSize: 12, color: "rgba(223,232,237,0.5)", marginBottom: 6 }}>Editando categoria</div>
+              <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.5)", marginBottom: 6 }}>Editando categoria</div>
               <input
                 style={S.input}
                 value={editCat.name}
@@ -233,7 +233,7 @@ export default function CatalogScreen() {
 
           {editProd && (
             <form style={S.form} onSubmit={saveEditProd}>
-              <div style={{ fontSize: 12, color: "rgba(223,232,237,0.5)", marginBottom: 6 }}>Editando produto</div>
+              <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.5)", marginBottom: 6 }}>Editando produto</div>
               <input style={S.input} placeholder="Nome" value={editProd.name} autoFocus
                 onChange={(e) => setEditProd({ ...editProd, name: e.target.value })} />
               <input style={S.input} placeholder="Preço" type="number" step="0.01" min="0.01"
@@ -269,7 +269,7 @@ export default function CatalogScreen() {
           ))}
 
           {selectedCat && products.length === 0 && (
-            <div style={{ color: "rgba(223,232,237,0.35)", fontSize: 14 }}>Nenhum produto nesta categoria.</div>
+            <div style={{ color: "rgba(var(--a-text-rgb),0.35)", fontSize: 14 }}>Nenhum produto nesta categoria.</div>
           )}
         </div>
       </div>

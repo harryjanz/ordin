@@ -13,7 +13,7 @@ function TotemPreview({ name, mode }: { name: string; mode: string }) {
     <div style={{
       borderRadius: 12,
       overflow: "hidden",
-      border: `1px solid rgba(255,255,255,0.08)`,
+      border: `1px solid rgba(var(--a-neutral-rgb),0.08)`,
       height: 220,
       background: T.radial,
       display: "flex",
@@ -71,17 +71,17 @@ function TotemPreview({ name, mode }: { name: string; mode: string }) {
 }
 
 const S = {
-  page:      { padding: 32, color: "#DFE8ED", maxWidth: 760 } as React.CSSProperties,
+  page:      { padding: 32, color: "var(--a-text)", maxWidth: 760 } as React.CSSProperties,
   title:     { fontSize: 22, fontWeight: 700, marginBottom: 24, fontFamily: FONT_D } as React.CSSProperties,
   card:      {
-    background: "#1d1434",
+    background: "var(--a-surface)",
     border: "1px solid rgba(153,0,255,0.2)",
     borderRadius: 12,
     padding: "24px 28px",
     marginBottom: 20,
   } as React.CSSProperties,
   cardTitle: { fontSize: 15, fontWeight: 600, marginBottom: 6, fontFamily: FONT_D } as React.CSSProperties,
-  cardDesc:  { fontSize: 13, color: "rgba(223,232,237,0.5)", marginBottom: 16, fontFamily: FONT_B } as React.CSSProperties,
+  cardDesc:  { fontSize: 13, color: "rgba(var(--a-text-rgb),0.5)", marginBottom: 16, fontFamily: FONT_B } as React.CSSProperties,
   btn: {
     padding: "10px 20px",
     background: "#9900ff",
@@ -165,7 +165,7 @@ export default function SettingsScreen() {
               marginTop: 16, background: "rgba(153,0,255,0.12)",
               border: "1px solid #9900ff", borderRadius: 8,
               padding: "16px 20px", fontSize: 28, fontWeight: 700,
-              letterSpacing: 8, color: "#DFE8ED", textAlign: "center",
+              letterSpacing: 8, color: "var(--a-text)", textAlign: "center",
               fontFamily: FONT_D,
             }}>
               {pin}
@@ -194,8 +194,8 @@ export default function SettingsScreen() {
                 onClick={() => setLocalTheme(key)}
                 style={{
                   borderRadius: 12,
-                  border: `2px solid ${selected ? "#ffffff" : "rgba(255,255,255,0.08)"}`,
-                  boxShadow: selected ? "0 0 0 3px rgba(255,255,255,0.12)" : "none",
+                  border: `2px solid ${selected ? "#ffffff" : "rgba(var(--a-neutral-rgb),0.08)"}`,
+                  boxShadow: selected ? "0 0 0 3px rgba(var(--a-neutral-rgb),0.12)" : "none",
                   cursor: "pointer",
                   overflow: "hidden",
                   transition: "border-color 0.15s, box-shadow 0.15s",
@@ -222,7 +222,7 @@ export default function SettingsScreen() {
                 </div>
 
                 {/* Descrição */}
-                <div style={{ padding: "0 16px 10px", fontSize: 11, color: "rgba(255,255,255,0.5)", fontFamily: FONT_B, lineHeight: 1.5 }}>
+                <div style={{ padding: "0 16px 10px", fontSize: 11, color: "rgba(var(--a-neutral-rgb),0.5)", fontFamily: FONT_B, lineHeight: 1.5 }}>
                   {entry.description}
                 </div>
 
@@ -231,7 +231,7 @@ export default function SettingsScreen() {
                   {entry.colors.map((c: string, i: number) => (
                     <div key={i} style={{
                       width: 20, height: 20, borderRadius: "50%",
-                      background: c, border: "2px solid rgba(255,255,255,0.15)",
+                      background: c, border: "2px solid rgba(var(--a-neutral-rgb),0.15)",
                     }} />
                   ))}
                 </div>
@@ -242,7 +242,7 @@ export default function SettingsScreen() {
 
         {/* Modo light/dark */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 24 }}>
-          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", fontFamily: FONT_B }}>Modo:</span>
+          <span style={{ fontSize: 13, color: "rgba(var(--a-neutral-rgb),0.5)", fontFamily: FONT_B }}>Modo:</span>
           {(["light", "dark"] as ThemeMode[]).map((m) => (
             <button
               key={m}
@@ -253,9 +253,9 @@ export default function SettingsScreen() {
                 fontFamily: FONT_D,
                 fontWeight: 700,
                 fontSize: 12,
-                border: `1px solid ${localMode === m ? "#ffffff" : "rgba(255,255,255,0.15)"}`,
+                border: `1px solid ${localMode === m ? "#ffffff" : "rgba(var(--a-neutral-rgb),0.15)"}`,
                 background: localMode === m ? "#ffffff" : "transparent",
-                color: localMode === m ? "#0a0a0f" : "rgba(255,255,255,0.5)",
+                color: localMode === m ? "#0a0a0f" : "rgba(var(--a-neutral-rgb),0.5)",
                 cursor: "pointer",
                 transition: "all 0.15s",
               }}
@@ -267,7 +267,7 @@ export default function SettingsScreen() {
 
         {/* Preview ao vivo */}
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", fontFamily: FONT_B, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: "rgba(var(--a-neutral-rgb),0.4)", fontFamily: FONT_B, marginBottom: 8 }}>
             Preview ao vivo
           </div>
           <TotemPreview name={localTheme} mode={localMode} />

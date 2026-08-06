@@ -58,7 +58,7 @@ export default function PairScreen() {
   return (
     <div style={{
       minHeight: "100vh",
-      background: "#0e0b1a",
+      background: "var(--a-bg)",
       display: "flex",
       alignItems: "flex-start",
       justifyContent: "center",
@@ -68,7 +68,7 @@ export default function PairScreen() {
       <div style={{
         width: "100%",
         maxWidth: 440,
-        background: "#1d1434",
+        background: "var(--a-surface)",
         border: "1px solid rgba(153,0,255,0.2)",
         borderRadius: 16,
         padding: "32px 28px",
@@ -82,7 +82,7 @@ export default function PairScreen() {
               fontFamily: FONT_D,
               fontSize: 20,
               fontWeight: 700,
-              color: "#DFE8ED",
+              color: "var(--a-text)",
               margin: 0,
             }}>
               Parear totem
@@ -91,7 +91,7 @@ export default function PairScreen() {
           <p style={{
             fontFamily: FONT_B,
             fontSize: 14,
-            color: "rgba(223,232,237,0.5)",
+            color: "rgba(var(--a-text-rgb),0.5)",
             margin: 0,
             lineHeight: 1.6,
           }}>
@@ -104,7 +104,7 @@ export default function PairScreen() {
           display: "block",
           fontFamily: FONT_B,
           fontSize: 12,
-          color: "rgba(223,232,237,0.5)",
+          color: "rgba(var(--a-text-rgb),0.5)",
           marginBottom: 8,
           letterSpacing: "0.05em",
           textTransform: "uppercase",
@@ -132,10 +132,10 @@ export default function PairScreen() {
             textAlign: "center",
             padding: "14px 16px",
             marginBottom: 20,
-            background: "rgba(255,255,255,0.05)",
+            background: "rgba(var(--a-neutral-rgb),0.05)",
             border: `1px solid ${code.length === 6 ? "rgba(153,0,255,0.6)" : "rgba(153,0,255,0.25)"}`,
             borderRadius: 12,
-            color: "#DFE8ED",
+            color: "var(--a-text)",
             outline: "none",
             transition: "border-color 0.15s",
           }}
@@ -146,7 +146,7 @@ export default function PairScreen() {
           display: "block",
           fontFamily: FONT_B,
           fontSize: 12,
-          color: "rgba(223,232,237,0.5)",
+          color: "rgba(var(--a-text-rgb),0.5)",
           marginBottom: 8,
           letterSpacing: "0.05em",
           textTransform: "uppercase",
@@ -162,10 +162,10 @@ export default function PairScreen() {
             boxSizing: "border-box",
             padding: "14px 16px",
             marginBottom: 24,
-            background: "rgba(255,255,255,0.05)",
+            background: "rgba(var(--a-neutral-rgb),0.05)",
             border: "1px solid rgba(153,0,255,0.25)",
             borderRadius: 12,
-            color: "#DFE8ED",
+            color: "var(--a-text)",
             fontFamily: FONT_B,
             fontSize: 15,
             minHeight: 52,
@@ -181,7 +181,7 @@ export default function PairScreen() {
             <option value="" disabled>Nenhum terminal encontrado</option>
           )}
           {terminals.map((t) => (
-            <option key={t.id} value={t.id} style={{ background: "#1d1434" }}>
+            <option key={t.id} value={t.id} style={{ background: "var(--a-surface)" }}>
               {t.label}
             </option>
           ))}
@@ -196,7 +196,7 @@ export default function PairScreen() {
             width: "100%",
             padding: "16px",
             background: canApprove ? "#9900ff" : "rgba(153,0,255,0.3)",
-            color: canApprove ? "#fff" : "rgba(255,255,255,0.4)",
+            color: canApprove ? "#fff" : "rgba(var(--a-neutral-rgb),0.4)",
             border: "none",
             borderRadius: 12,
             fontFamily: FONT_D,
@@ -232,7 +232,7 @@ export default function PairScreen() {
           marginTop: 24,
           fontFamily: FONT_B,
           fontSize: 12,
-          color: "rgba(223,232,237,0.3)",
+          color: "rgba(var(--a-text-rgb),0.3)",
           textAlign: "center",
           lineHeight: 1.6,
         }}>
