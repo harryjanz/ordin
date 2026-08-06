@@ -91,7 +91,7 @@ async def _create_seed(SessionLocal):
         # algum teste anterior falhar antes de chamar _cleanup_seed.
         document = f"1111111{os.urandom(4).hex()}"[:14]
         co = svc.Company(name="__cov_co__", document=document,
-                         pin_hash=pin_hash, plan="free", payment_provider="mock")
+                         pin_hash=pin_hash, plan="free", payment_provider="mock", state="SP")
         db.add(co); await db.flush()
         t = svc.Terminal(company_id=co.id, label="__cov_t__", terminal_code="__COV__",
                          paygo_terminal_id=None, environment="sandbox")
@@ -309,7 +309,7 @@ async def test_dir_create_company(db_session):
     import main as svc
     from main import CompanyIn
     body = CompanyIn(name="__dir_co__", document="11.222.333/0001-81",
-                     plan="free", payment_provider="mock")
+                     plan="free", payment_provider="mock", state="SP")
     async with db_session() as db:
         result = await svc.create_company(body, db, _user("superadmin"))
     new_id = result["company"].id
@@ -367,7 +367,7 @@ async def test_dir_delete_company(db_session):
     pin_hash = bcrypt.hashpw(b"0000", bcrypt.gensalt(4)).decode()
     async with db_session() as db:
         co = svc.Company(name="__del_dir__", document="66666666666",
-                         pin_hash=pin_hash, plan="free", payment_provider="mock")
+                         pin_hash=pin_hash, plan="free", payment_provider="mock", state="SP")
         db.add(co); await db.commit()
         del_id = co.id
     async with db_session() as db:

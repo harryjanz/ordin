@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Depends, Header, Query, Form, File, 
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, JSON,
+    Column, Integer, String, Boolean, DateTime, JSON, Enum,
     UniqueConstraint, select, func, or_, update,
 )
 from sqlalchemy.exc import IntegrityError
@@ -23,7 +23,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 from config import require_env, get_cors_origins
 from domain.cnpj import normalize_cnpj, is_valid_cnpj
-from domain.address import normalize_cep, is_valid_cep
+from domain.address import normalize_cep, is_valid_cep, UF_VALUES, is_valid_uf
 from domain.cpf import normalize_cpf, is_valid_cpf
 from infrastructure.cnpj_lookup import lookup_cnpj
 from fastapi import Request
@@ -102,8 +102,8 @@ class Company(Base):
     address_number           = Column(String(20), nullable=True)
     complement               = Column(String(80), nullable=True)
     neighborhood             = Column(String(80), nullable=True)
-    city                     = Column(String(80), nullable=True)
-    state                    = Column(String(2),  nullable=True)
+    city                     = Column(String(255), nullable=True)
+    state                    = Column(Enum(*UF_VALUES, name="uf_enum"), nullable=False)
     country                  = Column(String(60), nullable=True, default="Brasil")
     contract_status          = Column(String(20), nullable=False, default="pendente")
     contract_sent_at         = Column(DateTime, nullable=True)
@@ -258,7 +258,7 @@ class CompanyIn(BaseModel):
     complement: Optional[str] = None
     neighborhood: Optional[str] = None
     city: Optional[str] = None
-    state: Optional[str] = None
+    state: str
 
     @field_validator("document")
     @classmethod
@@ -274,6 +274,14 @@ class CompanyIn(BaseModel):
     @classmethod
     def validate_zip_code(cls, v: Optional[str]) -> Optional[str]:
         return _validate_zip_code_value(v)
+
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, v: str) -> str:
+        normalized = v.strip().upper()
+        if not is_valid_uf(normalized):
+            raise ValueError("UF inválida — deve ser uma sigla de estado brasileiro")
+        return normalized
 
 
 class CompanyUpdate(BaseModel):
@@ -301,6 +309,16 @@ class CompanyUpdate(BaseModel):
     @classmethod
     def validate_zip_code(cls, v: Optional[str]) -> Optional[str]:
         return _validate_zip_code_value(v)
+
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v
+        normalized = v.strip().upper()
+        if not is_valid_uf(normalized):
+            raise ValueError("UF inválida — deve ser uma sigla de estado brasileiro")
+        return normalized
 
 
 class CompanyListOut(BaseModel):

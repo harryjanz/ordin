@@ -53,7 +53,7 @@ async def empresa(client):
     import main as svc
     pin_hash = bcrypt.hashpw(b"1234", bcrypt.gensalt(4)).decode()
     async with svc.AsyncSessionLocal() as db:
-        co = svc.Company(name="__ord059__", document="11222333000181", pin_hash=pin_hash, plan="free")
+        co = svc.Company(name="__ord059__", document="11222333000181", pin_hash=pin_hash, plan="free", state="SP")
         db.add(co); await db.commit()
         yield co.id
         await db.execute(sa_delete(svc.Company).where(svc.Company.id == co.id))

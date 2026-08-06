@@ -72,15 +72,15 @@ async def empresas(client):
     async with svc.AsyncSessionLocal() as db:
         com_token_no_nome = svc.Company(
             name=f"{TOKEN} Caseiro Ltda", legal_name=f"{TOKEN} Caseiro Comércio de Alimentos Ltda",
-            document="72835450755173", pin_hash=pin_hash, plan="free", contract_status="pendente",
+            document="72835450755173", pin_hash=pin_hash, plan="free", contract_status="pendente", state="SP",
         )
         com_token_na_razao = svc.Company(
             name="Zzord061 Confeitaria Doce", legal_name=f"{TOKEN} Doce Confeitaria EIRELI",
-            document="67525081250650", pin_hash=pin_hash, plan="free", contract_status="enviado",
+            document="67525081250650", pin_hash=pin_hash, plan="free", contract_status="enviado", state="SP",
         )
         sem_token = svc.Company(
             name="Zzord061 Outra Empresa", legal_name="Zzord061 Outra Empresa Ltda",
-            document="22644575952997", pin_hash=pin_hash, plan="free", contract_status="assinado",
+            document="22644575952997", pin_hash=pin_hash, plan="free", contract_status="assinado", state="SP",
         )
         db.add_all([com_token_no_nome, com_token_na_razao, sem_token])
         await db.commit()

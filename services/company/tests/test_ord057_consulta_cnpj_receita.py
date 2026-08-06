@@ -194,7 +194,7 @@ async def test_endpoint_lookup_cnpj_forbidden_para_nao_superadmin(client):
 async def test_post_companies_situacao_ativa_persiste_cadastral_status(client, superadmin_token, monkeypatch, _cleanup_company):
     _mock_lookup(monkeypatch, found=True, cadastral_status="ATIVA")
     r = await client.post("/companies", headers=auth(superadmin_token),
-                          json={"name": "Empresa Ativa", "document": CNPJ_VALIDO})
+                          json={"name": "Empresa Ativa", "document": CNPJ_VALIDO, "state": "SP"})
     assert r.status_code == 201
     co_id = r.json()["company"]["id"]
     _cleanup_company.append(co_id)
@@ -204,7 +204,7 @@ async def test_post_companies_situacao_ativa_persiste_cadastral_status(client, s
 async def test_post_companies_situacao_inativa_bloqueia_cadastro(client, superadmin_token, monkeypatch):
     _mock_lookup(monkeypatch, found=True, cadastral_status="BAIXADA")
     r = await client.post("/companies", headers=auth(superadmin_token),
-                          json={"name": "Empresa Baixada", "document": CNPJ_VALIDO})
+                          json={"name": "Empresa Baixada", "document": CNPJ_VALIDO, "state": "SP"})
     assert r.status_code == 422
     assert "BAIXADA" in r.json()["detail"]
 
@@ -212,14 +212,14 @@ async def test_post_companies_situacao_inativa_bloqueia_cadastro(client, superad
 async def test_post_companies_cnpj_nao_encontrado_bloqueia_cadastro(client, superadmin_token, monkeypatch):
     _mock_lookup(monkeypatch, found=False, reason="cnpj_not_found")
     r = await client.post("/companies", headers=auth(superadmin_token),
-                          json={"name": "Empresa Fantasma", "document": CNPJ_VALIDO})
+                          json={"name": "Empresa Fantasma", "document": CNPJ_VALIDO, "state": "SP"})
     assert r.status_code == 422
 
 
 async def test_post_companies_lookup_indisponivel_permite_cadastro_manual(client, superadmin_token, monkeypatch, _cleanup_company):
     _mock_lookup(monkeypatch, found=False, reason="lookup_unavailable", cadastral_status="NAO_VERIFICADA")
     r = await client.post("/companies", headers=auth(superadmin_token),
-                          json={"name": "Empresa CNPJ Alfanumérico", "document": CNPJ_VALIDO})
+                          json={"name": "Empresa CNPJ Alfanumérico", "document": CNPJ_VALIDO, "state": "SP"})
     assert r.status_code == 201
     co_id = r.json()["company"]["id"]
     _cleanup_company.append(co_id)
@@ -236,7 +236,7 @@ async def test_post_companies_sem_document_nao_chama_lookup(client, superadmin_t
 
     import main as svc
     monkeypatch.setattr(svc, "lookup_cnpj", _fake)
-    r = await client.post("/companies", headers=auth(superadmin_token), json={"name": "Empresa Sem CNPJ"})
+    r = await client.post("/companies", headers=auth(superadmin_token), json={"name": "Empresa Sem CNPJ", "state": "SP"})
     assert r.status_code == 201
     co_id = r.json()["company"]["id"]
     _cleanup_company.append(co_id)

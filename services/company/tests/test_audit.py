@@ -51,7 +51,7 @@ async def test_regenerate_pin_emite_audit(client, capsys):
     async with svc.AsyncSessionLocal() as db:
         pin_hash = bcrypt.hashpw(b"9999", bcrypt.gensalt(4)).decode()
         co = svc.Company(name="__audit_test__", document="99999999999",
-                         pin_hash=pin_hash, plan="free", payment_provider="mock")
+                         pin_hash=pin_hash, plan="free", payment_provider="mock", state="SP")
         db.add(co); await db.commit()
         company_id = co.id
 

@@ -76,7 +76,7 @@ async def _cleanup_company(client):
 
 async def test_cnpj_numerico_valido_e_aceito(client, superadmin_token, _cleanup_company):
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Numérica", "document": "11.222.333/0001-81",
+        "name": "Empresa Numérica", "document": "11.222.333/0001-81", "state": "SP",
     })
     assert r.status_code == 201
     _cleanup_company.append(r.json()["company"]["id"])
@@ -84,7 +84,7 @@ async def test_cnpj_numerico_valido_e_aceito(client, superadmin_token, _cleanup_
 
 async def test_cnpj_numerico_dv_invalido_e_rejeitado(client, superadmin_token):
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Inválida", "document": "11.222.333/0001-80",
+        "name": "Empresa Inválida", "document": "11.222.333/0001-80", "state": "SP",
     })
     assert r.status_code == 422
 
@@ -94,7 +94,7 @@ async def test_cnpj_numerico_dv_invalido_e_rejeitado(client, superadmin_token):
 async def test_cnpj_alfanumerico_valido_e_aceito(client, superadmin_token, _cleanup_company):
     # gerado a partir do mesmo algoritmo implementado em domain/cnpj.py (ver risco documentado em ORD-056)
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Alfanumérica", "document": "12ABC34501DE35",
+        "name": "Empresa Alfanumérica", "document": "12ABC34501DE35", "state": "SP",
     })
     assert r.status_code == 201
     _cleanup_company.append(r.json()["company"]["id"])
@@ -102,7 +102,7 @@ async def test_cnpj_alfanumerico_valido_e_aceito(client, superadmin_token, _clea
 
 async def test_cnpj_alfanumerico_dv_invalido_e_rejeitado(client, superadmin_token):
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Alfanumérica Inválida", "document": "12ABC34501DE99",
+        "name": "Empresa Alfanumérica Inválida", "document": "12ABC34501DE99", "state": "SP",
     })
     assert r.status_code == 422
 
@@ -111,7 +111,7 @@ async def test_cnpj_alfanumerico_dv_invalido_e_rejeitado(client, superadmin_toke
 
 async def test_cnpj_com_letra_minuscula_fora_do_charset_apos_normalizacao_ok(client, superadmin_token, _cleanup_company):
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Minúscula", "document": "12abc34501de35",
+        "name": "Empresa Minúscula", "document": "12abc34501de35", "state": "SP",
     })
     assert r.status_code == 201
     _cleanup_company.append(r.json()["company"]["id"])
@@ -119,7 +119,7 @@ async def test_cnpj_com_letra_minuscula_fora_do_charset_apos_normalizacao_ok(cli
 
 async def test_cnpj_tamanho_invalido_e_rejeitado(client, superadmin_token):
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Curta", "document": "123456",
+        "name": "Empresa Curta", "document": "123456", "state": "SP",
     })
     assert r.status_code == 422
 
@@ -129,7 +129,7 @@ async def test_cnpj_tamanho_invalido_e_rejeitado(client, superadmin_token):
 async def test_cnpj_e_persistido_sem_mascara_no_banco(client, superadmin_token, _cleanup_company):
     import main as svc
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Sem Máscara", "document": "11.222.333/0001-81",
+        "name": "Empresa Sem Máscara", "document": "11.222.333/0001-81", "state": "SP",
     })
     assert r.status_code == 201
     co_id = r.json()["company"]["id"]
@@ -142,7 +142,7 @@ async def test_cnpj_e_persistido_sem_mascara_no_banco(client, superadmin_token, 
 async def test_cep_e_persistido_sem_mascara_no_banco(client, superadmin_token, _cleanup_company):
     import main as svc
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa CEP", "document": "11.222.333/0001-81", "zip_code": "01310-100",
+        "name": "Empresa CEP", "document": "11.222.333/0001-81", "zip_code": "01310-100", "state": "SP",
     })
     assert r.status_code == 201
     co_id = r.json()["company"]["id"]
@@ -154,7 +154,7 @@ async def test_cep_e_persistido_sem_mascara_no_banco(client, superadmin_token, _
 
 async def test_cep_invalido_e_rejeitado(client, superadmin_token):
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa CEP Inválido", "document": "11.222.333/0001-81", "zip_code": "123",
+        "name": "Empresa CEP Inválido", "document": "11.222.333/0001-81", "zip_code": "123", "state": "SP",
     })
     assert r.status_code == 422
 
@@ -188,7 +188,7 @@ async def test_dados_cadastrais_e_endereco_persistidos_e_retornados(client, supe
 
 async def test_inscricao_estadual_isenta_distinguivel_de_vazio(client, superadmin_token, _cleanup_company):
     r = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Isenta", "document": "11.222.333/0001-81", "state_registration": "ISENTO",
+        "name": "Empresa Isenta", "document": "11.222.333/0001-81", "state_registration": "ISENTO", "state": "SP",
     })
     co_id = r.json()["company"]["id"]
     _cleanup_company.append(co_id)
@@ -201,7 +201,7 @@ async def test_inscricao_estadual_isenta_distinguivel_de_vazio(client, superadmi
 async def test_payload_minimo_legado_continua_funcionando(client, superadmin_token, _cleanup_company):
     r = await client.post("/companies", headers=auth(superadmin_token), json={
         "name": "Empresa Mínima", "document": "11.222.333/0001-81",
-        "plan": "free", "payment_provider": "mock",
+        "plan": "free", "payment_provider": "mock", "state": "SP",
     })
     assert r.status_code == 201
     body = r.json()["company"]
@@ -212,6 +212,6 @@ async def test_payload_minimo_legado_continua_funcionando(client, superadmin_tok
 async def test_create_company_owner_forbidden(client):
     owner_token = _make_token("owner", 1)
     r = await client.post("/companies", headers=auth(owner_token), json={
-        "name": "Não deveria criar", "document": "11.222.333/0001-81",
+        "name": "Não deveria criar", "document": "11.222.333/0001-81", "state": "SP",
     })
     assert r.status_code == 403

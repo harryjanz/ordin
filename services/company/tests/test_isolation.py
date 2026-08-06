@@ -43,7 +43,7 @@ async def ids(client):
         if co_b is None:
             pin_b = bcrypt.hashpw(b"5678", bcrypt.gensalt(4)).decode()
             co_b = svc.Company(name="__test_pasta__", document="99999999999",
-                               pin_hash=pin_b, plan="free", payment_provider="mock")
+                               pin_hash=pin_b, plan="free", payment_provider="mock", state="SP")
             db.add(co_b)
             await db.commit()
             created_company_id = co_b.id

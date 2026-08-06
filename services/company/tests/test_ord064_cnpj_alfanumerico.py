@@ -242,7 +242,7 @@ async def test_post_companies_alfanumerico_sem_confirmacao_persiste_ativa(client
         respx.get(f"https://www.receitaws.com.br/v1/cnpj/{CNPJ_ALFA}").mock(return_value=httpx.Response(404))
         respx.get(f"https://publica.cnpj.ws/cnpj/{CNPJ_ALFA}").mock(return_value=httpx.Response(404))
         r = await client.post("/companies", headers=auth(superadmin_token), json={
-            "name": "Empresa Alfa E2E", "document": CNPJ_ALFA,
+            "name": "Empresa Alfa E2E", "document": CNPJ_ALFA, "state": "SP",
         })
     assert r.status_code == 201
     co_id = r.json()["company"]["id"]
@@ -256,7 +256,7 @@ async def test_post_companies_numerico_sem_confirmacao_continua_nao_verificada(c
         respx.get(f"https://www.receitaws.com.br/v1/cnpj/{CNPJ_NUM}").mock(side_effect=httpx.ConnectTimeout("timeout"))
         respx.get(f"https://publica.cnpj.ws/cnpj/{CNPJ_NUM}").mock(side_effect=httpx.ConnectTimeout("timeout"))
         r = await client.post("/companies", headers=auth(superadmin_token), json={
-            "name": "Empresa Numerica E2E", "document": CNPJ_NUM,
+            "name": "Empresa Numerica E2E", "document": CNPJ_NUM, "state": "SP",
         })
     assert r.status_code == 201
     co_id = r.json()["company"]["id"]

@@ -76,13 +76,13 @@ CNPJ_UNICO = "67525081250650"
 
 async def test_cnpj_duplicado_retorna_422_amigavel(client, superadmin_token, _cleanup_company):
     r1 = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Original ORD065", "document": CNPJ_UNICO,
+        "name": "Empresa Original ORD065", "document": CNPJ_UNICO, "state": "SP",
     })
     assert r1.status_code == 201
     _cleanup_company.append(r1.json()["company"]["id"])
 
     r2 = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Duplicada ORD065", "document": CNPJ_UNICO,
+        "name": "Empresa Duplicada ORD065", "document": CNPJ_UNICO, "state": "SP",
     })
     assert r2.status_code == 422
     assert r2.json()["detail"] == "CNPJ já cadastrado para outra empresa"
@@ -90,12 +90,12 @@ async def test_cnpj_duplicado_retorna_422_amigavel(client, superadmin_token, _cl
 
 async def test_cnpj_duplicado_nao_cria_linha_nova(client, superadmin_token, _cleanup_company):
     r1 = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Original ORD065 B", "document": CNPJ_UNICO,
+        "name": "Empresa Original ORD065 B", "document": CNPJ_UNICO, "state": "SP",
     })
     _cleanup_company.append(r1.json()["company"]["id"])
 
     await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Duplicada ORD065 B", "document": CNPJ_UNICO,
+        "name": "Empresa Duplicada ORD065 B", "document": CNPJ_UNICO, "state": "SP",
     })
 
     r_list = await client.get(f"/companies?document={CNPJ_UNICO}", headers=auth(superadmin_token))
@@ -104,13 +104,13 @@ async def test_cnpj_duplicado_nao_cria_linha_nova(client, superadmin_token, _cle
 
 async def test_cnpj_diferente_cadastra_normalmente(client, superadmin_token, _cleanup_company):
     r1 = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa A ORD065", "document": "22644575952997",
+        "name": "Empresa A ORD065", "document": "22644575952997", "state": "SP",
     })
     assert r1.status_code == 201
     _cleanup_company.append(r1.json()["company"]["id"])
 
     r2 = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa B ORD065", "document": "72835450755173",
+        "name": "Empresa B ORD065", "document": "72835450755173", "state": "SP",
     })
     assert r2.status_code == 201
     _cleanup_company.append(r2.json()["company"]["id"])
@@ -121,12 +121,12 @@ async def test_cnpj_duplicado_mascarado_tambem_e_bloqueado(client, superadmin_to
     # antes de bater no UNIQUE constraint (senão o índice não pegaria).
     from domain.cnpj import format_cnpj
     r1 = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Sem Mascara ORD065", "document": CNPJ_UNICO,
+        "name": "Empresa Sem Mascara ORD065", "document": CNPJ_UNICO, "state": "SP",
     })
     _cleanup_company.append(r1.json()["company"]["id"])
 
     r2 = await client.post("/companies", headers=auth(superadmin_token), json={
-        "name": "Empresa Com Mascara ORD065", "document": format_cnpj(CNPJ_UNICO),
+        "name": "Empresa Com Mascara ORD065", "document": format_cnpj(CNPJ_UNICO), "state": "SP",
     })
     assert r2.status_code == 422
     assert r2.json()["detail"] == "CNPJ já cadastrado para outra empresa"
