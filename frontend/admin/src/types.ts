@@ -1,4 +1,4 @@
-export type Role = "admin" | "owner" | "manager" | "cashier";
+export type Role = "superadmin" | "admin" | "owner" | "manager" | "cashier";
 
 export interface AuthState {
   accessToken: string | null;
@@ -14,6 +14,75 @@ export interface Company {
   slug: string;
   plan: string;
   active: boolean;
+  created_at?: string | null;
+  document?: string | null;
+  legal_name?: string | null;
+  state_registration?: string | null;
+  municipal_registration?: string | null;
+  tax_regime?: string | null;
+  company_size?: string | null;
+  cnae_code?: string | null;
+  cadastral_status?: string | null;
+  zip_code?: string | null;
+  street?: string | null;
+  address_number?: string | null;
+  complement?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+  contract_status?: string;
+  contract_sent_at?: string | null;
+  contract_signed_at?: string | null;
+  contract_document_url?: string | null;
+}
+
+export type ContactType = "comercial" | "financeiro" | "tecnico";
+
+export interface Contact {
+  id: number;
+  company_id: number;
+  contact_type: ContactType;
+  name: string;
+  role_title?: string | null;
+  email: string;
+  phone?: string | null;
+  created_at: string;
+}
+
+export interface LegalRepresentative {
+  id: number;
+  company_id: number;
+  name: string;
+  cpf: string;
+  role_title?: string | null;
+  email: string;
+  phone?: string | null;
+  created_at: string;
+}
+
+export interface CnpjLookupResult {
+  found: boolean;
+  reason?: string | null;
+  cadastral_status: string;
+  legal_name?: string | null;
+  trade_name?: string | null;
+  zip_code?: string | null;
+  street?: string | null;
+  address_number?: string | null;
+  complement?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+}
+
+export interface CepLookupResult {
+  found: boolean;
+  reason?: string | null;
+  street?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
 }
 
 export interface Terminal {

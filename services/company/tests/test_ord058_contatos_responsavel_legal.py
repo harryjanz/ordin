@@ -54,8 +54,9 @@ async def empresa(client):
     import main as svc
     pin_hash = bcrypt.hashpw(b"1234", bcrypt.gensalt(4)).decode()
     async with svc.AsyncSessionLocal() as db:
-        co_a = svc.Company(name="__ord058_a__", document="11222333000181", pin_hash=pin_hash, plan="free")
-        co_b = svc.Company(name="__ord058_b__", document="11222333000181", pin_hash=pin_hash, plan="free")
+        # documentos distintos — ORD-065 tornou companies.document UNIQUE
+        co_a = svc.Company(name="__ord058_a__", document="11222333000181", pin_hash=pin_hash, plan="free", state="SP")
+        co_b = svc.Company(name="__ord058_b__", document="22333444000192", pin_hash=pin_hash, plan="free", state="SP")
         db.add_all([co_a, co_b]); await db.commit()
         yield {"company_a": co_a.id, "company_b": co_b.id,
                "owner_a_token": _make_token("owner", co_a.id),

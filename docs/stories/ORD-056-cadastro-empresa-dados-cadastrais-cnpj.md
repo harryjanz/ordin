@@ -1,6 +1,6 @@
 ---
 id: ORD-056
-status: Ready
+status: Done
 fase: 4
 sprint: null
 responsavel: Backend SR
@@ -137,7 +137,7 @@ Feature: Cadastro de dados cadastrais e endereço da empresa com CNPJ validado
 
 A Receita Federal manteve o algoritmo de dígito verificador (peso 5,4,3,2,9,8,7,6,5,4,3,2 para o primeiro DV, mais peso 6 incluindo o primeiro DV para o segundo — mod 11, resto <2 vira 0) **inalterado**. A mudança está em como cada caractere das 12 primeiras posições é convertido a valor numérico: em vez de `int(char)` (que só funciona para dígitos), usa-se `ord(char) - 48` — isso preserva compatibilidade total com CNPJs numéricos existentes (dígitos '0'-'9' têm `ord(c)-48` idêntico ao valor do dígito) e estende para letras maiúsculas 'A'-'Z' (`ord(c)-48` no intervalo 17-42). Os 2 dígitos verificadores finais continuam sendo sempre numéricos (0-9), nunca letras.
 
-**⚠️ Risco identificado — requer validação antes de produção:** este é o mecanismo documentado publicamente (Nota Técnica RFB), mas como o formato alfanumérico começou a valer muito recentemente, a implementação deve ser conferida contra vetores de teste oficiais publicados pela Receita Federal antes do deploy — não confiar cegamente na descrição acima sem esse confronto.
+**✅ Risco fechado no ORD-064 (2026-08-05):** o algoritmo foi confrontado contra os vetores de teste oficiais publicados pelo SERPRO (PDF + exemplos Java/Python/TypeScript, material fornecido pelo usuário) — todos os 8 vetores de cálculo de DV e 9 dos 10 vetores de validação completa bateram. O único gap encontrado (CNPJ totalmente zerado `00000000000000` sendo aceito como válido por coincidência matemática do checksum) foi corrigido no mesmo ORD-064, junto com dois gaps adicionais descobertos durante a implementação: consulta à Receita podendo bloquear CNPJ alfanumérico legítimo por 404/corpo-de-erro não confiável, e promoção automática para `cadastral_status="ATIVA"` quando nenhum provedor confirma um CNPJ alfanumérico (decisão de produto, DV já validado localmente).
 
 ### Migrations
 Nova migration em `services/company/migrations/versions/`, `down_revision` apontando para a head atual (`20260618_1200`). Adiciona à tabela `companies`:
@@ -208,7 +208,7 @@ Não aplicável.
 - Backend: 3 pontos (migration + validação CNPJ + testes). Sem frontend nesta história.
 
 ### Riscos
-- Algoritmo do CNPJ alfanumérico precisa de confronto com vetores de teste oficiais da RFB antes de produção (ver seção acima)
+- ~~Algoritmo do CNPJ alfanumérico precisa de confronto com vetores de teste oficiais da RFB antes de produção~~ — **fechado no ORD-064** (ver seção acima)
 - Decisão de negócio pendente: razão social/endereço deveriam ser obrigatórios? Ficou como opcional nesta história para não quebrar retrocompatibilidade — revisar com PM se isso deve virar obrigatório numa história de "hardening" futura
 
 ---

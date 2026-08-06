@@ -9,8 +9,12 @@ import PaymentsScreen from "./screens/PaymentsScreen";
 import CompanyScreen from "./screens/CompanyScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 import PairScreen from "./screens/PairScreen";
+import NewCompanyScreen from "./screens/NewCompanyScreen";
+import CompanyContractScreen from "./screens/CompanyContractScreen";
+import CompanyListScreen from "./screens/CompanyListScreen";
 
 const ROLE_ROUTES: Record<string, string[]> = {
+  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/settings"],
   admin:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/settings", "/pair"],
   owner:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/settings", "/pair"],
   manager:  ["/dashboard", "/catalog", "/orders", "/payments", "/pair"],
@@ -43,6 +47,9 @@ export default function App() {
           <Route path="/company"   element={<ProtectedRoute path="/company"   element={<CompanyScreen />} />} />
           <Route path="/settings"  element={<ProtectedRoute path="/settings"  element={<SettingsScreen />} />} />
           <Route path="/pair"      element={<ProtectedRoute path="/pair"      element={<PairScreen />} />} />
+          <Route path="/companies" element={<ProtectedRoute path="/companies" element={<CompanyListScreen />} />} />
+          <Route path="/companies/new" element={<ProtectedRoute path="/companies/new" element={<NewCompanyScreen />} />} />
+          <Route path="/companies/:id/contract" element={<ProtectedRoute path="/companies/:id/contract" element={<CompanyContractScreen />} />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </main>

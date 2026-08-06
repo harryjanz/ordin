@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useStore } from "../store";
 import api from "../api";
 
 const MENU = [
-  { to: "/dashboard", label: "Dashboard",    icon: "⊡", roles: ["admin", "owner", "manager", "cashier"] },
-  { to: "/catalog",   label: "Catálogo",     icon: "▤", roles: ["admin", "owner", "manager"] },
-  { to: "/orders",    label: "Pedidos",      icon: "≡", roles: ["admin", "owner", "manager"] },
-  { to: "/payments",  label: "Transações",   icon: "◈", roles: ["admin", "owner", "manager"] },
-  { to: "/company",   label: "Empresa",      icon: "◉", roles: ["admin", "owner"] },
-  { to: "/pair",      label: "Dispositivos", icon: "⊞", roles: ["admin", "owner", "manager"] },
-  { to: "/settings",  label: "Config.",      icon: "⚙", roles: ["admin", "owner"] },
+  { to: "/dashboard",     label: "Dashboard",    icon: "⊡", roles: ["superadmin", "admin", "owner", "manager", "cashier"] },
+  { to: "/companies",     label: "Clientes",     icon: "▥", roles: ["superadmin"] },
+  { to: "/companies/new", label: "Novo cliente", icon: "🧾", roles: ["superadmin"] },
+  { to: "/catalog",       label: "Catálogo",     icon: "▤", roles: ["admin", "owner", "manager"] },
+  { to: "/orders",        label: "Pedidos",      icon: "≡", roles: ["admin", "owner", "manager"] },
+  { to: "/payments",      label: "Transações",   icon: "◈", roles: ["admin", "owner", "manager"] },
+  { to: "/company",       label: "Empresa",      icon: "◉", roles: ["admin", "owner"] },
+  { to: "/pair",          label: "Dispositivos", icon: "⊞", roles: ["admin", "owner", "manager"] },
+  { to: "/settings",      label: "Config.",      icon: "⚙", roles: ["superadmin", "admin", "owner"] },
 ] as const;
 
 const W_OPEN   = 220;
@@ -19,9 +21,20 @@ const W_CLOSED = 52;
 export default function Sidebar() {
   const { role, logout } = useStore();
   const location = useLocation();
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
 
   useEffect(() => { setOpen(false); }, [location.pathname]);
+
+  function handleNavClick(e: React.MouseEvent, to: string) {
+    if (!useStore.getState().unsavedChanges) return;
+    e.preventDefault();
+    const confirmed = window.confirm("Você tem alterações não salvas. Deseja sair mesmo assim?");
+    if (confirmed) {
+      useStore.getState().setUnsavedChanges(false);
+      navigate(to);
+    }
+  }
 
   async function handleLogout() {
     const { refreshToken } = useStore.getState();
@@ -114,6 +127,7 @@ export default function Sidebar() {
           <NavLink
             key={m.to}
             to={m.to}
+            onClick={(e) => handleNavClick(e, m.to)}
             style={({ isActive }) => ({
               display: "flex",
               alignItems: "center",

@@ -1,6 +1,6 @@
 ---
 id: ORD-060
-status: Ready
+status: Done
 fase: 4
 sprint: null
 responsavel: Frontend

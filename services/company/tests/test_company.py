@@ -44,7 +44,7 @@ async def seed(client):
     pw_hash  = bcrypt.hashpw(b"senha123", bcrypt.gensalt(4)).decode()
     async with svc.AsyncSessionLocal() as db:
         co = svc.Company(name="Empresa Teste", document="00000000001",
-                         pin_hash=pin_hash, plan="free", payment_provider="mock")
+                         pin_hash=pin_hash, plan="free", payment_provider="mock", state="SP")
         db.add(co); await db.flush()
         t = svc.Terminal(company_id=co.id, label="Totem 1", terminal_code="T001",
                          paygo_terminal_id=None, environment="sandbox")

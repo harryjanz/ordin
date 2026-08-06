@@ -14,17 +14,19 @@ from fastapi import FastAPI, HTTPException, Depends, Header, Query, Form, File, 
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, JSON,
+    Column, Integer, String, Boolean, DateTime, JSON, Enum,
     UniqueConstraint, select, func, or_, update,
 )
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
 from config import require_env, get_cors_origins
 from domain.cnpj import normalize_cnpj, is_valid_cnpj
-from domain.address import normalize_cep, is_valid_cep
+from domain.address import normalize_cep, is_valid_cep, UF_VALUES, is_valid_uf
 from domain.cpf import normalize_cpf, is_valid_cpf
 from infrastructure.cnpj_lookup import lookup_cnpj
+from infrastructure.cep_lookup import lookup_cep
 from fastapi import Request
 from auth import get_current_user, TokenPayload
 from audit import emit_audit
@@ -101,8 +103,8 @@ class Company(Base):
     address_number           = Column(String(20), nullable=True)
     complement               = Column(String(80), nullable=True)
     neighborhood             = Column(String(80), nullable=True)
-    city                     = Column(String(80), nullable=True)
-    state                    = Column(String(2),  nullable=True)
+    city                     = Column(String(255), nullable=True)
+    state                    = Column(Enum(*UF_VALUES, name="uf_enum"), nullable=False)
     country                  = Column(String(60), nullable=True, default="Brasil")
     contract_status          = Column(String(20), nullable=False, default="pendente")
     contract_sent_at         = Column(DateTime, nullable=True)
@@ -231,6 +233,15 @@ class CompanyOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+def _validate_zip_code_value(v: Optional[str]) -> Optional[str]:
+    if v is None or not v.strip():
+        return v
+    normalized = normalize_cep(v)
+    if not is_valid_cep(normalized):
+        raise ValueError("CEP inválido — deve conter 8 dígitos")
+    return normalized  # banco armazena sempre sem máscara
+
+
 class CompanyIn(BaseModel):
     name: str
     document: Optional[str] = None
@@ -248,7 +259,7 @@ class CompanyIn(BaseModel):
     complement: Optional[str] = None
     neighborhood: Optional[str] = None
     city: Optional[str] = None
-    state: Optional[str] = None
+    state: str
 
     @field_validator("document")
     @classmethod
@@ -263,19 +274,52 @@ class CompanyIn(BaseModel):
     @field_validator("zip_code")
     @classmethod
     def validate_zip_code(cls, v: Optional[str]) -> Optional[str]:
-        if v is None or not v.strip():
-            return v
-        normalized = normalize_cep(v)
-        if not is_valid_cep(normalized):
-            raise ValueError("CEP inválido — deve conter 8 dígitos")
-        return normalized  # banco armazena sempre sem máscara
+        return _validate_zip_code_value(v)
+
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, v: str) -> str:
+        normalized = v.strip().upper()
+        if not is_valid_uf(normalized):
+            raise ValueError("UF inválida — deve ser uma sigla de estado brasileiro")
+        return normalized
 
 
 class CompanyUpdate(BaseModel):
+    # document NÃO faz parte deste schema — é imutável após a criação (ORD-061).
+    # Trocar o CNPJ reabre a mesma janela de risco que a criação trata revalidando
+    # na Receita a cada submit; tratado como recadastro, não como edição.
     name: Optional[str] = None
-    document: Optional[str] = None
     plan: Optional[str] = None
     payment_provider: Optional[str] = None
+    legal_name: Optional[str] = None
+    state_registration: Optional[str] = None
+    municipal_registration: Optional[str] = None
+    tax_regime: Optional[str] = None
+    company_size: Optional[str] = None
+    cnae_code: Optional[str] = None
+    zip_code: Optional[str] = None
+    street: Optional[str] = None
+    address_number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+
+    @field_validator("zip_code")
+    @classmethod
+    def validate_zip_code(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_zip_code_value(v)
+
+    @field_validator("state")
+    @classmethod
+    def validate_state(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return v
+        normalized = v.strip().upper()
+        if not is_valid_uf(normalized):
+            raise ValueError("UF inválida — deve ser uma sigla de estado brasileiro")
+        return normalized
 
 
 class CompanyListOut(BaseModel):
@@ -298,6 +342,16 @@ class CnpjLookupOut(BaseModel):
     street: Optional[str] = None
     address_number: Optional[str] = None
     complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+
+class CepLookupOut(BaseModel):
+    found: bool
+    reason: Optional[str] = None
+    street: Optional[str] = None
     neighborhood: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
@@ -637,16 +691,26 @@ async def internal_get_terminal(
 async def list_companies(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+    q: Optional[str] = Query(None, description="Busca em nome fantasia ou razão social"),
+    document: Optional[str] = Query(None, description="Prefixo de CNPJ (início), com ou sem máscara"),
+    contract_status: Optional[str] = Query(None, pattern="^(pendente|enviado|assinado)$"),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_superadmin(current_user)
-    total = (await db.execute(
-        select(func.count()).select_from(Company).where(Company.active == True)
-    )).scalar()
-    result = await db.execute(
-        select(Company).where(Company.active == True).offset(skip).limit(limit)
-    )
+    stmt = select(Company).where(Company.active == True)
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(or_(Company.name.ilike(like), Company.legal_name.ilike(like)))
+    if document:
+        # Prefixo, não match exato — a listagem filtra progressivamente
+        # conforme o usuário digita o CNPJ (a partir do 3º dígito no client).
+        stmt = stmt.where(Company.document.like(f"{normalize_cnpj(document)}%"))
+    if contract_status:
+        stmt = stmt.where(Company.contract_status == contract_status)
+
+    total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar()
+    result = await db.execute(stmt.offset(skip).limit(limit))
     return {"companies": result.scalars().all(), "total": total}
 
 
@@ -676,7 +740,11 @@ async def create_company(
             cadastral_status = "ATIVA"
         elif result.reason == "cnpj_not_found":
             raise HTTPException(422, "CNPJ não encontrado na Receita Federal")
-        # reason == "lookup_unavailable" → segue o cadastro com cadastral_status = "NAO_VERIFICADA"
+        else:
+            # reason == "lookup_unavailable" — pra CNPJ alfanumérico, lookup_cnpj()
+            # já promove cadastral_status pra "ATIVA" (ORD-064, confia no DV local
+            # validado contra vetores oficiais); pra numérico, continua "NAO_VERIFICADA".
+            cadastral_status = result.cadastral_status
     pin = str(secrets.randbelow(900000) + 100000)
     co = Company(
         name=body.name,
@@ -700,7 +768,11 @@ async def create_company(
         state=body.state,
     )
     db.add(co)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(422, "CNPJ já cadastrado para outra empresa")
     await db.refresh(co)
     return {"company": co, "pin": pin}
 
@@ -722,6 +794,26 @@ async def cnpj_lookup(
     result = await lookup_cnpj(normalized)
     if not result.found and result.reason == "cnpj_not_found":
         raise HTTPException(404, "CNPJ não encontrado na Receita Federal")
+    return result
+
+
+@app.get(
+    "/companies/cep-lookup/{cep}",
+    response_model=CepLookupOut,
+    tags=["Empresas"],
+    summary="Consultar CEP",
+)
+async def cep_lookup(
+    cep: str,
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_superadmin(current_user)
+    normalized = normalize_cep(cep)
+    if not is_valid_cep(normalized):
+        raise HTTPException(422, "CEP inválido — deve conter 8 dígitos")
+    result = await lookup_cep(normalized)
+    if not result.found and result.reason == "cep_not_found":
+        raise HTTPException(404, "CEP não encontrado")
     return result
 
 
@@ -760,14 +852,8 @@ async def update_company(
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
-    if body.name is not None:
-        co.name = body.name
-    if body.document is not None:
-        co.document = body.document
-    if body.plan is not None:
-        co.plan = body.plan
-    if body.payment_provider is not None:
-        co.payment_provider = body.payment_provider
+    for field, value in body.model_dump(exclude_none=True).items():
+        setattr(co, field, value)
     await db.commit()
     await db.refresh(co)
     return co

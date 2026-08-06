@@ -1,10 +1,20 @@
-"""Normalização e validação de CEP.
+"""Normalização e validação de CEP e UF.
 
-Aceita entrada com ou sem máscara (XXXXX-XXX). O banco sempre armazena o
+CEP aceita entrada com ou sem máscara (XXXXX-XXX). O banco sempre armazena o
 valor normalizado (só dígitos) — nunca com máscara.
 """
 
 _MASK_CHARS = ("-", ".", " ")
+
+UF_VALUES = (
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO",
+    "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI",
+    "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+)
+
+
+def is_valid_uf(raw: str) -> bool:
+    return raw.strip().upper() in UF_VALUES
 
 
 def normalize_cep(raw: str) -> str:
