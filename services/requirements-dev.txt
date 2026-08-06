@@ -3,3 +3,4 @@ pytest-asyncio==0.23.6
 pytest-cov==5.0.0
 respx==0.21.1
 aiosqlite==0.20.0
+moto[s3]==5.0.9

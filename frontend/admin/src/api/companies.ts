@@ -162,3 +162,8 @@ export async function updateContractStatus(
   });
   return r.data;
 }
+
+export async function getContractDocumentUrl(companyId: number): Promise<string> {
+  const r = await api.get<{ url: string }>(`/companies/${companyId}/contract-document-url`);
+  return r.data.url;
+}

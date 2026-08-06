@@ -26,6 +26,29 @@ services:
     networks:
       - ordin
 
+  minio:
+    # S3 local (dev) — em produção o company-service aponta pro S3 real da AWS
+    # (sem S3_ENDPOINT_URL definido). Console web em :9001 pra inspecionar os
+    # arquivos manualmente.
+    image: minio/minio:latest
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ordin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ordin_dev_minio}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - ordin
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   rabbitmq:
     image: rabbitmq:3-management-alpine
     restart: always
@@ -81,10 +104,18 @@ services:
       INTERNAL_SECRET: ${INTERNAL_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
+      S3_BUCKET: ${S3_BUCKET:-ordin-contracts}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-ordin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-ordin_dev_minio}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
     networks:
       - ordin
     depends_on:
       mysql:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   catalog-service:
@@ -199,3 +230,4 @@ networks:
 volumes:
   mysql_data:
   mongo_data:
+  minio_data:

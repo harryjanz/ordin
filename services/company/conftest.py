@@ -7,6 +7,15 @@ os.environ.setdefault("JWT_ACCESS_EXP_MINUTES", "60")
 os.environ.setdefault("INTERNAL_SECRET", "test-internal-ci")
 os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000")
 os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", "0" * 64)
+os.environ.setdefault("S3_BUCKET", "ordin-contracts-test")
+os.environ.setdefault("AWS_REGION", "us-east-1")
+# S3_ENDPOINT_URL deliberadamente NÃO setada nos testes — moto só intercepta
+# o boto3 quando o client usa o endpoint padrão da AWS; com endpoint_url
+# customizado (caso do MinIO) ele tenta conectar de verdade e trava. A
+# própria ausência da env var já faz contract_storage._client() não passar
+# endpoint_url, igual seria em produção contra o S3 real.
+os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
+os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
 
 import pytest
 
