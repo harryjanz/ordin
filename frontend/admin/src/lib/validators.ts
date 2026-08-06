@@ -5,6 +5,12 @@
 const CNPJ_WEIGHTS_12 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
 const CNPJ_ZERADO = "0".repeat(14);
 
+export const UF_VALUES = [
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO",
+  "MA", "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI",
+  "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+] as const;
+
 export function normalizeCnpj(raw: string): string {
   return raw.trim().toUpperCase().replace(/[./-]/g, "");
 }

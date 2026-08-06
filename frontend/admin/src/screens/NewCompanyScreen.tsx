@@ -4,7 +4,7 @@ import Stepper, { StepDef } from "../components/Stepper";
 import { createCompany, createContact, lookupCnpj, upsertLegalRepresentative } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
-import { isValidCep, isValidCnpj, isValidCpf, normalizeCnpj } from "../lib/validators";
+import { isValidCep, isValidCnpj, isValidCpf, normalizeCnpj, UF_VALUES } from "../lib/validators";
 import type { CnpjLookupResult } from "../types";
 
 const STEPS: StepDef[] = [
@@ -417,7 +417,10 @@ export default function NewCompanyScreen() {
                 </div>
                 <div style={S.field}>
                   <label style={S.label}>UF<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.state ? S.inputError : {}) }} value={ufState} onChange={(e) => setUfState(e.target.value.toUpperCase())} maxLength={2} data-testid="input-state" />
+                  <select style={{ ...S.input, ...(fieldErrors.state ? S.inputError : {}) }} value={ufState} onChange={(e) => setUfState(e.target.value)} data-testid="input-state">
+                    <option value="">Selecione</option>
+                    {UF_VALUES.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+                  </select>
                   {fieldErrors.state && <span style={S.fieldErr}>{fieldErrors.state}</span>}
                 </div>
               </div>

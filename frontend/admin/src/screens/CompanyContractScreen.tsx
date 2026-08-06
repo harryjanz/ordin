@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import { getCompany, getLegalRepresentative, listContacts, updateCompany, updateContractStatus } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
-import { isValidCep } from "../lib/validators";
+import { isValidCep, UF_VALUES } from "../lib/validators";
 import { companyToEditForm, diffFields, type CompanyEditForm } from "../lib/companyEdit";
 import { useStore } from "../store";
 import type { Company, Contact, LegalRepresentative } from "../types";
@@ -354,7 +354,10 @@ export default function CompanyContractScreen() {
               </div>
               <div style={S.field}>
                 <label style={S.fieldLabel}>UF<span style={{ color: "#ff4d6d" }}>*</span></label>
-                <input style={{ ...S.input, ...(fieldErrors.state ? S.inputError : {}) }} value={draft.state} onChange={(e) => setDraftField("state", e.target.value.toUpperCase())} maxLength={2} />
+                <select style={{ ...S.input, ...(fieldErrors.state ? S.inputError : {}) }} value={draft.state} onChange={(e) => setDraftField("state", e.target.value)}>
+                  <option value="">Selecione</option>
+                  {UF_VALUES.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
+                </select>
                 {fieldErrors.state && <span style={S.fieldErr}>{fieldErrors.state}</span>}
               </div>
             </div>

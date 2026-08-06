@@ -153,7 +153,7 @@ test("cadastro com CNPJ alfanumérico completa sem bloquear (ORD-064)", async ({
   await page.getByTestId("input-address-number").fill("35");
   await page.getByTestId("input-neighborhood").fill("Centro");
   await page.getByTestId("input-city").fill("São Paulo");
-  await page.getByTestId("input-state").fill("SP");
+  await page.getByTestId("input-state").selectOption("SP");
   await page.getByRole("button", { name: "Continuar" }).click();
   await page.getByTestId("input-comercial-name").fill("Contato Alfa E2E");
   await page.getByTestId("input-comercial-email").fill("contato.alfa.e2e@example.com");
