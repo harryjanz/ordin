@@ -4,7 +4,7 @@ import { useStore } from "../store";
 import type { Terminal, User, Role, PaymentConfig } from "../types";
 
 const S = {
-  page: { padding: 32, color: "#DFE8ED" } as React.CSSProperties,
+  page: { padding: 32, color: "var(--a-text)" } as React.CSSProperties,
   title: { fontSize: 22, fontWeight: 700, marginBottom: 24 } as React.CSSProperties,
   tabs: { display: "flex", gap: 0, marginBottom: 24, borderBottom: "1px solid rgba(153,0,255,0.2)" } as React.CSSProperties,
   tab: (active: boolean) => ({
@@ -12,7 +12,7 @@ const S = {
     background: "transparent",
     border: "none",
     borderBottom: active ? "2px solid #9900ff" : "2px solid transparent",
-    color: active ? "#9900ff" : "rgba(223,232,237,0.5)",
+    color: active ? "#9900ff" : "rgba(var(--a-text-rgb),0.5)",
     fontSize: 14,
     fontWeight: active ? 600 : 400,
     cursor: "pointer",
@@ -21,7 +21,7 @@ const S = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    background: "#1d1434",
+    background: "var(--a-surface)",
     border: "1px solid rgba(153,0,255,0.15)",
     borderRadius: 8,
     padding: "10px 14px",
@@ -38,7 +38,7 @@ const S = {
     marginLeft: 8,
   } as React.CSSProperties),
   form: {
-    background: "#1d1434",
+    background: "var(--a-surface)",
     border: "1px solid rgba(153,0,255,0.2)",
     borderRadius: 10,
     padding: "16px 20px",
@@ -50,7 +50,7 @@ const S = {
     background: "rgba(153,0,255,0.08)",
     border: "1px solid rgba(153,0,255,0.25)",
     borderRadius: 6,
-    color: "#DFE8ED",
+    color: "var(--a-text)",
     fontSize: 14,
     marginBottom: 8,
     outline: "none",
@@ -61,7 +61,7 @@ const S = {
     background: "rgba(153,0,255,0.08)",
     border: "1px solid rgba(153,0,255,0.25)",
     borderRadius: 6,
-    color: "#DFE8ED",
+    color: "var(--a-text)",
     fontSize: 12,
     outline: "none",
     width: 180,
@@ -72,7 +72,7 @@ const S = {
     background: "rgba(153,0,255,0.08)",
     border: "1px solid rgba(153,0,255,0.25)",
     borderRadius: 6,
-    color: "#DFE8ED",
+    color: "var(--a-text)",
     fontSize: 14,
     marginBottom: 8,
     outline: "none",
@@ -327,11 +327,11 @@ function PaymentTab({ companyId }: PaymentTabProps) {
     <div>
       {/* Configs existentes */}
       {loading ? (
-        <div style={{ color: "rgba(223,232,237,0.4)", fontSize: 14 }}>Carregando…</div>
+        <div style={{ color: "rgba(var(--a-text-rgb),0.4)", fontSize: 14 }}>Carregando…</div>
       ) : err ? (
         <div style={{ color: "#ff4d6d", fontSize: 14 }}>{err}</div>
       ) : configs.length === 0 ? (
-        <div style={{ color: "rgba(223,232,237,0.35)", fontSize: 14, marginBottom: 20 }}>
+        <div style={{ color: "rgba(var(--a-text-rgb),0.35)", fontSize: 14, marginBottom: 20 }}>
           Nenhuma configuração de pagamento cadastrada.
         </div>
       ) : (
@@ -361,7 +361,7 @@ function PaymentTab({ companyId }: PaymentTabProps) {
                     <span style={{
                       fontSize: 11, padding: "2px 8px", borderRadius: 4,
                       background: c.active ? "rgba(93,212,144,0.15)" : "rgba(153,153,153,0.1)",
-                      color: c.active ? "#5DD490" : "rgba(223,232,237,0.35)",
+                      color: c.active ? "#5DD490" : "rgba(var(--a-text-rgb),0.35)",
                       fontWeight: c.active ? 600 : 400,
                     }}>
                       {c.active ? "● Ativa" : "○ Inativa"}
@@ -387,7 +387,7 @@ function PaymentTab({ companyId }: PaymentTabProps) {
                 </div>
 
                 {lines.length > 0 && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: "rgba(223,232,237,0.35)", fontFamily: "monospace" }}>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "rgba(var(--a-text-rgb),0.35)", fontFamily: "monospace" }}>
                     {lines.join("  ·  ")}
                   </div>
                 )}
@@ -405,7 +405,7 @@ function PaymentTab({ companyId }: PaymentTabProps) {
           </div>
           {editDef.fields.map((f) => (
             <div key={f.key}>
-              <div style={{ fontSize: 12, color: "rgba(223,232,237,0.5)", marginBottom: 3 }}>{f.label}</div>
+              <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.5)", marginBottom: 3 }}>{f.label}</div>
               <input
                 style={S.input}
                 type={f.type}
@@ -439,7 +439,7 @@ function PaymentTab({ companyId }: PaymentTabProps) {
       {/* Formulário de nova config */}
       <form onSubmit={handleAdd} style={S.form}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Nova configuração</div>
-        <div style={{ fontSize: 12, color: "rgba(223,232,237,0.4)", marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.4)", marginBottom: 12 }}>
           A configuração começa inativa. Clique em "Ativar" para usá-la.
         </div>
 
@@ -464,7 +464,7 @@ function PaymentTab({ companyId }: PaymentTabProps) {
 
         {providerDef.fields.map((f) => (
           <div key={f.key}>
-            <div style={{ fontSize: 12, color: "rgba(223,232,237,0.5)", marginBottom: 3 }}>
+            <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.5)", marginBottom: 3 }}>
               {f.label}{f.required ? "" : " (opcional)"}
             </div>
             <input
@@ -479,7 +479,7 @@ function PaymentTab({ companyId }: PaymentTabProps) {
         ))}
 
         {providerDef.note && (
-          <div style={{ fontSize: 12, color: "rgba(223,232,237,0.4)", marginBottom: 8, fontStyle: "italic" }}>
+          <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.4)", marginBottom: 8, fontStyle: "italic" }}>
             {providerDef.note}
           </div>
         )}
@@ -596,7 +596,7 @@ export default function CompanyScreen() {
   if (!companyId) {
     return (
       <div style={S.page}>
-        <div style={{ color: "rgba(223,232,237,0.4)" }}>Selecione uma empresa no Dashboard.</div>
+        <div style={{ color: "rgba(var(--a-text-rgb),0.4)" }}>Selecione uma empresa no Dashboard.</div>
       </div>
     );
   }
@@ -638,7 +638,7 @@ export default function CompanyScreen() {
                   {t.label}
                   <span style={S.badge(t.active)}>{t.active ? "ativo" : "inativo"}</span>
                   {t.environment && (
-                    <span style={{ fontSize: 11, color: "rgba(223,232,237,0.35)", marginLeft: 8 }}>
+                    <span style={{ fontSize: 11, color: "rgba(var(--a-text-rgb),0.35)", marginLeft: 8 }}>
                       {t.environment}
                     </span>
                   )}
@@ -648,7 +648,7 @@ export default function CompanyScreen() {
 
               {/* MP Device ID */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                <span style={{ fontSize: 12, color: "rgba(223,232,237,0.45)", flexShrink: 0 }}>MP Device ID:</span>
+                <span style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.45)", flexShrink: 0 }}>MP Device ID:</span>
                 <input
                   style={S.inputSmall}
                   placeholder="PAX_A910__SMARTPOS..."
@@ -671,7 +671,7 @@ export default function CompanyScreen() {
             </div>
           ))}
           {terminals.length === 0 && (
-            <div style={{ color: "rgba(223,232,237,0.35)", fontSize: 14 }}>Nenhum terminal cadastrado.</div>
+            <div style={{ color: "rgba(var(--a-text-rgb),0.35)", fontSize: 14 }}>Nenhum terminal cadastrado.</div>
           )}
         </>
       )}
@@ -705,14 +705,14 @@ export default function CompanyScreen() {
             <div key={u.id} style={S.item}>
               <span>
                 {u.name}
-                <span style={{ color: "rgba(223,232,237,0.4)", marginLeft: 8, fontSize: 12 }}>{u.email}</span>
+                <span style={{ color: "rgba(var(--a-text-rgb),0.4)", marginLeft: 8, fontSize: 12 }}>{u.email}</span>
                 <span style={S.badge(u.active)}>{u.role}</span>
               </span>
               <button style={S.dangerBtn} onClick={() => deleteUser(u.id)}>Excluir</button>
             </div>
           ))}
           {users.length === 0 && (
-            <div style={{ color: "rgba(223,232,237,0.35)", fontSize: 14 }}>Nenhum usuário cadastrado.</div>
+            <div style={{ color: "rgba(var(--a-text-rgb),0.35)", fontSize: 14 }}>Nenhum usuário cadastrado.</div>
           )}
         </>
       )}

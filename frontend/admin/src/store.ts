@@ -17,11 +17,18 @@ interface Store extends AuthState {
   // funciona aqui (só em data router); este flag é o mecanismo alternativo
   // pra confirmar antes de navegar pra fora de um formulário sujo.
   unsavedChanges: boolean;
+  // Tema claro/escuro da interface do próprio admin (não é a aparência do
+  // totem — isso fica em Company.visual_theme/visual_mode, via themes.ts).
+  // Só o superadmin vê o controle pra trocar (App.tsx só aplica data-theme
+  // quando role === "superadmin"); persiste no localStorage mesmo assim,
+  // já que o valor em si é inofensivo pra outros papéis se não for aplicado.
+  adminThemeMode: "light" | "dark";
   login: (access: string, refresh: string) => void;
   logout: () => void;
   updateTokens: (access: string, refresh: string) => void;
   setSelectedCompany: (id: number) => void;
   setUnsavedChanges: (v: boolean) => void;
+  toggleAdminThemeMode: () => void;
 }
 
 export const useStore = create<Store>()(
@@ -34,6 +41,7 @@ export const useStore = create<Store>()(
       role: null,
       selectedCompanyId: null,
       unsavedChanges: false,
+      adminThemeMode: "dark",
 
       login(access, refresh) {
         const p = decodeJwt(access);
@@ -74,6 +82,10 @@ export const useStore = create<Store>()(
 
       setUnsavedChanges(v) {
         set({ unsavedChanges: v });
+      },
+
+      toggleAdminThemeMode() {
+        set((s) => ({ adminThemeMode: s.adminThemeMode === "dark" ? "light" : "dark" }));
       },
     }),
     {

@@ -10,14 +10,14 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 const S = {
-  page: { padding: 32, color: "#DFE8ED" } as React.CSSProperties,
+  page: { padding: 32, color: "var(--a-text)" } as React.CSSProperties,
   title: { fontSize: 22, fontWeight: 700, marginBottom: 20 } as React.CSSProperties,
   table: { width: "100%", borderCollapse: "collapse" as const, fontSize: 13 },
   th: {
     textAlign: "left" as const,
     padding: "8px 12px",
     borderBottom: "1px solid rgba(153,0,255,0.15)",
-    color: "rgba(223,232,237,0.5)",
+    color: "rgba(var(--a-text-rgb),0.5)",
     fontWeight: 500,
   } as React.CSSProperties,
   td: {
@@ -53,18 +53,18 @@ export default function PaymentsScreen() {
     <div style={S.page}>
       <div style={S.title}>Transações TEF</div>
       {loading ? (
-        <div style={{ color: "rgba(223,232,237,0.4)" }}>Carregando…</div>
+        <div style={{ color: "rgba(var(--a-text-rgb),0.4)" }}>Carregando…</div>
       ) : (
         <>
           <div style={{
-            background: "#1d1434",
+            background: "var(--a-surface)",
             border: "1px solid rgba(153,0,255,0.2)",
             borderRadius: 10,
             padding: "16px 20px",
             marginBottom: 24,
             display: "inline-block",
           }}>
-            <div style={{ fontSize: 12, color: "rgba(223,232,237,0.5)", marginBottom: 4 }}>
+            <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.5)", marginBottom: 4 }}>
               Total aprovado ({transactions.filter((t) => t.status === "approved").length} transações)
             </div>
             <div style={{ fontSize: 24, fontWeight: 700, color: "#33cccc" }}>
@@ -105,7 +105,7 @@ export default function PaymentsScreen() {
             </tbody>
           </table>
           {transactions.length === 0 && (
-            <div style={{ color: "rgba(223,232,237,0.35)", fontSize: 14, marginTop: 24 }}>
+            <div style={{ color: "rgba(var(--a-text-rgb),0.35)", fontSize: 14, marginTop: 24 }}>
               Nenhuma transação encontrada.
             </div>
           )}

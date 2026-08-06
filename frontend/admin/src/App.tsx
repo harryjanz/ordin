@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useStore } from "./store";
 import Sidebar from "./components/Sidebar";
@@ -14,7 +15,7 @@ import CompanyContractScreen from "./screens/CompanyContractScreen";
 import CompanyListScreen from "./screens/CompanyListScreen";
 
 const ROLE_ROUTES: Record<string, string[]> = {
-  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/settings"],
+  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract"],
   admin:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/settings", "/pair"],
   owner:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/settings", "/pair"],
   manager:  ["/dashboard", "/catalog", "/orders", "/payments", "/pair"],
@@ -30,11 +31,21 @@ function ProtectedRoute({ path, element }: { path: string; element: JSX.Element 
 
 export default function App() {
   const isAuth = useStore((s) => !!s.accessToken);
+  const role = useStore((s) => s.role);
+  const adminThemeMode = useStore((s) => s.adminThemeMode);
+
+  // Claro/escuro é opt-in só pro superadmin (ver Sidebar.tsx) — outros
+  // papéis sempre veem o escuro histórico, mesmo que o valor persistido
+  // no localStorage do navegador tenha ficado como "light" de uma sessão
+  // anterior de superadmin no mesmo browser.
+  useEffect(() => {
+    document.documentElement.dataset.theme = role === "superadmin" ? adminThemeMode : "dark";
+  }, [role, adminThemeMode]);
 
   if (!isAuth) return <LoginScreen />;
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#0e0b1a" }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: "var(--a-bg)" }}>
       <Sidebar />
       <main style={{ flex: 1, overflow: "auto" }}>
         <Routes>

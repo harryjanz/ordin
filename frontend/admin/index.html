@@ -7,6 +7,25 @@
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+
+      /* Tema claro/escuro da interface do admin (não confundir com
+         src/themes.ts, que é a identidade visual do totem por empresa —
+         concerns separados). Escuro é o padrão histórico da interface;
+         claro é opt-in, disponível só pro superadmin (ver Sidebar.tsx). */
+      :root {
+        --a-bg: #0e0b1a;
+        --a-surface: #1d1434;
+        --a-text: #DFE8ED;
+        --a-text-rgb: 223, 232, 237;
+        --a-neutral-rgb: 255, 255, 255;
+      }
+      :root[data-theme="light"] {
+        --a-bg: #f4f2fa;
+        --a-surface: #ffffff;
+        --a-text: #1a1625;
+        --a-text-rgb: 26, 22, 37;
+        --a-neutral-rgb: 0, 0, 0;
+      }
     </style>
   </head>
   <body>

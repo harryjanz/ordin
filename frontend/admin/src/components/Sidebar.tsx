@@ -12,14 +12,14 @@ const MENU = [
   { to: "/payments",      label: "Transações",   icon: "◈", roles: ["admin", "owner", "manager"] },
   { to: "/company",       label: "Empresa",      icon: "◉", roles: ["admin", "owner"] },
   { to: "/pair",          label: "Dispositivos", icon: "⊞", roles: ["admin", "owner", "manager"] },
-  { to: "/settings",      label: "Config.",      icon: "⚙", roles: ["superadmin", "admin", "owner"] },
+  { to: "/settings",      label: "Config.",      icon: "⚙", roles: ["admin", "owner"] },
 ] as const;
 
 const W_OPEN   = 220;
 const W_CLOSED = 52;
 
 export default function Sidebar() {
-  const { role, logout } = useStore();
+  const { role, logout, adminThemeMode, toggleAdminThemeMode } = useStore();
   const location = useLocation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -54,7 +54,7 @@ export default function Sidebar() {
         position: "sticky",
         top: 0,
         overflow: "hidden",
-        background: "#1d1434",
+        background: "var(--a-surface)",
         borderRight: "1px solid rgba(153,0,255,0.2)",
         display: "flex",
         flexDirection: "column",
@@ -133,7 +133,7 @@ export default function Sidebar() {
               alignItems: "center",
               gap: 12,
               padding: "11px 14px",
-              color: isActive ? "#9900ff" : "rgba(223,232,237,0.7)",
+              color: isActive ? "#9900ff" : "rgba(var(--a-text-rgb),0.7)",
               textDecoration: "none",
               fontSize: 14,
               fontWeight: isActive ? 600 : 400,
@@ -157,6 +157,37 @@ export default function Sidebar() {
         ))}
       </nav>
 
+      {/* Claro/escuro — só pro superadmin (ver App.tsx, que só aplica
+          data-theme quando role === "superadmin") */}
+      {role === "superadmin" && (
+        <button
+          onClick={toggleAdminThemeMode}
+          aria-label={adminThemeMode === "dark" ? "Mudar para modo claro" : "Mudar para modo escuro"}
+          data-testid="theme-toggle"
+          style={{
+            flexShrink: 0,
+            margin: "0 10px 8px",
+            padding: "9px 10px",
+            background: "transparent",
+            border: "1px solid rgba(153,0,255,0.3)",
+            borderRadius: 6,
+            color: "rgba(var(--a-text-rgb),0.6)",
+            fontSize: 13,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <span style={{ flexShrink: 0, fontSize: 15 }}>{adminThemeMode === "dark" ? "☀️" : "🌙"}</span>
+          <span style={{ opacity: open ? 1 : 0, transition: "opacity 150ms ease" }}>
+            {adminThemeMode === "dark" ? "Modo claro" : "Modo escuro"}
+          </span>
+        </button>
+      )}
+
       {/* Botão sair */}
       <button
         onClick={handleLogout}
@@ -167,7 +198,7 @@ export default function Sidebar() {
           background: "transparent",
           border: "1px solid rgba(153,0,255,0.3)",
           borderRadius: 6,
-          color: "rgba(223,232,237,0.6)",
+          color: "rgba(var(--a-text-rgb),0.6)",
           fontSize: 13,
           cursor: "pointer",
           whiteSpace: "nowrap",

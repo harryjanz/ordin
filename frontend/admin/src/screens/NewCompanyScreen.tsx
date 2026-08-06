@@ -17,21 +17,21 @@ const STEPS: StepDef[] = [
 ];
 
 const S = {
-  page: { padding: 32, color: "#DFE8ED", maxWidth: 1100 } as React.CSSProperties,
+  page: { padding: 32, color: "var(--a-text)", maxWidth: 1100 } as React.CSSProperties,
   eyebrow: { fontFamily: "'Lexend', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9900ff", fontWeight: 600 } as React.CSSProperties,
   title: { fontFamily: "'Lexend', sans-serif", fontSize: 24, fontWeight: 600, marginTop: 6, marginBottom: 28 } as React.CSSProperties,
   wizard: { display: "grid", gridTemplateColumns: "230px 1fr", gap: 26, alignItems: "start" } as React.CSSProperties,
-  panel: { background: "#1d1434", border: "1px solid rgba(153,0,255,0.2)", borderRadius: 16, padding: "26px 28px 28px" } as React.CSSProperties,
+  panel: { background: "var(--a-surface)", border: "1px solid rgba(153,0,255,0.2)", borderRadius: 16, padding: "26px 28px 28px" } as React.CSSProperties,
   panelHead: { marginBottom: 20 } as React.CSSProperties,
   h2: { fontFamily: "'Lexend', sans-serif", fontSize: 18, fontWeight: 600 } as React.CSSProperties,
-  hint: { color: "rgba(223,232,237,0.5)", fontSize: 13, marginTop: 4 } as React.CSSProperties,
+  hint: { color: "rgba(var(--a-text-rgb),0.5)", fontSize: 13, marginTop: 4 } as React.CSSProperties,
   grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 16px" } as React.CSSProperties,
   grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px 16px" } as React.CSSProperties,
   field: { display: "flex", flexDirection: "column", gap: 6 } as React.CSSProperties,
-  label: { fontSize: 12, fontWeight: 600, color: "rgba(223,232,237,0.5)" } as React.CSSProperties,
+  label: { fontSize: 12, fontWeight: 600, color: "rgba(var(--a-text-rgb),0.5)" } as React.CSSProperties,
   req: { color: "#ff4d6d", marginLeft: 2 } as React.CSSProperties,
   input: {
-    fontSize: 14, color: "#DFE8ED", background: "#0e0b1a", border: "1px solid rgba(255,255,255,0.07)",
+    fontSize: 14, color: "var(--a-text)", background: "var(--a-bg)", border: "1px solid rgba(var(--a-neutral-rgb),0.07)",
     borderRadius: 9, padding: "10px 12px", outline: "none",
   } as React.CSSProperties,
   inputError: { borderColor: "#ff4d6d" } as React.CSSProperties,
@@ -49,22 +49,22 @@ const S = {
     display: "flex", alignItems: "center", gap: 10, marginTop: 16, padding: "12px 14px",
     background: "rgba(255,77,109,0.10)", border: "1px solid rgba(255,77,109,0.3)", borderRadius: 10,
   } as React.CSSProperties,
-  contactCard: { border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px 18px", marginBottom: 14 } as React.CSSProperties,
+  contactCard: { border: "1px solid rgba(var(--a-neutral-rgb),0.07)", borderRadius: 12, padding: "16px 18px", marginBottom: 14 } as React.CSSProperties,
   contactHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } as React.CSSProperties,
   badgeReq: { fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "#9900ff", background: "rgba(153,0,255,0.12)", padding: "3px 8px", borderRadius: 999 } as React.CSSProperties,
   ghostAdd: {
-    display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", border: "1px dashed rgba(255,255,255,0.15)",
-    borderRadius: 12, color: "rgba(223,232,237,0.5)", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 10, background: "transparent",
+    display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", border: "1px dashed rgba(var(--a-neutral-rgb),0.15)",
+    borderRadius: 12, color: "rgba(var(--a-text-rgb),0.5)", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 10, background: "transparent",
   } as React.CSSProperties,
-  actions: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 24, paddingTop: 18, borderTop: "1px solid rgba(255,255,255,0.07)" } as React.CSSProperties,
+  actions: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 24, paddingTop: 18, borderTop: "1px solid rgba(var(--a-neutral-rgb),0.07)" } as React.CSSProperties,
   btnPrimary: { fontFamily: "'Lexend', sans-serif", fontSize: 13.5, fontWeight: 600, padding: "11px 22px", borderRadius: 9, border: "none", background: "#9900ff", color: "#fff", cursor: "pointer" } as React.CSSProperties,
-  btnGhost: { fontFamily: "'Lexend', sans-serif", fontSize: 13.5, fontWeight: 600, padding: "11px 20px", borderRadius: 9, border: "1px solid rgba(255,255,255,0.12)", background: "transparent", color: "rgba(223,232,237,0.6)", cursor: "pointer" } as React.CSSProperties,
-  reviewGroup: { borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "14px 0" } as React.CSSProperties,
+  btnGhost: { fontFamily: "'Lexend', sans-serif", fontSize: 13.5, fontWeight: 600, padding: "11px 20px", borderRadius: 9, border: "1px solid rgba(var(--a-neutral-rgb),0.12)", background: "transparent", color: "rgba(var(--a-text-rgb),0.6)", cursor: "pointer" } as React.CSSProperties,
+  reviewGroup: { borderBottom: "1px solid rgba(var(--a-neutral-rgb),0.07)", padding: "14px 0" } as React.CSSProperties,
   reviewHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } as React.CSSProperties,
-  reviewTitle: { fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(223,232,237,0.5)" } as React.CSSProperties,
+  reviewTitle: { fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(var(--a-text-rgb),0.5)" } as React.CSSProperties,
   reviewEdit: { fontFamily: "'Lexend', sans-serif", fontSize: 12, fontWeight: 600, color: "#9900ff", background: "none", border: "none", cursor: "pointer" } as React.CSSProperties,
   kv: { fontSize: 13.5 } as React.CSSProperties,
-  kvLabel: { fontSize: 11, color: "rgba(223,232,237,0.5)" } as React.CSSProperties,
+  kvLabel: { fontSize: 11, color: "rgba(var(--a-text-rgb),0.5)" } as React.CSSProperties,
   successBox: { textAlign: "center", padding: "40px 20px" } as React.CSSProperties,
 };
 
@@ -286,7 +286,7 @@ export default function NewCompanyScreen() {
           <div style={S.successBox}>
             <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
             <h2 style={S.h2}>Cliente cadastrado com sucesso</h2>
-            <p style={S.hint}>PIN de acesso do totem: <strong style={{ fontFamily: "'Courier New', monospace", color: "#DFE8ED" }}>{created.pin}</strong></p>
+            <p style={S.hint}>PIN de acesso do totem: <strong style={{ fontFamily: "'Courier New', monospace", color: "var(--a-text)" }}>{created.pin}</strong></p>
             <div style={{ marginTop: 24, display: "flex", gap: 12, justifyContent: "center" }}>
               <button style={S.btnPrimary} onClick={() => navigate(`/companies/${created.id}/contract`)}>
                 Ver detalhe e status do contrato
@@ -653,7 +653,7 @@ function ContactCard({
       <div style={S.contactHead}>
         <span style={{ fontFamily: "'Lexend', sans-serif", fontSize: 13.5, fontWeight: 600 }}>{title}</span>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ ...S.badgeReq, color: "rgba(223,232,237,0.5)", background: "rgba(255,255,255,0.07)" }}>{badge}</span>
+          <span style={{ ...S.badgeReq, color: "rgba(var(--a-text-rgb),0.5)", background: "rgba(var(--a-neutral-rgb),0.07)" }}>{badge}</span>
           <button style={{ ...S.reviewEdit, color: "#ff4d6d" }} onClick={onRemove}>Remover</button>
         </div>
       </div>
