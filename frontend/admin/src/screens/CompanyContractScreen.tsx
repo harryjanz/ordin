@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { getCompany, getLegalRepresentative, listContacts, updateCompany, updateContractStatus } from "../api/companies";
+import { getCompany, getLegalRepresentative, listContacts, lookupCep, updateCompany, updateContractStatus } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
-import { isValidCep, UF_VALUES } from "../lib/validators";
+import { isValidCep, normalizeCep, UF_VALUES } from "../lib/validators";
 import { companyToEditForm, diffFields, type CompanyEditForm } from "../lib/companyEdit";
 import { useStore } from "../store";
-import type { Company, Contact, LegalRepresentative } from "../types";
+import type { CepLookupResult, Company, Contact, LegalRepresentative } from "../types";
 
 const STAGES = ["pendente", "enviado", "assinado"] as const;
 const STAGE_LABEL: Record<string, string> = { pendente: "Pendente", enviado: "Enviado", assinado: "Assinado" };
@@ -94,6 +94,9 @@ export default function CompanyContractScreen() {
   const [draft, setDraft] = useState<CompanyEditForm | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [cepLookupLoading, setCepLookupLoading] = useState(false);
+  const [cepLookupResult, setCepLookupResult] = useState<CepLookupResult | null>(null);
+  const cepLookupTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const originalForm = company ? companyToEditForm(company) : null;
   const dirtyFields = draft && originalForm ? diffFields(originalForm, draft) : {};
@@ -115,6 +118,35 @@ export default function CompanyContractScreen() {
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [dirtyCount]);
+
+  useEffect(() => {
+    if (!editing || !draft) return;
+    const normalized = normalizeCep(draft.zip_code);
+    if (!isValidCep(normalized)) {
+      setCepLookupResult(null);
+      return;
+    }
+    clearTimeout(cepLookupTimer.current);
+    cepLookupTimer.current = setTimeout(async () => {
+      setCepLookupLoading(true);
+      try {
+        const result = await lookupCep(normalized);
+        setCepLookupResult(result);
+        if (result.found) {
+          if (result.street) setDraftField("street", result.street);
+          if (result.neighborhood) setDraftField("neighborhood", result.neighborhood);
+          if (result.city) setDraftField("city", result.city);
+          if (result.state) setDraftField("state", result.state);
+        }
+      } catch {
+        setCepLookupResult({ found: false, reason: "lookup_unavailable" });
+      } finally {
+        setCepLookupLoading(false);
+      }
+    }, 500);
+    return () => clearTimeout(cepLookupTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, draft?.zip_code]);
 
   async function load() {
     setLoading(true);
@@ -323,6 +355,10 @@ export default function CompanyContractScreen() {
                   data-testid="input-edit-zip-code"
                 />
                 {fieldErrors.zip_code && <span style={S.fieldErr}>{fieldErrors.zip_code}</span>}
+                {!fieldErrors.zip_code && cepLookupLoading && <span style={{ fontSize: 11.5, color: "rgba(223,232,237,0.5)" }}>Buscando endereço…</span>}
+                {!fieldErrors.zip_code && !cepLookupLoading && cepLookupResult && !cepLookupResult.found && (
+                  <span style={{ fontSize: 11.5, color: "#FFB84D" }}>CEP não encontrado — preencha o endereço manualmente</span>
+                )}
               </div>
               <div style={{ ...S.field, gridColumn: "span 2" }}>
                 <label style={S.fieldLabel}>Logradouro<span style={{ color: "#ff4d6d" }}>*</span></label>

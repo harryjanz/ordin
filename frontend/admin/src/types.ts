@@ -76,6 +76,15 @@ export interface CnpjLookupResult {
   state?: string | null;
 }
 
+export interface CepLookupResult {
+  found: boolean;
+  reason?: string | null;
+  street?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+}
+
 export interface Terminal {
   id: number;
   company_id: number;

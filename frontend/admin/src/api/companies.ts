@@ -1,9 +1,14 @@
 import api from "../api";
-import type { CnpjLookupResult, Company, Contact, ContactType, LegalRepresentative } from "../types";
+import type { CepLookupResult, CnpjLookupResult, Company, Contact, ContactType, LegalRepresentative } from "../types";
 import { normalizeCnpj } from "../lib/validators";
 
 export async function lookupCnpj(cnpj: string): Promise<CnpjLookupResult> {
   const r = await api.get<CnpjLookupResult>(`/companies/cnpj-lookup/${encodeURIComponent(cnpj)}`);
+  return r.data;
+}
+
+export async function lookupCep(cep: string): Promise<CepLookupResult> {
+  const r = await api.get<CepLookupResult>(`/companies/cep-lookup/${encodeURIComponent(cep)}`);
   return r.data;
 }
 

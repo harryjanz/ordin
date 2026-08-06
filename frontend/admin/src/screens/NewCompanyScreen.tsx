@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Stepper, { StepDef } from "../components/Stepper";
-import { createCompany, createContact, lookupCnpj, upsertLegalRepresentative } from "../api/companies";
+import { createCompany, createContact, lookupCep, lookupCnpj, upsertLegalRepresentative } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
-import { isValidCep, isValidCnpj, isValidCpf, normalizeCnpj, UF_VALUES } from "../lib/validators";
-import type { CnpjLookupResult } from "../types";
+import { isValidCep, isValidCnpj, isValidCpf, normalizeCep, normalizeCnpj, UF_VALUES } from "../lib/validators";
+import type { CepLookupResult, CnpjLookupResult } from "../types";
 
 const STEPS: StepDef[] = [
   { label: "Dados cadastrais", sub: "CNPJ e Receita Federal" },
@@ -98,6 +98,9 @@ export default function NewCompanyScreen() {
   const [neighborhood, setNeighborhood] = useState("");
   const [city, setCity] = useState("");
   const [ufState, setUfState] = useState("");
+  const [cepLookupLoading, setCepLookupLoading] = useState(false);
+  const [cepLookupResult, setCepLookupResult] = useState<CepLookupResult | null>(null);
+  const cepLookupTimer = useRef<ReturnType<typeof setTimeout>>();
 
   // Passo 3
   const [comercial, setComercial] = useState<ContactForm>(emptyContact);
@@ -143,6 +146,34 @@ export default function NewCompanyScreen() {
     return () => clearTimeout(lookupTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cnpj]);
+
+  useEffect(() => {
+    const normalized = normalizeCep(zipCode);
+    if (!isValidCep(normalized)) {
+      setCepLookupResult(null);
+      return;
+    }
+    clearTimeout(cepLookupTimer.current);
+    cepLookupTimer.current = setTimeout(async () => {
+      setCepLookupLoading(true);
+      try {
+        const result = await lookupCep(normalized);
+        setCepLookupResult(result);
+        if (result.found) {
+          if (result.street) setStreet(result.street);
+          if (result.neighborhood) setNeighborhood(result.neighborhood);
+          if (result.city) setCity(result.city);
+          if (result.state) setUfState(result.state);
+        }
+      } catch {
+        setCepLookupResult({ found: false, reason: "lookup_unavailable" });
+      } finally {
+        setCepLookupLoading(false);
+      }
+    }, 500);
+    return () => clearTimeout(cepLookupTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zipCode]);
 
   function goToStep(i: number) {
     setSubmitError(null);
@@ -384,8 +415,12 @@ export default function NewCompanyScreen() {
               <div style={S.grid3}>
                 <div style={S.field}>
                   <label style={S.label}>CEP</label>
-                  <input style={{ ...S.input, ...(fieldErrors.zip_code ? S.inputError : {}), fontFamily: "'Courier New', monospace" }} value={formatCep(zipCode)} onChange={(e) => setZipCode(e.target.value)} />
+                  <input style={{ ...S.input, ...(fieldErrors.zip_code ? S.inputError : {}), fontFamily: "'Courier New', monospace" }} value={formatCep(zipCode)} onChange={(e) => setZipCode(e.target.value)} data-testid="input-zip-code" />
                   {fieldErrors.zip_code && <span style={S.fieldErr}>{fieldErrors.zip_code}</span>}
+                  {!fieldErrors.zip_code && cepLookupLoading && <span style={S.hint}>Buscando endereço…</span>}
+                  {!fieldErrors.zip_code && !cepLookupLoading && cepLookupResult && !cepLookupResult.found && (
+                    <span style={{ fontSize: 11.5, color: "#FFB84D" }}>CEP não encontrado — preencha o endereço manualmente</span>
+                  )}
                 </div>
                 <div style={{ ...S.field, gridColumn: "span 2" }}>
                   <label style={S.label}>Logradouro<span style={S.req}>*</span></label>
