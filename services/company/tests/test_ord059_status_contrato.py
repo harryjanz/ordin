@@ -6,10 +6,26 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from datetime import datetime, timedelta
 
 import bcrypt
+import boto3
 import pytest
 from httpx import ASGITransport, AsyncClient
+from moto import mock_aws
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+
+@pytest.fixture(autouse=True)
+def _s3_bucket():
+    """Contratos assinados sobem pro S3/MinIO (ver infrastructure/contract_storage.py)
+    — moto mocka a API do S3 pra esses testes não dependerem de um MinIO real rodando.
+    Sem endpoint_url customizado, igual ao client em contract_storage._client()
+    quando S3_ENDPOINT_URL não está setada (moto só intercepta o endpoint
+    padrão da AWS — com endpoint customizado ele tenta conectar de verdade)."""
+    with mock_aws():
+        boto3.client("s3", region_name=os.environ["AWS_REGION"]).create_bucket(
+            Bucket=os.environ["S3_BUCKET"]
+        )
+        yield
 
 
 def _make_token(role: str, company_id: int) -> str:
@@ -86,7 +102,23 @@ async def test_marcar_como_assinado_com_pdf_happy_path(client, superadmin_token,
     body = r.json()
     assert body["contract_status"] == "assinado"
     assert body["contract_signed_at"] is not None
-    assert body["contract_document_url"] is not None
+    assert body["contract_document_url"] == f"contracts/{empresa}/contrato_assinado.pdf"
+
+
+async def test_contract_document_url_endpoint_retorna_url_assinada(client, superadmin_token, empresa):
+    await client.patch(
+        f"/companies/{empresa}/contract-status",
+        headers=auth(superadmin_token), data={"status": "assinado"},
+        files={"signed_document": ("contrato.pdf", b"conteudo", "application/pdf")},
+    )
+    r = await client.get(f"/companies/{empresa}/contract-document-url", headers=auth(superadmin_token))
+    assert r.status_code == 200
+    assert r.json()["url"].startswith("http")
+
+
+async def test_contract_document_url_sem_contrato_retorna_404(client, superadmin_token, empresa):
+    r = await client.get(f"/companies/{empresa}/contract-document-url", headers=auth(superadmin_token))
+    assert r.status_code == 404
 
 
 async def test_marcar_assinado_sem_arquivo_e_rejeitado(client, superadmin_token, empresa):

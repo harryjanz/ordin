@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import Spinner from "../components/Spinner";
-import { getCompany, getLegalRepresentative, listContacts, lookupCep, updateCompany, updateContractStatus } from "../api/companies";
+import { getCompany, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, updateCompany, updateContractStatus } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
 import { isValidCep, normalizeCep, UF_VALUES } from "../lib/validators";
@@ -86,6 +86,7 @@ export default function CompanyContractScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [downloadingContract, setDownloadingContract] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
   // Modo de edição (ORD-063) — não reaproveita o Stepper do wizard (ORD-060):
@@ -197,6 +198,19 @@ export default function CompanyContractScreen() {
       setError(parseApiError(err).message);
     } finally {
       setUpdating(false);
+    }
+  }
+
+  async function downloadSignedContract() {
+    setDownloadingContract(true);
+    setError(null);
+    try {
+      const url = await getContractDocumentUrl(companyId);
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setError(parseApiError(err).message);
+    } finally {
+      setDownloadingContract(false);
     }
   }
 
@@ -478,7 +492,17 @@ export default function CompanyContractScreen() {
             </>
           )}
           {status === "assinado" && (
-            <span style={{ color: "#5DD490", fontSize: 13 }}>Contrato assinado — documento arquivado.</span>
+            <>
+              <span style={{ color: "#5DD490", fontSize: 13 }}>Contrato assinado — documento arquivado.</span>
+              <button
+                style={S.btnPrimary}
+                onClick={downloadSignedContract}
+                disabled={downloadingContract}
+                data-testid="btn-baixar-contrato"
+              >
+                {downloadingContract ? "Gerando link…" : "Baixar contrato assinado"}
+              </button>
+            </>
           )}
         </div>
       </div>

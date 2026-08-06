@@ -1,7 +1,6 @@
 import base64
 import json
 import os
-import pathlib
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
@@ -27,6 +26,7 @@ from domain.address import normalize_cep, is_valid_cep, UF_VALUES, is_valid_uf
 from domain.cpf import normalize_cpf, is_valid_cpf
 from infrastructure.cnpj_lookup import lookup_cnpj
 from infrastructure.cep_lookup import lookup_cep
+from infrastructure.contract_storage import ensure_bucket, presigned_download_url, upload_contract
 from fastapi import Request
 from auth import get_current_user, TokenPayload
 from audit import emit_audit
@@ -555,6 +555,11 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Internal-Secret"],
     allow_credentials=True,
 )
+
+
+@app.on_event("startup")
+async def _create_contracts_bucket_if_local() -> None:
+    ensure_bucket()
 
 
 # ── Endpoints internos — acessíveis apenas via VPC ────────────────────────────
@@ -1507,7 +1512,6 @@ async def get_legal_representative(
 
 VALID_CONTRACT_STATUSES = {"enviado", "assinado"}
 _CONTRACT_STATUS_RANK = {"pendente": 0, "enviado": 1, "assinado": 2}
-_UPLOADS_DIR = pathlib.Path(os.getenv("UPLOADS_DIR", "/app/uploads"))
 
 
 @app.patch(
@@ -1539,11 +1543,9 @@ async def update_contract_status(
     if status == "assinado":
         if signed_document is None:
             raise HTTPException(422, "signed_document é obrigatório quando status='assinado'")
-        contract_dir = _UPLOADS_DIR / "contracts" / str(company_id)
-        contract_dir.mkdir(parents=True, exist_ok=True)
-        dest = contract_dir / signed_document.filename
-        dest.write_bytes(await signed_document.read())
-        co.contract_document_url = str(dest)
+        content = await signed_document.read()
+        key = upload_contract(company_id, signed_document.filename, content)
+        co.contract_document_url = key  # é a key do objeto no bucket, não uma URL — ver contract_storage.py
         co.contract_signed_at = datetime.utcnow()
     elif status == "enviado":
         co.contract_sent_at = datetime.utcnow()
@@ -1560,6 +1562,30 @@ async def update_contract_status(
                result="success",
                detail={"from": status_anterior, "to": status})
     return co
+
+
+class ContractDocumentUrlOut(BaseModel):
+    url: str
+
+
+@app.get(
+    "/companies/{company_id}/contract-document-url",
+    response_model=ContractDocumentUrlOut,
+    tags=["Empresas"],
+    summary="URL assinada (temporária) pra baixar o contrato assinado",
+)
+async def get_contract_document_url(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_superadmin(current_user)
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+    if not co.contract_document_url:
+        raise HTTPException(404, "Nenhum contrato assinado foi enviado pra essa empresa")
+    return {"url": presigned_download_url(co.contract_document_url)}
 
 
 # ── Device pairing ───────────────────────────────────────────────────────────
