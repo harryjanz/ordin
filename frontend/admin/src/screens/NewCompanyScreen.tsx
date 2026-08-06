@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Stepper, { StepDef } from "../components/Stepper";
+import Spinner from "../components/Spinner";
 import { createCompany, createContact, lookupCep, lookupCnpj, upsertLegalRepresentative } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
@@ -34,6 +35,7 @@ const S = {
     borderRadius: 9, padding: "10px 12px", outline: "none",
   } as React.CSSProperties,
   inputError: { borderColor: "#ff4d6d" } as React.CSSProperties,
+  inputSpinner: { position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)" } as React.CSSProperties,
   fieldErr: { fontSize: 11.5, color: "#ff4d6d" } as React.CSSProperties,
   lookupOk: {
     display: "flex", alignItems: "center", gap: 10, marginTop: 16, padding: "12px 14px",
@@ -315,13 +317,20 @@ export default function NewCompanyScreen() {
               <div style={S.grid2}>
                 <div style={S.field}>
                   <label style={S.label}>CNPJ<span style={S.req}>*</span></label>
-                  <input
-                    style={{ ...S.input, ...(fieldErrors.document ? S.inputError : {}), fontFamily: "'Courier New', monospace" }}
-                    value={formatCnpj(cnpj)}
-                    onChange={(e) => setCnpj(e.target.value)}
-                    placeholder="XX.XXX.XXX/XXXX-XX"
-                    data-testid="input-cnpj"
-                  />
+                  <div style={{ position: "relative" }}>
+                    <input
+                      style={{ ...S.input, ...(fieldErrors.document ? S.inputError : {}), fontFamily: "'Courier New', monospace" }}
+                      value={formatCnpj(cnpj)}
+                      onChange={(e) => setCnpj(e.target.value)}
+                      placeholder="XX.XXX.XXX/XXXX-XX"
+                      data-testid="input-cnpj"
+                    />
+                    {lookupLoading && (
+                      <span style={S.inputSpinner}>
+                        <Spinner size={14} />
+                      </span>
+                    )}
+                  </div>
                   {fieldErrors.document && <span style={S.fieldErr}>{fieldErrors.document}</span>}
                 </div>
                 <div style={S.field}>
@@ -415,9 +424,15 @@ export default function NewCompanyScreen() {
               <div style={S.grid3}>
                 <div style={S.field}>
                   <label style={S.label}>CEP</label>
-                  <input style={{ ...S.input, ...(fieldErrors.zip_code ? S.inputError : {}), fontFamily: "'Courier New', monospace" }} value={formatCep(zipCode)} onChange={(e) => setZipCode(e.target.value)} data-testid="input-zip-code" />
+                  <div style={{ position: "relative" }}>
+                    <input style={{ ...S.input, ...(fieldErrors.zip_code ? S.inputError : {}), fontFamily: "'Courier New', monospace" }} value={formatCep(zipCode)} onChange={(e) => setZipCode(e.target.value)} data-testid="input-zip-code" />
+                    {cepLookupLoading && (
+                      <span style={S.inputSpinner}>
+                        <Spinner size={14} />
+                      </span>
+                    )}
+                  </div>
                   {fieldErrors.zip_code && <span style={S.fieldErr}>{fieldErrors.zip_code}</span>}
-                  {!fieldErrors.zip_code && cepLookupLoading && <span style={S.hint}>Buscando endereço…</span>}
                   {!fieldErrors.zip_code && !cepLookupLoading && cepLookupResult && !cepLookupResult.found && (
                     <span style={{ fontSize: 11.5, color: "#FFB84D" }}>CEP não encontrado — preencha o endereço manualmente</span>
                   )}

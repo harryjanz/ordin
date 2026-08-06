@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
+import Spinner from "../components/Spinner";
 import { getCompany, getLegalRepresentative, listContacts, lookupCep, updateCompany, updateContractStatus } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
@@ -348,14 +349,20 @@ export default function CompanyContractScreen() {
             <div style={S.grid3}>
               <div style={S.field}>
                 <label style={S.fieldLabel}>CEP</label>
-                <input
-                  style={{ ...S.input, ...(fieldErrors.zip_code ? S.inputError : {}), fontFamily: "'Courier New', monospace" }}
-                  value={formatCep(draft.zip_code)}
-                  onChange={(e) => setDraftField("zip_code", e.target.value)}
-                  data-testid="input-edit-zip-code"
-                />
+                <div style={{ position: "relative" }}>
+                  <input
+                    style={{ ...S.input, ...(fieldErrors.zip_code ? S.inputError : {}), fontFamily: "'Courier New', monospace" }}
+                    value={formatCep(draft.zip_code)}
+                    onChange={(e) => setDraftField("zip_code", e.target.value)}
+                    data-testid="input-edit-zip-code"
+                  />
+                  {cepLookupLoading && (
+                    <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)" }}>
+                      <Spinner size={14} />
+                    </span>
+                  )}
+                </div>
                 {fieldErrors.zip_code && <span style={S.fieldErr}>{fieldErrors.zip_code}</span>}
-                {!fieldErrors.zip_code && cepLookupLoading && <span style={{ fontSize: 11.5, color: "rgba(223,232,237,0.5)" }}>Buscando endereço…</span>}
                 {!fieldErrors.zip_code && !cepLookupLoading && cepLookupResult && !cepLookupResult.found && (
                   <span style={{ fontSize: 11.5, color: "#FFB84D" }}>CEP não encontrado — preencha o endereço manualmente</span>
                 )}
