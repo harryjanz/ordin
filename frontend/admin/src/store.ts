@@ -12,10 +12,16 @@ function decodeJwt(token: string): Record<string, unknown> {
 
 interface Store extends AuthState {
   selectedCompanyId: number | null;
+  // Sinaliza pro Sidebar que uma tela tem edição não salva (ORD-063) — o
+  // app usa <BrowserRouter> puro, então useBlocker do React Router não
+  // funciona aqui (só em data router); este flag é o mecanismo alternativo
+  // pra confirmar antes de navegar pra fora de um formulário sujo.
+  unsavedChanges: boolean;
   login: (access: string, refresh: string) => void;
   logout: () => void;
   updateTokens: (access: string, refresh: string) => void;
   setSelectedCompany: (id: number) => void;
+  setUnsavedChanges: (v: boolean) => void;
 }
 
 export const useStore = create<Store>()(
@@ -27,6 +33,7 @@ export const useStore = create<Store>()(
       companyId: null,
       role: null,
       selectedCompanyId: null,
+      unsavedChanges: false,
 
       login(access, refresh) {
         const p = decodeJwt(access);
@@ -64,7 +71,20 @@ export const useStore = create<Store>()(
       setSelectedCompany(id) {
         set({ selectedCompanyId: id });
       },
+
+      setUnsavedChanges(v) {
+        set({ unsavedChanges: v });
+      },
     }),
-    { name: "ordin-admin-auth" }
+    {
+      name: "ordin-admin-auth",
+      // unsavedChanges é efêmero (existe só enquanto a tela de edição está
+      // montada) — não deve sobreviver a um reload/fechar aba, senão um
+      // reload dentro do próprio modo de edição "prende" o flag como true.
+      partialize: (state) => {
+        const { unsavedChanges: _unsavedChanges, ...persisted } = state;
+        return persisted;
+      },
+    }
   )
 );

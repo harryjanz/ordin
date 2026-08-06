@@ -8,12 +8,14 @@ ord(c)-48 idêntico ao valor do dígito) e estende para letras maiúsculas 'A'-'
 (ord(c)-48 no intervalo 17-42). Os 2 dígitos verificadores finais são sempre
 numéricos, nunca letras.
 
-ATENÇÃO: mecanismo documentado publicamente (Nota Técnica RFB), mas ainda não
-confrontado com vetores de teste oficiais — ver risco registrado em ORD-056.
+Confrontado contra os vetores de teste oficiais publicados pela Receita/SERPRO
+(PDF + exemplos Java/Python/TypeScript) — ver ORD-064, que fechou o risco
+registrado no ORD-056 e corrigiu o gap do CNPJ zerado abaixo.
 """
 
 _MASK_CHARS = (".", "/", "-")
 _WEIGHTS_12 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+_CNPJ_ZERADO = "0" * 14
 
 
 def normalize_cnpj(raw: str) -> str:
@@ -35,7 +37,7 @@ def _check_digit(values: list[int], weights: list[int]) -> int:
 
 def is_valid_cnpj(raw: str) -> bool:
     cnpj = normalize_cnpj(raw)
-    if len(cnpj) != 14:
+    if len(cnpj) != 14 or cnpj == _CNPJ_ZERADO:
         return False
     base, dv = cnpj[:12], cnpj[12:]
     if not all(c.isdigit() or "A" <= c <= "Z" for c in base):
@@ -46,6 +48,14 @@ def is_valid_cnpj(raw: str) -> bool:
     dv1 = _check_digit(values, _WEIGHTS_12)
     dv2 = _check_digit(values + [dv1], [6, *_WEIGHTS_12])
     return dv == f"{dv1}{dv2}"
+
+
+def is_alphanumeric_cnpj(raw: str) -> bool:
+    """True se o CNPJ (normalizado) contém ao menos uma letra — usado pra
+    decidir se um 404/indisponibilidade de consulta externa deve ser tratado
+    com mais cautela (provedores públicos podem não reconhecer o formato
+    alfanumérico ainda, ver ORD-064)."""
+    return any(c.isalpha() for c in normalize_cnpj(raw))
 
 
 def format_cnpj(raw: str) -> str:

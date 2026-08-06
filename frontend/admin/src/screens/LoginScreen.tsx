@@ -99,8 +99,9 @@ export default function LoginScreen() {
         <div style={S.sub}>Painel administrativo</div>
         {error && <div style={S.error}>{error}</div>}
         <form onSubmit={handleSubmit}>
-          <label style={S.label}>E-mail</label>
+          <label style={S.label} htmlFor="login-email">E-mail</label>
           <input
+            id="login-email"
             style={S.input}
             type="email"
             value={email}
@@ -108,8 +109,9 @@ export default function LoginScreen() {
             autoFocus
             required
           />
-          <label style={S.label}>Senha</label>
+          <label style={S.label} htmlFor="login-password">Senha</label>
           <input
+            id="login-password"
             style={S.input}
             type="password"
             value={password}

@@ -1,6 +1,6 @@
 ---
 id: ORD-057
-status: Ready
+status: Done
 fase: 4
 sprint: null
 responsavel: Backend SR

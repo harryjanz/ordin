@@ -124,7 +124,9 @@ async def test_lookup_cnpj_fallback_receitaws_quando_brasilapi_falha():
     assert result.legal_name == "Empresa Fallback LTDA"
 
 
-async def test_lookup_cnpj_ambas_apis_indisponiveis_degrada_graciosamente():
+async def test_lookup_cnpj_todas_apis_indisponiveis_degrada_graciosamente():
+    # ORD-064 acrescentou um terceiro provedor (cnpj.ws) — os três precisam
+    # falhar pra chegar em lookup_unavailable.
     from infrastructure.cnpj_lookup import lookup_cnpj
     with respx.mock:
         respx.get(f"https://brasilapi.com.br/api/cnpj/v1/{CNPJ_VALIDO_NORMALIZADO}").mock(
@@ -133,10 +135,13 @@ async def test_lookup_cnpj_ambas_apis_indisponiveis_degrada_graciosamente():
         respx.get(f"https://www.receitaws.com.br/v1/cnpj/{CNPJ_VALIDO_NORMALIZADO}").mock(
             side_effect=httpx.ConnectTimeout("timeout")
         )
+        respx.get(f"https://publica.cnpj.ws/cnpj/{CNPJ_VALIDO_NORMALIZADO}").mock(
+            side_effect=httpx.ConnectTimeout("timeout")
+        )
         result = await lookup_cnpj(CNPJ_VALIDO_NORMALIZADO)
     assert result.found is False
     assert result.reason == "lookup_unavailable"
-    assert result.cadastral_status == "NAO_VERIFICADA"
+    assert result.cadastral_status == "NAO_VERIFICADA"  # CNPJ numérico — sem promoção automática (Gap 3 é só alfanumérico)
 
 
 # ── GET /companies/cnpj-lookup/{cnpj} ─────────────────────────────────────────

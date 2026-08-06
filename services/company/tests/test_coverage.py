@@ -78,10 +78,19 @@ async def db_session():
 
 async def _create_seed(SessionLocal):
     import main as svc
-    pin_hash = bcrypt.hashpw(b"5678", bcrypt.gensalt(4)).decode()
+    # PIN "2468" — deliberadamente diferente dos PINs do seed real (Burger
+    # House=1234, Pasta & Co=5678, Sweet Corner=9999). validate_pin/verify_pin
+    # fazem varredura linear em todas as empresas ativas procurando o hash que
+    # bate — com "5678" o teste podia "validar" contra o Pasta & Co de verdade
+    # em vez da empresa que ele mesmo acabou de criar.
+    pin_hash = bcrypt.hashpw(b"2468", bcrypt.gensalt(4)).decode()
     pw_hash  = bcrypt.hashpw(b"senha123", bcrypt.gensalt(4)).decode()
     async with SessionLocal() as db:
-        co = svc.Company(name="__cov_co__", document="11111111112",
+        # sufixo aleatório — ORD-065 tornou document UNIQUE; um valor fixo
+        # colidiria (e travaria TODOS os testes que dependem deste seed) se
+        # algum teste anterior falhar antes de chamar _cleanup_seed.
+        document = f"1111111{os.urandom(4).hex()}"[:14]
+        co = svc.Company(name="__cov_co__", document=document,
                          pin_hash=pin_hash, plan="free", payment_provider="mock")
         db.add(co); await db.flush()
         t = svc.Terminal(company_id=co.id, label="__cov_t__", terminal_code="__COV__",
@@ -175,7 +184,7 @@ async def test_dir_validate_pin_valido(db_session):
     import main as svc
     co_id, t_id, u_id = await _create_seed(db_session)
     async with db_session() as db:
-        result = await svc.validate_pin({"pin": "5678"}, db, None)
+        result = await svc.validate_pin({"pin": "2468"}, db, None)
     assert "company" in result and result["company"]["id"] == co_id
     await _cleanup_seed(db_session, co_id)
 
@@ -197,7 +206,7 @@ async def test_dir_verify_pin_terminal_inexistente(db_session):
     co_id, t_id, u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
-            await svc.verify_pin({"pin": "5678", "terminal_id": 999999}, db, None)
+            await svc.verify_pin({"pin": "2468", "terminal_id": 999999}, db, None)
         assert exc.value.status_code == 404
     await _cleanup_seed(db_session, co_id)
 
@@ -206,7 +215,7 @@ async def test_dir_verify_pin_valido(db_session):
     import main as svc
     co_id, t_id, u_id = await _create_seed(db_session)
     async with db_session() as db:
-        result = await svc.verify_pin({"pin": "5678", "terminal_id": t_id}, db, None)
+        result = await svc.verify_pin({"pin": "2468", "terminal_id": t_id}, db, None)
     assert "company" in result and "terminal" in result
     await _cleanup_seed(db_session, co_id)
 
@@ -262,6 +271,12 @@ async def test_dir_internal_get_terminal_mock(db_session):
 
 
 async def test_dir_internal_get_terminal_paygo_sem_config(db_session):
+    # internal_get_terminal não olha company.payment_provider — a fonte de
+    # verdade é ter ou não uma CompanyPaymentConfig ativa (comentário no
+    # próprio código: "Fonte de verdade: config ativa..."). Sem config ativa,
+    # a resposta é sempre fallback mock, mesmo com payment_provider="paygo"
+    # na empresa — não levanta 400. Este teste antes esperava uma exceção que
+    # o código nunca levantou nesse caminho (bug do teste, não do código).
     import main as svc
     co_id, t_id, u_id = await _create_seed(db_session)
     async with db_session() as db:
@@ -269,9 +284,8 @@ async def test_dir_internal_get_terminal_paygo_sem_config(db_session):
         co.payment_provider = "paygo"
         await db.commit()
     async with db_session() as db:
-        with pytest.raises(HTTPException) as exc:
-            await svc.internal_get_terminal(t_id, db, None)
-        assert exc.value.status_code == 400
+        result = await svc.internal_get_terminal(t_id, db, None)
+    assert result["payment_provider"] == "mock" and result["config"] is None
     await _cleanup_seed(db_session, co_id)
 
 
@@ -281,7 +295,10 @@ async def test_dir_list_companies(db_session):
     import main as svc
     co_id, t_id, u_id = await _create_seed(db_session)
     async with db_session() as db:
-        result = await svc.list_companies(0, 50, db, _user("superadmin"))
+        result = await svc.list_companies(
+            0, 50, q=None, document=None, contract_status=None,
+            db=db, current_user=_user("superadmin"),
+        )
     assert "companies" in result and "total" in result
     await _cleanup_seed(db_session, co_id)
 
@@ -689,6 +706,11 @@ async def test_dir_update_payment_config(db_session):
             PaymentConfigIn(provider="paygo", environment="sandbox", api_key="k1", api_secret="s1"),
             db, _user("owner", co_id))
     cfg_id = created["id"]
+    # create_payment_config nasce com active=False (só uma config fica ativa
+    # por vez); update/delete só enxergam config ativa — precisa ativar antes,
+    # senão cai no 404 "Config não encontrada" (bug do teste, não do código).
+    async with db_session() as db:
+        await svc.activate_payment_config(co_id, cfg_id, db, _user("owner", co_id))
     async with db_session() as db:
         result = await svc.update_payment_config(
             co_id, cfg_id,
@@ -722,6 +744,9 @@ async def test_dir_delete_payment_config(db_session):
             PaymentConfigIn(provider="mock", environment="sandbox"),
             db, _user("owner", co_id))
     cfg_id = created["id"]
+    # mesma razão do test_dir_update_payment_config — precisa estar ativa.
+    async with db_session() as db:
+        await svc.activate_payment_config(co_id, cfg_id, db, _user("owner", co_id))
     async with db_session() as db:
         await svc.delete_payment_config(co_id, cfg_id, db, _user("owner", co_id))
     await _cleanup_seed(db_session, co_id)
