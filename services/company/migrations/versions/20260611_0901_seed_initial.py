@@ -24,11 +24,11 @@ def upgrade() -> None:
     # PINs: Burger House=1234, Pasta & Co=5678, Sweet Corner=9999 (bcrypt rounds=12)
     op.execute("""
         INSERT IGNORE INTO companies (id, name, document, pin_hash, plan, active) VALUES
-        (1, 'Burger House',  '12.345.678/0001-99',
+        (1, 'Burger House',  '12345678000199',
          '$2b$12$P36sH8rfVxTfCf9MNrD/IOakrEdGWON.OfkXFEnaej.7c4xQmQxia', 'pro',     1),
-        (2, 'Pasta & Co',    '98.765.432/0001-11',
+        (2, 'Pasta & Co',    '98765432000111',
          '$2b$12$GmaN8ep8RD66P99QDoZprOuXNPMXUibxKdngFpeXBIMgDq7/5U0bG',  'starter', 1),
-        (3, 'Sweet Corner',  '11.222.333/0001-44',
+        (3, 'Sweet Corner',  '11222333000144',
          '$2b$12$JDi/WkNftympM5hSFAj19e4XXmekiVtogwwI7huBUNZsJyn.6SJ2O',  'free',    1)
     """)
     op.execute("""
