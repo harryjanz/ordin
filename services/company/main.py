@@ -26,6 +26,7 @@ from domain.cnpj import normalize_cnpj, is_valid_cnpj
 from domain.address import normalize_cep, is_valid_cep, UF_VALUES, is_valid_uf
 from domain.cpf import normalize_cpf, is_valid_cpf
 from infrastructure.cnpj_lookup import lookup_cnpj
+from infrastructure.cep_lookup import lookup_cep
 from fastapi import Request
 from auth import get_current_user, TokenPayload
 from audit import emit_audit
@@ -341,6 +342,16 @@ class CnpjLookupOut(BaseModel):
     street: Optional[str] = None
     address_number: Optional[str] = None
     complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+
+class CepLookupOut(BaseModel):
+    found: bool
+    reason: Optional[str] = None
+    street: Optional[str] = None
     neighborhood: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
@@ -783,6 +794,26 @@ async def cnpj_lookup(
     result = await lookup_cnpj(normalized)
     if not result.found and result.reason == "cnpj_not_found":
         raise HTTPException(404, "CNPJ não encontrado na Receita Federal")
+    return result
+
+
+@app.get(
+    "/companies/cep-lookup/{cep}",
+    response_model=CepLookupOut,
+    tags=["Empresas"],
+    summary="Consultar CEP",
+)
+async def cep_lookup(
+    cep: str,
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_superadmin(current_user)
+    normalized = normalize_cep(cep)
+    if not is_valid_cep(normalized):
+        raise HTTPException(422, "CEP inválido — deve conter 8 dígitos")
+    result = await lookup_cep(normalized)
+    if not result.found and result.reason == "cep_not_found":
+        raise HTTPException(404, "CEP não encontrado")
     return result
 
 
