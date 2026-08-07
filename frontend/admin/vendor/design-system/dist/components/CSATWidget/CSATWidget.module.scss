@@ -1,0 +1,116 @@
+@import '../../core/scss/styles';
+
+.ds-csat__wrapper {
+  width: 312px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+
+  padding: spacing('m') 0 spacing('s');
+  gap: spacing('s');
+
+  border-radius: spacing('xs');
+  @include border(1, 'solid', 'grey-200');
+
+  & button {
+    padding: spacing('s');
+
+    & i {
+      margin: 0;
+      @include color('color', 'grey-400');
+    }
+  }
+}
+
+.ds-csat__title {
+  @include font('xs-emphasys');
+  @include color('color', 'grey-600');
+  text-align: center;
+  width: 248px;
+  margin: 0;
+}
+
+.ds-csat__container-scores {
+  display: flex;
+
+  button {
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+  }
+}
+
+.ds-csat__score {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-evenly;
+  align-items: center;
+  width: spacing('xxl-2');
+  height: spacing('xxl-3');
+  cursor: pointer;
+
+  & svg > path {
+    transition: all 100ms ease-in-out;
+  }
+
+  &:focus-within {
+    & svg > path {
+      stroke: #8f00ff;
+      transition: all 100ms ease-in-out;
+    }
+
+    & button {
+      outline: none;
+    }
+  }
+
+  & span {
+    padding-bottom: spacing('s');
+    @include font('xs');
+    @include color('color', 'grey-600');
+  }
+}
+
+.ds-csat__modal-textarea {
+  & div:nth-child(1) {
+    min-width: auto;
+    padding-bottom: 13px;
+  }
+
+  & ::placeholder {
+    @include font('sm');
+    @include color('color', 'grey-600');
+    text-align: justify;
+  }
+}
+
+.ds-csat__csat-finish-container {
+  width: 312px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  padding: spacing('l') 0;
+  gap: spacing('m');
+
+  @include border(1, 'solid', 'grey-200');
+  border-radius: spacing('xs');
+
+  & h1 {
+    width: 216px;
+    margin: 0;
+    text-align: center;
+
+    @include font('sm-emphasys');
+    @include color('color', 'grey-600');
+  }
+
+  & p {
+    margin: 0;
+
+    @include font('xs');
+    @include color('color', 'grey-600');
+  }
+}

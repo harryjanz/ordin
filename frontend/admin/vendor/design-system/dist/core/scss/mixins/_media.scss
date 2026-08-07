@@ -1,0 +1,32 @@
+@use "sass:map";
+
+// ==========================================================
+// media
+// Get the media query settings based on Bootstrap's values:
+// "xs": 576px
+// "md": 768px
+// "lg": 992px
+// "xl": 1200px
+//
+// Required arguments:
+// `$token` String
+//
+// Example of use:
+// .foo {
+//    @include media('md') {
+//      background-color: color("brand-primary");
+//    }
+// }
+//
+// @return
+// @media (min-width: 768px) {
+//   .foo {
+//     background-color: #9900ff;
+//   }
+// }
+// ==========================================================
+@mixin media($token) {
+  @media (min-width: map.get($breakpoints, $token)) {
+    @content;
+  }
+}

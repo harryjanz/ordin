@@ -1,0 +1,155 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  padding: 32px;
+  color: var(--a-text);
+}
+
+.title {
+  @include font('xl-emphasys');
+  margin-bottom: 24px;
+}
+
+.row {
+  display: flex;
+  gap: 24px;
+}
+
+.col {
+  flex: 1;
+  min-width: 0;
+}
+
+.sectionTitle {
+  @include font('base-emphasys');
+  color: rgba(var(--a-text-rgb), 0.8);
+  margin-bottom: 12px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  @include font('sm');
+}
+
+.itemSelected {
+  border: 1px solid color('brand-primary');
+  cursor: pointer;
+}
+
+.itemClickable {
+  cursor: pointer;
+}
+
+.itemName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.itemPrice {
+  color: color('success-base');
+  @include font('sm-emphasys');
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.form {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.formRow {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.formRowField {
+  flex: 1;
+  min-width: 0;
+}
+
+.formLabel {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-bottom: -2px;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+}
+
+.empty {
+  color: rgba(var(--a-text-rgb), 0.35);
+  @include font('sm');
+}
+
+.formHint {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.4);
+}
+
+.rowThumb {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  @include rounded('default');
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.rowThumbPlaceholder {
+  width: 32px;
+  height: 32px;
+  @include rounded('default');
+  background: rgba(var(--a-text-rgb), 0.06);
+  flex-shrink: 0;
+}
+
+.imageSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(var(--a-text-rgb), 0.03);
+  @include rounded('card');
+}
+
+.imagePreview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.thumbnailImg {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  @include rounded('default');
+  border: 1px solid var(--a-border);
+  cursor: pointer;
+}
+
+.previewImage {
+  display: block;
+  width: 100%;
+  height: auto;
+}

@@ -1,0 +1,31 @@
+@use "sass:map";
+
+// ==========================================================
+// padding
+// Get the padding settings based on spacing tokens. For 0 value
+// please use "0" or "none" as argument.
+//
+// Required arguments:
+// `$top` String
+// `$right` String
+// `$bottom` String
+// `$left` String
+//
+// Example of use:
+// .foo { @include padding('xs', 's', 'none', 'xl') }
+//
+// @return
+// .foo {
+//   padding-top: 4px;
+//   padding-right: 8px;
+//   padding-bottom: 0;
+//   padding-left: 32px;
+// }
+// ==========================================================
+
+@mixin padding($top: null, $right: null, $bottom: null, $left: null) {
+  padding-top: if($top, map.get($spacing, $top), null);
+  padding-right: if($right, map.get($spacing, $right), null);
+  padding-bottom: if($bottom, map.get($spacing, $bottom), null);
+  padding-left: if($left, map.get($spacing, $left), null);
+}

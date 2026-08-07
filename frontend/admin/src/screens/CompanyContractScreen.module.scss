@@ -1,0 +1,232 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  padding: 32px;
+  color: var(--a-text);
+  max-width: 900px;
+}
+
+.header {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+  @include padding('l', 'xl', 'l', 'xl');
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.h2 {
+  @include font('xl');
+}
+
+.doc {
+  font-family: "Courier New", monospace;
+  color: rgba(var(--a-text-rgb), 0.5);
+  @include font('sm');
+  margin-top: 4px;
+}
+
+.addr {
+  color: rgba(var(--a-text-rgb), 0.5);
+  @include font('sm');
+  margin-top: 6px;
+}
+
+.headerActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.panel {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+  @include padding('l', 'xl', 'l', 'xl');
+  margin-bottom: 20px;
+}
+
+.h3 {
+  @include font('l-emphasys');
+}
+
+.h3Mb {
+  margin-bottom: 16px;
+}
+
+.note {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-bottom: 22px;
+  max-width: 62ch;
+}
+
+.tracker {
+  display: flex;
+  align-items: flex-start;
+}
+
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+}
+
+.circle {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  @include font('sm-emphasys');
+  background: rgba(var(--a-neutral-rgb), 0.07);
+  color: rgba(var(--a-text-rgb), 0.5);
+  z-index: 1;
+
+  &.circleCurrent {
+    background: color('brand-primary');
+    color: color('white');
+  }
+
+  &.circleDone {
+    background: color('success-light');
+    color: color('success-base');
+  }
+}
+
+.stageLabel {
+  @include font('xs-emphasys');
+  margin-top: 10px;
+}
+
+.stageTime {
+  font-family: "Courier New", monospace;
+  @include font('xs-2');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-top: 3px;
+}
+
+.actionsRow {
+  display: flex;
+  gap: 12px;
+  margin-top: 26px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.signedNote {
+  color: color('success-base');
+  @include font('sm');
+}
+
+.contactsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.miniCard {
+  border: 1px solid rgba(var(--a-neutral-rgb), 0.07);
+  @include rounded('card');
+  @include padding('s', 'm', 's', 'm');
+}
+
+.miniType {
+  @include font('xs-2-emphasys');
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: color('brand-primary');
+  margin-bottom: 6px;
+}
+
+.miniName {
+  @include font('sm-emphasys');
+}
+
+.miniDetail {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-top: 2px;
+}
+
+.miniDetailMono {
+  font-family: "Courier New", monospace;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 16px;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px 16px;
+}
+
+.spanFull {
+  grid-column: span 2;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+}
+
+.mt14 {
+  margin-top: 14px;
+}
+
+.helperWarn {
+  @include font('xs');
+  color: color('warning-base');
+}
+
+.savebar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(29, 20, 52, 0.95);
+  border-top: 1px solid var(--a-border);
+  padding: 16px 4px;
+  margin-top: -4px;
+}
+
+.dirtyNote {
+  @include font('xs');
+  color: color('warning-base');
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dirtyDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color('warning-base');
+}
+
+.savebarActions {
+  display: flex;
+  gap: 12px;
+}
+
+.alertBox {
+  margin-bottom: 16px;
+}
+
+.emphasisTeal {
+  color: #33cccc;
+}

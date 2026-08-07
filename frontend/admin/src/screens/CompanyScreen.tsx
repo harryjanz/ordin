@@ -1,112 +1,10 @@
 import { useState, useEffect, FormEvent } from "react";
+import { Button, Dropdown, InputBase, Tab, Tabs, Tag, type DropdownOptions } from "design-system";
 import api from "../api";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { useStore } from "../store";
 import type { Terminal, User, Role, PaymentConfig } from "../types";
-
-const S = {
-  page: { padding: 32, color: "var(--a-text)" } as React.CSSProperties,
-  title: { fontSize: 22, fontWeight: 700, marginBottom: 24 } as React.CSSProperties,
-  tabs: { display: "flex", gap: 0, marginBottom: 24, borderBottom: "1px solid rgba(153,0,255,0.2)" } as React.CSSProperties,
-  tab: (active: boolean) => ({
-    padding: "8px 20px",
-    background: "transparent",
-    border: "none",
-    borderBottom: active ? "2px solid #9900ff" : "2px solid transparent",
-    color: active ? "#9900ff" : "rgba(var(--a-text-rgb),0.5)",
-    fontSize: 14,
-    fontWeight: active ? 600 : 400,
-    cursor: "pointer",
-  } as React.CSSProperties),
-  item: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    background: "var(--a-surface)",
-    border: "1px solid rgba(153,0,255,0.15)",
-    borderRadius: 8,
-    padding: "10px 14px",
-    marginBottom: 8,
-    fontSize: 14,
-    gap: 8,
-  } as React.CSSProperties,
-  badge: (active: boolean) => ({
-    fontSize: 11,
-    padding: "2px 8px",
-    borderRadius: 4,
-    background: active ? "rgba(51,204,204,0.15)" : "rgba(255,77,109,0.15)",
-    color: active ? "#33cccc" : "#ff4d6d",
-    marginLeft: 8,
-  } as React.CSSProperties),
-  form: {
-    background: "var(--a-surface)",
-    border: "1px solid rgba(153,0,255,0.2)",
-    borderRadius: 10,
-    padding: "16px 20px",
-    marginBottom: 20,
-  } as React.CSSProperties,
-  input: {
-    width: "100%",
-    padding: "8px 12px",
-    background: "rgba(153,0,255,0.08)",
-    border: "1px solid rgba(153,0,255,0.25)",
-    borderRadius: 6,
-    color: "var(--a-text)",
-    fontSize: 14,
-    marginBottom: 8,
-    outline: "none",
-    boxSizing: "border-box" as const,
-  } as React.CSSProperties,
-  inputSmall: {
-    padding: "5px 10px",
-    background: "rgba(153,0,255,0.08)",
-    border: "1px solid rgba(153,0,255,0.25)",
-    borderRadius: 6,
-    color: "var(--a-text)",
-    fontSize: 12,
-    outline: "none",
-    width: 180,
-  } as React.CSSProperties,
-  select: {
-    width: "100%",
-    padding: "8px 12px",
-    background: "rgba(153,0,255,0.08)",
-    border: "1px solid rgba(153,0,255,0.25)",
-    borderRadius: 6,
-    color: "var(--a-text)",
-    fontSize: 14,
-    marginBottom: 8,
-    outline: "none",
-  } as React.CSSProperties,
-  addBtn: {
-    padding: "8px 16px",
-    background: "#9900ff",
-    color: "#fff",
-    border: "none",
-    borderRadius: 6,
-    fontSize: 13,
-    cursor: "pointer",
-  } as React.CSSProperties,
-  saveSmallBtn: {
-    padding: "5px 12px",
-    background: "#9900ff",
-    color: "#fff",
-    border: "none",
-    borderRadius: 6,
-    fontSize: 12,
-    cursor: "pointer",
-    flexShrink: 0,
-  } as React.CSSProperties,
-  dangerBtn: {
-    padding: "4px 10px",
-    background: "rgba(255,77,109,0.15)",
-    border: "none",
-    borderRadius: 4,
-    color: "#ff4d6d",
-    fontSize: 12,
-    cursor: "pointer",
-    flexShrink: 0,
-  } as React.CSSProperties,
-};
+import styles from "./CompanyScreen.module.scss";
 
 // ── Provider catalog ─────────────────────────────────────────────────────────
 // Adicionar novo provider: inserir entrada aqui. O formulário e a listagem
@@ -174,6 +72,22 @@ const PROVIDERS: Record<string, ProviderDef> = {
   },
 };
 
+const PROVIDER_OPTIONS: DropdownOptions[] = Object.entries(PROVIDERS).map(([key, def]) => ({
+  value: key,
+  label: def.label,
+}));
+
+const ENVIRONMENT_OPTIONS: DropdownOptions[] = [
+  { value: "sandbox", label: "Sandbox" },
+  { value: "production", label: "Produção" },
+];
+
+const ROLE_OPTIONS: DropdownOptions[] = [
+  { value: "cashier", label: "Caixa" },
+  { value: "manager", label: "Gerente" },
+  { value: "owner", label: "Owner" },
+];
+
 // Converte { "api_key": "x", "extra_config.public_key": "y" } → payload da API
 function buildConfigPayload(
   provider: string,
@@ -231,6 +145,7 @@ function PaymentTab({ companyId }: PaymentTabProps) {
   const [editId, setEditId] = useState<number | null>(null);
   const [editValues, setEditValues] = useState<Record<string, string>>({});
   const [editSaving, setEditSaving] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const providerDef = PROVIDERS[provider] ?? { label: provider, fields: [] };
   const editCfg = configs.find((c) => c.id === editId);
@@ -280,8 +195,10 @@ function PaymentTab({ companyId }: PaymentTabProps) {
     }
   }
 
-  async function handleDelete(id: number) {
-    if (!confirm("Remover esta configuração?")) return;
+  async function handleDelete() {
+    if (confirmDeleteId === null) return;
+    const id = confirmDeleteId;
+    setConfirmDeleteId(null);
     await api.delete(`/companies/${companyId}/payment-configs/${id}`);
     load();
   }
@@ -327,11 +244,11 @@ function PaymentTab({ companyId }: PaymentTabProps) {
     <div>
       {/* Configs existentes */}
       {loading ? (
-        <div style={{ color: "rgba(var(--a-text-rgb),0.4)", fontSize: 14 }}>Carregando…</div>
+        <div className={styles.muted}>Carregando…</div>
       ) : err ? (
-        <div style={{ color: "#ff4d6d", fontSize: 14 }}>{err}</div>
+        <div className={styles.muted}>{err}</div>
       ) : configs.length === 0 ? (
-        <div style={{ color: "rgba(var(--a-text-rgb),0.35)", fontSize: 14, marginBottom: 20 }}>
+        <div className={styles.muted} style={{ marginBottom: 20 }}>
           Nenhuma configuração de pagamento cadastrada.
         </div>
       ) : (
@@ -340,56 +257,36 @@ function PaymentTab({ companyId }: PaymentTabProps) {
             const def = PROVIDERS[c.provider] ?? { label: c.provider, fields: [] };
             const lines = credentialLines(c, def);
             return (
-              <div key={c.id} style={{
-                ...S.item,
-                flexDirection: "column",
-                alignItems: "stretch",
-                border: c.active
-                  ? "1px solid rgba(93,212,144,0.4)"
-                  : "1px solid rgba(153,0,255,0.15)",
-              }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 600 }}>{def.label}</span>
-                    <span style={{
-                      fontSize: 11, padding: "2px 8px", borderRadius: 4,
-                      background: c.environment === "production" ? "rgba(245,158,11,0.15)" : "rgba(51,204,204,0.12)",
-                      color: c.environment === "production" ? "#f59e0b" : "#33cccc",
-                    }}>
+              <div
+                key={c.id}
+                className={`${styles.item} ${styles.configItem} ${c.active ? styles.configItemActive : ""}`}
+              >
+                <div className={styles.configHead}>
+                  <div className={styles.configTags}>
+                    <span className={styles.configLabel}>{def.label}</span>
+                    <Tag variant={c.environment === "production" ? "warning" : "neutral"}>
                       {envLabel[c.environment] ?? c.environment}
-                    </span>
-                    <span style={{
-                      fontSize: 11, padding: "2px 8px", borderRadius: 4,
-                      background: c.active ? "rgba(93,212,144,0.15)" : "rgba(153,153,153,0.1)",
-                      color: c.active ? "#5DD490" : "rgba(var(--a-text-rgb),0.35)",
-                      fontWeight: c.active ? 600 : 400,
-                    }}>
+                    </Tag>
+                    <Tag variant={c.active ? "success" : "greyscale"}>
                       {c.active ? "● Ativa" : "○ Inativa"}
-                    </span>
+                    </Tag>
                   </div>
 
-                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <div className={styles.configActions}>
                     {!c.active && (
-                      <button
-                        style={{ ...S.saveSmallBtn, background: "#5DD490", color: "#0a0a0f" }}
-                        onClick={() => handleActivate(c.id)}
-                      >
-                        Ativar
-                      </button>
+                      <Button size="small" onClick={() => handleActivate(c.id)}>Ativar</Button>
                     )}
                     {def.fields.length > 0 && (
-                      <button style={S.saveSmallBtn} onClick={() => openEdit(c.id)}>
+                      <Button size="small" variant="secondary" onClick={() => openEdit(c.id)}>
                         Editar credenciais
-                      </button>
+                      </Button>
                     )}
-                    <button style={S.dangerBtn} onClick={() => handleDelete(c.id)}>Remover</button>
+                    <Button size="small" variant="secondary" onClick={() => setConfirmDeleteId(c.id)}>Remover</Button>
                   </div>
                 </div>
 
                 {lines.length > 0 && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: "rgba(var(--a-text-rgb),0.35)", fontFamily: "monospace" }}>
-                    {lines.join("  ·  ")}
-                  </div>
+                  <div className={styles.configLines}>{lines.join("  ·  ")}</div>
                 )}
               </div>
             );
@@ -399,99 +296,85 @@ function PaymentTab({ companyId }: PaymentTabProps) {
 
       {/* Modal inline de edição */}
       {editId !== null && editDef && (
-        <form onSubmit={handleEdit} style={{ ...S.form, marginBottom: 20, borderColor: "rgba(153,0,255,0.4)" }}>
-          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
-            Editar credenciais — {editDef.label}
-          </div>
+        <form onSubmit={handleEdit} className={styles.form}>
+          <div className={styles.formTitle}>Editar credenciais — {editDef.label}</div>
           {editDef.fields.map((f) => (
-            <div key={f.key}>
-              <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.5)", marginBottom: 3 }}>{f.label}</div>
-              <input
-                style={S.input}
-                type={f.type}
-                placeholder={`Novo valor (deixe em branco para manter atual)`}
-                value={editValues[f.key] ?? ""}
-                onChange={(e) => setEditValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                autoComplete="new-password"
-                autoFocus={f === editDef.fields[0]}
-              />
-            </div>
+            <InputBase
+              key={f.key}
+              label={f.label}
+              type={f.type}
+              placeholder="Novo valor (deixe em branco para manter atual)"
+              value={editValues[f.key] ?? ""}
+              onChange={(e) => setEditValues((v) => ({ ...v, [f.key]: e.target.value }))}
+              autoComplete="new-password"
+              autoFocus={f === editDef.fields[0]}
+            />
           ))}
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              style={S.addBtn}
+          <div className={styles.formActions}>
+            <Button
               type="submit"
+              loading={editSaving}
               disabled={editSaving || Object.values(editValues).every((v) => !v.trim())}
             >
-              {editSaving ? "Salvando…" : "Salvar"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setEditId(null)}
-              style={{ ...S.dangerBtn, padding: "8px 14px" }}
-            >
-              Cancelar
-            </button>
+              Salvar
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setEditId(null)}>Cancelar</Button>
           </div>
         </form>
       )}
 
       {/* Formulário de nova config */}
-      <form onSubmit={handleAdd} style={S.form}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Nova configuração</div>
-        <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.4)", marginBottom: 12 }}>
+      <form onSubmit={handleAdd} className={styles.form}>
+        <div className={styles.formTitle}>Nova configuração</div>
+        <div className={styles.formHint}>
           A configuração começa inativa. Clique em "Ativar" para usá-la.
         </div>
 
-        <select
-          style={S.select}
-          value={provider}
-          onChange={(e) => { setProvider(e.target.value); setFieldValues({}); }}
-        >
-          {Object.entries(PROVIDERS).map(([key, def]) => (
-            <option key={key} value={key}>{def.label}</option>
-          ))}
-        </select>
+        <Dropdown
+          value={PROVIDER_OPTIONS.find((o) => o.value === provider) ?? null}
+          onValueSelected={(opt) => { setProvider(opt.value); setFieldValues({}); }}
+          options={PROVIDER_OPTIONS}
+        />
 
-        <select
-          style={S.select}
-          value={environment}
-          onChange={(e) => setEnvironment(e.target.value)}
-        >
-          <option value="sandbox">Sandbox</option>
-          <option value="production">Produção</option>
-        </select>
+        <Dropdown
+          value={ENVIRONMENT_OPTIONS.find((o) => o.value === environment) ?? null}
+          onValueSelected={(opt) => setEnvironment(opt.value)}
+          options={ENVIRONMENT_OPTIONS}
+        />
 
         {providerDef.fields.map((f) => (
-          <div key={f.key}>
-            <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.5)", marginBottom: 3 }}>
-              {f.label}{f.required ? "" : " (opcional)"}
-            </div>
-            <input
-              style={S.input}
-              type={f.type}
-              placeholder={f.placeholder}
-              value={fieldValues[f.key] ?? ""}
-              onChange={(e) => setFieldValues((v) => ({ ...v, [f.key]: e.target.value }))}
-              autoComplete="new-password"
-            />
-          </div>
+          <InputBase
+            key={f.key}
+            label={`${f.label}${f.required ? "" : " (opcional)"}`}
+            type={f.type}
+            placeholder={f.placeholder}
+            value={fieldValues[f.key] ?? ""}
+            onChange={(e) => setFieldValues((v) => ({ ...v, [f.key]: e.target.value }))}
+            autoComplete="new-password"
+          />
         ))}
 
         {providerDef.note && (
-          <div style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.4)", marginBottom: 8, fontStyle: "italic" }}>
-            {providerDef.note}
-          </div>
+          <div className={styles.configNote}>{providerDef.note}</div>
         )}
 
-        <button style={S.addBtn} type="submit" disabled={saving || !isAddValid()}>
-          {saving ? "Salvando…" : "Adicionar configuração"}
-        </button>
+        <div className={styles.formActions}>
+          <Button type="submit" loading={saving} disabled={saving || !isAddValid()}>
+            Adicionar configuração
+          </Button>
+        </div>
       </form>
 
       {msg && (
-        <div style={{ marginTop: 12, fontSize: 13, color: msg.ok ? "#5DD490" : "#ff6b5b" }}>{msg.text}</div>
+        <div className={`${styles.flashMsg} ${msg.ok ? styles.flashOk : styles.flashErr}`}>{msg.text}</div>
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        message="Remover esta configuração?"
+        onConfirm={handleDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }
@@ -514,6 +397,8 @@ export default function CompanyScreen() {
   const [users, setUsers] = useState<User[]>([]);
   const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "cashier" as Role });
   const [errUsers, setErrUsers] = useState<string | null>(null);
+
+  const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
     if (!companyId) return;
@@ -556,10 +441,16 @@ export default function CompanyScreen() {
     loadTerminals();
   }
 
-  async function deleteTerminal(id: number) {
-    if (!companyId || !confirm("Excluir terminal?")) return;
-    await api.delete(`/companies/${companyId}/terminals/${id}`);
-    loadTerminals();
+  function deleteTerminal(id: number) {
+    if (!companyId) return;
+    setConfirmState({
+      message: "Excluir terminal?",
+      onConfirm: async () => {
+        setConfirmState(null);
+        await api.delete(`/companies/${companyId}/terminals/${id}`);
+        loadTerminals();
+      },
+    });
   }
 
   async function saveMpDevice(terminalId: number) {
@@ -587,83 +478,87 @@ export default function CompanyScreen() {
     loadUsers();
   }
 
-  async function deleteUser(id: number) {
-    if (!companyId || !confirm("Excluir usuário?")) return;
-    await api.delete(`/companies/${companyId}/users/${id}`);
-    loadUsers();
+  function deleteUser(id: number) {
+    if (!companyId) return;
+    setConfirmState({
+      message: "Excluir usuário?",
+      onConfirm: async () => {
+        setConfirmState(null);
+        await api.delete(`/companies/${companyId}/users/${id}`);
+        loadUsers();
+      },
+    });
   }
 
   if (!companyId) {
     return (
-      <div style={S.page}>
-        <div style={{ color: "rgba(var(--a-text-rgb),0.4)" }}>Selecione uma empresa no Dashboard.</div>
+      <div className={styles.page}>
+        <div className={styles.muted}>Selecione uma empresa no Dashboard.</div>
       </div>
     );
   }
 
   return (
-    <div style={S.page}>
-      <div style={S.title}>Empresa</div>
+    <div className={styles.page}>
+      <div className={styles.title}>Empresa</div>
 
-      <div style={S.tabs}>
-        <button style={S.tab(tab === "terminals")} onClick={() => setTab("terminals")}>Terminais</button>
-        <button style={S.tab(tab === "users")} onClick={() => setTab("users")}>Usuários</button>
-        <button style={S.tab(tab === "payment")} onClick={() => setTab("payment")}>Pagamento</button>
+      <div className={styles.tabs}>
+        <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as "terminals" | "users" | "payment")}>
+          <Tab value="terminals" label="Terminais" />
+          <Tab value="users" label="Usuários" />
+          <Tab value="payment" label="Pagamento" />
+        </Tabs>
       </div>
 
       {/* ── Terminais ── */}
       {tab === "terminals" && (
         <>
           {errTerminals && (
-            <div style={{ color: "#ff4d6d", marginBottom: 12, fontSize: 14 }}>
-              {errTerminals}{" "}
-              <button onClick={loadTerminals} style={{ background: "none", border: "none", color: "#9900ff", cursor: "pointer", fontSize: 13 }}>Tentar novamente</button>
+            <div className={styles.errorRow}>
+              <span className={styles.muted}>{errTerminals}</span>
+              <Button size="small" variant="secondary" onClick={loadTerminals}>Tentar novamente</Button>
             </div>
           )}
-          <form style={S.form} onSubmit={addTerminal}>
-            <input
-              style={S.input}
+          <form className={styles.form} onSubmit={addTerminal}>
+            <InputBase
               placeholder="Rótulo do terminal (ex: Caixa 2)"
               value={newTerminal}
               onChange={(e) => setNewTerminal(e.target.value)}
             />
-            <button style={S.addBtn} type="submit">Adicionar terminal</button>
+            <div className={styles.formActions}>
+              <Button type="submit">Adicionar terminal</Button>
+            </div>
           </form>
 
           {terminals.map((t) => (
-            <div key={t.id} style={{ ...S.item, flexDirection: "column", alignItems: "stretch" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div key={t.id} className={`${styles.item} ${styles.itemStack}`}>
+              <div className={styles.itemHead}>
                 <span>
-                  <strong style={{ fontFamily: "monospace", marginRight: 8, color: "#9900ff" }}>#{t.id}</strong>
+                  <strong className={styles.itemId}>#{t.id}</strong>
                   {t.label}
-                  <span style={S.badge(t.active)}>{t.active ? "ativo" : "inativo"}</span>
-                  {t.environment && (
-                    <span style={{ fontSize: 11, color: "rgba(var(--a-text-rgb),0.35)", marginLeft: 8 }}>
-                      {t.environment}
-                    </span>
-                  )}
+                  <Tag variant={t.active ? "success" : "error"} removable={false}>
+                    {t.active ? "ativo" : "inativo"}
+                  </Tag>
+                  {t.environment && <span className={styles.itemMeta}>{t.environment}</span>}
                 </span>
-                <button style={S.dangerBtn} onClick={() => deleteTerminal(t.id)}>Excluir</button>
+                <Button size="small" variant="secondary" onClick={() => deleteTerminal(t.id)}>Excluir</Button>
               </div>
 
               {/* MP Device ID */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                <span style={{ fontSize: 12, color: "rgba(var(--a-text-rgb),0.45)", flexShrink: 0 }}>MP Device ID:</span>
-                <input
-                  style={S.inputSmall}
-                  placeholder="PAX_A910__SMARTPOS..."
-                  value={mpEdits[t.id] ?? ""}
-                  onChange={(e) => setMpEdits((m) => ({ ...m, [t.id]: e.target.value }))}
-                />
-                <button
-                  style={S.saveSmallBtn}
-                  onClick={() => saveMpDevice(t.id)}
-                  disabled={mpSaving[t.id]}
-                >
-                  {mpSaving[t.id] ? "…" : "Salvar"}
-                </button>
+              <div className={styles.mpRow}>
+                <span className={styles.mpLabel}>MP Device ID:</span>
+                <div className={styles.mpInput}>
+                  <InputBase
+                    placeholder="PAX_A910__SMARTPOS..."
+                    value={mpEdits[t.id] ?? ""}
+                    onChange={(e) => setMpEdits((m) => ({ ...m, [t.id]: e.target.value }))}
+                  />
+                </div>
+                <Button size="small" loading={mpSaving[t.id]} onClick={() => saveMpDevice(t.id)}>
+                  Salvar
+                </Button>
                 {mpMsg[t.id] && (
-                  <span style={{ fontSize: 12, color: mpMsg[t.id] === "Salvo!" ? "#5DD490" : "#ff6b5b" }}>
+                  <span className={`${styles.mpMsg} ${mpMsg[t.id] === "Salvo!" ? styles.mpMsgOk : styles.mpMsgErr}`}>
                     {mpMsg[t.id]}
                   </span>
                 )}
@@ -671,7 +566,7 @@ export default function CompanyScreen() {
             </div>
           ))}
           {terminals.length === 0 && (
-            <div style={{ color: "rgba(var(--a-text-rgb),0.35)", fontSize: 14 }}>Nenhum terminal cadastrado.</div>
+            <div className={styles.muted}>Nenhum terminal cadastrado.</div>
           )}
         </>
       )}
@@ -680,45 +575,50 @@ export default function CompanyScreen() {
       {tab === "users" && (
         <>
           {errUsers && (
-            <div style={{ color: "#ff4d6d", marginBottom: 12, fontSize: 14 }}>
-              {errUsers}{" "}
-              <button onClick={loadUsers} style={{ background: "none", border: "none", color: "#9900ff", cursor: "pointer", fontSize: 13 }}>Tentar novamente</button>
+            <div className={styles.errorRow}>
+              <span className={styles.muted}>{errUsers}</span>
+              <Button size="small" variant="secondary" onClick={loadUsers}>Tentar novamente</Button>
             </div>
           )}
-          <form style={S.form} onSubmit={addUser}>
-            <input style={S.input} placeholder="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
-            <input style={S.input} placeholder="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
-            <input style={S.input} placeholder="Senha" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
-            <select
-              style={S.select}
-              value={newUser.role}
-              onChange={(e) => setNewUser({ ...newUser, role: e.target.value as Role })}
-            >
-              <option value="cashier">Caixa</option>
-              <option value="manager">Gerente</option>
-              <option value="owner">Owner</option>
-            </select>
-            <button style={S.addBtn} type="submit">Criar usuário</button>
+          <form className={styles.form} onSubmit={addUser}>
+            <InputBase placeholder="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
+            <InputBase placeholder="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+            <InputBase placeholder="Senha" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
+            <Dropdown
+              value={ROLE_OPTIONS.find((o) => o.value === newUser.role) ?? null}
+              onValueSelected={(opt) => setNewUser({ ...newUser, role: opt.value as Role })}
+              options={ROLE_OPTIONS}
+            />
+            <div className={styles.formActions}>
+              <Button type="submit">Criar usuário</Button>
+            </div>
           </form>
 
           {users.map((u) => (
-            <div key={u.id} style={S.item}>
+            <div key={u.id} className={styles.item}>
               <span>
                 {u.name}
-                <span style={{ color: "rgba(var(--a-text-rgb),0.4)", marginLeft: 8, fontSize: 12 }}>{u.email}</span>
-                <span style={S.badge(u.active)}>{u.role}</span>
+                <span className={styles.itemEmail}>{u.email}</span>
+                <Tag variant={u.active ? "success" : "error"}>{u.role}</Tag>
               </span>
-              <button style={S.dangerBtn} onClick={() => deleteUser(u.id)}>Excluir</button>
+              <Button size="small" variant="secondary" onClick={() => deleteUser(u.id)}>Excluir</Button>
             </div>
           ))}
           {users.length === 0 && (
-            <div style={{ color: "rgba(var(--a-text-rgb),0.35)", fontSize: 14 }}>Nenhum usuário cadastrado.</div>
+            <div className={styles.muted}>Nenhum usuário cadastrado.</div>
           )}
         </>
       )}
 
       {/* ── Pagamento ── */}
       {tab === "payment" && <PaymentTab companyId={companyId} />}
+
+      <ConfirmDialog
+        open={!!confirmState}
+        message={confirmState?.message ?? ""}
+        onConfirm={() => confirmState?.onConfirm()}
+        onCancel={() => setConfirmState(null)}
+      />
     </div>
   );
 }

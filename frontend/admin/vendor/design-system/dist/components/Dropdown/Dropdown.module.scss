@@ -1,0 +1,107 @@
+@import '../../core/scss/styles.scss';
+
+.ds-dropdown-input__wrapper {
+  width: 100%;
+  min-height: spacing('xxl-4');
+  position: relative;
+  cursor: pointer;
+  outline: 0;
+
+  & input {
+    caret-color: transparent;
+  }
+
+  div > div > i {
+    transition: 200ms;
+  }
+
+  &--focused:not(.ds-dropdown-input__wrapper--loading) {
+    & div > div > i {
+      transform: rotate(180deg);
+    }
+  }
+}
+
+.ds-dropdown-input__list {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  width: 100%;
+  max-height: calc(5 * spacing('xxl'));
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  @include color('background-color', 'white');
+  @include border(1, 'solid', 'grey-300');
+  border-top: none;
+  box-sizing: border-box;
+  box-shadow: 0px 8px 16px rgba(100, 100, 100, 0.16);
+  @include rounded('card');
+  z-index: 2;
+
+  &--visible {
+    display: flex;
+  }
+
+  &--large {
+    top: spacing('xxl-4');
+  }
+
+  &--medium {
+    top: spacing('xxl-2');
+  }
+}
+
+.ds-dropdown-input__list__item {
+  @include color('color', 'dark');
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  background-color: transparent;
+  border: none;
+
+  &--large {
+    padding: 9px spacing('m') 9px spacing('m');
+    @include font('base');
+  }
+
+  &--medium {
+    padding: 11px spacing('m') 11px spacing('m');
+    @include font('sm');
+  }
+
+  &--overflow {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &:hover,
+  &--focused {
+    @include color('background-color', 'grey-100');
+  }
+
+  &--selected {
+    @include color('color', 'brand-primary');
+  }
+
+  &--no-results {
+    @include color('color', 'grey-500');
+    padding: spacing('xs') spacing('m');
+    display: flex;
+    align-items: center;
+
+    &--large {
+      @include font('base');
+    }
+
+    &--medium {
+      @include font('sm');
+    }
+
+    & > p {
+      margin-top: spacing('s');
+      margin-bottom: spacing('s');
+    }
+  }
+}

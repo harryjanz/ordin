@@ -1,0 +1,87 @@
+@import '../../core/scss/styles.scss';
+
+/*-----------------------------------*\
+ #Tag
+\*-----------------------------------*/
+
+.ds-tag__wrapper {
+  @include font('xs-emphasys');
+  @include rounded('card');
+  padding: spacing('0') spacing('xs');
+  height: spacing('m');
+  display: inline-flex;
+
+  &--emphasys {
+    @include color('color', 'white');
+    @include color('background-color', 'brand-primary');
+
+    & > button {
+      @include color('color', 'white');
+    }
+  }
+
+  &--neutral {
+    @include color('color', 'brand-primary');
+    @include color('background-color', 'brand-secondary');
+
+    & > button {
+      @include color('color', 'brand-primary');
+    }
+  }
+
+  &--success {
+    @include color('color', 'success-base');
+    @include color('background-color', 'success-light');
+
+    & > button {
+      @include color('color', 'success-base');
+    }
+  }
+
+  &--warning {
+    @include color('color', 'warning-base');
+    @include color('background-color', 'warning-light');
+
+    & > button {
+      @include color('color', 'warning-base');
+    }
+  }
+
+  &--error {
+    @include color('color', 'error-base');
+    @include color('background-color', 'error-light');
+
+    & > button {
+      @include color('color', 'error-base');
+    }
+  }
+
+  &--greyscale {
+    @include color('color', 'grey-500');
+    @include color('background-color', 'grey-100');
+
+    & > button {
+      @include color('color', 'grey-500');
+    }
+  }
+
+  &--removable {
+    & > button {
+      padding: spacing('0');
+      margin-left: spacing('s');
+      background: none;
+      border: none;
+      cursor: pointer;
+
+      & > i {
+        &::before {
+          @include font('xs-emphasys');
+          font-weight: 600 !important;
+          vertical-align: text-bottom;
+          height: auto;
+          width: auto;
+        }
+      }
+    }
+  }
+}

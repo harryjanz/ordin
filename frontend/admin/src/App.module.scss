@@ -1,0 +1,10 @@
+.shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--a-bg);
+}
+
+.main {
+  flex: 1;
+  overflow: auto;
+}

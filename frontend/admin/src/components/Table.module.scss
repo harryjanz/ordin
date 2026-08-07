@@ -1,0 +1,45 @@
+@import 'design-system/dist/core/scss/styles';
+
+.wrap {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  overflow: hidden;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.th {
+  text-align: left;
+  @include font('xs-2-emphasys');
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(var(--a-text-rgb), 0.5);
+  @include padding('s', 'l', 's', 'l');
+  border-bottom: 1px solid rgba(var(--a-neutral-rgb), 0.07);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.td {
+  @include padding('m', 'l', 'm', 'l');
+  border-bottom: 1px solid rgba(var(--a-neutral-rgb), 0.07);
+  vertical-align: middle;
+  @include font('sm');
+}
+
+.tdMono {
+  font-family: "Courier New", monospace;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.empty {
+  @include padding('xxl-2', 'l', 'xxl-2', 'l');
+  text-align: center;
+  color: rgba(var(--a-text-rgb), 0.5);
+}

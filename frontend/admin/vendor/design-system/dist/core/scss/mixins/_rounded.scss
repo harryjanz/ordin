@@ -1,0 +1,56 @@
+@use "sass:map";
+
+// ==========================================================
+// rounded
+// Get the border-radius property either for all themes or by providing a spacing token
+//
+//  Optional Arguments:
+//  `$component` String
+//  `$spacing` String
+//
+// Examples of use:
+// .foo { @include rounded() }
+//
+// @return
+// .foo {
+//   border-radius: 4px;
+// }
+//
+// .abc { @include rounded(null, 'l') }
+//
+// @return
+// .abc {
+//   border-radius: 24px;
+// }
+//
+// .bar { @include rounded('checkbox') }
+//
+// @return
+// .foo {
+//   border-radius: 2px;
+// }
+// ==========================================================
+
+@mixin rounded($component: null, $spacing: null) {
+  @if $spacing != null {
+    border-radius: spacing($spacing);
+  } @else if $spacing == null {
+    @if $component != null {
+      // Default theme border-radius
+      border-radius: map.get($borders-radius, $component);
+      @each $theme, $border in $borders-radius-themes {
+        &.#{$theme} {
+          border-radius: map.get($border, $component);
+        }
+      }
+    } @else {
+      // Default theme border-radius
+      border-radius: map.get($borders-radius, 'default');
+      @each $theme, $border in $borders-radius-themes {
+        &.#{$theme} {
+          border-radius: map.get($border, 'default');
+        }
+      }
+    }
+  }
+}

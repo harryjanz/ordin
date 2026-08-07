@@ -1,0 +1,69 @@
+// Camada de tema do admin — não é a aparência do totem (isso fica em
+// src/themes.ts, por empresa via Company.visual_theme/visual_mode).
+//
+// O design system (../../../../design-system) só registra um tema
+// ("default", claro-primeiro — ver core/scss/tokens/themes/_default.scss)
+// e não tem modo escuro pronto. Reexportamos os tokens dele como CSS custom
+// properties e construímos claro/escuro por cima, aplicado via
+// documentElement.dataset.theme (ver App.tsx) — mesmo mecanismo e mesmos
+// nomes de variável do ORD-070 (--a-*), só que agora as cores vêm dos
+// tokens reais do DS em vez de valores inventados à mão. "RGB triplet
+// variável" (--a-text-rgb/--a-neutral-rgb) preserva a opacidade original de
+// cada rgba() sem precisar remapear cada uso manualmente.
+//
+// Cores de marca/semânticas (brand-primary roxo, success/warning/error) são
+// constantes nos dois modos — só neutros (fundo/superfície/texto/borda)
+// variam, prática padrão de design system.
+
+:root {
+  --brand-primary: #9900ff;
+  --brand-secondary: #f6ebff;
+  --success-base: #058060;
+  --success-light: #e4fbf3;
+  --warning-base: #c63f06;
+  --warning-light: #fff5ed;
+  --error-base: #cf343f;
+  --error-light: #fff0f0;
+
+  // Escuro é o padrão histórico do admin — idêntico ao visual anterior ao DS.
+  --a-bg: #180a33; // token "dark" do DS
+  --a-surface: #1d1434; // card/sidebar bg do admin, não é token do DS
+  --a-surface-2: #0e0b1a; // input bg / superfície mais escura
+  --a-text: #ffffff; // token "white" do DS
+  --a-text-rgb: 255, 255, 255;
+  --a-border: rgba(153, 0, 255, 0.2);
+  --a-neutral-rgb: 255, 255, 255;
+}
+
+:root[data-theme="light"] {
+  --a-bg: #f1f5f7; // token "grey-100"
+  --a-surface: #ffffff; // token "white"
+  --a-surface-2: #f1f5f7; // token "grey-100"
+  --a-text: #180a33; // token "dark"
+  --a-text-rgb: 24, 10, 51;
+  --a-border: #e0e7ec; // token "grey-200"
+  --a-neutral-rgb: 0, 0, 0;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+// Ícones do design-system (ex: Upload) são dimensionados em icons.css
+// assumindo content-box (padrão do browser) — o reset acima pra border-box
+// faz o padding "comer" o width todo, sobrando 0px pro glifo e vazando por
+// cima do texto ao lado (ex: ícone de upload encavalado com "Clique aqui").
+// Restaura content-box só pros ícones do DS, sem afetar o resto do reset.
+i[class^="icon-"],
+i[class*=" icon-"] {
+  box-sizing: content-box;
+}
+
+body {
+  background: var(--a-bg);
+  color: var(--a-text);
+  font-family: Metropolis, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  transition: background-color 150ms ease, color 150ms ease;
+}

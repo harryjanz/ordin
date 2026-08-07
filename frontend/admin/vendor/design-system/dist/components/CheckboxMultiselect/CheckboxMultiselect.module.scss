@@ -1,0 +1,114 @@
+@import '../../core/scss/styles.scss';
+
+.ds-checkbox-multiselect__wrapper {
+  width: 100%;
+  min-height: spacing('xxl-2');
+  position: relative;
+  cursor: pointer;
+
+  & input {
+    caret-color: transparent;
+  }
+
+  div > div > i {
+    transition: 200ms;
+  }
+
+  &--focused:not(.ds-checkbox-multiselect__wrapper--loading) {
+    & div > div > i {
+      transform: rotate(180deg);
+    }
+  }
+}
+
+.ds-checkbox-multiselect__options {
+  display: none;
+  flex-direction: column;
+  position: absolute;
+  width: 100%;
+  max-height: calc(5 * spacing('xxl'));
+  margin: 0;
+  padding: spacing('s') 0px;
+  @include color('background-color', 'white');
+  @include border(1, 'solid', 'grey-300');
+  @include rounded('checkbox');
+  border-top: none;
+  box-sizing: border-box;
+  box-shadow: 0px 8px 16px rgba(100, 100, 100, 0.16);
+  z-index: 2;
+
+  &--visible {
+    display: flex;
+  }
+
+  &--large {
+    top: spacing('xxl-4');
+  }
+
+  &--medium {
+    top: spacing('xxl-2');
+  }
+}
+
+.ds-checkbox-multiselect__options-list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.ds-checkbox-multiselect__option-item {
+  height: spacing('xxl');
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+
+  &--large {
+    padding: 9px spacing('m') 9px spacing('m');
+    @include font('base');
+  }
+
+  &--medium {
+    padding: 11px spacing('m') 11px spacing('m');
+    @include font('sm');
+  }
+
+  & > label {
+    width: 100%;
+  }
+
+  &:hover {
+    @include color('background-color', 'grey-100');
+  }
+}
+
+.ds-checkbox-multiselect__options--no-results {
+  @include color('color', 'grey-500');
+  padding: spacing('xs') spacing('m');
+  display: flex;
+  align-items: center;
+
+  &--large {
+    @include font('base');
+  }
+
+  &--medium {
+    @include font('sm');
+  }
+
+  & > p {
+    margin-top: spacing('s');
+    margin-bottom: spacing('s');
+  }
+}
+
+.ds-checkbox-multiselect__buttons-wrapper {
+  display: flex;
+  flex-flow: row;
+  justify-content: space-around;
+
+  & > button {
+    width: 100%;
+  }
+
+  gap: spacing('m');
+  padding: spacing('s') spacing('m') spacing('xs') spacing('m');
+}

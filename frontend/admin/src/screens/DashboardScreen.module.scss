@@ -1,0 +1,61 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  padding: 32px;
+  color: var(--a-text);
+}
+
+.title {
+  @include font('xl-emphasys');
+  margin-bottom: 24px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.card {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  @include padding('l', 'xl', 'l', 'xl');
+}
+
+.cardLabel {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-bottom: 8px;
+}
+
+.cardValue {
+  @include font('xl-2-emphasys');
+  color: color('brand-primary');
+}
+
+.cardValueSmall {
+  @include font('l-emphasys');
+  color: color('brand-primary');
+}
+
+.section {
+  margin-bottom: 32px;
+  max-width: 320px;
+}
+
+.sectionTitle {
+  @include font('sm-emphasys');
+  color: rgba(var(--a-text-rgb), 0.8);
+  margin-bottom: 12px;
+}
+
+.muted {
+  color: rgba(var(--a-text-rgb), 0.4);
+}
+
+.empty {
+  color: rgba(var(--a-text-rgb), 0.35);
+  @include font('sm');
+}

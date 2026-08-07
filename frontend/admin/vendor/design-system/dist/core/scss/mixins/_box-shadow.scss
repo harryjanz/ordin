@@ -1,0 +1,119 @@
+@use "sass:map";
+
+// ==========================================================
+// box-shadow
+// Get a box-shadow with your web-kits passing according
+// to the necessary properties
+//
+//  Arguments:
+// `$top` Number
+// `$left` Number
+// `$blur` Number
+// `$spread` Number
+// `$color` String
+// `$opacity` Number
+//
+// Optional arguments:
+// `$inset` Bool
+// `$pseudoelement` String
+//
+// Examples of use:
+// .foo { @include box-shadow(0, 12, 26, -4, color('brand-primary'), 0.5) }
+//
+// @return
+// .foo {
+//     -webkit-box-shadow: 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+//     -moz-box-shadow: 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+//     box-shadow: 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+// }
+//
+// .bar { @include box-shadow(0, 12, 26, -4, color('brand-primary'), 0.5, true); }
+//
+// @return
+// .bar {
+//    -webkit-box-shadow: inset 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+//    -moz-box-shadow: inset 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+//    box-shadow: inset 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+// }
+//
+// .zaz { @include box-shadow(0, 12, 26, -4, color('brand-primary'), 0.5, false, '::before'); }
+//
+// @return
+// .zaz {
+//    &::before {
+//      -webkit-box-shadow: inset 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+//      -moz-box-shadow: inset 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+//      box-shadow: inset 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+//    }
+// }
+//
+// ==========================================================
+@mixin box-shadow(
+  $top,
+  $left,
+  $blur,
+  $spread,
+  $token,
+  $opacity,
+  $inset: false,
+  $pseudoelement: null
+) {
+  $props: box-shadow(
+    $top,
+    $left,
+    $blur,
+    $spread,
+    map.get($colors, $token),
+    $opacity,
+    $inset
+  );
+  @if $pseudoelement != null {
+    &#{$pseudoelement} {
+      -webkit-box-shadow: $props;
+      -moz-box-shadow: $props;
+      box-shadow: $props;
+    }
+
+    @each $theme, $color in $color-themes {
+      $props: box-shadow(
+        $top,
+        $left,
+        $blur,
+        $spread,
+        map.get($color, $token),
+        $opacity,
+        $inset
+      );
+
+      &.#{$theme} {
+        &#{$pseudoelement} {
+          -webkit-box-shadow: $props;
+          -moz-box-shadow: $props;
+          box-shadow: $props;
+        }
+      }
+    }
+  } @else {
+    -webkit-box-shadow: $props;
+    -moz-box-shadow: $props;
+    box-shadow: $props;
+
+    @each $theme, $color in $color-themes {
+      $props: box-shadow(
+        $top,
+        $left,
+        $blur,
+        $spread,
+        map.get($color, $token),
+        $opacity,
+        $inset
+      );
+
+      &.#{$theme} {
+        -webkit-box-shadow: $props;
+        -moz-box-shadow: $props;
+        box-shadow: $props;
+      }
+    }
+  }
+}

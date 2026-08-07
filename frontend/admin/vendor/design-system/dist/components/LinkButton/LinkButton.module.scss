@@ -1,0 +1,118 @@
+@import '../../core/scss/styles';
+
+/*-------------------------------------------*\
+  # Link-Button
+\*-------------------------------------------*/
+@keyframes rotating {
+  0% {
+    transform: rotate(0deg);
+    -webkit-transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+    -webkit-transform: rotate(360deg);
+  }
+}
+
+.ds-link-button__btn {
+  border: none;
+  outline: none;
+  background-color: transparent;
+  padding: 0px;
+  display: inline-flex;
+  text-align: left;
+
+  &:hover:enabled {
+    cursor: pointer;
+
+    & > .ds-link-button__label {
+      text-decoration: underline;
+    }
+  }
+
+  &[disabled] {
+    cursor: not-allowed;
+    & > .ds-link-button__label,
+    .ds-link-button__icon {
+      opacity: 0.2;
+    }
+  }
+
+  &--loading {
+    cursor: progress !important;
+  }
+}
+
+.ds-link-button__label {
+  display: inline-flex;
+  align-self: center;
+  vertical-align: middle;
+
+  &--small {
+    @include font('xs-emphasys');
+  }
+
+  &--large {
+    @include font('base-emphasys');
+  }
+
+  &--primary {
+    @include color('color', 'brand-primary');
+  }
+
+  &--inverse {
+    @include color('color', 'white');
+  }
+
+  &--success {
+    @include color('color', 'success-base');
+  }
+
+  &--error {
+    @include color('color', 'error-base');
+  }
+
+  &--warning {
+    @include color('color', 'warning-base');
+  }
+}
+
+.ds-link-button__icon {
+  vertical-align: middle;
+
+  &--primary {
+    @include color('color', 'brand-primary');
+  }
+
+  &--inverse {
+    @include color('color', 'white');
+  }
+
+  &--success {
+    @include color('color', 'success-base');
+  }
+
+  &--error {
+    @include color('color', 'error-base');
+  }
+
+  &--warning {
+    @include color('color', 'warning-base');
+  }
+
+  &--loading {
+    &::before {
+      animation: rotating 1s linear infinite;
+      -webkit-animation: rotating 1s linear infinite;
+      display: inline-block;
+    }
+  }
+
+  &--left {
+    margin-right: spacing('s');
+  }
+
+  &--right {
+    margin-left: spacing('s');
+  }
+}

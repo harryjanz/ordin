@@ -128,10 +128,21 @@ services:
       DB_URL: ${CATALOG_DB_URL}
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      # Bucket próprio (não o S3_BUCKET de contratos do company-service) —
+      # nome de env var separado de propósito pra não vazar override um do
+      # outro caso o .env customize S3_BUCKET.
+      S3_BUCKET: ${S3_BUCKET_CATALOG:-ordin-catalog}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-ordin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-ordin_dev_minio}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
     networks:
       - ordin
     depends_on:
       mysql:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   order-service:

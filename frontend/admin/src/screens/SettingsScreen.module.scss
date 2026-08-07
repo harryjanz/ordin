@@ -1,0 +1,200 @@
+@import 'design-system/dist/core/scss/styles';
+
+$font-d: 'Lexend', sans-serif;
+$font-b: 'Inter', sans-serif;
+
+.page {
+  padding: 32px;
+  color: var(--a-text);
+  max-width: 760px;
+}
+
+.title {
+  @include font('xl-emphasys');
+  margin-bottom: 24px;
+  font-family: $font-d;
+}
+
+.card {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 24px 28px;
+  margin-bottom: 20px;
+}
+
+.cardTitle {
+  @include font('base-emphasys');
+  margin-bottom: 6px;
+  font-family: $font-d;
+}
+
+.cardDesc {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-bottom: 16px;
+  font-family: $font-b;
+}
+
+.pinBox {
+  margin-top: 16px;
+  background: color('brand-secondary');
+  border: 1px solid color('brand-primary');
+  @include rounded('card');
+  padding: 16px 20px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  color: var(--a-text);
+  text-align: center;
+  font-family: $font-d;
+}
+
+.pinHint {
+  margin-top: 8px;
+  @include font('xs');
+  color: color('warning-base');
+  text-align: center;
+  font-family: $font-b;
+}
+
+.themeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.themeCard {
+  border-radius: 12px;
+  border: 2px solid rgba(var(--a-neutral-rgb), 0.08);
+  box-shadow: none;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  background: #0a0a0f;
+}
+
+.themeCardSelected {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(var(--a-neutral-rgb), 0.12);
+}
+
+.themeCardHead {
+  padding: 14px 16px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.themeCardLabel {
+  font-family: $font-d;
+  font-weight: 800;
+  font-size: 13px;
+  color: #fff;
+}
+
+.themeCardCheck {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #000;
+}
+
+.themeCardDesc {
+  padding: 0 16px 10px;
+  font-size: 11px;
+  color: rgba(var(--a-neutral-rgb), 0.5);
+  font-family: $font-b;
+  line-height: 1.5;
+}
+
+.themeCardDots {
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 16px;
+}
+
+.themeCardDot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid rgba(var(--a-neutral-rgb), 0.15);
+}
+
+.modeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.modeLabel {
+  font-size: 13px;
+  color: rgba(var(--a-neutral-rgb), 0.5);
+  font-family: $font-b;
+}
+
+.modeBtn {
+  padding: 6px 18px;
+  border-radius: 999px;
+  font-family: $font-d;
+  font-weight: 700;
+  font-size: 12px;
+  border: 1px solid rgba(var(--a-neutral-rgb), 0.15);
+  background: transparent;
+  color: rgba(var(--a-neutral-rgb), 0.5);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.modeBtnActive {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #0a0a0f;
+}
+
+.previewSection {
+  margin-bottom: 20px;
+}
+
+.previewLabel {
+  font-size: 12px;
+  color: rgba(var(--a-neutral-rgb), 0.4);
+  font-family: $font-b;
+  margin-bottom: 8px;
+}
+
+.saveRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.saveBtn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 999px;
+  font-size: 14px;
+  font-family: $font-d;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.saveMsg {
+  font-family: $font-b;
+  @include font('sm');
+}
+
+.saveMsgOk {
+  color: color('success-base');
+}
+
+.saveMsgErr {
+  color: color('error-base');
+}

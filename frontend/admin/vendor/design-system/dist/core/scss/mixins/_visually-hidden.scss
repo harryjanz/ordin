@@ -1,0 +1,28 @@
+// ==========================================================
+// visually-hidden
+// Get the attributes according to a11y to hide a certain content
+//
+// Examples of use:
+// .foo { @include visually-hidden() }
+//
+// @return
+// .foo {
+//    clip: rect(0 0 0 0);
+//    clip-path: inset(50%);
+//    height: 1px;
+//    overflow: hidden;
+//    position: absolute;
+//    white-space: nowrap;
+//    width: 1px;
+// }
+// ==========================================================
+
+@mixin visually-hidden() {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}

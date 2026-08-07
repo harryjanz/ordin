@@ -1,0 +1,87 @@
+@import '../../core/scss/styles.scss';
+
+.ds-upload__container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+
+  &--fullWidth {
+    width: 100%;
+  }
+
+  @media screen and (max-width: 430px) {
+    width: 100% !important;
+  }
+}
+
+.ds-upload__wrapper {
+  position: relative;
+  padding: 0;
+  @include font('sm');
+  @include border(1, 'dashed', 'grey-400');
+  @include rounded('input');
+  height: 80px;
+  display: flex;
+  cursor: pointer;
+
+  &--drag-over {
+    @include color('background', 'brand-secondary');
+    @include border(1, 'dashed', 'brand-primary');
+  }
+
+  &:hover {
+    @include border(1, 'dashed', 'brand-primary');
+  }
+}
+
+.ds-upload__wrapper input[type='file'] {
+  display: none;
+  @include color('color', 'white');
+}
+
+.ds-upload__input-custom {
+  width: 100%;
+  @include font('sm-emphasys');
+  @include color('color', 'brand-primary');
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+
+  span {
+    @include color('color', 'dark');
+    padding-left: 5px;
+    border: 0;
+  }
+
+  @media screen and (max-width: 325px) {
+    text-align: right;
+
+    & span {
+      text-align: left !important;
+    }
+  }
+}
+
+.ds-upload__icon {
+  padding: 10px;
+  width: 20px;
+}
+
+.ds-upload__file-size {
+  width: 100%;
+  @include color('color', 'grey-600');
+  cursor: default;
+  @include font('xs');
+  padding: 8px;
+  text-align: center;
+}
+
+.ds-upload__helper {
+  width: 100%;
+  @include color('color', 'grey-500');
+  cursor: default;
+  @include font('xs');
+  padding-top: 8px;
+  text-align: start;
+}

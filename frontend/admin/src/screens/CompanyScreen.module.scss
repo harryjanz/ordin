@@ -1,0 +1,192 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  padding: 32px;
+  color: var(--a-text);
+}
+
+.title {
+  @include font('xl-emphasys');
+  margin-bottom: 24px;
+}
+
+.tabs {
+  margin-bottom: 24px;
+}
+
+.muted {
+  color: rgba(var(--a-text-rgb), 0.4);
+  @include font('sm');
+}
+
+.errorRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  gap: 8px;
+  @include font('sm');
+}
+
+.itemStack {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.itemHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.itemId {
+  font-family: monospace;
+  margin-right: 8px;
+  color: color('brand-primary');
+}
+
+.itemMeta {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.35);
+  margin-left: 8px;
+}
+
+.mpRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.mpLabel {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.45);
+  flex-shrink: 0;
+}
+
+.mpInput {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.mpMsg {
+  @include font('xs');
+}
+
+.mpMsgOk {
+  color: color('success-base');
+}
+
+.mpMsgErr {
+  color: color('error-base');
+}
+
+.itemEmail {
+  color: rgba(var(--a-text-rgb), 0.4);
+  margin-left: 8px;
+  @include font('xs');
+}
+
+.form {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.formTitle {
+  @include font('sm-emphasys');
+  margin-bottom: 4px;
+}
+
+.formHint {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.4);
+  margin-bottom: 12px;
+}
+
+.formLabel {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-bottom: -2px;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+}
+
+.configItem {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.configItemActive {
+  border: 1px solid rgba(93, 212, 144, 0.4);
+}
+
+.configHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.configTags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.configActions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.configLabel {
+  font-weight: 600;
+}
+
+.configLines {
+  margin-top: 6px;
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.35);
+  font-family: monospace;
+}
+
+.configNote {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.4);
+  font-style: italic;
+  margin-bottom: 8px;
+}
+
+.flashMsg {
+  margin-top: 12px;
+  @include font('sm');
+}
+
+.flashOk {
+  color: color('success-base');
+}
+
+.flashErr {
+  color: color('error-base');
+}

@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { extractCompanyId, hardDeleteImmediately, recordTestCompany } from "./test-data-manifest";
+import { selectDropdownOption } from "./dropdown-helper";
 
 // Fluxo completo (ORD-063): login superadmin → cadastra um cliente (via
 // wizard do ORD-060, só pra ter um registro determinístico) → abre o
@@ -72,7 +73,7 @@ test("editar cadastro, salvar e confirmar persistência", async ({ page }) => {
   await test.step("editar razão social e cidade, salvar e ver refletido no modo leitura", async () => {
     await page.getByTestId("btn-editar-cadastro").click();
     await page.getByTestId("input-edit-legal-name").fill(`${tradeName} Comércio de Alimentos Ltda`);
-    await page.getByTestId("select-edit-company-size").selectOption("EPP");
+    await selectDropdownOption(page, "select-edit-company-size", "EPP");
     await expect(page.getByTestId("dirty-count")).toContainText("2 campos alterados");
     await page.screenshot({ path: test.info().outputPath("02-campos-alterados.png") });
 
@@ -128,16 +129,13 @@ test("navegar pelo menu com alterações pendentes pede confirmação", async ({
   await page.getByTestId("btn-editar-cadastro").click();
   await page.getByTestId("input-edit-legal-name").fill("Alteração Não Salva Ltda");
 
-  let dialogMessage = "";
-  page.once("dialog", async (dialog) => {
-    dialogMessage = dialog.message();
-    await dialog.dismiss();
-  });
   await page.getByRole("button", { name: /abrir menu/i }).click();
   await page.getByRole("link", { name: "Dashboard" }).click();
 
-  expect(dialogMessage).toContain("alterações não salvas");
-  // dismiss cancelou a navegação — ainda na tela de edição com o valor digitado intacto
+  await expect(page.getByText(/alterações não salvas/i)).toBeVisible();
+  await page.getByRole("button", { name: "Cancelar" }).click();
+
+  // cancelar a confirmação cancelou a navegação — ainda na tela de edição com o valor digitado intacto
   await expect(page.getByTestId("input-edit-legal-name")).toHaveValue("Alteração Não Salva Ltda");
   await page.screenshot({ path: test.info().outputPath("guard-navegacao-cancelada.png") });
 });
