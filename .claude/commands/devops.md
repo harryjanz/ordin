@@ -5,9 +5,10 @@ Você está atuando como **Engenheiro DevOps AWS** do projeto **Ordin**.
 ## Estado atual da infraestrutura
 
 - Apenas **Docker Compose** para desenvolvimento local — zero infra AWS provisionada
-- Sem CI/CD (nenhum `.github/workflows/`)
-- Sem ambientes separados (dev / staging / prod)
-- Credenciais hardcoded no código e no `init.sql`
+- CI existe (`.github/workflows/ci.yml`: security checks → lint → testes → build), mas o job de testes não roda hoje porque depende do lint passar, e o lint tem dívida pré-existente em `main` (ver `docs/ARQUITETURA.md` §11) — não há `deploy-staging.yml`/`deploy-prod.yml`
+- Sem ambientes separados (dev / staging / prod) — só existe `main`, sem branch `develop`
+- Sem branch protection configurada — PRs são revisadas e mergeadas pelo próprio autor
+- Módulos Terraform: só `secrets/` e `ecs/` (parcial) existem hoje (ver `docs/ARQUITETURA.md` §9)
 - Nginx local (a ser substituído por Kong em produção)
 
 ## Arquitetura AWS-alvo (conforme `docs/ARQUITETURA.md` §9)
@@ -59,23 +60,32 @@ infra/
 
 Referência de padrão: `ms-payment/infra/modules/` (OIDC, ECS, Secrets Manager já implementados).
 
-## Pipeline CI/CD (conforme `docs/ARQUITETURA.md` §11)
+## Pipeline CI/CD hoje
+
+```
+Push em qualquer branch / PR para main:
+  ci.yml → security checks → ruff + mypy (lint) → pytest --cov-fail-under=40 → build Docker
+```
+
+Testes e build dependem do lint passar (`needs: lint`) — como o lint falha hoje em `main` (dívida pré-existente), esses jobs não rodam de fato. Sem branch protection, isso não bloqueia merge.
+
+## Pipeline CI/CD — alvo pra quando a Fase 2 (produção) começar (conforme `docs/ARQUITETURA.md` §11)
 
 ```
 Push feature/* branch:
   ci.yml → ruff → mypy → pytest (unit + integration) → build Docker (sem push)
 
-PR para develop:
+PR para main:
   ci.yml + testes de isolamento multi-tenant
 
-Merge develop:
+Merge em main:
   deploy-staging.yml →
     build → push ECR →
     deck sync infra/kong/kong.yml (Kong config) →
     migrate (ECS Run Task: alembic upgrade head) →    ← bloqueia se falhar
     deploy ECS blue/green (CodeDeploy, staging)
 
-Merge main (aprovação de 2 revisores):
+Promoção manual staging → produção (aprovação de 2 revisores):
   deploy-prod.yml →
     build → push ECR →
     deck sync kong.yml →
@@ -85,7 +95,7 @@ Merge main (aprovação de 2 revisores):
     evento de deploy registrado no Datadog
 ```
 
-Autenticação AWS via **OIDC** (GitHub Actions sem chaves de longa duração).
+Nenhum destes workflows (`deploy-staging.yml`, `deploy-prod.yml`) existe ainda. Autenticação AWS via **OIDC** (GitHub Actions sem chaves de longa duração) é o plano — também não implementado.
 
 ## Datadog no ECS (sidecar)
 

@@ -50,7 +50,7 @@ O gateway Nginx fica em `http://localhost:8000`. Cada serviço também expõe su
 
 | Serviço | Porta | Banco (`fk_*`) | Responsabilidade |
 |---------|-------|----------------|-----------------|
-| `auth` | 8001 | `fk_auth` | JWT (access 15min + kiosk 4h + refresh 7d), PIN login, rate limiting Redis |
+| `auth` | 8001 | `fk_auth` | JWT (access 60min via `JWT_ACCESS_EXP_MINUTES`, configurável + kiosk 12h hardcoded + refresh 7d), PIN login, rate limiting Redis |
 | `company` | 8002 | `fk_company` | Multi-tenant: empresas, usuários, terminais; endpoints `/internal/*` para auth |
 | `catalog` | 8003 | `fk_catalog` | Catálogo de produtos: categorias e produtos por empresa |
 | `order` | 8004 | `fk_order` | Pedidos, tickets por unidade, WebSocket tempo real, QR com HMAC |
@@ -72,7 +72,7 @@ O gateway Nginx fica em `http://localhost:8000`. Cada serviço também expõe su
 3. Caixa coleta ticket → `POST /tickets/{code}/collect` com `SELECT FOR UPDATE` (previne dupla coleta)
 4. Quando todos os tickets de um pedido são coletados → ordem marcada automaticamente como `completed`
 
-**QR format:** `{ticket_code}|{product_name}|{order_ref}|{unit}/{total}|{HMAC-SHA256(payload, QR_SECRET)}`
+**QR format:** `{ticket_code}|{product_name}|{order_ref}|{timestamp}|{HMAC-SHA256(payload, QR_SECRET)}` (confirmado em `_make_qr_data()`, `services/order/main.py`)
 
 ### WebSocket
 
@@ -114,7 +114,7 @@ COMPANY_DB_URL=...  CATALOG_DB_URL=...  ORDER_DB_URL=...  PAYMENT_DB_URL=...
 
 # Auth
 JWT_SECRET=<hex 32 chars>
-JWT_ACCESS_EXP_MINUTES=15
+JWT_ACCESS_EXP_MINUTES=60
 JWT_REFRESH_EXP_DAYS=7
 
 # Segurança

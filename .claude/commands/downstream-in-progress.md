@@ -16,7 +16,7 @@ Você está atuando no step **In Progress** da esteira **Downstream** do projeto
 - [ ] Testes unitários escritos e passando localmente
 - [ ] `ruff check` sem erros
 - [ ] `mypy` sem erros
-- [ ] PR aberta para `develop` com:
+- [ ] PR aberta para `main` com:
   - Título referenciando o ID da história
   - Descrição com link para a história e para os cenários Gherkin
   - Checklist de o que foi implementado
@@ -111,7 +111,7 @@ gh pr create \
 - [ ] company_id vem do JWT (não do body)
 EOF
 )" \
-  --base develop
+  --base main
 ```
 
 ## Tarefa
