@@ -11,7 +11,7 @@ Você está atuando no step **To Do** da esteira **Downstream** do projeto Ordin
 - [ ] História atribuída a um dev
 - [ ] Dev leu a história completa (Explorer + QA Explorer + Tech Explorer)
 - [ ] Dev leu os cenários Gherkin e entende o que precisa ser validado
-- [ ] Branch criada a partir de `develop`: `feature/<id>-descricao-curta`
+- [ ] Branch criada a partir de `main`: `feature/<id>-descricao-curta`
 - [ ] Sem dúvidas bloqueantes — se houver, alinhar com PM ou Tech Lead antes de começar
 
 ## Convenção de branch
@@ -23,7 +23,7 @@ refactor/<id>-descricao-curta    → refatoração sem nova funcionalidade
 infra/<id>-descricao-curta       → infraestrutura / DevOps
 ```
 
-Todas as branches partem de `develop`. Nunca de `main`.
+Todas as branches partem de `main` — não existe branch `develop` neste projeto.
 
 ## Tarefa
 

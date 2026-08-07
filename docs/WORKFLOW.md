@@ -98,7 +98,7 @@ O downstream começa quando uma história **Ready** é puxada para o sprint. O o
 **Responsável:** Dev (Backend ou Frontend conforme escopo).
 **Critério de saída:**
 - História atribuída a um dev
-- Branch criada a partir de `develop` com nome `feature/<id>-descricao`
+- Branch criada a partir de `main` com nome `feature/<id>-descricao` (não existe branch `develop` neste projeto)
 - Dev leu a história, os cenários Gherkin e a solução técnica
 
 ---
@@ -109,17 +109,17 @@ O downstream começa quando uma história **Ready** é puxada para o sprint. O o
 **Critério de saída:**
 - Código implementado conforme a solução técnica
 - Testes unitários escritos e passando localmente
-- `ruff` e `mypy` sem erros
-- PR aberta para `develop` com descrição referenciando a história e os cenários Gherkin
+- `ruff` e `mypy` sem erros (meta — hoje `main` já roda com dívida de lint pré-existente, ver `docs/ARQUITETURA.md` §13)
+- PR aberta para `main` com descrição referenciando a história e os cenários Gherkin
 
 ---
 
 ### Code Review
-**O que acontece:** time revisa a PR — código, arquitetura, cobertura de testes, aderência à diretiva de arquitetura (`docs/ARQUITETURA.md`).
-**Responsável:** Time (ao menos 1 aprovação de Backend SR; Frontend SR se escopo frontend).
+**O que acontece:** revisão da PR — código, arquitetura, cobertura de testes, aderência à diretiva de arquitetura (`docs/ARQUITETURA.md`).
+**Responsável:** hoje, o próprio autor (projeto de um único dev, sem revisor formal obrigatório nem branch protection configurada). Se o time crescer, este é o step que ganha um segundo par de olhos primeiro.
 **Critério de saída:**
-- PR aprovada sem comentários bloqueadores
-- CI verde: ruff + mypy + pytest (cobertura ≥ 80%) + build Docker
+- PR sem comentários bloqueadores em aberto
+- Testes relevantes rodados e passando localmente (o job de testes do CI não roda hoje — depende do lint passar, e o lint tem dívida pré-existente em `main`; ver `docs/ARQUITETURA.md` §11)
 - Testes de isolamento multi-tenant passando (se endpoint protegido)
 
 ---
@@ -137,11 +137,14 @@ O downstream começa quando uma história **Ready** é puxada para o sprint. O o
 ---
 
 ### Deploy
-**O que acontece:** merge na `main`, pipeline executa deploy blue/green em produção via CodeDeploy. Healthcheck de 60s — rollback automático se falhar.
+
+> **Hoje** este step é só "merge em `main` e subir a stack local" (`docker compose up --build`, migrations Alembic no startup do container) — não existe produção, staging nem pipeline de deploy. O texto abaixo é o alvo pra quando a Fase 2 (produção) começar, ver `docs/ARQUITETURA.md` §9 e §14.
+
+**O que acontece (alvo):** merge na `main`, pipeline executa deploy blue/green em produção via CodeDeploy. Healthcheck de 60s — rollback automático se falhar.
 **Responsável:** DevOps + Dev (acompanha o deploy).
-**Critério de saída:**
-- Merge aprovado na `main` (2 revisores conforme `docs/ARQUITETURA.md` §11)
-- Pipeline `deploy-prod.yml` executado com sucesso
+**Critério de saída (alvo):**
+- Merge em `main` (hoje: revisão e merge pelo próprio autor; alvo futuro: revisor formal, ver `docs/ARQUITETURA.md` §11)
+- Pipeline `deploy-prod.yml` executado com sucesso (ainda não existe)
 - Healthcheck passou em todos os serviços afetados
 - Evento de deploy registrado no Datadog
 - História marcada como **Done**

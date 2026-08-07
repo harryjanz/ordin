@@ -2,21 +2,24 @@ Você está atuando no step **Deploy** da esteira **Downstream** do projeto Ordi
 
 > Referências: `docs/WORKFLOW.md` (workflow completo) · `docs/ARQUITETURA.md` §11 (CI/CD) e §9 (infraestrutura) · `docs/roles/devops.md`
 
+> **Status real (2026-08): nada abaixo existe ainda.** Não há staging, produção, Kong, Datadog nem pipeline `deploy-staging.yml`/`deploy-prod.yml` — só `main` e a stack local via `docker compose up --build`. A Fase 2 (produção) está deliberadamente bloqueada até decisão explícita do usuário (`docs/ARQUITETURA.md` §14). Hoje, "Deploy" na prática é: mergear a PR em `main` e validar rodando a stack local. O fluxo abaixo é a diretiva de como implementar quando essa fase começar — não confundir com o processo em vigor.
+
 ## Sobre este step
 
-**Objetivo:** merge na `main` e deploy blue/green em produção via CodeDeploy. História marcada como Done ao final.
-**Responsável:** DevOps + Dev (acompanha o deploy).
+**Objetivo (alvo):** merge na `main` e deploy blue/green em produção via CodeDeploy. História marcada como Done ao final.
+**Objetivo (hoje):** merge na `main`, validar rodando `docker compose up --build` localmente, história marcada como Done.
+**Responsável:** hoje, o próprio autor (sem DevOps dedicado).
 
 **Pré-condições obrigatórias para entrar neste step:**
 - [ ] QA aprovou todos os cenários Gherkin
-- [ ] PR aprovada por ao menos 2 revisores (conforme `docs/ARQUITETURA.md` §11)
-- [ ] CI verde (ruff + mypy + pytest + build Docker)
+- [ ] PR revisada (hoje: pelo próprio autor — não existe exigência de 2 revisores em vigor, ver `docs/ARQUITETURA.md` §11)
+- [ ] Lint/testes rodados localmente (CI não bloqueia hoje, ver `docs/ARQUITETURA.md` §11)
 - [ ] Nenhum item dos checklist S1–S5 de `docs/ARQUITETURA.md` §12 em aberto
 
-## Fluxo do deploy (conforme `docs/ARQUITETURA.md` §11)
+## Fluxo do deploy — alvo pra quando a Fase 2 começar (conforme `docs/ARQUITETURA.md` §11)
 
 ```
-1. Merge PR aprovada → branch develop
+1. Merge PR aprovada → main
       ↓
 2. deploy-staging.yml dispara automaticamente:
    build → push ECR → deck sync kong.yml →
@@ -42,11 +45,11 @@ Você está atuando no step **Deploy** da esteira **Downstream** do projeto Ordi
    - Marcar história como Done
 ```
 
-## Checklist de deploy
+## Checklist de deploy — alvo
 
 ### Antes do merge para main
 - [ ] QA step concluído e aprovado
-- [ ] 2 aprovações na PR
+- [ ] 2 aprovações na PR (alvo futuro — hoje é revisão pelo próprio autor)
 - [ ] CI verde
 - [ ] Migration testada em staging antes de prod
 

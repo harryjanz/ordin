@@ -5,10 +5,10 @@ Você está atuando no step **Code Review** da esteira **Downstream** do projeto
 ## Sobre este step
 
 **Objetivo:** revisar a PR garantindo qualidade, aderência à arquitetura e segurança.
-**Responsável:** ao menos 1 aprovação de Backend SR; Frontend SR se escopo frontend.
+**Responsável:** hoje, o próprio autor (projeto de um único dev, sem revisor formal obrigatório — ver `docs/ARQUITETURA.md` §11).
 
 **Critério de saída — PR aprovada com:**
-- [ ] CI verde: ruff + mypy + pytest (cobertura ≥ 80%) + build Docker
+- [ ] Lint/testes rodados localmente (o job de testes do CI não roda hoje — depende do lint, que tem dívida pré-existente em `main`; ver `docs/ARQUITETURA.md` §11)
 - [ ] Testes de isolamento multi-tenant passando (se endpoint protegido)
 - [ ] Nenhum comentário bloqueador sem resposta
 - [ ] Código segue Clean Architecture (§3 `docs/ARQUITETURA.md`)
@@ -50,32 +50,27 @@ Você está atuando no step **Code Review** da esteira **Downstream** do projeto
 - [ ] Sem código morto ou imports não usados
 - [ ] Sem `print()` ou `logger.debug()` esquecido
 
-## Após aprovação — merge para develop
+## Após aprovação — merge para main
 
 Quando todos os itens do checklist estiverem verificados e a PR não tiver comentários bloqueadores:
 
-### 1. Confirmar que o CI passou
+### 1. Conferir os checks da PR
 
 ```bash
 gh pr checks <número-da-pr>
-# todos os checks devem estar com status "pass"
 ```
 
-### 2. Mergear a PR para develop
+O check "Lint & type check" provavelmente está vermelho por dívida pré-existente em `main` (ver `docs/ARQUITETURA.md` §11) — não é motivo pra bloquear sozinho; confirme que não há erro **novo** introduzido pela PR além dessa dívida.
+
+### 2. Mergear a PR para main
 
 ```bash
 gh pr merge <número-da-pr> --merge --delete-branch
 ```
 
-O merge para `develop` dispara automaticamente o `deploy-staging.yml`:
-```
-build → push ECR → deck sync kong.yml →
-alembic upgrade head (ECS Run Task) →
-deploy ECS blue/green (staging)
-```
+Não existe staging nem deploy automatizado hoje — o merge em `main` é o fim do fluxo até a Fase 2 (produção) começar. Pra validar a mudança, suba a stack local: `docker compose up --build` (migrations Alembic rodam no startup do container).
 
-> Após o deploy em staging, a história avança para o step **QA**.
-> O merge para `main` acontece no step **Deploy**, após aprovação do QA.
+> A história avança para o step **QA** logo em seguida, validado localmente/manualmente (não em staging — não existe ainda).
 
 ## Tarefa
 

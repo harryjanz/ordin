@@ -12,20 +12,25 @@ O Ordin é uma plataforma de autoatendimento para food service, multi-tenant por
 ### 1.1 Hierarquia de Entidades
 
 ```
-PLATAFORMA ORDIN (Super Admin)
-  └── EMPRESA (Admin + Caixa)
+PLATAFORMA ORDIN (superadmin)
+  └── EMPRESA (owner, manager, cashier)
         └── TERMINAL
               └── PEDIDO → ITENS → TICKETS → COLETA
 ```
 
 ### 1.2 Papéis (RBAC)
 
+> Roles reais confirmados no seed (`services/company/migrations/versions/20260611_0901_seed_initial.py`) e nas checagens de código — substituem `super_admin`/`admin`/`cashier`/`kiosk` de versões antigas deste doc.
+
 | Role | Escopo | Capacidades |
 |---|---|---|
-| `super_admin` | Plataforma | Gerencia todas as empresas |
-| `admin` | Sua empresa | CRUD de catálogo, terminais, usuários |
-| `cashier` | Sua empresa | Coleta tickets, visualiza pedidos |
-| `kiosk` | Empresa + terminal específicos (do JWT) | Lê catálogo, cria pedido e pagamento |
+| `superadmin` | Plataforma | Único que cria/edita/desativa empresas, consulta CNPJ/CEP, mexe em status de contrato, aprova pareamento de totem |
+| `owner` | Sua empresa | Tudo de `manager`, mais: promover usuário a `owner`, responsável legal da empresa |
+| `manager` | Sua empresa | CRUD de catálogo, terminais, usuários (exceto promover a `owner`), configurações de pagamento |
+| `cashier` | Sua empresa | Autenticado — hoje sem checagem de role própria no código além de estar logado |
+| `kiosk` | Empresa + terminal específicos (do JWT) | Lê catálogo, cria pedido e pagamento; token de 12h, sem refresh |
+
+Muitos endpoints (a maioria de `order-service` e `payment-service`) só exigem "autenticado nesta empresa", sem checagem de role específica — ver `README.md` §6 para o detalhe endpoint a endpoint.
 
 ---
 
@@ -138,9 +143,9 @@ Regra absoluta: company_id é SEMPRE extraído do JWT. Nunca aceito do body ou q
 
 | Token | Validade | Quem usa |
 |---|---|---|
-| Access token (`admin`, `cashier`) | **15 minutos** | Admin web, app balcão |
-| Refresh token (`admin`, `cashier`) | 7 dias (com rotação) | Renovação automática no frontend |
-| Access token (`kiosk`) | **4 horas** | Totem (ambiente controlado, sem refresh) |
+| Access token (`owner`, `manager`, `cashier`, `superadmin`) | **60 minutos** (`JWT_ACCESS_EXP_MINUTES`, configurável — valor atual no `.env`) | Admin web, app balcão |
+| Refresh token (`owner`, `manager`, `cashier`, `superadmin`) | 7 dias (com rotação) | Renovação automática no frontend |
+| Access token (`kiosk`) | **12 horas** (hardcoded em `auth-service`) | Totem (ambiente controlado, sem refresh) |
 
 - Refresh token rotation: novo token gerado a cada renovação; token anterior invalidado
 - Redis blacklist para revogação imediata (ex: operador removido da empresa)
@@ -152,9 +157,11 @@ Regra absoluta: company_id é SEMPRE extraído do JWT. Nunca aceito do body ou q
 
 ```
 ticket_code = base32_random(8 chars)
-hmac_payload = f"{ticket_code}|{order_ref}|{product_name}|{unit_number}/{total_units}"
+hmac_payload = f"{ticket_code}|{product_name}|{order_ref}|{timestamp}"
 qr_data = f"{hmac_payload}|{HMAC-SHA256(hmac_payload, QR_SECRET)}"
 ```
+
+Confirmado em `_make_qr_data()` (`services/order/main.py`). Versões antigas deste doc tinham a ordem `order_ref`/`product_name` trocada e usavam `{unit_number}/{total_units}` em vez de `{timestamp}` — não batia com o código.
 
 - `QR_SECRET` armazenado no Secrets Manager
 - Validação no `collect_ticket`: recomputar HMAC e comparar antes de aceitar
@@ -182,6 +189,8 @@ Interface de publicação: `IMessageBroker` (ABC no `domain`). Implementações 
 ---
 
 ## 9. Infraestrutura AWS
+
+> **Estado alvo, não implementado (2026-08).** Nada nesta seção existe hoje — sem conta AWS provisionada, sem Kong, sem Aurora, sem Datadog. A Fase 2 (produção/staging) está deliberadamente bloqueada até decisão explícita do usuário (ver §14). O que segue é a diretiva de como construir quando essa fase começar, lida em conjunto com o estado real dos módulos Terraform abaixo.
 
 ```
 Route 53 → ACM (HTTPS)
@@ -212,19 +221,19 @@ CloudWatch Logs     → complementar ao Datadog para métricas nativas AWS
 ```
 infra/
   modules/
-    networking/    → VPC, subnets pub/priv, NAT GW, SGs
-    rds/           → Aurora Serverless v2, RDS Proxy, subnet group
-    elasticache/   → Redis
-    sqs/           → filas FIFO e Standard, políticas IAM
-    ecr/           → repositórios (lifecycle: manter últimas 10 imagens)
-    kong/          → ECS service Kong + Konga, deck sync no CI
-    ecs/           → cluster, task definitions, services, IAM roles, OIDC GitHub
-    alb/           → target groups, listeners, ACM, sticky sessions para WS
-    waf/           → AWS WAF, regras OWASP Top 10
-    secrets/       → Secrets Manager entries
+    networking/    → VPC, subnets pub/priv, NAT GW, SGs                       [ ] não iniciado
+    rds/           → Aurora Serverless v2, RDS Proxy, subnet group            [ ] não iniciado
+    elasticache/   → Redis                                                    [ ] não iniciado
+    sqs/           → filas FIFO e Standard, políticas IAM                     [ ] não iniciado
+    ecr/           → repositórios (lifecycle: manter últimas 10 imagens)      [ ] não iniciado
+    kong/          → ECS service Kong + Konga, deck sync no CI                [ ] não iniciado
+    ecs/           → cluster, task definitions, services, IAM roles, OIDC     [~] parcial (só task_definitions.tf)
+    alb/           → target groups, listeners, ACM, sticky sessions para WS   [ ] não iniciado
+    waf/           → AWS WAF, regras OWASP Top 10                             [ ] não iniciado
+    secrets/       → Secrets Manager entries                                  [x] existe (main.tf, outputs.tf, variables.tf)
   envs/
-    staging/
-    prod/
+    staging/                                                                  [ ] não iniciado
+    prod/                                                                     [ ] não iniciado
 ```
 
 ---
@@ -267,18 +276,33 @@ CMD: ddtrace-run uvicorn app.interfaces.main:app --host 0.0.0.0 --port 800X
 
 ## 11. CI/CD Pipeline
 
+### O que roda hoje
+
+Só `.github/workflows/ci.yml`, direto contra `main` (sem branch `develop` — ver §14 e nota de branching abaixo):
+
+```
+Push em qualquer branch / PR para main:
+  ci.yml → security checks → ruff + mypy (lint) → pytest --cov-fail-under=40 → build Docker
+```
+
+O job de testes (`test`) e o de build (`build`) declaram `needs: lint` — como o lint falha em `main` hoje (dívida técnica pré-existente, ~579 erros ruff, não é regressão de PR nenhuma), **esses jobs não rodam** no CI atual. `main` não tem branch protection configurada, então isso não bloqueia merge; a validação de teste acontece localmente antes do PR.
+
+**Modelo de branch real:** toda branch parte de `main` (`feature/<id>`, `sprint/<id(s)>`); a PR é revisada e mergeada pelo próprio autor, sem revisor formal obrigatório nem staging automatizado. Isso é uma escolha consciente pra um projeto de um único desenvolvedor — não um desvio da diretiva a ser corrigido, mas o ponto de partida se o time crescer.
+
+### Pipeline alvo — pra quando a Fase 2 (produção) começar
+
 ```
 Push feature/* branch:
   ci.yml → ruff → mypy → pytest (unit + integration) → build Docker
 
-PR para develop:
+PR para main:
   ci.yml + testes de isolamento multi-tenant (empresa A não acessa dados de empresa B)
 
-Merge develop:
+Merge em main → staging:
   deploy-staging.yml → build → push ECR → deck sync kong.yml →
     migrate (ECS Run Task alembic upgrade head) → deploy ECS blue/green (staging)
 
-Merge main (após aprovação de 2 revisores):
+Promoção staging → produção:
   deploy-prod.yml → build → push ECR → deck sync → migrate → deploy ECS blue/green →
     healthcheck 60s → rollback automático se falhar
 ```
@@ -287,6 +311,8 @@ Merge main (após aprovação de 2 revisores):
 - `alembic upgrade head` **bloqueia** o deploy se falhar
 - Kong config: `deck sync infra/kong/kong.yml` no deploy
 - Evento de deploy registrado no Datadog (correlaciona anomalias pós-deploy)
+
+Nenhum destes workflows (`deploy-staging.yml`, `deploy-prod.yml`) existe ainda — só o design.
 
 ---
 
@@ -317,7 +343,7 @@ Merge main (após aprovação de 2 revisores):
 - **Async everywhere:** `AsyncSession` + `aiomysql`; nenhum `Session` síncrono
 - **Re-exportações:** `Name as Name` em `__init__.py` (exigência do ruff)
 - **`asyncio_mode = "auto"`** no pytest
-- **Cobertura mínima:** 80% por serviço (CI bloqueia se abaixo)
+- **Cobertura mínima:** `pyproject.toml` de cada serviço pede 80% (`fail_under = 80`) para rodar `pytest --cov` localmente, mas o CI real (`ci.yml`) hoje só exige `--cov-fail-under=40` — e nem chega a rodar, porque o job de testes depende do lint passar (ver §11)
 - **Nomes de migration:** `YYYYMMDD_HHMM_descricao.py`
 - **Comentários:** apenas quando o *porquê* não é óbvio; nunca docstrings longas
 - **Commits:** PT-BR; mensagem descreve o *porquê*, não o *o quê*
