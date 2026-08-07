@@ -1,6 +1,6 @@
 # ORD-051 — Totem: número do pedido em destaque na tela de sucesso
 
-**Status:** Ready
+**Status:** Done
 **Pontos:** 1
 **Sprint:** —
 

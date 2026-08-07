@@ -1,6 +1,6 @@
 # ORD-039 — Revisão de layout e UX do totem
 
-**Status:** New
+**Status:** Done
 **Tipo:** UX / Frontend
 **Referência:** `docs/guia-layout-totem-autoatendimento.md`
 

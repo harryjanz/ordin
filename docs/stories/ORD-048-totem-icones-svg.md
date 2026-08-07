@@ -1,6 +1,6 @@
 # ORD-048 — Totem: substituir emojis por ícones SVG
 
-**Status:** Ready
+**Status:** Done
 **Pontos:** 2
 **Sprint:** —
 

@@ -1,7 +1,7 @@
 # ORD-054 — Layout em duas colunas no ticket impresso do totem
 
 ## Status
-`Ready`
+`Done`
 
 ## Descrição
 O ticket HTML gerado pelo totem exibe QR Code e informações do produto em coluna única centralizada, obrigando o operador do balcão a ler linha por linha para identificar produto e escanear o QR. Queremos redesenhar cada bloco de ticket com o título do produto em fonte grande ocupando a largura total no topo, e abaixo duas colunas — 40% à esquerda para o QR Code e 60% à direita para unidade e código. A mudança afeta apenas `buildPrintHtml` em `SuccessScreen.tsx`.

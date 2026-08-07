@@ -1,6 +1,6 @@
 # ORD-042 — Autenticação do totem por pareamento de dispositivo (código + QR)
 
-**Status:** Ready
+**Status:** Done
 **Tipo:** Feature — Segurança / Autenticação / Full-stack
 **Fase:** 1
 **Sprint:** device-pairing

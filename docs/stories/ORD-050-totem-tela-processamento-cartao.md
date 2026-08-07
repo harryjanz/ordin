@@ -1,6 +1,6 @@
 # ORD-050 — Totem: tela dedicada de processamento de cartão
 
-**Status:** Ready
+**Status:** Done
 **Pontos:** 2
 **Sprint:** —
 

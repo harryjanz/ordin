@@ -1,6 +1,6 @@
 # ORD-040 — Aplicar Design System v2 ao totem
 
-**Status:** New
+**Status:** Done
 **Tipo:** UX / Design System / Frontend
 **Referência:** `docs/design-system-totem-v2.html` + `docs/guia-layout-totem-autoatendimento.md`
 
@@ -284,4 +284,4 @@ style={{ width: 52, height: 52, background: "none", border: "none", color: T.rox
 
 ---
 
-**Status:** Ready
+**Status:** Done
