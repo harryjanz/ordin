@@ -237,6 +237,73 @@
         }
       }
     },
+    "/auth/device/challenge": {
+      "post": {
+        "tags": [
+          "Autenticação"
+        ],
+        "summary": "Gerar código de pareamento para totem",
+        "description": "Gera um código de 6 caracteres + QR URL para parear o totem sem PIN.",
+        "operationId": "device_challenge_auth_device_challenge_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceChallengeOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/device/status": {
+      "get": {
+        "tags": [
+          "Autenticação"
+        ],
+        "summary": "Verificar status do pareamento",
+        "description": "Polling pelo totem. Retorna pending/approved/expired. Quando approved, gera JWT e consome o código.",
+        "operationId": "device_status_auth_device_status_get",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Código de 6 caracteres",
+              "title": "Code"
+            },
+            "description": "Código de 6 caracteres"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -261,6 +328,46 @@
   },
   "components": {
     "schemas": {
+      "AvailableTerminalInfo": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "terminal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal Code"
+          },
+          "tef_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tef Number"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "AvailableTerminalInfo"
+      },
       "CompanyInfo": {
         "properties": {
           "id": {
@@ -274,6 +381,16 @@
           "plan": {
             "type": "string",
             "title": "Plan"
+          },
+          "visual_theme": {
+            "type": "string",
+            "title": "Visual Theme",
+            "default": "ordin"
+          },
+          "visual_mode": {
+            "type": "string",
+            "title": "Visual Mode",
+            "default": "light"
           }
         },
         "type": "object",
@@ -283,6 +400,84 @@
           "plan"
         ],
         "title": "CompanyInfo"
+      },
+      "DeviceChallengeOut": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "qr_url": {
+            "type": "string",
+            "title": "Qr Url"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "qr_url",
+          "expires_in"
+        ],
+        "title": "DeviceChallengeOut"
+      },
+      "DeviceStatusOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "access_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Token"
+          },
+          "token_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Type"
+          },
+          "company": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompanyInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "terminal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TerminalInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "DeviceStatusOut"
       },
       "HTTPValidationError": {
         "properties": {
@@ -473,6 +668,14 @@
           },
           "company": {
             "$ref": "#/components/schemas/CompanyInfo"
+          },
+          "terminals": {
+            "items": {
+              "$ref": "#/components/schemas/AvailableTerminalInfo"
+            },
+            "type": "array",
+            "title": "Terminals",
+            "default": []
           }
         },
         "type": "object",
