@@ -47,6 +47,16 @@
   cursor: pointer;
 }
 
+.itemDragging {
+  opacity: 0.4;
+}
+
+.dragHandle {
+  cursor: grab;
+  color: rgba(var(--a-text-rgb), 0.35);
+  user-select: none;
+}
+
 .itemName {
   display: flex;
   align-items: center;

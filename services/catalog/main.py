@@ -3,7 +3,8 @@ import io
 from fastapi import FastAPI, File, HTTPException, Depends, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, ForeignKey, select
+from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, ForeignKey, JSON, Text, UniqueConstraint, select, update, delete, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 from pydantic import BaseModel, field_validator
@@ -53,23 +54,67 @@ class Category(Base):
 
 class Product(Base):
     __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),)
     id          = Column(Integer, primary_key=True)
     company_id  = Column(Integer, nullable=False, index=True)
     category_id = Column(Integer, ForeignKey("categories.id"))
     name        = Column(String(120), nullable=False)
-    description = Column(String(500))
+    description = Column(String(500))  # descrição curta — grade/listagem
+    description_long = Column(Text)  # descrição longa — detalhe do item
     price       = Column(Numeric(10, 2), nullable=False)
     image_url   = Column(String(500))  # key do objeto no bucket, não uma URL — ver infrastructure/image_storage.py
     thumbnail_url = Column(String(500))  # idem, key do thumbnail
     active      = Column(Boolean, default=True)
     deleted     = Column(Boolean, default=False, nullable=False)  # ver Category.deleted
+    tags        = Column(JSON)  # lista livre de strings, sem lista fechada (ver ORD-075)
+    calories    = Column(Integer)  # kcal
+    sku         = Column(String(50))  # único por empresa, ver UniqueConstraint acima
+    sort_order  = Column(Integer)  # gerenciado só via create_product (inicial) e /catalog/products/reorder
     created_at  = Column(DateTime, default=datetime.utcnow)
+
+class Allergen(Base):
+    """Master data, não por empresa — lista oficial (RDC 727/2022, Lei
+    10.674/2003 glúten, Lei 12.849/2013 látex). Fica em tabela (não enum de
+    código) de propósito: a ANVISA está revisando essa norma, então precisa
+    dar pra atualizar via dado, sem deploy, quando ela mudar."""
+    __tablename__ = "allergens"
+    id         = Column(Integer, primary_key=True)
+    code       = Column(String(50), unique=True, nullable=False)
+    name       = Column(String(80), nullable=False)
+    category   = Column(String(50))  # ex: "oleaginosas", pra agrupar exibição
+    active     = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class ProductAllergen(Base):
+    __tablename__ = "product_allergens"
+    product_id  = Column(Integer, ForeignKey("products.id"), primary_key=True)
+    allergen_id = Column(Integer, ForeignKey("allergens.id"), primary_key=True)
 
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
 
-def _serialize_product(p: "Product") -> dict:
+async def _get_product_allergens(db: AsyncSession, product_id: int) -> list[dict]:
+    result = await db.execute(
+        select(Allergen)
+        .join(ProductAllergen, ProductAllergen.allergen_id == Allergen.id)
+        .filter(ProductAllergen.product_id == product_id)
+        .order_by(Allergen.name)
+    )
+    return [{"id": a.id, "code": a.code, "name": a.name, "category": a.category} for a in result.scalars().all()]
+
+async def _set_product_allergens(db: AsyncSession, product_id: int, allergen_ids: list[int]) -> None:
+    unique_ids = set(allergen_ids)
+    if unique_ids:
+        result = await db.execute(select(Allergen.id).filter(Allergen.id.in_(unique_ids)))
+        found_ids = set(result.scalars().all())
+        if found_ids != unique_ids:
+            raise HTTPException(400, detail="allergen_ids contém id que não existe")
+    await db.execute(delete(ProductAllergen).where(ProductAllergen.product_id == product_id))
+    for allergen_id in unique_ids:
+        db.add(ProductAllergen(product_id=product_id, allergen_id=allergen_id))
+
+async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
     """Monta o dict de saída trocando as keys de S3 guardadas no banco por
     URLs assinadas (temporárias) — o cliente nunca vê a key crua."""
     return {
@@ -77,10 +122,16 @@ def _serialize_product(p: "Product") -> dict:
         "category_id": p.category_id,
         "name": p.name,
         "description": p.description,
+        "description_long": p.description_long,
         "price": float(p.price),
         "image_url": presigned_download_url(p.image_url) if p.image_url else None,
         "thumbnail_url": presigned_download_url(p.thumbnail_url) if p.thumbnail_url else None,
         "active": p.active,
+        "tags": p.tags,
+        "calories": p.calories,
+        "sku": p.sku,
+        "sort_order": p.sort_order,
+        "allergens": await _get_product_allergens(db, p.id),
     }
 
 # ── Response schemas ──────────────────────────────────────────────────────────
@@ -100,15 +151,30 @@ class CategoryUpdate(BaseModel):
     name: Optional[str] = None
     active: Optional[bool] = None
 
+class AllergenOut(BaseModel):
+    id: int
+    code: str
+    name: str
+    category: Optional[str] = None
+
+class AllergenListOut(BaseModel):
+    allergens: list[AllergenOut]
+
 class ProductOut(BaseModel):
     id: int
     category_id: Optional[int] = None
     name: str
     description: Optional[str] = None
+    description_long: Optional[str] = None
     price: float
     image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     active: bool = True
+    tags: Optional[list[str]] = None
+    calories: Optional[int] = None
+    sku: Optional[str] = None
+    sort_order: Optional[int] = None
+    allergens: list[AllergenOut] = []
 
 class ProductListOut(BaseModel):
     products: list[ProductOut]
@@ -116,8 +182,13 @@ class ProductListOut(BaseModel):
 class ProductIn(BaseModel):
     name: str
     description: Optional[str] = None
+    description_long: Optional[str] = None
     price: float
     category_id: Optional[int] = None
+    tags: Optional[list[str]] = None
+    calories: Optional[int] = None
+    sku: Optional[str] = None
+    allergen_ids: Optional[list[int]] = None
 
     @field_validator("price")
     @classmethod
@@ -129,9 +200,14 @@ class ProductIn(BaseModel):
 class ProductUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    description_long: Optional[str] = None
     price: Optional[float] = None
     category_id: Optional[int] = None
     active: Optional[bool] = None
+    tags: Optional[list[str]] = None
+    calories: Optional[int] = None
+    sku: Optional[str] = None
+    allergen_ids: Optional[list[int]] = None
 
     @field_validator("price")
     @classmethod
@@ -139,6 +215,10 @@ class ProductUpdate(BaseModel):
         if v is not None and v <= 0:
             raise ValueError("Preço deve ser positivo")
         return v
+
+class ReorderIn(BaseModel):
+    category_id: int
+    product_ids: list[int]
 
 class HealthOut(BaseModel):
     service: str
@@ -224,9 +304,10 @@ async def list_products(
         q = q.filter_by(active=True)
     if category_id:
         q = q.filter_by(category_id=category_id)
+    q = q.order_by(Product.sort_order.asc(), Product.id.asc())
     result = await db.execute(q)
     products = result.scalars().all()
-    return {"products": [_serialize_product(p) for p in products]}
+    return {"products": [await _serialize_product(db, p) for p in products]}
 
 @app.get(
     "/catalog/products/{product_id}",
@@ -244,7 +325,23 @@ async def get_product(
     result = await db.execute(select(Product).filter_by(id=product_id, company_id=current_user.company_id, deleted=False))
     p = result.scalars().first()
     if not p: raise HTTPException(404)
-    return _serialize_product(p)
+    return await _serialize_product(db, p)
+
+@app.get(
+    "/catalog/allergens",
+    response_model=AllergenListOut,
+    tags=["Catálogo"],
+    summary="Listar alérgenos oficiais (RDC 727/2022)",
+)
+async def list_allergens(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """Master data, não filtrado por empresa. Fonte das opções de multiseleção
+    no admin — a lista nunca fica hardcoded em código (ver ORD-075)."""
+    result = await db.execute(select(Allergen).filter_by(active=True).order_by(Allergen.name))
+    allergens = result.scalars().all()
+    return {"allergens": [{"id": a.id, "code": a.code, "name": a.name, "category": a.category} for a in allergens]}
 
 @app.post(
     "/catalog/categories",
@@ -336,15 +433,63 @@ async def create_product(
         )).scalars().first()
         if not cat:
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
+    next_sort_order = 0
+    if body.category_id is not None:
+        count_result = await db.execute(
+            select(func.count()).select_from(Product).filter_by(
+                company_id=current_user.company_id, category_id=body.category_id, deleted=False
+            )
+        )
+        next_sort_order = count_result.scalar_one()
     p = Product(
         company_id=current_user.company_id,
         category_id=body.category_id,
         name=body.name,
         description=body.description,
+        description_long=body.description_long,
         price=body.price,
+        tags=body.tags,
+        calories=body.calories,
+        sku=body.sku,
+        sort_order=next_sort_order,
     )
-    db.add(p); await db.commit(); await db.refresh(p)
-    return _serialize_product(p)
+    db.add(p)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+    await db.refresh(p)
+    if body.allergen_ids is not None:
+        await _set_product_allergens(db, p.id, body.allergen_ids)
+        await db.commit()
+    return await _serialize_product(db, p)
+
+@app.put(
+    "/catalog/products/reorder",
+    status_code=204,
+    tags=["Catálogo"],
+    summary="Reordenar produtos de uma categoria",
+    responses={400: {"description": "algum product_id não pertence à empresa/categoria informada"}},
+)
+async def reorder_products(
+    body: ReorderIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(require_write_role),
+):
+    """Rota registrada antes de /catalog/products/{product_id} de propósito:
+    caso contrário o path param capturaria "reorder" como product_id."""
+    result = await db.execute(
+        select(Product.id).filter_by(
+            company_id=current_user.company_id, category_id=body.category_id, deleted=False
+        )
+    )
+    valid_ids = set(result.scalars().all())
+    if set(body.product_ids) != valid_ids:
+        raise HTTPException(400, detail="product_ids não corresponde exatamente aos produtos da categoria")
+    for index, product_id in enumerate(body.product_ids):
+        await db.execute(update(Product).where(Product.id == product_id).values(sort_order=index))
+    await db.commit()
 
 @app.put(
     "/catalog/products/{product_id}",
@@ -371,10 +516,18 @@ async def update_product(
         )).scalars().first()
         if not cat:
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_none=True, exclude={"allergen_ids"}).items():
         setattr(p, field, value)
-    await db.commit(); await db.refresh(p)
-    return _serialize_product(p)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+    if body.allergen_ids is not None:
+        await _set_product_allergens(db, p.id, body.allergen_ids)
+        await db.commit()
+    await db.refresh(p)
+    return await _serialize_product(db, p)
 
 @app.delete(
     "/catalog/products/{product_id}",
@@ -463,7 +616,7 @@ async def upload_product_image_endpoint(
     p.image_url = image_key
     p.thumbnail_url = thumb_key
     await db.commit(); await db.refresh(p)
-    return _serialize_product(p)
+    return await _serialize_product(db, p)
 
 @app.delete(
     "/catalog/products/{product_id}/image",
@@ -485,7 +638,7 @@ async def delete_product_image(
     p.image_url = None
     p.thumbnail_url = None
     await db.commit(); await db.refresh(p)
-    return _serialize_product(p)
+    return await _serialize_product(db, p)
 
 @app.get("/health", response_model=HealthOut, tags=["Catálogo"], summary="Healthcheck")
 def health(): return {"service": "catalog", "status": "ok"}
