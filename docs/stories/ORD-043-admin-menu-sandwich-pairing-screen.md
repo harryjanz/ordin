@@ -1,6 +1,6 @@
 # ORD-043 — Admin: menu sanduíche + tela dedicada de pareamento mobile-friendly
 
-**Status:** Ready  
+**Status:** Done  
 **Pontos:** 5  
 **Sprint:** Correções / UX
 

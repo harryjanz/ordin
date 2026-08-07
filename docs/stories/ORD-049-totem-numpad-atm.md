@@ -1,6 +1,6 @@
 # ORD-049 — Totem: numpad padrão ATM + teclas maiores
 
-**Status:** Ready
+**Status:** Done
 **Pontos:** 1
 **Sprint:** —
 

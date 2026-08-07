@@ -1,7 +1,7 @@
 # ORD-052 — Impressão térmica silenciosa via QZ Tray + ESC/POS
 
 ## Status
-`Ready`
+`Done`
 
 ## Descrição
 O totem atualmente imprime tickets via `window.open()` + `window.print()`, o que exibe o diálogo de impressão do navegador e interrompe o fluxo de autoatendimento. Em produção, os terminais utilizam impressoras térmicas 80mm com guilhotina (Epson TM-T20X, Elgin i7 Plus, Bematech MP-4200 HS) compatíveis com o protocolo ESC/POS. A solução é integrar o QZ Tray — um daemon local que atua como ponte entre o navegador e a impressora via WebSocket — para disparar a impressão silenciosamente, sem nenhum popup. Quando o QZ Tray não estiver disponível, o sistema deve cair graciosamente para o `window.print()` atual.

@@ -1,7 +1,7 @@
 # ORD-053 — Preview de impressão no modo mock do totem
 
 ## Status
-`Ready`
+`Done`
 
 ## Descrição
 Durante o desenvolvimento, quando o payment-service está em modo mock (`provider: "mock"` na resposta da API), o desenvolvedor não tem como visualizar o layout do ticket térmico sem uma impressora física ou QZ Tray instalado. A impressão silenciosa (ORD-052) cai no fallback `window.open()`, mas em ambiente Docker o popup pode ser bloqueado. Precisamos que, ao receber `provider: "mock"` na resposta de pagamento aprovado, o HTML de impressão seja aberto automaticamente em uma nova aba para validação visual do layout — exatamente o que seria enviado à impressora. Em produção (provider diferente de `"mock"`), esse preview não deve ocorrer.
