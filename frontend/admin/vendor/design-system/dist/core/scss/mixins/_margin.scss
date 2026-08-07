@@ -1,0 +1,31 @@
+@use "sass:map";
+
+// ==========================================================
+// margin
+// Get the margin settings based on spacing tokens. For 0 value
+// please use "0" or "none" as argument.
+//
+// Required arguments:
+// `$top` String
+// `$right` String
+// `$bottom` String
+// `$left` String
+//
+// Example of use:
+// .foo { @include margin('xs', 's', 'none', 'xl') }
+//
+// @return
+// .foo {
+//   margin-top: 4px;
+//   margin-right: 8px;
+//   margin-bottom: 0;
+//   margin-left: 32px;
+// }
+// ==========================================================
+
+@mixin margin($top: null, $right: null, $bottom: null, $left: null) {
+  margin-top: if($top, map.get($spacing, $top), null);
+  margin-right: if($right, map.get($spacing, $right), null);
+  margin-bottom: if($bottom, map.get($spacing, $bottom), null);
+  margin-left: if($left, map.get($spacing, $left), null);
+}

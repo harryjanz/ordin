@@ -4,6 +4,15 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // "design-system" é consumido via dependência `file:` — o caminho real
+    // (depois de resolver o symlink que o npm cria) não passa por
+    // node_modules/, então o plugin de CJS do Rollup não detecta os exports
+    // nomeados por padrão. Força o tratamento explícito.
+    commonjsOptions: {
+      include: [/design-system/, /node_modules/],
+    },
+  },
   server: {
     port: 5174,
     proxy: {

@@ -1,0 +1,19 @@
+@import '../../core/scss/styles';
+
+.ds-divider__div {
+  &--horizontal {
+    border-top: 1px solid color('grey-200');
+
+    &.ds-divider__div--centered {
+      align-self: center;
+    }
+  }
+
+  &--vertical {
+    border-left: 1px solid color('grey-200');
+
+    &.ds-divider__div--centered {
+      align-self: center;
+    }
+  }
+}

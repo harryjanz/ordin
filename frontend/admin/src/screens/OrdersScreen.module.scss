@@ -1,0 +1,81 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  padding: 32px;
+  color: var(--a-text);
+}
+
+.title {
+  @include font('xl-emphasys');
+  margin-bottom: 20px;
+}
+
+.filters {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+  max-width: 240px;
+}
+
+.muted {
+  color: rgba(var(--a-text-rgb), 0.4);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  @include font('sm');
+}
+
+.th {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(153, 0, 255, 0.15);
+  color: rgba(var(--a-text-rgb), 0.5);
+  font-weight: 500;
+}
+
+.td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(153, 0, 255, 0.08);
+}
+
+.mono {
+  font-family: monospace;
+}
+
+.ticketCell {
+  padding: 0 12px 8px;
+}
+
+.ticketPanel {
+  background: rgba(153, 0, 255, 0.05);
+  border: 1px solid rgba(153, 0, 255, 0.12);
+  @include rounded('card');
+  padding: 12px;
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+.ticketLoading {
+  color: rgba(var(--a-text-rgb), 0.4);
+  @include font('sm');
+}
+
+.ticketStatus {
+  font-weight: 600;
+}
+
+.ticketStatusCollected {
+  color: #33cccc;
+}
+
+.ticketStatusPending {
+  color: color('warning-base');
+}
+
+.empty {
+  color: rgba(var(--a-text-rgb), 0.35);
+  @include font('sm');
+  margin-top: 24px;
+}

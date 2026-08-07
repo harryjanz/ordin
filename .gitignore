@@ -15,3 +15,7 @@ venv/
 node_modules/
 docs/exemples/
 frontend/admin/e2e/.test-data-manifest.json
+
+# design system vendorizado (ver frontend/admin/vendor/design-system/README.md)
+# — precisa estar commitado, o `dist/` acima excluiria por padrão
+!frontend/admin/vendor/design-system/dist/

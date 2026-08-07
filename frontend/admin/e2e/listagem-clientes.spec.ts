@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { extractCompanyId, recordTestCompany } from "./test-data-manifest";
+import { selectDropdownOption } from "./dropdown-helper";
 
 // Fluxo completo (ORD-062): login superadmin → cadastra um cliente com nome
 // único (via wizard do ORD-060, reaproveitado só pra ter um registro
@@ -52,19 +53,19 @@ test("busca por nome, filtra por status e navega ao detalhe", async ({ page }) =
   });
 
   await test.step("filtro de status pendente mantém o resultado", async () => {
-    await page.getByTestId("select-filtro-status").selectOption("pendente");
+    await selectDropdownOption(page, "select-filtro-status", "Pendente");
     await expect(page.getByTestId("contador-resultados")).toContainText("1 cliente encontrado");
     await page.screenshot({ path: test.info().outputPath("02-filtro-status-pendente.png") });
   });
 
   await test.step("filtro de status assinado zera o resultado (estado vazio)", async () => {
-    await page.getByTestId("select-filtro-status").selectOption("assinado");
+    await selectDropdownOption(page, "select-filtro-status", "Assinado");
     await expect(page.getByTestId("empty-state")).toBeVisible();
     await page.screenshot({ path: test.info().outputPath("03-estado-vazio.png") });
   });
 
   await test.step("limpar filtros e navegar ao detalhe pela linha", async () => {
-    await page.getByTestId("select-filtro-status").selectOption("");
+    await selectDropdownOption(page, "select-filtro-status", "Todos");
     await page.getByTestId("input-busca-nome").fill(tradeName);
     await expect(page.getByTestId("contador-resultados")).toContainText("1 cliente encontrado");
     await page.getByText(tradeName).click();

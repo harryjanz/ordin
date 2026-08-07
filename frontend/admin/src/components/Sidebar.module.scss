@@ -1,0 +1,109 @@
+@import 'design-system/dist/core/scss/styles';
+
+.sidebar {
+  flex-shrink: 0;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+  background: var(--a-surface);
+  border-right: 1px solid var(--a-border);
+  display: flex;
+  flex-direction: column;
+  transition: width 220ms ease, min-width 220ms ease;
+  z-index: 10;
+}
+
+.hamburger {
+  flex-shrink: 0;
+  align-self: flex-start;
+  @include margin('m', 's', 's', 's');
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid rgba(153, 0, 255, 0.35);
+  @include rounded('default');
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.hamburgerBar {
+  display: block;
+  width: 14px;
+  height: 2px;
+  background: color('brand-primary');
+  border-radius: 2px;
+  transition: transform 0.22s, opacity 0.22s;
+  transform-origin: center;
+}
+
+.logo {
+  padding-left: 14px;
+  padding-bottom: 16px;
+  @include font('l-emphasys');
+  color: color('brand-primary');
+  white-space: nowrap;
+  transition: opacity 150ms ease;
+  flex-shrink: 0;
+}
+
+.nav {
+  flex: 1;
+  overflow: hidden;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  @include padding('s', 'm', 's', 'm');
+  color: rgba(var(--a-text-rgb), 0.7);
+  text-decoration: none;
+  @include font('sm');
+  background: transparent;
+  border-left: 3px solid transparent;
+  white-space: nowrap;
+
+  &.navItemActive {
+    color: color('brand-primary');
+    @include font('sm-emphasys');
+    background: rgba(153, 0, 255, 0.1);
+    border-left: 3px solid color('brand-primary');
+  }
+}
+
+.navIcon {
+  flex-shrink: 0;
+  font-size: 17px;
+  width: 20px;
+  text-align: center;
+}
+
+.navLabel {
+  transition: opacity 150ms ease;
+}
+
+.actionBtn {
+  flex-shrink: 0;
+  @include margin('none', 's', 's', 's');
+}
+
+.themeToggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  @include padding('xs', 's', 'xs', 's');
+  background: transparent;
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  color: rgba(var(--a-text-rgb), 0.6);
+  @include font('sm');
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}

@@ -1,0 +1,23 @@
+@import '../../core/scss/styles';
+@import '../../core/scss/styles';
+
+.ds-calendar-year-selection__list {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+  padding: 0 spacing('s');
+  margin: 0;
+  overflow-y: auto;
+  max-height: calc(19.125rem - 66px);
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+.ds-calendar-year-selection__item {
+  width: 6.5rem;
+  height: 2.5rem;
+  box-sizing: border-box;
+  padding: 2px spacing('xs') 2px spacing('xs');
+}

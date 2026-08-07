@@ -129,6 +129,7 @@ export interface Product {
   description: string | null;
   price: number;
   image_url: string | null;
+  thumbnail_url: string | null;
   active: boolean;
   sort_order: number;
 }

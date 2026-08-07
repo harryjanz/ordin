@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Stepper, { StepDef } from "../components/Stepper";
-import Spinner from "../components/Spinner";
+import { Alert, Button, Dropdown, InputBase, Tag, type DropdownOptions } from "design-system";
+import WizardSteps, { type StepDef } from "../components/WizardSteps";
 import { createCompany, createContact, lookupCep, lookupCnpj, upsertLegalRepresentative } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
 import { isValidCep, isValidCnpj, isValidCpf, normalizeCep, normalizeCnpj, UF_VALUES } from "../lib/validators";
 import type { CepLookupResult, CnpjLookupResult } from "../types";
+import styles from "./NewCompanyScreen.module.scss";
 
 const STEPS: StepDef[] = [
   { label: "Dados cadastrais", sub: "CNPJ e Receita Federal" },
@@ -16,57 +17,20 @@ const STEPS: StepDef[] = [
   { label: "Revisão", sub: "Confirmar e criar" },
 ];
 
-const S = {
-  page: { padding: 32, color: "var(--a-text)", maxWidth: 1100 } as React.CSSProperties,
-  eyebrow: { fontFamily: "'Lexend', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#9900ff", fontWeight: 600 } as React.CSSProperties,
-  title: { fontFamily: "'Lexend', sans-serif", fontSize: 24, fontWeight: 600, marginTop: 6, marginBottom: 28 } as React.CSSProperties,
-  wizard: { display: "grid", gridTemplateColumns: "230px 1fr", gap: 26, alignItems: "start" } as React.CSSProperties,
-  panel: { background: "var(--a-surface)", border: "1px solid rgba(153,0,255,0.2)", borderRadius: 16, padding: "26px 28px 28px" } as React.CSSProperties,
-  panelHead: { marginBottom: 20 } as React.CSSProperties,
-  h2: { fontFamily: "'Lexend', sans-serif", fontSize: 18, fontWeight: 600 } as React.CSSProperties,
-  hint: { color: "rgba(var(--a-text-rgb),0.5)", fontSize: 13, marginTop: 4 } as React.CSSProperties,
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px 16px" } as React.CSSProperties,
-  grid3: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "14px 16px" } as React.CSSProperties,
-  field: { display: "flex", flexDirection: "column", gap: 6 } as React.CSSProperties,
-  label: { fontSize: 12, fontWeight: 600, color: "rgba(var(--a-text-rgb),0.5)" } as React.CSSProperties,
-  req: { color: "#ff4d6d", marginLeft: 2 } as React.CSSProperties,
-  input: {
-    fontSize: 14, color: "var(--a-text)", background: "var(--a-bg)", border: "1px solid rgba(var(--a-neutral-rgb),0.07)",
-    borderRadius: 9, padding: "10px 12px", outline: "none",
-  } as React.CSSProperties,
-  inputError: { borderColor: "#ff4d6d" } as React.CSSProperties,
-  inputSpinner: { position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)" } as React.CSSProperties,
-  fieldErr: { fontSize: 11.5, color: "#ff4d6d" } as React.CSSProperties,
-  lookupOk: {
-    display: "flex", alignItems: "center", gap: 10, marginTop: 16, padding: "12px 14px",
-    background: "rgba(93,212,144,0.16)", border: "1px solid rgba(93,212,144,0.3)", borderRadius: 10,
-  } as React.CSSProperties,
-  lookupWarn: {
-    display: "flex", alignItems: "center", gap: 10, marginTop: 16, padding: "12px 14px",
-    background: "rgba(255,184,77,0.16)", border: "1px solid rgba(255,184,77,0.3)", borderRadius: 10,
-  } as React.CSSProperties,
-  lookupBad: {
-    display: "flex", alignItems: "center", gap: 10, marginTop: 16, padding: "12px 14px",
-    background: "rgba(255,77,109,0.10)", border: "1px solid rgba(255,77,109,0.3)", borderRadius: 10,
-  } as React.CSSProperties,
-  contactCard: { border: "1px solid rgba(var(--a-neutral-rgb),0.07)", borderRadius: 12, padding: "16px 18px", marginBottom: 14 } as React.CSSProperties,
-  contactHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 } as React.CSSProperties,
-  badgeReq: { fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "#9900ff", background: "rgba(153,0,255,0.12)", padding: "3px 8px", borderRadius: 999 } as React.CSSProperties,
-  ghostAdd: {
-    display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", border: "1px dashed rgba(var(--a-neutral-rgb),0.15)",
-    borderRadius: 12, color: "rgba(var(--a-text-rgb),0.5)", fontSize: 13, fontWeight: 600, cursor: "pointer", marginBottom: 10, background: "transparent",
-  } as React.CSSProperties,
-  actions: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 24, paddingTop: 18, borderTop: "1px solid rgba(var(--a-neutral-rgb),0.07)" } as React.CSSProperties,
-  btnPrimary: { fontFamily: "'Lexend', sans-serif", fontSize: 13.5, fontWeight: 600, padding: "11px 22px", borderRadius: 9, border: "none", background: "#9900ff", color: "#fff", cursor: "pointer" } as React.CSSProperties,
-  btnGhost: { fontFamily: "'Lexend', sans-serif", fontSize: 13.5, fontWeight: 600, padding: "11px 20px", borderRadius: 9, border: "1px solid rgba(var(--a-neutral-rgb),0.12)", background: "transparent", color: "rgba(var(--a-text-rgb),0.6)", cursor: "pointer" } as React.CSSProperties,
-  reviewGroup: { borderBottom: "1px solid rgba(var(--a-neutral-rgb),0.07)", padding: "14px 0" } as React.CSSProperties,
-  reviewHead: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } as React.CSSProperties,
-  reviewTitle: { fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: "rgba(var(--a-text-rgb),0.5)" } as React.CSSProperties,
-  reviewEdit: { fontFamily: "'Lexend', sans-serif", fontSize: 12, fontWeight: 600, color: "#9900ff", background: "none", border: "none", cursor: "pointer" } as React.CSSProperties,
-  kv: { fontSize: 13.5 } as React.CSSProperties,
-  kvLabel: { fontSize: 11, color: "rgba(var(--a-text-rgb),0.5)" } as React.CSSProperties,
-  successBox: { textAlign: "center", padding: "40px 20px" } as React.CSSProperties,
-};
+const COMPANY_SIZE_OPTIONS: DropdownOptions[] = [
+  { value: "MEI", label: "MEI" },
+  { value: "ME", label: "ME" },
+  { value: "EPP", label: "EPP" },
+  { value: "DEMAIS", label: "Demais" },
+];
+
+const TAX_REGIME_OPTIONS: DropdownOptions[] = [
+  { value: "simples_nacional", label: "Simples Nacional" },
+  { value: "lucro_presumido", label: "Lucro Presumido" },
+  { value: "lucro_real", label: "Lucro Real" },
+];
+
+const UF_OPTIONS: DropdownOptions[] = UF_VALUES.map((uf) => ({ value: uf, label: uf }));
 
 interface ContactForm { name: string; roleTitle: string; email: string; phone: string; }
 const emptyContact: ContactForm = { name: "", roleTitle: "", email: "", phone: "" };
@@ -281,17 +245,17 @@ export default function NewCompanyScreen() {
 
   if (created) {
     return (
-      <div style={S.page}>
-        <div style={S.panel}>
-          <div style={S.successBox}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
-            <h2 style={S.h2}>Cliente cadastrado com sucesso</h2>
-            <p style={S.hint}>PIN de acesso do totem: <strong style={{ fontFamily: "'Courier New', monospace", color: "var(--a-text)" }}>{created.pin}</strong></p>
-            <div style={{ marginTop: 24, display: "flex", gap: 12, justifyContent: "center" }}>
-              <button style={S.btnPrimary} onClick={() => navigate(`/companies/${created.id}/contract`)}>
+      <div className={styles.page}>
+        <div className={styles.panel}>
+          <div className={styles.successBox}>
+            <div className={styles.successIcon}>✅</div>
+            <h2 className={styles.h2}>Cliente cadastrado com sucesso</h2>
+            <p className={styles.hint}>PIN de acesso do totem: <strong className={styles.mono}>{created.pin}</strong></p>
+            <div className={styles.successActions}>
+              <Button onClick={() => navigate(`/companies/${created.id}/contract`)}>
                 Ver detalhe e status do contrato
-              </button>
-              <button style={S.btnGhost} onClick={() => window.location.reload()}>Cadastrar outro cliente</button>
+              </Button>
+              <Button variant="secondary" onClick={() => window.location.reload()}>Cadastrar outro cliente</Button>
             </div>
           </div>
         </div>
@@ -300,342 +264,365 @@ export default function NewCompanyScreen() {
   }
 
   return (
-    <div style={S.page}>
-      <div style={S.eyebrow}>Empresas / Novo cliente</div>
-      <h1 style={S.title}>Cadastro de cliente</h1>
+    <div className={styles.page}>
+      <div className={styles.eyebrow}>Empresas / Novo cliente</div>
+      <h1 className={styles.title}>Cadastro de cliente</h1>
 
-      <div style={S.wizard}>
-        <Stepper steps={STEPS} current={step} maxReached={maxReached} onSelect={goToStep} />
+      <div className={styles.wizard}>
+        <WizardSteps steps={STEPS} current={step} maxReached={maxReached} onSelect={goToStep} />
 
-        <div style={S.panel}>
+        <div className={styles.panel}>
           {step === 0 && (
             <>
-              <div style={S.panelHead}>
-                <h2 style={S.h2}>Dados cadastrais</h2>
-                <p style={S.hint}>Informe o CNPJ — a situação cadastral é verificada na Receita Federal.</p>
+              <div className={styles.panelHead}>
+                <h2 className={styles.h2}>Dados cadastrais</h2>
+                <p className={styles.hint}>Informe o CNPJ — a situação cadastral é verificada na Receita Federal.</p>
               </div>
-              <div style={S.grid2}>
-                <div style={S.field}>
-                  <label style={S.label}>CNPJ<span style={S.req}>*</span></label>
-                  <div style={{ position: "relative" }}>
-                    <input
-                      style={{ ...S.input, ...(fieldErrors.document ? S.inputError : {}), fontFamily: "'Courier New', monospace" }}
-                      value={formatCnpj(cnpj)}
-                      onChange={(e) => setCnpj(e.target.value)}
-                      placeholder="XX.XXX.XXX/XXXX-XX"
-                      data-testid="input-cnpj"
-                    />
-                    {lookupLoading && (
-                      <span style={S.inputSpinner}>
-                        <Spinner size={14} />
-                      </span>
-                    )}
-                  </div>
-                  {fieldErrors.document && <span style={S.fieldErr}>{fieldErrors.document}</span>}
+              <div className={styles.grid2}>
+                <div className={styles.field}>
+                  <InputBase
+                    label="CNPJ*"
+                    value={formatCnpj(cnpj)}
+                    onChange={(e) => setCnpj(e.target.value)}
+                    placeholder="XX.XXX.XXX/XXXX-XX"
+                    errorMessage={fieldErrors.document}
+                    loading={lookupLoading}
+                    data-testid="input-cnpj"
+                  />
                 </div>
-                <div style={S.field}>
-                  <label style={S.label}>Nome fantasia<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.name ? S.inputError : {}) }} value={tradeName} onChange={(e) => setTradeName(e.target.value)} data-testid="input-trade-name" />
-                  {fieldErrors.name && <span style={S.fieldErr}>{fieldErrors.name}</span>}
+                <div className={styles.field}>
+                  <InputBase
+                    label="Nome fantasia*"
+                    value={tradeName}
+                    onChange={(e) => setTradeName(e.target.value)}
+                    errorMessage={fieldErrors.name}
+                    data-testid="input-trade-name"
+                  />
                 </div>
               </div>
 
-              {lookupLoading && <div style={S.hint} data-testid="lookup-loading">Consultando Receita Federal…</div>}
+              {lookupLoading && <div className={styles.hint} data-testid="lookup-loading">Consultando Receita Federal…</div>}
               {!lookupLoading && lookupResult?.found && lookupResult.cadastral_status === "ATIVA" && (
-                <div style={S.lookupOk} data-testid="lookup-ativa">
-                  <strong style={{ fontFamily: "'Lexend', sans-serif", fontSize: 13, color: "#5DD490" }}>Situação cadastral: ATIVA</strong>
-                  <span style={S.hint}>Dados preenchidos automaticamente — revise antes de prosseguir.</span>
+                <div className={styles.alertBox} data-testid="lookup-ativa">
+                  <Alert variant="success" icon="check-circle" fullWidth
+                    text="Situação cadastral: ATIVA. Dados preenchidos automaticamente — revise antes de prosseguir." />
                 </div>
               )}
               {!lookupLoading && lookupResult?.found && lookupResult.cadastral_status !== "ATIVA" && (
-                <div style={S.lookupBad} data-testid="lookup-inativa">
-                  <span>CNPJ com situação <strong>{lookupResult.cadastral_status}</strong> na Receita Federal — não é possível prosseguir.</span>
+                <div className={styles.alertBox} data-testid="lookup-inativa">
+                  <Alert variant="error" icon="alert-circle" fullWidth
+                    text={`CNPJ com situação ${lookupResult.cadastral_status} na Receita Federal — não é possível prosseguir.`} />
                 </div>
               )}
               {!lookupLoading && lookupResult && !lookupResult.found && lookupResult.reason === "lookup_unavailable" && lookupResult.cadastral_status === "ATIVA" && (
-                <div style={S.lookupOk} data-testid="lookup-ativa-local">
-                  <strong style={{ fontFamily: "'Lexend', sans-serif", fontSize: 13, color: "#5DD490" }}>
-                    Dígito verificador válido — situação cadastral ainda não confirmável pela Receita
-                  </strong>
-                  <span style={S.hint}>
-                    CNPJ alfanumérico recente: os provedores de consulta ainda não confirmam esse formato. Preencha os
-                    dados manualmente e revise antes de prosseguir.
-                  </span>
+                <div className={styles.alertBox} data-testid="lookup-ativa-local">
+                  <Alert variant="success" icon="check-circle" fullWidth
+                    text="Dígito verificador válido — situação cadastral ainda não confirmável pela Receita. CNPJ alfanumérico recente: os provedores de consulta ainda não confirmam esse formato. Preencha os dados manualmente e revise antes de prosseguir." />
                 </div>
               )}
               {!lookupLoading && lookupResult && !lookupResult.found && lookupResult.reason === "lookup_unavailable" && lookupResult.cadastral_status !== "ATIVA" && (
-                <div style={S.lookupWarn} data-testid="lookup-indisponivel">
-                  <span>Consulta automática indisponível para este CNPJ — preencha os dados manualmente.</span>
+                <div className={styles.alertBox} data-testid="lookup-indisponivel">
+                  <Alert variant="warning" icon="alert-triangle" fullWidth
+                    text="Consulta automática indisponível para este CNPJ — preencha os dados manualmente." />
                 </div>
               )}
               {!lookupLoading && lookupResult && !lookupResult.found && lookupResult.reason === "cnpj_not_found" && (
-                <div style={S.lookupBad} data-testid="lookup-nao-encontrado">
-                  <span>CNPJ não encontrado na Receita Federal.</span>
+                <div className={styles.alertBox} data-testid="lookup-nao-encontrado">
+                  <Alert variant="error" icon="alert-circle" fullWidth text="CNPJ não encontrado na Receita Federal." />
                 </div>
               )}
 
-              <div style={{ ...S.grid2, marginTop: 18 }}>
-                <div style={S.field}>
-                  <label style={S.label}>Razão social<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.legal_name ? S.inputError : {}) }} value={legalName} onChange={(e) => setLegalName(e.target.value)} data-testid="input-legal-name" />
-                  {fieldErrors.legal_name && <span style={S.fieldErr}>{fieldErrors.legal_name}</span>}
+              <div className={`${styles.grid2} ${styles.mt18}`}>
+                <div className={styles.field}>
+                  <InputBase
+                    label="Razão social*"
+                    value={legalName}
+                    onChange={(e) => setLegalName(e.target.value)}
+                    errorMessage={fieldErrors.legal_name}
+                    data-testid="input-legal-name"
+                  />
                 </div>
-                <div style={S.field}>
-                  <label style={S.label}>Porte</label>
-                  <select style={S.input} value={companySize} onChange={(e) => setCompanySize(e.target.value)}>
-                    <option value="MEI">MEI</option>
-                    <option value="ME">ME</option>
-                    <option value="EPP">EPP</option>
-                    <option value="DEMAIS">Demais</option>
-                  </select>
-                </div>
-              </div>
-              <div style={{ ...S.grid3, marginTop: 14 }}>
-                <div style={S.field}>
-                  <label style={S.label}>Inscrição estadual</label>
-                  <input style={S.input} value={stateRegistration} onChange={(e) => setStateRegistration(e.target.value)} placeholder="ISENTO" />
-                </div>
-                <div style={S.field}>
-                  <label style={S.label}>Regime tributário</label>
-                  <select style={S.input} value={taxRegime} onChange={(e) => setTaxRegime(e.target.value)}>
-                    <option value="simples_nacional">Simples Nacional</option>
-                    <option value="lucro_presumido">Lucro Presumido</option>
-                    <option value="lucro_real">Lucro Real</option>
-                  </select>
-                </div>
-                <div style={S.field}>
-                  <label style={S.label}>CNAE principal</label>
-                  <input style={{ ...S.input, fontFamily: "'Courier New', monospace" }} value={cnaeCode} onChange={(e) => setCnaeCode(e.target.value)} placeholder="0000-0/00" />
+                <div className={styles.field}>
+                  <Dropdown
+                    label="Porte"
+                    value={COMPANY_SIZE_OPTIONS.find((o) => o.value === companySize) ?? null}
+                    onValueSelected={(opt) => setCompanySize(opt.value)}
+                    options={COMPANY_SIZE_OPTIONS}
+                  />
                 </div>
               </div>
-              <div style={S.actions}>
+              <div className={`${styles.grid3} ${styles.mt14}`}>
+                <div className={styles.field}>
+                  <InputBase label="Inscrição estadual" value={stateRegistration} onChange={(e) => setStateRegistration(e.target.value)} placeholder="ISENTO" />
+                </div>
+                <div className={styles.field}>
+                  <Dropdown
+                    label="Regime tributário"
+                    value={TAX_REGIME_OPTIONS.find((o) => o.value === taxRegime) ?? null}
+                    onValueSelected={(opt) => setTaxRegime(opt.value)}
+                    options={TAX_REGIME_OPTIONS}
+                  />
+                </div>
+                <div className={styles.field}>
+                  <InputBase label="CNAE principal" value={cnaeCode} onChange={(e) => setCnaeCode(e.target.value)} placeholder="0000-0/00" />
+                </div>
+              </div>
+              <div className={styles.actions}>
                 <span />
-                <button style={S.btnPrimary} onClick={advance}>Continuar</button>
+                <Button onClick={advance}>Continuar</Button>
               </div>
             </>
           )}
 
           {step === 1 && (
             <>
-              <div style={S.panelHead}>
-                <h2 style={S.h2}>Endereço</h2>
-                <p style={S.hint}>Autopreenchido pela consulta de CNPJ — editável.</p>
+              <div className={styles.panelHead}>
+                <h2 className={styles.h2}>Endereço</h2>
+                <p className={styles.hint}>Autopreenchido pela consulta de CNPJ — editável.</p>
               </div>
-              <div style={S.grid3}>
-                <div style={S.field}>
-                  <label style={S.label}>CEP</label>
-                  <div style={{ position: "relative" }}>
-                    <input style={{ ...S.input, ...(fieldErrors.zip_code ? S.inputError : {}), fontFamily: "'Courier New', monospace" }} value={formatCep(zipCode)} onChange={(e) => setZipCode(e.target.value)} data-testid="input-zip-code" />
-                    {cepLookupLoading && (
-                      <span style={S.inputSpinner}>
-                        <Spinner size={14} />
-                      </span>
-                    )}
-                  </div>
-                  {fieldErrors.zip_code && <span style={S.fieldErr}>{fieldErrors.zip_code}</span>}
-                  {!fieldErrors.zip_code && !cepLookupLoading && cepLookupResult && !cepLookupResult.found && (
-                    <span style={{ fontSize: 11.5, color: "#FFB84D" }}>CEP não encontrado — preencha o endereço manualmente</span>
-                  )}
+              <div className={styles.grid3}>
+                <div className={styles.field}>
+                  <InputBase
+                    label="CEP"
+                    value={formatCep(zipCode)}
+                    onChange={(e) => setZipCode(e.target.value)}
+                    errorMessage={fieldErrors.zip_code}
+                    helperMessage={!fieldErrors.zip_code && !cepLookupLoading && cepLookupResult && !cepLookupResult.found ? "CEP não encontrado — preencha o endereço manualmente" : undefined}
+                    loading={cepLookupLoading}
+                    data-testid="input-zip-code"
+                  />
                 </div>
-                <div style={{ ...S.field, gridColumn: "span 2" }}>
-                  <label style={S.label}>Logradouro<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.street ? S.inputError : {}) }} value={street} onChange={(e) => setStreet(e.target.value)} data-testid="input-street" />
-                  {fieldErrors.street && <span style={S.fieldErr}>{fieldErrors.street}</span>}
-                </div>
-              </div>
-              <div style={{ ...S.grid3, marginTop: 14 }}>
-                <div style={S.field}>
-                  <label style={S.label}>Número<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.address_number ? S.inputError : {}) }} value={addressNumber} onChange={(e) => setAddressNumber(e.target.value)} data-testid="input-address-number" />
-                  {fieldErrors.address_number && <span style={S.fieldErr}>{fieldErrors.address_number}</span>}
-                </div>
-                <div style={S.field}>
-                  <label style={S.label}>Complemento</label>
-                  <input style={S.input} value={complement} onChange={(e) => setComplement(e.target.value)} />
-                </div>
-                <div style={S.field}>
-                  <label style={S.label}>Bairro<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.neighborhood ? S.inputError : {}) }} value={neighborhood} onChange={(e) => setNeighborhood(e.target.value)} data-testid="input-neighborhood" />
-                  {fieldErrors.neighborhood && <span style={S.fieldErr}>{fieldErrors.neighborhood}</span>}
+                <div className={`${styles.field} ${styles.spanFull}`}>
+                  <InputBase
+                    label="Logradouro*"
+                    value={street}
+                    onChange={(e) => setStreet(e.target.value)}
+                    errorMessage={fieldErrors.street}
+                    data-testid="input-street"
+                  />
                 </div>
               </div>
-              <div style={{ ...S.grid2, marginTop: 14 }}>
-                <div style={S.field}>
-                  <label style={S.label}>Cidade<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.city ? S.inputError : {}) }} value={city} onChange={(e) => setCity(e.target.value)} data-testid="input-city" />
-                  {fieldErrors.city && <span style={S.fieldErr}>{fieldErrors.city}</span>}
+              <div className={`${styles.grid3} ${styles.mt14}`}>
+                <div className={styles.field}>
+                  <InputBase
+                    label="Número*"
+                    value={addressNumber}
+                    onChange={(e) => setAddressNumber(e.target.value)}
+                    errorMessage={fieldErrors.address_number}
+                    data-testid="input-address-number"
+                  />
                 </div>
-                <div style={S.field}>
-                  <label style={S.label}>UF<span style={S.req}>*</span></label>
-                  <select style={{ ...S.input, ...(fieldErrors.state ? S.inputError : {}) }} value={ufState} onChange={(e) => setUfState(e.target.value)} data-testid="input-state">
-                    <option value="">Selecione</option>
-                    {UF_VALUES.map((uf) => <option key={uf} value={uf}>{uf}</option>)}
-                  </select>
-                  {fieldErrors.state && <span style={S.fieldErr}>{fieldErrors.state}</span>}
+                <div className={styles.field}>
+                  <InputBase label="Complemento" value={complement} onChange={(e) => setComplement(e.target.value)} />
+                </div>
+                <div className={styles.field}>
+                  <InputBase
+                    label="Bairro*"
+                    value={neighborhood}
+                    onChange={(e) => setNeighborhood(e.target.value)}
+                    errorMessage={fieldErrors.neighborhood}
+                    data-testid="input-neighborhood"
+                  />
                 </div>
               </div>
-              <div style={S.actions}>
-                <button style={S.btnGhost} onClick={() => goToStep(0)}>Voltar</button>
-                <button style={S.btnPrimary} onClick={advance}>Continuar</button>
+              <div className={`${styles.grid2} ${styles.mt14}`}>
+                <div className={styles.field}>
+                  <InputBase
+                    label="Cidade*"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    errorMessage={fieldErrors.city}
+                    data-testid="input-city"
+                  />
+                </div>
+                <div className={styles.field}>
+                  <Dropdown
+                    label="UF*"
+                    placeholder="Selecione"
+                    value={UF_OPTIONS.find((o) => o.value === ufState) ?? null}
+                    onValueSelected={(opt) => setUfState(opt.value)}
+                    options={UF_OPTIONS}
+                    errorMessage={fieldErrors.state}
+                    data-testid="input-state"
+                  />
+                </div>
+              </div>
+              <div className={styles.actions}>
+                <Button variant="secondary" onClick={() => goToStep(0)}>Voltar</Button>
+                <Button onClick={advance}>Continuar</Button>
               </div>
             </>
           )}
 
           {step === 2 && (
             <>
-              <div style={S.panelHead}>
-                <h2 style={S.h2}>Contatos</h2>
-                <p style={S.hint}>Comercial é obrigatório — financeiro e técnico ficam a critério do cliente.</p>
+              <div className={styles.panelHead}>
+                <h2 className={styles.h2}>Contatos</h2>
+                <p className={styles.hint}>Comercial é obrigatório — financeiro e técnico ficam a critério do cliente.</p>
               </div>
-              <div style={S.contactCard}>
-                <div style={S.contactHead}>
-                  <span style={{ fontFamily: "'Lexend', sans-serif", fontSize: 13.5, fontWeight: 600 }}>Contato comercial</span>
-                  <span style={S.badgeReq}>Obrigatório</span>
+              <div className={styles.contactCard}>
+                <div className={styles.contactHead}>
+                  <span className={styles.contactTitle}>Contato comercial</span>
+                  <span className={styles.badgeReq}>Obrigatório</span>
                 </div>
-                <div style={S.grid2}>
-                  <div style={S.field}>
-                    <label style={S.label}>Nome<span style={S.req}>*</span></label>
-                    <input style={{ ...S.input, ...(fieldErrors.comercial_name ? S.inputError : {}) }} value={comercial.name} onChange={(e) => setComercial({ ...comercial, name: e.target.value })} data-testid="input-comercial-name" />
-                    {fieldErrors.comercial_name && <span style={S.fieldErr}>{fieldErrors.comercial_name}</span>}
+                <div className={styles.grid2}>
+                  <div className={styles.field}>
+                    <InputBase
+                      label="Nome*"
+                      value={comercial.name}
+                      onChange={(e) => setComercial({ ...comercial, name: e.target.value })}
+                      errorMessage={fieldErrors.comercial_name}
+                      data-testid="input-comercial-name"
+                    />
                   </div>
-                  <div style={S.field}>
-                    <label style={S.label}>Cargo</label>
-                    <input style={S.input} value={comercial.roleTitle} onChange={(e) => setComercial({ ...comercial, roleTitle: e.target.value })} />
+                  <div className={styles.field}>
+                    <InputBase label="Cargo" value={comercial.roleTitle} onChange={(e) => setComercial({ ...comercial, roleTitle: e.target.value })} />
                   </div>
-                  <div style={S.field}>
-                    <label style={S.label}>E-mail<span style={S.req}>*</span></label>
-                    <input style={{ ...S.input, ...(fieldErrors.comercial_email ? S.inputError : {}) }} value={comercial.email} onChange={(e) => setComercial({ ...comercial, email: e.target.value })} data-testid="input-comercial-email" />
-                    {fieldErrors.comercial_email && <span style={S.fieldErr}>{fieldErrors.comercial_email}</span>}
+                  <div className={styles.field}>
+                    <InputBase
+                      label="E-mail*"
+                      value={comercial.email}
+                      onChange={(e) => setComercial({ ...comercial, email: e.target.value })}
+                      errorMessage={fieldErrors.comercial_email}
+                      data-testid="input-comercial-email"
+                    />
                   </div>
-                  <div style={S.field}>
-                    <label style={S.label}>Telefone</label>
-                    <input style={{ ...S.input, fontFamily: "'Courier New', monospace" }} value={comercial.phone} onChange={(e) => setComercial({ ...comercial, phone: e.target.value })} />
+                  <div className={styles.field}>
+                    <InputBase label="Telefone" value={comercial.phone} onChange={(e) => setComercial({ ...comercial, phone: e.target.value })} />
                   </div>
                 </div>
               </div>
 
               {financeiro ? (
-                <ContactCard title="Contato financeiro" badge="Opcional" value={financeiro} onChange={setFinanceiro} onRemove={() => setFinanceiro(null)} />
+                <ContactCard title="Contato financeiro" value={financeiro} onChange={setFinanceiro} onRemove={() => setFinanceiro(null)} />
               ) : (
-                <button style={S.ghostAdd} onClick={() => setFinanceiro(emptyContact)}>+ Adicionar contato financeiro (opcional)</button>
+                <button className={styles.ghostAdd} onClick={() => setFinanceiro(emptyContact)}>+ Adicionar contato financeiro (opcional)</button>
               )}
               {tecnico ? (
-                <ContactCard title="Contato técnico" badge="Opcional" value={tecnico} onChange={setTecnico} onRemove={() => setTecnico(null)} />
+                <ContactCard title="Contato técnico" value={tecnico} onChange={setTecnico} onRemove={() => setTecnico(null)} />
               ) : (
-                <button style={S.ghostAdd} onClick={() => setTecnico(emptyContact)}>+ Adicionar contato técnico (opcional)</button>
+                <button className={styles.ghostAdd} onClick={() => setTecnico(emptyContact)}>+ Adicionar contato técnico (opcional)</button>
               )}
 
-              <div style={S.actions}>
-                <button style={S.btnGhost} onClick={() => goToStep(1)}>Voltar</button>
-                <button style={S.btnPrimary} onClick={advance}>Continuar</button>
+              <div className={styles.actions}>
+                <Button variant="secondary" onClick={() => goToStep(1)}>Voltar</Button>
+                <Button onClick={advance}>Continuar</Button>
               </div>
             </>
           )}
 
           {step === 3 && (
             <>
-              <div style={S.panelHead}>
-                <h2 style={S.h2}>Responsável legal</h2>
-                <p style={S.hint}>É quem assina o contrato de prestação de serviço pela empresa.</p>
+              <div className={styles.panelHead}>
+                <h2 className={styles.h2}>Responsável legal</h2>
+                <p className={styles.hint}>É quem assina o contrato de prestação de serviço pela empresa.</p>
               </div>
-              <div style={S.grid2}>
-                <div style={{ ...S.field, gridColumn: "span 2" }}>
-                  <label style={S.label}>Nome completo<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.rep_name ? S.inputError : {}) }} value={repName} onChange={(e) => setRepName(e.target.value)} data-testid="input-rep-name" />
-                  {fieldErrors.rep_name && <span style={S.fieldErr}>{fieldErrors.rep_name}</span>}
-                </div>
-              </div>
-              <div style={{ ...S.grid2, marginTop: 14 }}>
-                <div style={S.field}>
-                  <label style={S.label}>CPF<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.rep_cpf ? S.inputError : {}), fontFamily: "'Courier New', monospace" }} value={formatCpf(repCpf)} onChange={(e) => setRepCpf(e.target.value)} data-testid="input-rep-cpf" />
-                  {fieldErrors.rep_cpf && <span style={S.fieldErr}>{fieldErrors.rep_cpf}</span>}
-                </div>
-                <div style={S.field}>
-                  <label style={S.label}>Cargo</label>
-                  <input style={S.input} value={repRole} onChange={(e) => setRepRole(e.target.value)} placeholder="Sócio-administrador" />
+              <div className={styles.grid2}>
+                <div className={`${styles.field} ${styles.spanFull}`}>
+                  <InputBase
+                    label="Nome completo*"
+                    value={repName}
+                    onChange={(e) => setRepName(e.target.value)}
+                    errorMessage={fieldErrors.rep_name}
+                    data-testid="input-rep-name"
+                  />
                 </div>
               </div>
-              <div style={{ ...S.grid2, marginTop: 14 }}>
-                <div style={S.field}>
-                  <label style={S.label}>E-mail<span style={S.req}>*</span></label>
-                  <input style={{ ...S.input, ...(fieldErrors.rep_email ? S.inputError : {}) }} value={repEmail} onChange={(e) => setRepEmail(e.target.value)} data-testid="input-rep-email" />
-                  {fieldErrors.rep_email && <span style={S.fieldErr}>{fieldErrors.rep_email}</span>}
+              <div className={`${styles.grid2} ${styles.mt14}`}>
+                <div className={styles.field}>
+                  <InputBase
+                    label="CPF*"
+                    value={formatCpf(repCpf)}
+                    onChange={(e) => setRepCpf(e.target.value)}
+                    errorMessage={fieldErrors.rep_cpf}
+                    data-testid="input-rep-cpf"
+                  />
                 </div>
-                <div style={S.field}>
-                  <label style={S.label}>Telefone</label>
-                  <input style={{ ...S.input, fontFamily: "'Courier New', monospace" }} value={repPhone} onChange={(e) => setRepPhone(e.target.value)} />
+                <div className={styles.field}>
+                  <InputBase label="Cargo" value={repRole} onChange={(e) => setRepRole(e.target.value)} placeholder="Sócio-administrador" />
                 </div>
               </div>
-              <div style={S.actions}>
-                <button style={S.btnGhost} onClick={() => goToStep(2)}>Voltar</button>
-                <button style={S.btnPrimary} onClick={advance}>Continuar</button>
+              <div className={`${styles.grid2} ${styles.mt14}`}>
+                <div className={styles.field}>
+                  <InputBase
+                    label="E-mail*"
+                    value={repEmail}
+                    onChange={(e) => setRepEmail(e.target.value)}
+                    errorMessage={fieldErrors.rep_email}
+                    data-testid="input-rep-email"
+                  />
+                </div>
+                <div className={styles.field}>
+                  <InputBase label="Telefone" value={repPhone} onChange={(e) => setRepPhone(e.target.value)} />
+                </div>
+              </div>
+              <div className={styles.actions}>
+                <Button variant="secondary" onClick={() => goToStep(2)}>Voltar</Button>
+                <Button onClick={advance}>Continuar</Button>
               </div>
             </>
           )}
 
           {step === 4 && (
             <>
-              <div style={S.panelHead}>
-                <h2 style={S.h2}>Revisão</h2>
-                <p style={S.hint}>Confira os dados antes de criar o cadastro.</p>
+              <div className={styles.panelHead}>
+                <h2 className={styles.h2}>Revisão</h2>
+                <p className={styles.hint}>Confira os dados antes de criar o cadastro.</p>
               </div>
 
-              <div style={S.reviewGroup}>
-                <div style={S.reviewHead}>
-                  <span style={S.reviewTitle}>Dados cadastrais</span>
-                  <button style={S.reviewEdit} onClick={() => goToStep(0)}>Editar</button>
+              <div className={styles.reviewGroup}>
+                <div className={styles.reviewHead}>
+                  <span className={styles.reviewTitle}>Dados cadastrais</span>
+                  <Button variant="secondary" size="small" onClick={() => goToStep(0)}>Editar</Button>
                 </div>
-                <div style={S.grid3}>
-                  <div style={S.kv}><div style={S.kvLabel}>CNPJ</div><div style={{ fontFamily: "'Courier New', monospace" }}>{formatCnpj(cnpj)}</div></div>
-                  <div style={S.kv}><div style={S.kvLabel}>Razão social</div><div>{legalName}</div></div>
-                  <div style={S.kv}><div style={S.kvLabel}>Situação</div><div style={{ color: "#5DD490" }}>{lookupResult?.cadastral_status ?? "NAO_VERIFICADA"}</div></div>
-                </div>
-              </div>
-
-              <div style={S.reviewGroup}>
-                <div style={S.reviewHead}>
-                  <span style={S.reviewTitle}>Endereço</span>
-                  <button style={S.reviewEdit} onClick={() => goToStep(1)}>Editar</button>
-                </div>
-                <div style={S.grid3}>
-                  <div style={S.kv}><div style={S.kvLabel}>Logradouro</div><div>{street}, {addressNumber}</div></div>
-                  <div style={S.kv}><div style={S.kvLabel}>Cidade/UF</div><div>{city}/{ufState}</div></div>
-                  <div style={S.kv}><div style={S.kvLabel}>CEP</div><div style={{ fontFamily: "'Courier New', monospace" }}>{formatCep(zipCode)}</div></div>
+                <div className={styles.grid3}>
+                  <div className={styles.kv}><div className={styles.kvLabel}>CNPJ</div><div className={styles.mono}>{formatCnpj(cnpj)}</div></div>
+                  <div className={styles.kv}><div className={styles.kvLabel}>Razão social</div><div>{legalName}</div></div>
+                  <div className={styles.kv}><div className={styles.kvLabel}>Situação</div><Tag variant="success">{lookupResult?.cadastral_status ?? "NAO_VERIFICADA"}</Tag></div>
                 </div>
               </div>
 
-              <div style={S.reviewGroup}>
-                <div style={S.reviewHead}>
-                  <span style={S.reviewTitle}>Contatos</span>
-                  <button style={S.reviewEdit} onClick={() => goToStep(2)}>Editar</button>
+              <div className={styles.reviewGroup}>
+                <div className={styles.reviewHead}>
+                  <span className={styles.reviewTitle}>Endereço</span>
+                  <Button variant="secondary" size="small" onClick={() => goToStep(1)}>Editar</Button>
                 </div>
-                <div style={S.grid3}>
-                  <div style={S.kv}><div style={S.kvLabel}>Comercial</div><div>{comercial.name}</div></div>
-                  <div style={S.kv}><div style={S.kvLabel}>Financeiro</div><div>{financeiro?.name || "Não informado"}</div></div>
-                  <div style={S.kv}><div style={S.kvLabel}>Técnico</div><div>{tecnico?.name || "Não informado"}</div></div>
-                </div>
-              </div>
-
-              <div style={S.reviewGroup}>
-                <div style={S.reviewHead}>
-                  <span style={S.reviewTitle}>Responsável legal</span>
-                  <button style={S.reviewEdit} onClick={() => goToStep(3)}>Editar</button>
-                </div>
-                <div style={S.grid3}>
-                  <div style={S.kv}><div style={S.kvLabel}>Nome</div><div>{repName}</div></div>
-                  <div style={S.kv}><div style={S.kvLabel}>CPF</div><div style={{ fontFamily: "'Courier New', monospace" }}>{formatCpf(repCpf)}</div></div>
-                  <div style={S.kv}><div style={S.kvLabel}>Cargo</div><div>{repRole || "—"}</div></div>
+                <div className={styles.grid3}>
+                  <div className={styles.kv}><div className={styles.kvLabel}>Logradouro</div><div>{street}, {addressNumber}</div></div>
+                  <div className={styles.kv}><div className={styles.kvLabel}>Cidade/UF</div><div>{city}/{ufState}</div></div>
+                  <div className={styles.kv}><div className={styles.kvLabel}>CEP</div><div className={styles.mono}>{formatCep(zipCode)}</div></div>
                 </div>
               </div>
 
-              {submitError && <div style={{ ...S.lookupBad, marginTop: 16 }}>{submitError}</div>}
+              <div className={styles.reviewGroup}>
+                <div className={styles.reviewHead}>
+                  <span className={styles.reviewTitle}>Contatos</span>
+                  <Button variant="secondary" size="small" onClick={() => goToStep(2)}>Editar</Button>
+                </div>
+                <div className={styles.grid3}>
+                  <div className={styles.kv}><div className={styles.kvLabel}>Comercial</div><div>{comercial.name}</div></div>
+                  <div className={styles.kv}><div className={styles.kvLabel}>Financeiro</div><div>{financeiro?.name || "Não informado"}</div></div>
+                  <div className={styles.kv}><div className={styles.kvLabel}>Técnico</div><div>{tecnico?.name || "Não informado"}</div></div>
+                </div>
+              </div>
 
-              <div style={S.actions}>
-                <button style={S.btnGhost} onClick={() => goToStep(3)} disabled={submitting}>Voltar</button>
-                <button style={S.btnPrimary} onClick={submit} disabled={submitting} data-testid="btn-criar-cadastro">
-                  {submitting ? "Criando…" : "Criar cadastro"}
-                </button>
+              <div className={styles.reviewGroup}>
+                <div className={styles.reviewHead}>
+                  <span className={styles.reviewTitle}>Responsável legal</span>
+                  <Button variant="secondary" size="small" onClick={() => goToStep(3)}>Editar</Button>
+                </div>
+                <div className={styles.grid3}>
+                  <div className={styles.kv}><div className={styles.kvLabel}>Nome</div><div>{repName}</div></div>
+                  <div className={styles.kv}><div className={styles.kvLabel}>CPF</div><div className={styles.mono}>{formatCpf(repCpf)}</div></div>
+                  <div className={styles.kv}><div className={styles.kvLabel}>Cargo</div><div>{repRole || "—"}</div></div>
+                </div>
+              </div>
+
+              {submitError && <div className={styles.alertBox}><Alert variant="error" text={submitError} fullWidth /></div>}
+
+              <div className={styles.actions}>
+                <Button variant="secondary" onClick={() => goToStep(3)} disabled={submitting}>Voltar</Button>
+                <Button onClick={submit} loading={submitting} data-testid="btn-criar-cadastro">Criar cadastro</Button>
               </div>
             </>
           )}
@@ -646,33 +633,29 @@ export default function NewCompanyScreen() {
 }
 
 function ContactCard({
-  title, badge, value, onChange, onRemove,
-}: { title: string; badge: string; value: ContactForm; onChange: (v: ContactForm) => void; onRemove: () => void }) {
+  title, value, onChange, onRemove,
+}: { title: string; value: ContactForm; onChange: (v: ContactForm) => void; onRemove: () => void }) {
   return (
-    <div style={S.contactCard}>
-      <div style={S.contactHead}>
-        <span style={{ fontFamily: "'Lexend', sans-serif", fontSize: 13.5, fontWeight: 600 }}>{title}</span>
+    <div className={styles.contactCard}>
+      <div className={styles.contactHead}>
+        <span className={styles.contactTitle}>{title}</span>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <span style={{ ...S.badgeReq, color: "rgba(var(--a-text-rgb),0.5)", background: "rgba(var(--a-neutral-rgb),0.07)" }}>{badge}</span>
-          <button style={{ ...S.reviewEdit, color: "#ff4d6d" }} onClick={onRemove}>Remover</button>
+          <span className={styles.badgeOptional}>Opcional</span>
+          <Button variant="secondary" size="small" onClick={onRemove}>Remover</Button>
         </div>
       </div>
-      <div style={S.grid2}>
-        <div style={S.field}>
-          <label style={S.label}>Nome</label>
-          <input style={S.input} value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} />
+      <div className={styles.grid2}>
+        <div className={styles.field}>
+          <InputBase label="Nome" value={value.name} onChange={(e) => onChange({ ...value, name: e.target.value })} />
         </div>
-        <div style={S.field}>
-          <label style={S.label}>Cargo</label>
-          <input style={S.input} value={value.roleTitle} onChange={(e) => onChange({ ...value, roleTitle: e.target.value })} />
+        <div className={styles.field}>
+          <InputBase label="Cargo" value={value.roleTitle} onChange={(e) => onChange({ ...value, roleTitle: e.target.value })} />
         </div>
-        <div style={S.field}>
-          <label style={S.label}>E-mail</label>
-          <input style={S.input} value={value.email} onChange={(e) => onChange({ ...value, email: e.target.value })} />
+        <div className={styles.field}>
+          <InputBase label="E-mail" value={value.email} onChange={(e) => onChange({ ...value, email: e.target.value })} />
         </div>
-        <div style={S.field}>
-          <label style={S.label}>Telefone</label>
-          <input style={{ ...S.input, fontFamily: "'Courier New', monospace" }} value={value.phone} onChange={(e) => onChange({ ...value, phone: e.target.value })} />
+        <div className={styles.field}>
+          <InputBase label="Telefone" value={value.phone} onChange={(e) => onChange({ ...value, phone: e.target.value })} />
         </div>
       </div>
     </div>

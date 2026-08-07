@@ -1,0 +1,145 @@
+@import '../../core/scss/styles.scss';
+
+@keyframes loading-loop {
+  0% {
+    left: 0%;
+    right: 100%;
+    width: 0px;
+  }
+  10% {
+    left: 0%;
+    right: 75%;
+    width: 40px;
+  }
+  90% {
+    right: 0%;
+    left: 75%;
+    width: 40px;
+  }
+  100% {
+    left: 100%;
+    right: 0%;
+    width: 0px;
+  }
+}
+
+.ds-upload-list-files__container {
+  margin-top: 48px;
+  display: flex;
+  flex-direction: column;
+}
+
+.ds-upload-list-files__title {
+  @include font('xs-emphasys');
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: spacing('m');
+  cursor: default;
+}
+
+.ds-upload-list-files__items-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.ds-upload-list-files__item {
+  max-width: 390px;
+  margin-bottom: 30px;
+
+  & i {
+    @include color('color', 'brand-primary');
+    padding-right: 8px;
+    position: relative;
+  }
+
+  & span {
+    @include font('sm');
+    @include color('color', 'dark');
+    line-height: 18px;
+    line-break: anywhere;
+    max-width: 300px;
+  }
+
+  &--over {
+    &:hover {
+      cursor: default;
+
+      & span {
+        @include color('color', 'brand-primary');
+      }
+
+      & i {
+        display: block;
+      }
+    }
+  }
+}
+
+.ds-upload-list-files__item-card {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+}
+
+.ds-upload-list-files__item-wrapper {
+  max-width: 380px;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+
+  & button {
+    cursor: pointer;
+    border: 0;
+    background: none;
+    padding: 0;
+    width: 10px;
+    height: 15px;
+    display: flex;
+    align-items: center;
+
+    & i {
+      padding: 0;
+      display: none;
+    }
+  }
+}
+
+.ds-upload-list-files__item-success {
+  @include color('color', 'brand-primary');
+}
+
+.ds-upload-list-files__item-status {
+  @include font('sm');
+  @include color('color', 'grey-500');
+  margin-left: 28px;
+  cursor: default;
+
+  &--error {
+    @include font('sm-emphasys');
+    @include color('color', 'error-base');
+  }
+}
+
+.ds-upload-list-files__loader {
+  width: 296px;
+  margin: 0 auto;
+  border-radius: 10px;
+  @include color('background-color', 'grey-100');
+  border: 2px solid transparent;
+  position: relative;
+  top: 12px;
+  left: -18px;
+}
+
+.ds-upload-list-files__loader .ds-upload-list-files__loader-bar {
+  position: absolute;
+  @include border(2, 'solid', 'brand-primary');
+  @include rounded(null, 'xs');
+  top: -2px;
+  right: 100%;
+  bottom: 0;
+  left: 0;
+  width: 20px;
+  animation: loading-loop 1.5s linear infinite;
+}

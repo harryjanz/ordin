@@ -1,0 +1,39 @@
+// ==========================================================
+// box-shadow($top, $left, $blur, $spread, $color, $opacity, $inset)
+// Returns a box shadow according to the parameters
+//
+// Required arguments:
+// `$top` Number
+// `$left` Number
+// `$blur` Number
+// `$spread` Number
+// `$color` String
+// `$opacity` Number
+//
+// Optional arguments:
+// `$inset` Bool
+//
+// Example of use:
+// .foo { box-shadow: box-shadow(0, 12, 26, -4, color('brand-primary'), 0.5); }
+// @return 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+// or
+// .foo { box-shadow: box-shadow(0, 12, 26, -4, color('brand-primary'), 0.5, true); }
+// @return inset 0px 12px 26px -4px rgba(153, 102, 255, 0.5);
+// ==========================================================
+@function box-shadow(
+  $top,
+  $left,
+  $blur,
+  $spread,
+  $color,
+  $opacity,
+  $inset: false
+) {
+  $props: #{$top}px #{$left}px #{$blur}px #{$spread}px rgba($color, $opacity);
+
+  @if $inset {
+    @return inset $props;
+  } @else {
+    @return $props;
+  }
+}

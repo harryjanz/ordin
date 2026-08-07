@@ -1,0 +1,68 @@
+@import '../../core/scss/styles.scss';
+
+.ds-tab__button {
+  padding: spacing('m') spacing('l');
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+  flex-direction: row;
+  cursor: pointer;
+  box-sizing: border-box;
+  background-color: transparent;
+  border: none;
+  text-align: left;
+
+  &--active {
+    & > .ds-tab__label {
+      @include color('color', 'brand-primary');
+    }
+  }
+
+  &--disabled {
+    opacity: 0.4;
+    &:hover {
+      cursor: not-allowed !important;
+    }
+  }
+
+  &:not(.ds-tab__button--disabled):hover {
+    transition: ease-in 200ms;
+
+    & > .ds-tab__label {
+      @include color('color', 'brand-primary');
+    }
+
+    & > .ds-tab__totalizer {
+      @include color('color', 'brand-primary');
+      @include color('background-color', 'brand-secondary');
+    }
+  }
+}
+
+.ds-tab__label {
+  @include font('base-emphasys');
+  @include color('color', 'grey-500');
+  margin-right: spacing('s');
+}
+
+.ds-tab__totalizer {
+  @include font('xs-emphasys');
+  @include color('color', 'grey-500');
+  @include color('background-color', 'grey-100');
+  @include rounded(null, 'xs');
+  padding: spacing('0') spacing('xs');
+  height: spacing('m');
+  display: inline-flex;
+  align-self: center;
+
+  &--active {
+    @include color('color', 'brand-primary');
+    @include color('background-color', 'brand-secondary');
+  }
+}
+
+@media screen and (max-width: 500px) {
+  .ds-tab__button {
+    padding: spacing('m');
+  }
+}

@@ -1,0 +1,54 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  min-height: 100vh;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--a-bg);
+}
+
+.themeToggle {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  font-size: 17px;
+  cursor: pointer;
+}
+
+.card {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  @include padding('xxl', 'xxl-2', 'xxl', 'xxl-2');
+  width: 380px;
+}
+
+.logo {
+  @include font('xl-emphasys');
+  color: color('brand-primary');
+  margin-bottom: 4px;
+}
+
+.sub {
+  color: rgba(var(--a-text-rgb), 0.5);
+  @include font('sm');
+  margin-bottom: 32px;
+}
+
+.field {
+  margin-bottom: 16px;
+}
+
+.error {
+  margin-bottom: 16px;
+}

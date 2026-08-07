@@ -1,0 +1,118 @@
+@import 'design-system/dist/core/scss/styles';
+
+.wrap {
+  min-height: 100vh;
+  background: var(--a-bg);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 72px 20px 40px;
+  box-sizing: border-box;
+}
+
+.card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 32px 28px;
+  box-sizing: border-box;
+}
+
+.header {
+  margin-bottom: 28px;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.headerIcon {
+  font-size: 22px;
+}
+
+.headerTitle {
+  @include font('xl-emphasys');
+  color: var(--a-text);
+  margin: 0;
+}
+
+.headerSub {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.fieldLabel {
+  display: block;
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-bottom: 8px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+// Campo do código do totem: propositalmente grande/monoespaçado/centralizado —
+// mantido como <input> customizado (não InputBase) porque a prop className do
+// InputBase substitui por completo as classes internas do componente em vez de
+// mesclar, o que apagaria o estilo base do DS.
+.codeInput {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: 'Courier New', monospace;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: 10px;
+  text-transform: uppercase;
+  text-align: center;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+  background: rgba(var(--a-neutral-rgb), 0.05);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  color: var(--a-text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.codeInputFilled {
+  border-color: color('brand-primary');
+}
+
+.terminalField {
+  margin-bottom: 24px;
+}
+
+.feedback {
+  margin-top: 16px;
+  padding: 12px 16px;
+  @include rounded('card');
+  @include font('sm');
+  text-align: center;
+}
+
+.feedbackOk {
+  background: rgba(93, 212, 144, 0.1);
+  border: 1px solid rgba(93, 212, 144, 0.3);
+  color: #5dd490;
+}
+
+.feedbackErr {
+  background: rgba(255, 107, 91, 0.1);
+  border: 1px solid rgba(255, 107, 91, 0.3);
+  color: #ff6b5b;
+}
+
+.hint {
+  margin-top: 24px;
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.3);
+  text-align: center;
+  line-height: 1.6;
+}

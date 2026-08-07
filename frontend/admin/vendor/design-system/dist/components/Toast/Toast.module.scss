@@ -1,0 +1,85 @@
+@import '../../core/scss/styles.scss';
+
+.ds-toast__container {
+  top: spacing('l') !important;
+  left: spacing('l') !important;
+  bottom: spacing('l') !important;
+  right: spacing('l') !important;
+
+  & div > div > div {
+    margin: 0px;
+  }
+}
+
+.ds-toast__wrapper {
+  @include font('xs-emphasys');
+  padding: spacing('m');
+  display: flex;
+  flex-flow: row nowrap;
+  @include rounded('card');
+  box-sizing: border-box;
+  align-items: center;
+
+  & > i {
+    margin-right: spacing('s');
+    align-self: flex-start;
+  }
+
+  &--neutral {
+    @include color('background-color', 'grey-100');
+    @include color('color', 'dark');
+  }
+
+  &--success {
+    @include color('background-color', 'success-light');
+    @include color('color', 'success-base');
+  }
+
+  &--warning {
+    @include color('background-color', 'warning-light');
+    @include color('color', 'warning-base');
+  }
+
+  &--error {
+    @include color('background-color', 'error-light');
+    @include color('color', 'error-base');
+  }
+}
+
+.ds-toast__close-button {
+  border: none;
+  padding: 0px;
+  background-color: transparent;
+  margin-left: spacing('m');
+  margin-top: 2px;
+  cursor: pointer;
+  align-self: flex-start;
+
+  &:hover {
+    & > i {
+      @include color('color', 'brand-primary');
+    }
+  }
+
+  & > i {
+    &::before {
+      font-size: 14px !important;
+      line-height: 14px !important;
+    }
+  }
+}
+
+.ds-toast__text {
+  @include font('xs-emphasys');
+  display: flow-root;
+  margin: 0px;
+  align-self: center;
+
+  & button {
+    padding-right: 3px;
+
+    & > span {
+      text-decoration: underline;
+    }
+  }
+}

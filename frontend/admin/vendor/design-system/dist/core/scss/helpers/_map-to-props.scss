@@ -1,0 +1,44 @@
+@use "sass:meta";
+
+// ==========================================================
+// map-to-props()
+// returns the keys/value pairs of a map as a string
+//
+// Required arguments:
+// `$map` Map
+//
+// Example of use:
+// sample map with nested maps as fonts variations CSS properties
+// $fonts: (
+//   "xs-2": (
+//     font-weight: 400,
+//     font-size: 10px,
+//     letter-spacing: 0,
+//     line-height: 12px
+//   )
+// );
+//
+// @include map-to-props($fonts, 'xs-2')
+//
+// @return
+// font-weight: 400,
+// font-size: 10px,
+// letter-spacing: 0,
+// line-height: 12px
+// ==========================================================
+
+@mixin map-to-props($map) {
+  @if type-of($map) == map {
+    @each $prop, $value in $map {
+      @if type-of($value) != map {
+        @if inspect($prop) == 'description' {
+          /* #{inspect($value)} */
+        } @else {
+          #{inspect($prop)}: #{inspect($value)};
+        }
+      } @else {
+        @include map-to-props($value);
+      }
+    }
+  }
+}

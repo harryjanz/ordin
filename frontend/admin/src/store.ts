@@ -19,9 +19,8 @@ interface Store extends AuthState {
   unsavedChanges: boolean;
   // Tema claro/escuro da interface do próprio admin (não é a aparência do
   // totem — isso fica em Company.visual_theme/visual_mode, via themes.ts).
-  // Só o superadmin vê o controle pra trocar (App.tsx só aplica data-theme
-  // quando role === "superadmin"); persiste no localStorage mesmo assim,
-  // já que o valor em si é inofensivo pra outros papéis se não for aplicado.
+  // Disponível pra todos os papéis (Sidebar mostra o controle pra todos);
+  // persiste no localStorage.
   adminThemeMode: "light" | "dark";
   login: (access: string, refresh: string) => void;
   logout: () => void;

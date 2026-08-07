@@ -1,0 +1,35 @@
+@import '../../core/scss/styles';
+
+.ds-calendar-date-selection__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  list-style: none;
+  margin: 0;
+  padding: 0 spacing('s');
+  height: 2.5rem;
+
+  & li {
+    @include font('sm');
+    @include color('color', 'grey-500');
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: 1 0 0;
+  }
+}
+
+.ds-calendar-date-selection__list {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+  margin: 0;
+  padding: 0 spacing('s');
+}
+
+.ds-calendar-date-selection__item {
+  width: 2.786rem;
+  height: 2.5rem;
+  box-sizing: border-box;
+  padding: 2px spacing('xs') 2px spacing('xs');
+}
