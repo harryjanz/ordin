@@ -1,9 +1,41 @@
-import { useState, useEffect, FormEvent } from "react";
-import { Button, CurrencyInput, Dropdown, InputBase, Modal, Tag, Upload, UploadListFiles, type DropdownOptions, type UploadFile } from "design-system";
+import { useState, useEffect, FormEvent, DragEvent } from "react";
+import {
+  Button,
+  CheckboxMultiselect,
+  CurrencyInput,
+  Dropdown,
+  InputBase,
+  Modal,
+  NumberInput,
+  Tag,
+  TagInput,
+  TextArea,
+  Upload,
+  UploadListFiles,
+  type DropdownOptions,
+  type TagProps,
+  type UploadFile,
+} from "design-system";
 import api from "../api";
 import ConfirmDialog, { type ConfirmDialogProps } from "../components/ConfirmDialog";
-import type { Category, Product } from "../types";
+import type { Allergen, Category, Product } from "../types";
 import styles from "./CatalogScreen.module.scss";
+
+// Conjunto sugerido pra tags (usuário aprovou "adotar os padrões sugeridos,
+// mas podem surgir mais") — o TagInput do DS não tem suporte nativo a
+// sugestões, então isso vira só um texto de apoio; qualquer tag livre é aceita.
+const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
+
+// Variant semântica por tag conhecida — o resto cai no default (neutral).
+const TAG_VARIANTS: Record<string, TagProps["variant"]> = {
+  picante: "warning",
+  vegetariano: "success",
+  "mais vendido": "emphasys",
+};
+
+function tagVariant(tag: string): TagProps["variant"] {
+  return TAG_VARIANTS[tag.toLowerCase()] ?? "neutral";
+}
 
 // Upload do DS espera o limite de tamanho em MB.
 // Valor redondo em MB de propósito — o Upload do DS monta a mensagem de erro
@@ -32,11 +64,19 @@ interface EditProdState {
   category_id: number;
   image_url: string | null;
   thumbnail_url: string | null;
+  description: string;
+  description_long: string;
+  calories: number | null;
+  sku: string;
+  tags: string[];
+  allergen_ids: string[];
 }
 
 export default function CatalogScreen() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [allergens, setAllergens] = useState<Allergen[]>([]);
+  const [draggedProductId, setDraggedProductId] = useState<number | null>(null);
   const [selectedCat, setSelectedCat] = useState<number | null>(null);
   const [newCatName, setNewCatName] = useState("");
   const [newProd, setNewProd] = useState<{ name: string; price: number | null }>({ name: "", price: null });
@@ -51,7 +91,7 @@ export default function CatalogScreen() {
   } | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
 
-  useEffect(() => { loadCategories(); }, []);
+  useEffect(() => { loadCategories(); loadAllergens(); }, []);
   useEffect(() => { if (selectedCat) loadProducts(selectedCat); else setProducts([]); }, [selectedCat]);
 
   async function loadCategories() {
@@ -62,6 +102,11 @@ export default function CatalogScreen() {
   async function loadProducts(catId: number) {
     const r = await api.get(`/catalog/products?category_id=${catId}&include_inactive=true`);
     setProducts(r.data.products ?? r.data);
+  }
+
+  async function loadAllergens() {
+    const r = await api.get("/catalog/allergens");
+    setAllergens(r.data.allergens ?? r.data);
   }
 
   async function addCategory(e: FormEvent) {
@@ -132,6 +177,12 @@ export default function CatalogScreen() {
       category_id: p.category_id,
       image_url: p.image_url,
       thumbnail_url: p.thumbnail_url,
+      description: p.description ?? "",
+      description_long: p.description_long ?? "",
+      calories: p.calories,
+      sku: p.sku ?? "",
+      tags: p.tags ?? [],
+      allergen_ids: (p.allergens ?? []).map((a) => String(a.id)),
     });
     setUploadFiles([]);
   }
@@ -148,9 +199,41 @@ export default function CatalogScreen() {
       name: editProd.name.trim(),
       price: editProd.price,
       category_id: editProd.category_id,
+      description: editProd.description.trim() || null,
+      description_long: editProd.description_long.trim() || null,
+      calories: editProd.calories,
+      sku: editProd.sku.trim() || null,
+      tags: editProd.tags,
+      allergen_ids: editProd.allergen_ids.map(Number),
     });
     closeEditProd();
     if (selectedCat) loadProducts(selectedCat);
+  }
+
+  function handleProductDragStart(id: number) {
+    setDraggedProductId(id);
+  }
+
+  function handleProductDragOver(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+  }
+
+  async function handleProductDrop(e: DragEvent<HTMLDivElement>, targetId: number) {
+    e.preventDefault();
+    const sourceId = draggedProductId;
+    setDraggedProductId(null);
+    if (sourceId === null || sourceId === targetId || !selectedCat) return;
+    const fromIndex = products.findIndex((p) => p.id === sourceId);
+    const toIndex = products.findIndex((p) => p.id === targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+    const reordered = [...products];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+    setProducts(reordered);
+    await api.put("/catalog/products/reorder", {
+      category_id: selectedCat,
+      product_ids: reordered.map((p) => p.id),
+    });
   }
 
   async function handleImageFiles(files: UploadFile[]) {
@@ -343,6 +426,65 @@ export default function CatalogScreen() {
                 options={categoryOptions}
               />
 
+              <TextArea
+                label="Descrição curta"
+                value={editProd.description}
+                onChange={(e) => setEditProd({ ...editProd, description: e.target.value })}
+                maxLength={500}
+                helperMessage="Aparece na grade/listagem do totem"
+              />
+
+              <TextArea
+                label="Descrição longa"
+                value={editProd.description_long}
+                onChange={(e) => setEditProd({ ...editProd, description_long: e.target.value })}
+                maxLength={2000}
+                autoSize
+                helperMessage="Detalhe completo, mostrado só ao abrir o item"
+              />
+
+              <div className={styles.formRow}>
+                <div className={styles.formRowField}>
+                  <NumberInput
+                    label="Calorias (kcal)"
+                    value={editProd.calories ?? undefined}
+                    onChange={(value: number) => setEditProd({ ...editProd, calories: value })}
+                  />
+                </div>
+                <div className={styles.formRowField}>
+                  <InputBase
+                    label="SKU"
+                    value={editProd.sku}
+                    placeholder="Opcional, único por empresa"
+                    onChange={(e) => setEditProd({ ...editProd, sku: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <TagInput
+                label="Tags"
+                value={editProd.tags}
+                onValueChange={(tags) => setEditProd({ ...editProd, tags })}
+                placeholder={`Sugestões: ${SUGGESTED_TAGS}`}
+              />
+
+              <CheckboxMultiselect
+                key={editProd.id}
+                id={`edit-prod-${editProd.id}-allergens`}
+                label="Alérgenos (RDC 727/2022)"
+                options={allergens.map((a) => ({ value: String(a.id), label: a.name, disabled: false }))}
+                initialSelection={editProd.allergen_ids}
+                onSelectOption={(option, checked) => {
+                  setEditProd((prev) => {
+                    if (!prev) return prev;
+                    const ids = checked
+                      ? [...prev.allergen_ids, option.value]
+                      : prev.allergen_ids.filter((id) => id !== option.value);
+                    return { ...prev, allergen_ids: ids };
+                  });
+                }}
+              />
+
               <div className={styles.imageSection}>
                 <div className={styles.formLabel}>Imagem do produto</div>
                 {editProd.thumbnail_url ? (
@@ -387,8 +529,16 @@ export default function CatalogScreen() {
           )}
 
           {products.map((p) => (
-            <div key={p.id} className={styles.item}>
+            <div
+              key={p.id}
+              className={`${styles.item} ${draggedProductId === p.id ? styles.itemDragging : ""}`}
+              draggable
+              onDragStart={() => handleProductDragStart(p.id)}
+              onDragOver={handleProductDragOver}
+              onDrop={(e) => handleProductDrop(e, p.id)}
+            >
               <span className={styles.itemName}>
+                <span className={styles.dragHandle} title="Arraste para reordenar">⠿</span>
                 {p.thumbnail_url ? (
                   <img
                     src={p.thumbnail_url}
@@ -407,6 +557,9 @@ export default function CatalogScreen() {
                   {p.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                 </span>
                 <Tag variant={p.active ? "success" : "error"}>{p.active ? "ativo" : "inativo"}</Tag>
+                {(p.tags ?? []).map((t) => (
+                  <Tag key={t} variant={tagVariant(t)}>{t}</Tag>
+                ))}
               </span>
               <div className={styles.actions}>
                 <Button size="small" variant="secondary" onClick={() => openEditProd(p)}>Editar</Button>

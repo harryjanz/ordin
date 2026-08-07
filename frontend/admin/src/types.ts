@@ -121,17 +121,29 @@ export interface Category {
   sort_order: number;
 }
 
+export interface Allergen {
+  id: number;
+  code: string;
+  name: string;
+  category: string | null;
+}
+
 export interface Product {
   id: number;
   company_id: number;
   category_id: number;
   name: string;
   description: string | null;
+  description_long: string | null;
   price: number;
   image_url: string | null;
   thumbnail_url: string | null;
   active: boolean;
-  sort_order: number;
+  tags: string[] | null;
+  calories: number | null;
+  sku: string | null;
+  sort_order: number | null;
+  allergens: Allergen[];
 }
 
 export interface Order {
