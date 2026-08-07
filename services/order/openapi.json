@@ -14,15 +14,20 @@
         "summary": "Criar pedido",
         "description": "Cria um pedido para o totem autenticado. Para cada unidade de cada item, gera um ticket\nindependente com QR Code assinado por HMAC-SHA256. Requer `role: kiosk`.",
         "operationId": "create_order_orders_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/OrderIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -45,12 +50,80 @@
               }
             }
           }
-        },
+        }
+      },
+      "get": {
+        "tags": [
+          "Pedidos"
+        ],
+        "summary": "Listar pedidos da empresa",
+        "description": "Lista pedidos da empresa autenticada com filtro opcional de status.",
+        "operationId": "list_orders_orders_get",
         "security": [
           {
             "HTTPBearer": []
           }
-        ]
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Skip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/tickets/{ticket_code}/collect": {
@@ -456,6 +529,70 @@
         ],
         "title": "OrderIn"
       },
+      "OrderListItem": {
+        "properties": {
+          "order_ref": {
+            "type": "string",
+            "title": "Order Ref"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "total": {
+            "type": "number",
+            "title": "Total"
+          },
+          "terminal_id": {
+            "type": "integer",
+            "title": "Terminal Id"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "tickets_total": {
+            "type": "integer",
+            "title": "Tickets Total"
+          },
+          "tickets_collected": {
+            "type": "integer",
+            "title": "Tickets Collected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "order_ref",
+          "status",
+          "total",
+          "terminal_id",
+          "created_at",
+          "tickets_total",
+          "tickets_collected"
+        ],
+        "title": "OrderListItem"
+      },
+      "OrderListOut": {
+        "properties": {
+          "orders": {
+            "items": {
+              "$ref": "#/components/schemas/OrderListItem"
+            },
+            "type": "array",
+            "title": "Orders"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "orders",
+          "total"
+        ],
+        "title": "OrderListOut"
+      },
       "OrderOut": {
         "properties": {
           "order_ref": {
@@ -529,6 +666,10 @@
             "type": "string",
             "title": "Ticket Code"
           },
+          "qr_data": {
+            "type": "string",
+            "title": "Qr Data"
+          },
           "status": {
             "type": "string",
             "title": "Status"
@@ -567,6 +708,7 @@
         "type": "object",
         "required": [
           "ticket_code",
+          "qr_data",
           "status",
           "unit_number",
           "total_units"
