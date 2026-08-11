@@ -76,6 +76,19 @@
   }
 }
 
+// "Sair" reaproveita .navItem (mesmo box-model/cor/alinhamento dos itens de
+// navegação acima — ver ORD-076, achados 1 e 3), mas é <button>, não <a>,
+// então precisa resetar o chrome padrão de botão do browser.
+.logoutItem {
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .navIcon {
   flex-shrink: 0;
   font-size: 17px;
@@ -95,15 +108,11 @@
 .themeToggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   @include padding('xs', 's', 'xs', 's');
-  background: transparent;
-  border: 1px solid var(--a-border);
-  @include rounded('default');
   color: rgba(var(--a-text-rgb), 0.6);
   @include font('sm');
-  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
 }
