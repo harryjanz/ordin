@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { Button, DateInput, Dropdown, Tag, type DropdownOptions, type TagProps } from "design-system";
+import { Button, DateInput, Dropdown, Skeleton, Tag, type DropdownOptions, type TagProps } from "design-system";
 import { listPayments } from "../api/payments";
 import { listCompanies } from "../api/companies";
 import { useStore } from "../store";
 import Table, { type TableColumn } from "../components/Table";
-import type { Company, Transaction } from "../types";
+import type { Company, PaymentStatusSummary, Transaction } from "../types";
 import styles from "./PaymentsScreen.module.scss";
 
 const STATUS_VARIANT: Record<string, TagProps["variant"]> = {
@@ -33,6 +33,23 @@ const STATUS_OPTIONS: DropdownOptions[] = [
 
 const LIMIT = 50;
 
+// "expired" não vira card dedicado (baixíssimo volume) — soma junto com
+// "Recusado", mesmo bucket semântico ("não completou"). Clicar num card
+// filtra a tabela pelo status principal do card (statuses[0]).
+const STATUS_CARDS: { key: string; label: string; statuses: string[]; color: string; note?: string }[] = [
+  { key: "approved", label: "Aprovado", statuses: ["approved"], color: "var(--success-base)" },
+  { key: "refused", label: "Recusado", statuses: ["refused", "expired"], color: "var(--error-base)", note: "inclui expiradas" },
+  { key: "cancelled", label: "Cancelado", statuses: ["cancelled"], color: "var(--warning-base)" },
+  { key: "processing", label: "Em processamento", statuses: ["processing"], color: "var(--brand-primary)", note: "PIX aguardando confirmação" },
+];
+
+function sumSummary(summary: PaymentStatusSummary, statuses: string[]): { count: number; amount: number } {
+  return statuses.reduce(
+    (acc, s) => ({ count: acc.count + (summary[s]?.count ?? 0), amount: acc.amount + (summary[s]?.amount ?? 0) }),
+    { count: 0, amount: 0 }
+  );
+}
+
 // DateInput trabalha em dd/mm/aaaa — o backend espera algo comparável a
 // created_at (DATETIME). "dd/mm/aaaa" -> "aaaa-mm-dd".
 function toIsoDate(brDate: string): string | undefined {
@@ -55,6 +72,7 @@ export default function PaymentsScreen() {
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<PaymentStatusSummary>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -75,15 +93,11 @@ export default function PaymentsScreen() {
       skip,
       limit: LIMIT,
     })
-      .then((r) => { setTransactions(r.items); setTotal(r.total); })
+      .then((r) => { setTransactions(r.items); setTotal(r.total); setSummary(r.summary); })
       .catch(() => null)
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, dateFrom, dateTo, provider, status, skip]);
-
-  const totalApproved = transactions
-    .filter((t) => t.status === "approved")
-    .reduce((acc, t) => acc + t.amount, 0);
 
   function clearFilters() {
     setCompanyId(null);
@@ -162,19 +176,36 @@ export default function PaymentsScreen() {
         <Button variant="secondary" onClick={clearFilters} disabled={!hasFilter}>Limpar</Button>
       </div>
 
+      <div className={styles.grid}>
+        {STATUS_CARDS.map((card) => {
+          const { count, amount } = sumSummary(summary, card.statuses);
+          const active = status === card.statuses[0];
+          return (
+            <button
+              key={card.key}
+              type="button"
+              className={`${styles.card} ${active ? styles.cardActive : ""}`}
+              style={{ borderLeftColor: card.color }}
+              onClick={() => { setStatus(active ? "" : card.statuses[0]); setSkip(0); }}
+            >
+              <div className={styles.cardLabel}>{card.label} {loading ? "" : `(${count})`}</div>
+              {loading ? (
+                <Skeleton height={28} />
+              ) : (
+                <div className={styles.cardValue} style={{ color: card.color }}>
+                  {amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                </div>
+              )}
+              {card.note && <div className={styles.cardNote}>{card.note}</div>}
+            </button>
+          );
+        })}
+      </div>
+
       {loading && transactions.length === 0 && total === 0 ? (
         <div className={styles.muted}>Carregando…</div>
       ) : (
         <>
-          <div className={styles.summary}>
-            <div className={styles.summaryLabel}>
-              Total aprovado ({transactions.filter((t) => t.status === "approved").length} transações{loading ? " · atualizando…" : ""})
-            </div>
-            <div className={styles.summaryValue}>
-              {totalApproved.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-            </div>
-          </div>
-
           {transactions.length > 0 ? (
             <>
               <Table columns={columns} rows={transactions} rowKey={(t) => t.id} />

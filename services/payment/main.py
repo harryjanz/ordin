@@ -164,9 +164,19 @@ class TransactionOut(BaseModel):
     created_at:    str
 
 
+class StatusSummaryItem(BaseModel):
+    count: int
+    amount: float
+
+
 class PaymentListOut(BaseModel):
     items: list[TransactionOut]
     total: int
+    # Agregado por status, ignorando o filtro de status (mas respeitando
+    # empresa/provider/período) — ver ORD-078. Sempre com os 5 status do
+    # enum presentes, count=0/amount=0 quando não há transação daquele
+    # status no recorte filtrado (o frontend não precisa tratar ausência).
+    summary: dict[str, StatusSummaryItem]
 
 
 class CancelOut(BaseModel):
@@ -401,18 +411,24 @@ async def list_payments(
     # revela se a empresa pedida existe, só se comporta como se o parâmetro
     # não tivesse sido enviado).
     if current_user.role == "superadmin":
-        filters = [Transaction.company_id == company_id] if company_id else []
+        base_filters = [Transaction.company_id == company_id] if company_id else []
     else:
-        filters = [Transaction.company_id == current_user.company_id]
+        base_filters = [Transaction.company_id == current_user.company_id]
 
+    if provider:
+        base_filters.append(Transaction.provider == provider)
+    if date_from:
+        base_filters.append(Transaction.created_at >= date_from)
+    if date_to:
+        base_filters.append(Transaction.created_at <= date_to)
+
+    # filters = base_filters + status, usado na lista/contagem paginada.
+    # O resumo por status (summary, abaixo) usa só base_filters — ignora o
+    # filtro de status de propósito, pra sempre mostrar a distribuição
+    # completa entre os status, mesmo com a tabela filtrada por um só.
+    filters = list(base_filters)
     if status:
         filters.append(Transaction.status == status)
-    if provider:
-        filters.append(Transaction.provider == provider)
-    if date_from:
-        filters.append(Transaction.created_at >= date_from)
-    if date_to:
-        filters.append(Transaction.created_at <= date_to)
 
     total = (
         await db.execute(select(func.count()).select_from(Transaction).where(*filters))
@@ -426,6 +442,17 @@ async def list_payments(
         .limit(limit)
     )
     txs = result.scalars().all()
+
+    summary = {s.value: {"count": 0, "amount": 0.0} for s in TransactionStatus}
+    summary_rows = await db.execute(
+        select(Transaction.status, func.count(), func.sum(Transaction.amount))
+        .where(*base_filters)
+        .group_by(Transaction.status)
+    )
+    for row_status, row_count, row_amount in summary_rows.all():
+        if row_status in summary:
+            summary[row_status] = {"count": row_count, "amount": float(row_amount or 0)}
+
     return {
         "items": [
             {
@@ -442,6 +469,7 @@ async def list_payments(
             for t in txs
         ],
         "total": total,
+        "summary": summary,
     }
 
 

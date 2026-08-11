@@ -48,24 +48,48 @@
   align-items: center;
 }
 
-.summary {
+// Resumo por status (ORD-078) — mesmo grid/card do DashboardScreen
+// (DashboardScreen.module.scss), adaptado com uma borda-esquerda semântica
+// por status em vez de sempre brand-primary, e clicável (filtra a tabela).
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.card {
   background: var(--a-surface);
   border: 1px solid var(--a-border);
+  border-left: 3px solid var(--a-border);
   @include rounded('card');
-  @include padding('m', 'l', 'm', 'l');
-  margin-bottom: 24px;
-  display: inline-block;
+  @include padding('l', 'xl', 'l', 'xl');
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+
+  &.cardActive {
+    outline: 2px solid rgba(var(--a-text-rgb), 0.15);
+    outline-offset: -1px;
+  }
 }
 
-.summaryLabel {
+.cardLabel {
   @include font('xs');
   color: rgba(var(--a-text-rgb), 0.5);
-  margin-bottom: 4px;
+  margin-bottom: 8px;
 }
 
-.summaryValue {
-  @include font('xl-emphasys');
-  color: #33cccc;
+.cardValue {
+  @include font('xl-2-emphasys');
+}
+
+.cardNote {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.35);
+  margin-top: 4px;
 }
 
 .empty {

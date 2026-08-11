@@ -176,3 +176,12 @@ export interface Transaction {
   authorization: string | null;
   created_at: string;
 }
+
+export interface StatusSummaryItem {
+  count: number;
+  amount: number;
+}
+
+// Sempre com os 5 status do TransactionStatus (backend) presentes, mesmo
+// zerados — ver ORD-078.
+export type PaymentStatusSummary = Record<string, StatusSummaryItem>;

@@ -1,5 +1,5 @@
 import api from "../api";
-import type { Transaction } from "../types";
+import type { PaymentStatusSummary, Transaction } from "../types";
 
 export interface PaymentListFilters {
   companyId?: number;
@@ -26,8 +26,14 @@ export function buildPaymentListQuery(filters: PaymentListFilters): Record<strin
   return params;
 }
 
-export async function listPayments(filters: PaymentListFilters): Promise<{ items: Transaction[]; total: number }> {
-  const r = await api.get<{ items: Transaction[]; total: number }>("/payments", {
+export interface PaymentListResult {
+  items: Transaction[];
+  total: number;
+  summary: PaymentStatusSummary;
+}
+
+export async function listPayments(filters: PaymentListFilters): Promise<PaymentListResult> {
+  const r = await api.get<PaymentListResult>("/payments", {
     params: buildPaymentListQuery(filters),
   });
   return r.data;
