@@ -21,26 +21,39 @@ export interface TableProps<T> {
   expandedRowKey?: string | number | null;
   /** Conteúdo do painel expansível, renderizado numa linha extra logo abaixo. Só tem efeito junto com `expandedRowKey`. */
   renderExpanded?: (row: T) => ReactNode;
+  /**
+   * "compact" reproduz literalmente o protótipo aprovado de Transações TEF
+   * (fonte/padding menores, borda real em vez de quase-invisível, fundo do
+   * cabeçalho, hover de linha, borda da última linha removida). Só usado em
+   * PaymentsScreen — não muda o Table "default" do CompanyListScreen.
+   */
+  variant?: "default" | "compact";
 }
 
 export default function Table<T>({
-  columns, rows, rowKey, onRowClick, rowTestId, emptyMessage, expandedRowKey, renderExpanded,
+  columns, rows, rowKey, onRowClick, rowTestId, emptyMessage, expandedRowKey, renderExpanded, variant = "default",
 }: TableProps<T>) {
+  const compact = variant === "compact";
+  const cx = (base: string, compactClass?: string) => (compact && compactClass ? `${base} ${compactClass}` : base);
+
   if (rows.length === 0) {
     return (
-      <div className={styles.wrap}>
+      <div className={cx(styles.wrap, styles.wrapCompact)}>
         <div className={styles.empty} data-testid="empty-state">{emptyMessage ?? "Nenhum registro encontrado."}</div>
       </div>
     );
   }
 
+  const chevronColumn = Boolean(renderExpanded);
+
   return (
-    <div className={styles.wrap}>
-      <table className={styles.table}>
+    <div className={cx(styles.wrap, styles.wrapCompact)}>
+      <table className={cx(styles.table, styles.tableCompact)}>
         <thead>
           <tr>
+            {chevronColumn && <th className={cx(styles.th, styles.thCompact)} />}
             {columns.map((col) => (
-              <th key={col.key} className={styles.th}>{col.header}</th>
+              <th key={col.key} className={cx(styles.th, styles.thCompact)}>{col.header}</th>
             ))}
           </tr>
         </thead>
@@ -51,19 +64,24 @@ export default function Table<T>({
             return (
               <Fragment key={key}>
                 <tr
-                  className={styles.row}
+                  className={cx(styles.row, styles.rowCompact)}
                   onClick={() => onRowClick?.(row)}
                   data-testid={rowTestId?.(row)}
                 >
+                  {chevronColumn && (
+                    <td className={cx(styles.td, styles.tdCompact)}>
+                      <span className={`${styles.chev} ${expanded ? styles.chevOpen : ""}`}>▸</span>
+                    </td>
+                  )}
                   {columns.map((col) => (
-                    <td key={col.key} className={`${styles.td} ${col.mono ? styles.tdMono : ""}`}>
+                    <td key={col.key} className={`${cx(styles.td, styles.tdCompact)} ${col.mono ? styles.tdMono : ""}`}>
                       {col.render(row)}
                     </td>
                   ))}
                 </tr>
                 {expanded && (
                   <tr className={styles.expandedRow}>
-                    <td className={styles.expandedCell} colSpan={columns.length}>
+                    <td className={styles.expandedCell} colSpan={columns.length + (chevronColumn ? 1 : 0)}>
                       {renderExpanded!(row)}
                     </td>
                   </tr>

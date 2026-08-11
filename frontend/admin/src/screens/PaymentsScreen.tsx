@@ -242,6 +242,7 @@ export default function PaymentsScreen() {
             <>
               <div className={styles.count}><b>{total}</b> transaç{total === 1 ? "ão" : "ões"} encontrada{total === 1 ? "" : "s"}</div>
               <Table
+                variant="compact"
                 columns={columns}
                 rows={transactions}
                 rowKey={(t) => t.id}

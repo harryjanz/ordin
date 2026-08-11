@@ -138,7 +138,7 @@
 
 // Painel de detalhe expansível da linha (ORD-080).
 .detail {
-  background: rgba(var(--a-neutral-rgb), 0.03);
+  background: var(--a-surface-2);
   padding: 16px 20px;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
