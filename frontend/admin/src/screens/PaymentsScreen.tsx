@@ -98,7 +98,9 @@ function isPaygoBlocked(t: Transaction): boolean {
 
 export default function PaymentsScreen() {
   const role = useStore((s) => s.role);
-  const isSuperadmin = role === "superadmin";
+  // superadmin e admin são equivalentes (gestão da plataforma, ver
+  // docs/ARQUITETURA.md §1.2) — os dois enxergam/filtram por qualquer empresa.
+  const isPlatformAdmin = role === "superadmin" || role === "admin";
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [companyId, setCompanyId] = useState<number | null>(null);
@@ -134,11 +136,11 @@ export default function PaymentsScreen() {
   const otherReasonRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    if (isSuperadmin) {
+    if (isPlatformAdmin) {
       listCompanies({ limit: 200 }).then((r) => setCompanies(r.companies)).catch(() => null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSuperadmin]);
+  }, [isPlatformAdmin]);
 
   useEffect(() => {
     fetchTransactions();
@@ -276,7 +278,7 @@ export default function PaymentsScreen() {
     },
   ];
 
-  const scopeNote = isSuperadmin
+  const scopeNote = isPlatformAdmin
     ? (companyId ? companyOptions.find((o) => o.value === String(companyId))?.label : "Todas as empresas")
     : null;
 
@@ -317,7 +319,7 @@ export default function PaymentsScreen() {
       </div>
 
       <div className={styles.filterBar}>
-        {isSuperadmin && (
+        {isPlatformAdmin && (
           <div className={styles.field}>
             <Dropdown
               label="Empresa"

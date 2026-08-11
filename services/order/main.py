@@ -19,6 +19,17 @@ def require_internal(x_internal_secret: str = Header(default="")) -> None:
     if not secrets.compare_digest(x_internal_secret, INTERNAL_SECRET):
         raise HTTPException(403, detail="Acesso interno não autorizado")
 
+
+ORDER_STATUSES = ["pending", "paid", "completed", "cancelled"]
+
+
+def _normalize_cpf(value: str) -> str:
+    # order-service não tem o normalizador do company-service (domain/cpf.py)
+    # nem depende dele (serviços independentes) — versão mínima só pra
+    # comparar o filtro com o que está gravado (grava como recebido do
+    # totem, sem pontuação, ver Order.cpf/OrderIn.cpf).
+    return "".join(c for c in value if c.isdigit())
+
 engine = create_async_engine(DB_URL.replace("mysql+pymysql://", "mysql+aiomysql://"), pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -99,14 +110,21 @@ class OrderListItem(BaseModel):
     order_ref: str
     status: str
     total: float
+    company_id: int
     terminal_id: int
+    cpf: Optional[str] = None
     created_at: str
     tickets_total: int
     tickets_collected: int
 
+class OrderStatusSummaryItem(BaseModel):
+    count: int
+    total: float
+
 class OrderListOut(BaseModel):
     orders: list[OrderListItem]
     total: int
+    summary: dict[str, OrderStatusSummaryItem]
 
 class TicketOut(BaseModel):
     ticket_code: str
@@ -324,23 +342,79 @@ async def collect_ticket(
 )
 async def list_orders(
     status: Optional[str] = None,
+    order_ref: Optional[str] = None,
+    cpf: Optional[str] = None,
+    company_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    hour_from: Optional[str] = None,
+    hour_to: Optional[str] = None,
     limit: int = 50,
     skip: int = 0,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    """Lista pedidos da empresa autenticada com filtro opcional de status."""
-    q = select(Order).where(Order.company_id == current_user.company_id)
+    """Lista pedidos da empresa autenticada (superadmin/admin veem todas, com
+    filtro opcional de empresa) com filtros de status/referência/CPF/período/
+    faixa de horário e resumo agregado por status."""
+    # Mesmo padrão de list_payments (ORD-077): superadmin/admin enxergam
+    # todas as empresas, com filtro opcional de company_id pra restringir a
+    # uma; qualquer outro role fica restrito à própria, e o parâmetro
+    # company_id é ignorado nesse caso (sem 403, sem revelar se a empresa
+    # pedida existe).
+    if current_user.role in ("superadmin", "admin"):
+        base_filters = [Order.company_id == company_id] if company_id else []
+    else:
+        base_filters = [Order.company_id == current_user.company_id]
+
+    if order_ref:
+        base_filters.append(Order.order_ref.like(f"%{order_ref}%"))
+    if cpf:
+        # Prefixo, não igualdade exata — usuário reportou ao vivo que
+        # digitar os primeiros dígitos de um CPF que ele lembra parcialmente
+        # não achava nada (ex.: "030" não batia com "03013954973" gravado).
+        base_filters.append(Order.cpf.like(f"{_normalize_cpf(cpf)}%"))
+    if date_from:
+        base_filters.append(Order.created_at >= date_from)
+    if date_to:
+        base_filters.append(Order.created_at <= date_to)
+    # Faixa de horário só tem efeito com date_from setado (validado também
+    # no frontend — campo desabilitado até "De" ser preenchido). Sem essa
+    # trava, "só entre 11h-14h" sozinho filtraria o histórico inteiro por
+    # hora do dia, o que não é o caso de uso (localizar pedido dentro de um
+    # período já filtrado, não fora dele).
+    if date_from and hour_from:
+        base_filters.append(func.time(Order.created_at) >= hour_from)
+    if date_from and hour_to:
+        base_filters.append(func.time(Order.created_at) <= hour_to)
+
+    # filters = base_filters + status, usado na lista/contagem paginada. O
+    # resumo por status (summary, abaixo) usa só base_filters — ignora o
+    # filtro de status de propósito, mesmo padrão do ORD-078 em
+    # list_payments, pra sempre mostrar a distribuição completa mesmo com a
+    # tabela filtrada por um status só.
+    filters = list(base_filters)
     if status and status != "all":
-        q = q.where(Order.status == status)
-    q = q.order_by(Order.created_at.desc()).offset(skip).limit(limit)
-    result = await db.execute(q)
+        filters.append(Order.status == status)
+
+    total = (
+        await db.execute(select(func.count()).select_from(Order).where(*filters))
+    ).scalar_one()
+
+    result = await db.execute(
+        select(Order).where(*filters).order_by(Order.created_at.desc()).offset(skip).limit(limit)
+    )
     orders = result.scalars().all()
 
-    count_q = select(func.count(Order.id)).where(Order.company_id == current_user.company_id)
-    if status and status != "all":
-        count_q = count_q.where(Order.status == status)
-    total = (await db.execute(count_q)).scalar_one()
+    summary = {s: {"count": 0, "total": 0.0} for s in ORDER_STATUSES}
+    summary_rows = await db.execute(
+        select(Order.status, func.count(), func.sum(Order.total))
+        .where(*base_filters)
+        .group_by(Order.status)
+    )
+    for row_status, row_count, row_total in summary_rows.all():
+        if row_status in summary:
+            summary[row_status] = {"count": row_count, "total": float(row_total or 0)}
 
     items = []
     for o in orders:
@@ -354,12 +428,14 @@ async def list_orders(
             "order_ref": o.order_ref,
             "status": o.status,
             "total": float(o.total),
+            "company_id": o.company_id,
             "terminal_id": o.terminal_id,
+            "cpf": o.cpf,
             "created_at": o.created_at.isoformat() if o.created_at else "",
             "tickets_total": len(tix_rows),
             "tickets_collected": sum(1 for t in tix_rows if t.status == "collected"),
         })
-    return {"orders": items, "total": total}
+    return {"orders": items, "total": total, "summary": summary}
 
 
 @app.patch(

@@ -155,11 +155,22 @@ export interface Order {
   order_ref: string;
   status: string;
   total: number;
+  company_id: number;
   terminal_id: number;
+  cpf: string | null;
   created_at: string;
   tickets_total: number;
   tickets_collected: number;
 }
+
+export interface OrderStatusSummaryItem {
+  count: number;
+  total: number;
+}
+
+// Sempre com os 4 status reais (pending/paid/completed/cancelled)
+// presentes, mesmo zerados — ver ORD-081, mesmo padrão do PaymentStatusSummary.
+export type OrderStatusSummary = Record<string, OrderStatusSummaryItem>;
 
 export interface Ticket {
   ticket_code: string;

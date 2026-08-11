@@ -431,12 +431,14 @@ async def list_payments(
     skip: int = 0,
     limit: int = 50,
 ):
-    # Superadmin enxerga todas as empresas (com filtro opcional de company_id
-    # pra restringir a uma) — qualquer outro role só vê a própria empresa,
-    # e o parâmetro company_id é ignorado nesse caso (não retorna 403 nem
-    # revela se a empresa pedida existe, só se comporta como se o parâmetro
-    # não tivesse sido enviado).
-    if current_user.role == "superadmin":
+    # Superadmin/admin enxergam todas as empresas (com filtro opcional de
+    # company_id pra restringir a uma) — mesmo tratamento pros dois desde
+    # que passaram a ser equivalentes em capacidade (ver
+    # docs/ARQUITETURA.md §1.2, commit 85be419). Qualquer outro role só vê a
+    # própria empresa, e o parâmetro company_id é ignorado nesse caso (não
+    # retorna 403 nem revela se a empresa pedida existe, só se comporta
+    # como se o parâmetro não tivesse sido enviado).
+    if current_user.role in ("superadmin", "admin"):
         base_filters = [Transaction.company_id == company_id] if company_id else []
     else:
         base_filters = [Transaction.company_id == current_user.company_id]
@@ -527,10 +529,10 @@ async def cancel_payment(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(require_write_role),
 ):
-    # Superadmin cancela transação de qualquer empresa (mesmo padrão de
-    # list_payments) — outros roles seguem restritos à própria empresa.
+    # Superadmin/admin cancelam transação de qualquer empresa (mesmo padrão
+    # de list_payments) — outros roles seguem restritos à própria empresa.
     tx_filters = [Transaction.id == tx_id]
-    if current_user.role != "superadmin":
+    if current_user.role not in ("superadmin", "admin"):
         tx_filters.append(Transaction.company_id == current_user.company_id)
     result = await db.execute(select(Transaction).where(*tx_filters))
     tx = result.scalars().first()

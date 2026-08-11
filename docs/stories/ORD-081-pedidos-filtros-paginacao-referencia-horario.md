@@ -1,6 +1,6 @@
 ---
 id: ORD-081
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Backend + Frontend
@@ -53,21 +53,21 @@ Como **superadmin/admin**, quero filtrar pedidos por empresa, referência, statu
 6. "Limpar" volta ao estado padrão
 
 ### Critérios de aceite
-- [ ] Filtro de empresa visível só pra `superadmin`/`admin` (mesmo Dropdown + `listCompanies()` de Transações)
-- [ ] Busca por referência (`order_ref`) — campo de texto livre, busca parcial (não precisa digitar o código inteiro)
-- [ ] Filtro de status inclui **todos** os valores reais usados no banco: `pending`, `paid`, `completed`, `cancelled` (corrige a lacuna do Achado crítico)
-- [ ] Filtro de período (De/Até) — mesmo `DateInput` com validação Até ≥ De e Até desabilitado até De ser preenchido (mesmo comportamento ajustado em Transações nesta sessão)
-- [ ] Filtro de faixa de horário (De/Até) — **decidido com o usuário (2026-08-11):** filtra pela hora do dia (`TIME` de `created_at`), independente da data — caso de uso real: cliente não tem mais o número do pedido, mas lembra aproximadamente do horário que fez. **Desabilitado até a data "De" ser preenchida** (mesmo padrão de habilitação progressiva já usado em Até/De de Transações) — não faz sentido filtrar por horário sem ao menos um ponto de partida de data.
-- [ ] Filtro por CPF do cliente — **decidido com o usuário:** campo de busca (não é obrigatório no pedido, mas quando o cliente insere no totem, filtrar por ele ajuda a localizar). CPF também aparece no painel de detalhe expandido (ver critério abaixo).
-- [ ] **Sem filtro de terminal** — **decidido com o usuário:** removido do escopo. Cada empresa nomeia terminal como quiser, um filtro por esse campo ficaria bagunçado entre empresas diferentes (mesmo assim o nome do terminal continua sendo exibido, só não é filtrável — ver critério de nome do terminal abaixo).
-- [ ] Cards de resumo por status (pendente/pago/concluído/cancelado), mesmo padrão do `ORD-078` em Transações — **decidido com o usuário:** implementar.
-- [ ] Paginação real via componente `Pagination` do design system — mesmo padrão de Transações
-- [ ] Tabela usa o componente `Table` compartilhado (`variant="compact"`) em vez de HTML cru — cabeçalho, altura de linha e hover idênticos a Transações
-- [ ] Terminal mostrado pelo nome (`listTerminals`), não pelo ID cru
-- [ ] Painel de tickets do pedido migra pro mecanismo `renderExpanded`/`expandedRowKey` do `Table` (chevron), substituindo o botão "Tickets"/"Fechar" atual — CPF do cliente exibido ali também (mascarado parcialmente, ex.: `123.***.**9-01`, mesmo cuidado com PII que o projeto já tem em outros lugares)
-- [ ] Superadmin/admin sem filtro de empresa selecionado veem pedidos de **todas** as empresas (hoje só vê a própria, silenciosamente)
-- [ ] Owner/manager continuam restritos à própria empresa mesmo manipulando a URL/request (backend valida)
-- [ ] Nenhuma mudança de comportamento pra quem já usa a tela hoje sem filtro, exceto o teto de 100 virar paginado
+- [x] Filtro de empresa visível só pra `superadmin`/`admin` (mesmo Dropdown + `listCompanies()` de Transações)
+- [x] Busca por referência (`order_ref`) — campo de texto livre, busca parcial (não precisa digitar o código inteiro)
+- [x] Filtro de status inclui **todos** os valores reais usados no banco: `pending`, `paid`, `completed`, `cancelled` (corrige a lacuna do Achado crítico)
+- [x] Filtro de período (De/Até) — mesmo `DateInput` com validação Até ≥ De e Até desabilitado até De ser preenchido (mesmo comportamento ajustado em Transações nesta sessão)
+- [x] Filtro de faixa de horário (De/Até) — **decidido com o usuário (2026-08-11):** filtra pela hora do dia (`TIME` de `created_at`), independente da data — caso de uso real: cliente não tem mais o número do pedido, mas lembra aproximadamente do horário que fez. **Desabilitado até a data "De" ser preenchida** (mesmo padrão de habilitação progressiva já usado em Até/De de Transações) — não faz sentido filtrar por horário sem ao menos um ponto de partida de data.
+- [x] Filtro por CPF do cliente — **decidido com o usuário:** campo de busca (não é obrigatório no pedido, mas quando o cliente insere no totem, filtrar por ele ajuda a localizar). CPF também aparece no painel de detalhe expandido (ver critério abaixo).
+- [x] **Sem filtro de terminal** — **decidido com o usuário:** removido do escopo. Cada empresa nomeia terminal como quiser, um filtro por esse campo ficaria bagunçado entre empresas diferentes (mesmo assim o nome do terminal continua sendo exibido, só não é filtrável — ver critério de nome do terminal abaixo).
+- [x] Cards de resumo por status (pendente/pago/concluído/cancelado), mesmo padrão do `ORD-078` em Transações — **decidido com o usuário:** implementar.
+- [x] Paginação real via componente `Pagination` do design system — mesmo padrão de Transações
+- [x] Tabela usa o componente `Table` compartilhado (`variant="compact"`) em vez de HTML cru — cabeçalho, altura de linha e hover idênticos a Transações
+- [x] Terminal mostrado pelo nome (`listTerminals`), não pelo ID cru
+- [x] Painel de tickets do pedido migra pro mecanismo `renderExpanded`/`expandedRowKey` do `Table` (chevron), substituindo o botão "Tickets"/"Fechar" atual — CPF do cliente exibido ali também (mascarado parcialmente, ex.: `123.***.**9-01`, mesmo cuidado com PII que o projeto já tem em outros lugares)
+- [x] Superadmin/admin sem filtro de empresa selecionado veem pedidos de **todas** as empresas (hoje só vê a própria, silenciosamente)
+- [x] Owner/manager continuam restritos à própria empresa mesmo manipulando a URL/request (backend valida)
+- [x] Nenhuma mudança de comportamento pra quem já usa a tela hoje sem filtro, exceto o teto de 100 virar paginado
 
 ### Wireframe / Mockup
 Não desenhei protótipo novo — a recomendação é clonar a estrutura visual/CSS já aprovada de `PaymentsScreen.tsx`/`.module.scss` (filter-bar em grid, cards de resumo, tabela compact, painel de detalhe), trocando os campos e status pelos específicos de Pedidos.
@@ -184,7 +184,7 @@ Feature: Filtros, paginação e busca em Pedidos
 async def list_orders(
     status: Optional[str] = None,
     order_ref: Optional[str] = None,    # busca parcial, LIKE
-    cpf: Optional[str] = None,          # busca exata, normalizada (só dígitos)
+    cpf: Optional[str] = None,          # busca por prefixo, normalizada (só dígitos)
     company_id: Optional[int] = None,   # só tem efeito pra superadmin/admin
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -214,7 +214,7 @@ async def list_orders(
     # filtro de status de propósito, pra mostrar a distribuição completa
     # mesmo com a tabela filtrada por um status só.
 ```
-Mesma convenção que `list_payments` já estabeleceu no ORD-077 (`superadmin`/`admin` com bypass condicional a `company_id` opcional, resto do role restrito). `order_ref` com `LIKE` — índice único hoje é exato (`unique=True`, `main.py:32`); busca parcial não usa esse índice, mas com 85 registros não é um problema de performance agora; vale um índice `FULLTEXT` ou `LIKE 'prefix%'` (que usa índice B-tree) se o volume crescer — não bloqueia a entrega. `cpf` já existe normalizado (só dígitos) na gravação (`domain/cpf.py`, reaproveitado do company-service) — busca exata, sem `LIKE`, usa índice se um for adicionado depois.
+Mesma convenção que `list_payments` já estabeleceu no ORD-077 (`superadmin`/`admin` com bypass condicional a `company_id` opcional, resto do role restrito). `order_ref` com `LIKE` — índice único hoje é exato (`unique=True`, `main.py:32`); busca parcial não usa esse índice, mas com 85 registros não é um problema de performance agora; vale um índice `FULLTEXT` ou `LIKE 'prefix%'` (que usa índice B-tree) se o volume crescer — não bloqueia a entrega. `cpf` — busca por prefixo (`LIKE 'xxx%'`), não igualdade exata: **corrigido ao vivo durante a implementação** — a primeira versão usava igualdade, e o usuário reportou que lembrar só os primeiros dígitos de um CPF ("030") não achava nada. Prefixo usa índice B-tree se um for adicionado depois (hoje sem índice, aceitável no volume atual).
 
 **Faixa de horário — decidido com o usuário (2026-08-11):** hora do dia via `func.time(created_at)`, aplicado sobre o período já filtrado — não um timestamp único combinado. Caso de uso real: cliente perdeu o número do pedido mas lembra o horário aproximado. `hour_from`/`hour_to` só têm efeito quando `date_from` está setado — replicado no frontend como campo desabilitado (mesmo padrão de `disabled={!dateFrom}` que Até já usa em Transações).
 
@@ -249,3 +249,23 @@ Não existe componente de hora no design system (só `DateInput` — confirmado,
 **Explorer:** [x] fluxo, personas e critérios de aceite definidos, achado crítico do status `paid` documentado · **QA Explorer:** [x] cenários Gherkin cobrindo multi-tenant, busca, todos os filtros novos (incluindo CPF, resumo, habilitação condicional de horário), paginação e expansão · **Tech Explorer:** [x] diagnóstico medido ao vivo (query direta no MySQL), direção técnica com assinatura de endpoint completa, riscos e estimativa · **Aprovação final:** [x] aprovado no chat pelo usuário (2026-08-11) — faixa de horário (hora do dia sobre o período, condicionada a "De"), cards de resumo, filtro de CPF e recusa do filtro de terminal, todos decididos
 
 **Status: Ready** — pode começar a implementação.
+
+---
+
+## Downstream
+
+Fluxo simplificado de dev único, sem revisor formal nem branch protection (ver `docs/WORKFLOW.md` — Code Review "hoje, o próprio autor").
+
+- **To Do → In Progress:** branch `feature/ord-081-pedidos-filtros` criada a partir de `main`.
+- Implementação completa (backend `order-service` + frontend `OrdersScreen`/`api/orders.ts`), conforme a solução técnica do Tech Explorer.
+- **49 testes passando** em `services/order/tests/` (38 pré-existentes + 11 novos, sem regressão) — cobrem os filtros novos, bypass multi-tenant de superadmin/admin, resumo por status ignorando o filtro de status.
+- `tsc --noEmit` limpo.
+- Verificado ao vivo via `curl` autenticado contra o gateway (não só teste automatizado): `status=paid` retornando os pedidos reais esperados, faixa de horário respeitando a trava de `date_from`, CPF com pontuação normalizado, superadmin sem filtro vendo todas as empresas.
+- **3 ajustes pós-implementação, encontrados em revisão ao vivo do usuário no navegador** (não cobertos pelos critérios originais, corrigidos no mesmo ciclo):
+  - Filtro de CPF implementado como igualdade exata não achava nada com busca parcial ("030") — corrigido pra `LIKE 'prefixo%'`, teste novo adicionado.
+  - Campo de data (`De`/`Até`) cortando o texto no grid do filtro — `minmax` do grid aumentado de 150px pra 180px.
+  - Status "Pago" passou a vir marcado por padrão ao abrir a tela (pedido do usuário — é o status mais analisado no dia a dia); "Limpar" continua voltando pra "Todos".
+- **Achado relacionado corrigido no mesmo ciclo:** `PaymentsScreen`/`list_payments` (Transações) só liberavam o filtro de empresa pra `role === "superadmin"`, não `admin` — inconsistente com a decisão desta sessão de equiparar os dois roles (`docs/ARQUITETURA.md` §1.2). Corrigido junto, já que é o mesmo padrão sendo implementado aqui.
+- PR aberta e mesclada em `main`.
+
+**Status: Done**
