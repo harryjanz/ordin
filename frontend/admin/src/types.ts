@@ -175,4 +175,7 @@ export interface Transaction {
   nsu: string | null;
   authorization: string | null;
   created_at: string;
+  /** Preenchido só localmente após um cancelamento bem-sucedido nesta sessão
+   * (o backend ainda não devolve esse campo em GET /payments — ver ORD-080). */
+  cancel_reason?: string;
 }
