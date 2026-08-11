@@ -84,7 +84,7 @@
 // cada coluna ficaria estreita demais pra um DateInput/InputBase.
 .filterBar {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
   align-items: end;
   background: var(--a-surface);

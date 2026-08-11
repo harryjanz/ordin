@@ -370,7 +370,10 @@ async def list_orders(
     if order_ref:
         base_filters.append(Order.order_ref.like(f"%{order_ref}%"))
     if cpf:
-        base_filters.append(Order.cpf == _normalize_cpf(cpf))
+        # Prefixo, não igualdade exata — usuário reportou ao vivo que
+        # digitar os primeiros dígitos de um CPF que ele lembra parcialmente
+        # não achava nada (ex.: "030" não batia com "03013954973" gravado).
+        base_filters.append(Order.cpf.like(f"{_normalize_cpf(cpf)}%"))
     if date_from:
         base_filters.append(Order.created_at >= date_from)
     if date_to:

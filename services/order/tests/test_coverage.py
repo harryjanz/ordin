@@ -316,6 +316,21 @@ async def test_dir_list_orders_filtro_cpf(db_session):
     await _cleanup_orders(db_session, refs)
 
 
+async def test_dir_list_orders_filtro_cpf_prefixo(db_session):
+    """Achado ao vivo: usuário reportou que lembrar só os primeiros dígitos
+    de um CPF ("030") não achava nada com igualdade exata — vira busca por
+    prefixo, não igualdade."""
+    import main as svc
+    refs = ["ORD-COVCPFP1", "ORD-COVCPFP2"]
+    await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, cpf="03013954973")
+    await _mk_bare_order(db_session, refs[1], company_id=ISOLATED_CO, cpf="11122233344")
+    async with db_session() as db:
+        result = await svc.list_orders(cpf="030", db=db, current_user=_user("owner", ISOLATED_CO))
+    found = {o["order_ref"] for o in result["orders"]}
+    assert found == {"ORD-COVCPFP1"}
+    await _cleanup_orders(db_session, refs)
+
+
 async def test_dir_list_orders_filtro_status_paid(db_session):
     """Achado crítico do ORD-081: status 'paid' precisa ser filtrável (faltava no frontend antigo)."""
     import main as svc

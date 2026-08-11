@@ -184,7 +184,7 @@ Feature: Filtros, paginação e busca em Pedidos
 async def list_orders(
     status: Optional[str] = None,
     order_ref: Optional[str] = None,    # busca parcial, LIKE
-    cpf: Optional[str] = None,          # busca exata, normalizada (só dígitos)
+    cpf: Optional[str] = None,          # busca por prefixo, normalizada (só dígitos)
     company_id: Optional[int] = None,   # só tem efeito pra superadmin/admin
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -214,7 +214,7 @@ async def list_orders(
     # filtro de status de propósito, pra mostrar a distribuição completa
     # mesmo com a tabela filtrada por um status só.
 ```
-Mesma convenção que `list_payments` já estabeleceu no ORD-077 (`superadmin`/`admin` com bypass condicional a `company_id` opcional, resto do role restrito). `order_ref` com `LIKE` — índice único hoje é exato (`unique=True`, `main.py:32`); busca parcial não usa esse índice, mas com 85 registros não é um problema de performance agora; vale um índice `FULLTEXT` ou `LIKE 'prefix%'` (que usa índice B-tree) se o volume crescer — não bloqueia a entrega. `cpf` já existe normalizado (só dígitos) na gravação (`domain/cpf.py`, reaproveitado do company-service) — busca exata, sem `LIKE`, usa índice se um for adicionado depois.
+Mesma convenção que `list_payments` já estabeleceu no ORD-077 (`superadmin`/`admin` com bypass condicional a `company_id` opcional, resto do role restrito). `order_ref` com `LIKE` — índice único hoje é exato (`unique=True`, `main.py:32`); busca parcial não usa esse índice, mas com 85 registros não é um problema de performance agora; vale um índice `FULLTEXT` ou `LIKE 'prefix%'` (que usa índice B-tree) se o volume crescer — não bloqueia a entrega. `cpf` — busca por prefixo (`LIKE 'xxx%'`), não igualdade exata: **corrigido ao vivo durante a implementação** — a primeira versão usava igualdade, e o usuário reportou que lembrar só os primeiros dígitos de um CPF ("030") não achava nada. Prefixo usa índice B-tree se um for adicionado depois (hoje sem índice, aceitável no volume atual).
 
 **Faixa de horário — decidido com o usuário (2026-08-11):** hora do dia via `func.time(created_at)`, aplicado sobre o período já filtrado — não um timestamp único combinado. Caso de uso real: cliente perdeu o número do pedido mas lembra o horário aproximado. `hour_from`/`hour_to` só têm efeito quando `date_from` está setado — replicado no frontend como campo desabilitado (mesmo padrão de `disabled={!dateFrom}` que Até já usa em Transações).
 
