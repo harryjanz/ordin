@@ -73,7 +73,10 @@ export default function OrdersScreen() {
   const [dateTo, setDateTo] = useState("");
   const [hourFrom, setHourFrom] = useState("");
   const [hourTo, setHourTo] = useState("");
-  const [status, setStatus] = useState("");
+  // "Pago" como padrão ao abrir a tela — é o status mais analisado no
+  // dia a dia (pedido concluído do ponto de vista financeiro, ainda não
+  // necessariamente coletado). "Limpar" continua voltando pra "" (todos).
+  const [status, setStatus] = useState("paid");
   const [skip, setSkip] = useState(0);
 
   const [orders, setOrders] = useState<Order[]>([]);
