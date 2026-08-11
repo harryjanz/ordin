@@ -1,10 +1,10 @@
 ---
 id: ORD-081
-status: Tech Explorer
+status: Ready
 fase: 6
 sprint: null
 responsavel: Backend + Frontend
-estimativa: 6 pontos
+estimativa: 8 pontos
 ---
 
 # ORD-081 — Pedidos: filtros (empresa, referência, status, data e faixa de horário), paginação e mesmo padrão visual de Transações
@@ -57,17 +57,20 @@ Como **superadmin/admin**, quero filtrar pedidos por empresa, referência, statu
 - [ ] Busca por referência (`order_ref`) — campo de texto livre, busca parcial (não precisa digitar o código inteiro)
 - [ ] Filtro de status inclui **todos** os valores reais usados no banco: `pending`, `paid`, `completed`, `cancelled` (corrige a lacuna do Achado crítico)
 - [ ] Filtro de período (De/Até) — mesmo `DateInput` com validação Até ≥ De e Até desabilitado até De ser preenchido (mesmo comportamento ajustado em Transações nesta sessão)
-- [ ] Filtro de faixa de horário (De/Até) — **decisão a confirmar com o usuário:** filtra pela hora do dia (`HOUR`/`TIME` de `created_at`), independente da data — útil pra "todo pedido feito entre 11h e 14h, em qualquer dia do período" (ex.: análise de horário de pico). Ver Tech Explorer pra alternativa (faixa de data+hora combinada).
+- [ ] Filtro de faixa de horário (De/Até) — **decidido com o usuário (2026-08-11):** filtra pela hora do dia (`TIME` de `created_at`), independente da data — caso de uso real: cliente não tem mais o número do pedido, mas lembra aproximadamente do horário que fez. **Desabilitado até a data "De" ser preenchida** (mesmo padrão de habilitação progressiva já usado em Até/De de Transações) — não faz sentido filtrar por horário sem ao menos um ponto de partida de data.
+- [ ] Filtro por CPF do cliente — **decidido com o usuário:** campo de busca (não é obrigatório no pedido, mas quando o cliente insere no totem, filtrar por ele ajuda a localizar). CPF também aparece no painel de detalhe expandido (ver critério abaixo).
+- [ ] **Sem filtro de terminal** — **decidido com o usuário:** removido do escopo. Cada empresa nomeia terminal como quiser, um filtro por esse campo ficaria bagunçado entre empresas diferentes (mesmo assim o nome do terminal continua sendo exibido, só não é filtrável — ver critério de nome do terminal abaixo).
+- [ ] Cards de resumo por status (pendente/pago/concluído/cancelado), mesmo padrão do `ORD-078` em Transações — **decidido com o usuário:** implementar.
 - [ ] Paginação real via componente `Pagination` do design system — mesmo padrão de Transações
 - [ ] Tabela usa o componente `Table` compartilhado (`variant="compact"`) em vez de HTML cru — cabeçalho, altura de linha e hover idênticos a Transações
 - [ ] Terminal mostrado pelo nome (`listTerminals`), não pelo ID cru
-- [ ] Painel de tickets do pedido migra pro mecanismo `renderExpanded`/`expandedRowKey` do `Table` (chevron), substituindo o botão "Tickets"/"Fechar" atual
+- [ ] Painel de tickets do pedido migra pro mecanismo `renderExpanded`/`expandedRowKey` do `Table` (chevron), substituindo o botão "Tickets"/"Fechar" atual — CPF do cliente exibido ali também (mascarado parcialmente, ex.: `123.***.**9-01`, mesmo cuidado com PII que o projeto já tem em outros lugares)
 - [ ] Superadmin/admin sem filtro de empresa selecionado veem pedidos de **todas** as empresas (hoje só vê a própria, silenciosamente)
 - [ ] Owner/manager continuam restritos à própria empresa mesmo manipulando a URL/request (backend valida)
 - [ ] Nenhuma mudança de comportamento pra quem já usa a tela hoje sem filtro, exceto o teto de 100 virar paginado
 
 ### Wireframe / Mockup
-Não desenhei protótipo novo — a recomendação é literalmente clonar a estrutura visual/CSS já aprovada de `PaymentsScreen.tsx`/`.module.scss` (filter-bar em grid, cards não se aplicam aqui — não foi pedido resumo por status pra Pedidos, só os filtros), trocando os campos pelos específicos de Pedidos. PM/UX: ver seção de sugestões abaixo antes de aprovar.
+Não desenhei protótipo novo — a recomendação é clonar a estrutura visual/CSS já aprovada de `PaymentsScreen.tsx`/`.module.scss` (filter-bar em grid, cards de resumo, tabela compact, painel de detalhe), trocando os campos e status pelos específicos de Pedidos.
 
 ---
 
@@ -108,10 +111,37 @@ Feature: Filtros, paginação e busca em Pedidos
     Então só pedidos dentro do intervalo aparecem
     E Até não aceita data anterior a De
 
+  Scenario: Filtro de faixa de horário desabilitado sem data
+    Dado que o usuário ainda não preencheu o campo "De" (data)
+    Quando ele olha os campos de faixa de horário
+    Então eles aparecem desabilitados
+
   Scenario: Filtro de faixa de horário
-    Dado que existem pedidos em horários diferentes do dia
-    Quando o usuário define uma faixa de horário (ex.: 11:00–14:00)
+    Dado que o usuário já preencheu a data "De"
+    E existem pedidos em horários diferentes do dia, em dias diferentes do período
+    Quando ele define uma faixa de horário (ex.: 11:00–14:00)
     Então só pedidos criados dentro dessa faixa de horário aparecem, em qualquer dia do período filtrado
+    E isso ajuda a localizar um pedido específico quando o cliente só lembra o horário aproximado
+
+  Scenario: Filtro por CPF
+    Dado que existe um pedido com CPF preenchido
+    Quando o usuário digita o CPF no filtro
+    Então só pedidos desse CPF aparecem
+
+  Scenario: CPF exibido mascarado no detalhe
+    Dado que um pedido tem CPF preenchido
+    Quando o usuário expande a linha desse pedido
+    Então o CPF aparece parcialmente mascarado no painel de detalhe
+
+  Scenario: Cards de resumo por status
+    Dado que existem pedidos com status variados
+    Quando o usuário abre /orders
+    Então vê um card por status (pendente/pago/concluído/cancelado) com contagem e não muda com o filtro de status aplicado na tabela (mesmo comportamento do resumo de Transações)
+
+  Scenario: Sem filtro de terminal
+    Dado que o usuário olha a barra de filtros
+    Então não existe nenhum campo de filtro por terminal
+    E o nome do terminal continua aparecendo no detalhe expandido
 
   Scenario: Paginação
     Dado que o resultado filtrado tem mais de uma página
@@ -154,10 +184,11 @@ Feature: Filtros, paginação e busca em Pedidos
 async def list_orders(
     status: Optional[str] = None,
     order_ref: Optional[str] = None,    # busca parcial, LIKE
+    cpf: Optional[str] = None,          # busca exata, normalizada (só dígitos)
     company_id: Optional[int] = None,   # só tem efeito pra superadmin/admin
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
-    hour_from: Optional[str] = None,    # "HH:MM"
+    hour_from: Optional[str] = None,    # "HH:MM" — só tem efeito com date_from setado
     hour_to: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
@@ -171,46 +202,50 @@ async def list_orders(
         q = select(Order).where(Order.company_id == current_user.company_id)
     if status: q = q.where(Order.status == status)
     if order_ref: q = q.where(Order.order_ref.like(f"%{order_ref}%"))
+    if cpf: q = q.where(Order.cpf == normalize_cpf(cpf))
     if date_from: q = q.where(Order.created_at >= date_from)
     if date_to: q = q.where(Order.created_at <= date_to)
-    if hour_from: q = q.where(func.time(Order.created_at) >= hour_from)
-    if hour_to: q = q.where(func.time(Order.created_at) <= hour_to)
+    if date_from and hour_from: q = q.where(func.time(Order.created_at) >= hour_from)
+    if date_from and hour_to: q = q.where(func.time(Order.created_at) <= hour_to)
     # total espelhando os mesmos filtros, mesmo padrão de list_payments/list_orders atual
+
+    # Resumo por status (mesmo padrão do ORD-078 em list_payments) — sempre
+    # sobre base_filters (empresa/período/horário/CPF/referência), ignora o
+    # filtro de status de propósito, pra mostrar a distribuição completa
+    # mesmo com a tabela filtrada por um status só.
 ```
-Mesma convenção que `list_payments` já estabeleceu no ORD-077 (`superadmin`/`admin` com bypass condicional a `company_id` opcional, resto do role restrito). `order_ref` com `LIKE` — índice único hoje é exato (`unique=True`, `main.py:32`); busca parcial não usa esse índice, mas com 85 registros não é um problema de performance agora; vale um índice `FULLTEXT` ou `LIKE 'prefix%'` (que usa índice B-tree) se o volume crescer — não bloqueia a entrega.
+Mesma convenção que `list_payments` já estabeleceu no ORD-077 (`superadmin`/`admin` com bypass condicional a `company_id` opcional, resto do role restrito). `order_ref` com `LIKE` — índice único hoje é exato (`unique=True`, `main.py:32`); busca parcial não usa esse índice, mas com 85 registros não é um problema de performance agora; vale um índice `FULLTEXT` ou `LIKE 'prefix%'` (que usa índice B-tree) se o volume crescer — não bloqueia a entrega. `cpf` já existe normalizado (só dígitos) na gravação (`domain/cpf.py`, reaproveitado do company-service) — busca exata, sem `LIKE`, usa índice se um for adicionado depois.
 
-**Faixa de horário — duas opções, precisa decisão do usuário antes de Ready:**
-1. **Hora do dia, independente da data** (proposta acima, `func.time(created_at)`) — responde "pedidos feitos entre 11h–14h, em qualquer dia do período". Mais flexível pra análise de turno/pico, mas semântica menos óbvia pra quem não conhece a intenção.
-2. **Faixa de data+hora combinada** (um único par De/Até com data e hora juntos, tipo `datetime-local`) — mais simples de implementar e entender (é só um range de timestamp), mas perde a capacidade de "todo dia, mesmo horário" sem repetir o filtro dia a dia.
+**Faixa de horário — decidido com o usuário (2026-08-11):** hora do dia via `func.time(created_at)`, aplicado sobre o período já filtrado — não um timestamp único combinado. Caso de uso real: cliente perdeu o número do pedido mas lembra o horário aproximado. `hour_from`/`hour_to` só têm efeito quando `date_from` está setado — replicado no frontend como campo desabilitado (mesmo padrão de `disabled={!dateFrom}` que Até já usa em Transações).
 
-Não existe componente de hora no design system (só `DateInput`, sem componente de hora — confirmado, busquei em `vendor/design-system/dist/components/`). Direção proposta: `InputBase` com `type="time"` (passa por `InputHTMLAttributes<HTMLInputElement>`, herda o input nativo do browser) — reaproveita o chrome visual do DS (borda, label, foco) sem precisar de componente novo.
+Não existe componente de hora no design system (só `DateInput` — confirmado, busquei em `vendor/design-system/dist/components/`). Direção: `InputBase` com `type="time"` (herda `InputHTMLAttributes<HTMLInputElement>`, input nativo do browser) — reaproveita o chrome visual do DS sem precisar de componente novo.
 
-**Frontend:** clona `PaymentsScreen.tsx` quase literalmente — mesma filter-bar em grid, mesmo uso de `Table` `variant="compact"` com `renderExpanded` pro painel de tickets (substituindo o `Fragment`/`<tr>` manual atual), mesmo `Pagination` do design system. `api/orders.ts` novo espelhando `api/payments.ts` (`listOrders`, `buildOrderListQuery`).
+**CPF:** campo de busca de texto livre (`InputBase`, sem máscara — aceita com ou sem pontuação, normalizado no backend via `normalize_cpf` já existente em `domain/cpf.py`). Exibido no painel de detalhe mascarado (ex.: `123.***.**9-01`) — mesmo cuidado com PII que o projeto já aplica a contatos/responsável legal no company-service (campos `_enc`).
+
+**Frontend:** clona `PaymentsScreen.tsx` quase literalmente — mesma filter-bar em grid (agora com empresa, referência, CPF, período, faixa de horário, status — 6 campos + botão, uma linha a mais que Transações), mesmos cards de resumo (`STATUS_CARDS` equivalente: pendente/pago/concluído/cancelado), mesmo uso de `Table` `variant="compact"` com `renderExpanded` pro painel de tickets (substituindo o `Fragment`/`<tr>` manual atual), mesmo `Pagination` do design system. `api/orders.ts` novo espelhando `api/payments.ts` (`listOrders`, `buildOrderListQuery`).
 
 ### Riscos
-- **Faixa de horário é a decisão de escopo mais sensível da história** — as duas opções acima têm UX bem diferente; recomendo confirmar com o usuário antes de sair do Tech Explorer (ver critério de aceite marcado como decisão pendente).
-- Reaproveitar `Table`/`Pagination`/padrão de filtro já validados em Transações reduz bastante o risco de implementação — não é um componente novo, é reuso do que a Fase 6 já testou em produção.
+- Reaproveitar `Table`/`Pagination`/padrão de filtro e cards já validados em Transações reduz bastante o risco de implementação — não é um componente novo, é reuso do que a Fase 6 já testou em produção.
 - `order_ref` com `LIKE '%...%'` não usa índice — aceitável no volume atual, registrar como dívida se crescer (mesmo espírito da nota de índice do ORD-077).
 - Migrar o painel de tickets pro `renderExpanded` do `Table` muda a marcação HTML mas não o comportamento visível — baixo risco, já é um padrão testado (Transações, ORD-080).
+- CPF em texto plano no painel de detalhe (mascarado) — mesmo risco de exposição que qualquer PII em tela; mascarar cobre o caso comum, mas vale revisar se algum role deveria ver o CPF completo (ex.: pra conferência manual) — não bloqueia a entrega, fica como nota pra QA validar visualmente.
 
 ### Estimativa
-6 pontos — mais filtros que o ORD-077 (5) por causa da busca por referência e da faixa de horário (campo sem componente pronto no DS), mas boa parte do trabalho é reuso direto de padrão já construído e testado (`Table` compact, `Pagination`, filter-bar, `listTerminals`), o que reduz o risco de UI mesmo com mais campos.
+8 pontos — mais escopo que o ORD-077 (5): busca por referência, CPF, faixa de horário (campo sem componente pronto no DS) e resumo por status (equivalente ao ORD-078, 3 pontos, mas replicado aqui). Boa parte do trabalho é reuso direto de padrão já construído e testado (`Table` compact, `Pagination`, filter-bar, cards, `listTerminals`), o que reduz o risco de UI mesmo com mais campos.
 
 ---
 
-## Sugestões de PM/UX pra revisão do usuário
+## Sugestões de PM/UX — decididas com o usuário (2026-08-11)
 
-Como pedido, aqui vão pontos que acho que valem discussão antes de aprovar — não implementei nenhum ainda:
-
-1. **Faixa de horário — confirmar a semântica** (ver Tech Explorer): hora-do-dia recorrente vs. timestamp único combinado. Se a intenção é "analisar horário de pico", a primeira opção é mais poderosa; se é só "refinar mais o período", a segunda é mais simples e menos surpreendente.
-2. **Resumo por status, como Transações tem (ORD-078)?** Não foi pedido, mas dado que "mesmo formato" foi explicitamente citado — um card por status (pendente/pago/concluído/cancelado) daria o mesmo tipo de visão rápida que os cards de Transações dão hoje. Sugestão de melhoria, não critério de aceite — incluo só se o usuário confirmar que quer.
-3. **`cpf` do cliente existe no modelo (`Order.cpf`) e não é mostrado em lugar nenhum hoje** — nem na lista, nem no detalhe expandido. Pode ser útil no painel expandido (como Transações mostra ambiente/terminal/referência do provider), mas é dado de cliente (CPF) — vale considerar se deve aparecer mascarado/parcial por padrão, mesmo espírito de cuidado que o projeto já tem com PII em outros lugares (contatos criptografados no company-service).
-4. **Terminal, ao contrário de Transações, não tem filtro dedicado** — Transações também não filtra por terminal, então não é inconsistência, mas com o nome do terminal exposto (achado 4), um filtro por terminal poderia ser natural de adicionar junto, já que os dados já estão sendo buscados.
+1. **Faixa de horário** — hora do dia sobre o período filtrado, desabilitada até "De" ser preenchido. Caso de uso confirmado: cliente sem o número do pedido, sabe o horário aproximado.
+2. **Cards de resumo por status** — aprovado, mesmo padrão do ORD-078.
+3. **CPF** — aprovado como filtro (não só exibição); mascarado no painel de detalhe.
+4. **Filtro de terminal** — recusado. Nome de terminal é livre por empresa, um filtro por esse campo ficaria bagunçado entre empresas diferentes. Nome do terminal continua sendo exibido (achado 4), só não vira filtro.
 
 ---
 
 ## Ready
 
-**Explorer:** [x] fluxo, personas e critérios de aceite definidos, achado crítico do status `paid` documentado · **QA Explorer:** [x] cenários Gherkin cobrindo multi-tenant, busca, todos os filtros novos, paginação e expansão · **Tech Explorer:** [x] diagnóstico medido ao vivo (query direta no MySQL), direção técnica com proposta de assinatura de endpoint, duas alternativas pra faixa de horário, riscos e estimativa · **Aprovação final:** [ ] pendente — precisa decisão do usuário sobre a semântica da faixa de horário (Tech Explorer) e sobre as 4 sugestões de PM/UX acima antes de virar Ready
+**Explorer:** [x] fluxo, personas e critérios de aceite definidos, achado crítico do status `paid` documentado · **QA Explorer:** [x] cenários Gherkin cobrindo multi-tenant, busca, todos os filtros novos (incluindo CPF, resumo, habilitação condicional de horário), paginação e expansão · **Tech Explorer:** [x] diagnóstico medido ao vivo (query direta no MySQL), direção técnica com assinatura de endpoint completa, riscos e estimativa · **Aprovação final:** [x] aprovado no chat pelo usuário (2026-08-11) — faixa de horário (hora do dia sobre o período, condicionada a "De"), cards de resumo, filtro de CPF e recusa do filtro de terminal, todos decididos
 
-**Status: Tech Explorer** — não iniciar implementação até aprovação explícita.
+**Status: Ready** — pode começar a implementação.
