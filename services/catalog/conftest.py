@@ -37,8 +37,22 @@ def token_owner():
 
 
 @pytest.fixture
+def token_superadmin():
+    return make_jwt(role="superadmin", company_id=1)
+
+
+@pytest.fixture
+def token_admin():
+    return make_jwt(role="admin", company_id=1)
+
+
+@pytest.fixture
 def token_company_b():
-    return make_jwt(role="admin", company_id=2)
+    # "owner", não "admin" — desde que superadmin/admin passaram a ser
+    # equivalentes (gestão da plataforma, docs/ARQUITETURA.md §1.2), "admin"
+    # deixou de representar um usuário comum de empresa isolada; esses testes
+    # querem só um segundo tenant qualquer pra isolamento multi-tenant.
+    return make_jwt(role="owner", company_id=2)
 
 
 @pytest.fixture

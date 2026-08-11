@@ -26,12 +26,39 @@ _IMAGE_CONTENT_TYPES = {"image/jpeg": "jpg", "image/png": "png"}
 _IMAGE_MAX_BYTES = 2 * 1024 * 1024  # 2 MB
 _THUMBNAIL_SIZE = (200, 200)
 
-_WRITE_ROLES = {"admin", "owner", "manager"}
+_WRITE_ROLES = {"superadmin", "admin", "owner", "manager"}
 
 def require_write_role(current_user: TokenPayload = Depends(get_current_user)) -> TokenPayload:
     if current_user.role not in _WRITE_ROLES:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="Permissão insuficiente")
     return current_user
+
+
+# superadmin/admin são usuários da própria Ordin (gestão da plataforma, ver
+# docs/ARQUITETURA.md §1.2) — administram catálogo de qualquer empresa
+# cliente, mas precisam dizer explicitamente qual (não existe "ver catálogo
+# de todas as empresas ao mesmo tempo" — diferente de list_payments/
+# list_orders, aqui é sempre edição de uma empresa por vez). Owner/manager
+# continuam restritos à própria empresa, parâmetro company_id é ignorado
+# nesse caso (mesmo padrão dos outros serviços).
+def _resolve_company_id(company_id: Optional[int], current_user: TokenPayload) -> int:
+    if current_user.role in ("superadmin", "admin"):
+        if not company_id:
+            raise HTTPException(400, detail="Parâmetro company_id é obrigatório para superadmin/admin")
+        return company_id
+    return current_user.company_id
+
+async def resolve_company_id(
+    company_id: Optional[int] = None,
+    current_user: TokenPayload = Depends(get_current_user),
+) -> int:
+    return _resolve_company_id(company_id, current_user)
+
+async def resolve_company_id_write(
+    company_id: Optional[int] = None,
+    current_user: TokenPayload = Depends(require_write_role),
+) -> int:
+    return _resolve_company_id(company_id, current_user)
 
 DB_URL = require_env("DB_URL")
 engine = create_async_engine(DB_URL.replace("mysql+pymysql://", "mysql+aiomysql://"), pool_pre_ping=True)
@@ -270,13 +297,14 @@ async def _create_catalog_bucket_if_local() -> None:
 async def list_categories(
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(get_current_user),
+    company_id: int = Depends(resolve_company_id),
 ):
-    """Retorna categorias da empresa autenticada. Por padrão só as ativas
-    (usado pelo totem); `include_inactive=true` também traz as desativadas
-    (usado pela gestão de catálogo no admin). Categorias excluídas
-    definitivamente (`deleted=True`) nunca aparecem, nem com include_inactive."""
-    q = select(Category).filter_by(company_id=current_user.company_id, deleted=False)
+    """Retorna categorias da empresa (própria, ou informada via company_id
+    pra superadmin/admin). Por padrão só as ativas (usado pelo totem);
+    `include_inactive=true` também traz as desativadas (usado pela gestão de
+    catálogo no admin). Categorias excluídas definitivamente (`deleted=True`)
+    nunca aparecem, nem com include_inactive."""
+    q = select(Category).filter_by(company_id=company_id, deleted=False)
     if not include_inactive:
         q = q.filter_by(active=True)
     result = await db.execute(q)
@@ -293,13 +321,14 @@ async def list_products(
     category_id: Optional[int] = None,
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(get_current_user),
+    company_id: int = Depends(resolve_company_id),
 ):
-    """Retorna produtos da empresa. Filtrável por `category_id`. Por padrão só
-    produtos ativos (usado pelo totem); `include_inactive=true` também traz os
+    """Retorna produtos da empresa (própria, ou informada via company_id pra
+    superadmin/admin). Filtrável por `category_id`. Por padrão só produtos
+    ativos (usado pelo totem); `include_inactive=true` também traz os
     desativados (usado pela gestão de catálogo no admin). Produtos excluídos
     definitivamente (`deleted=True`) nunca aparecem, nem com include_inactive."""
-    q = select(Product).filter_by(company_id=current_user.company_id, deleted=False)
+    q = select(Product).filter_by(company_id=company_id, deleted=False)
     if not include_inactive:
         q = q.filter_by(active=True)
     if category_id:
@@ -319,10 +348,10 @@ async def list_products(
 async def get_product(
     product_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(get_current_user),
+    company_id: int = Depends(resolve_company_id),
 ):
     """Retorna os detalhes de um produto. Isolamento multi-tenant aplicado: 404 se o produto for de outra empresa."""
-    result = await db.execute(select(Product).filter_by(id=product_id, company_id=current_user.company_id, deleted=False))
+    result = await db.execute(select(Product).filter_by(id=product_id, company_id=company_id, deleted=False))
     p = result.scalars().first()
     if not p: raise HTTPException(404)
     return await _serialize_product(db, p)
@@ -353,9 +382,9 @@ async def list_allergens(
 async def create_category(
     body: CategoryIn,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_write_role),
+    company_id: int = Depends(resolve_company_id_write),
 ):
-    cat = Category(company_id=current_user.company_id, name=body.name)
+    cat = Category(company_id=company_id, name=body.name)
     db.add(cat); await db.commit(); await db.refresh(cat)
     return {"id": cat.id, "name": cat.name, "active": cat.active}
 
@@ -370,9 +399,9 @@ async def update_category(
     category_id: int,
     body: CategoryUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_write_role),
+    company_id: int = Depends(resolve_company_id_write),
 ):
-    result = await db.execute(select(Category).filter_by(id=category_id, company_id=current_user.company_id, deleted=False))
+    result = await db.execute(select(Category).filter_by(id=category_id, company_id=company_id, deleted=False))
     cat = result.scalars().first()
     if not cat: raise HTTPException(404)
     for field, value in body.model_dump(exclude_none=True).items():
@@ -391,21 +420,21 @@ async def delete_category(
     category_id: int,
     permanent: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_write_role),
+    company_id: int = Depends(resolve_company_id_write),
 ):
     """Por padrão só desativa (`active=False`), reversível via PUT com
     `active: true`. Com `permanent=true`, marca `deleted=True` na categoria
     e em todos os seus produtos — ação irreversível, essas linhas nunca mais
     aparecem em nenhuma consulta, mas continuam no banco (vínculo com vendas
     já realizadas)."""
-    result = await db.execute(select(Category).filter_by(id=category_id, company_id=current_user.company_id, deleted=False))
+    result = await db.execute(select(Category).filter_by(id=category_id, company_id=company_id, deleted=False))
     cat = result.scalars().first()
     if not cat: raise HTTPException(404)
     if permanent:
         cat.deleted = True
         cat.active = False
         products = (await db.execute(
-            select(Product).filter_by(category_id=category_id, company_id=current_user.company_id, deleted=False)
+            select(Product).filter_by(category_id=category_id, company_id=company_id, deleted=False)
         )).scalars().all()
         for p in products:
             p.deleted = True
@@ -425,11 +454,11 @@ async def delete_category(
 async def create_product(
     body: ProductIn,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_write_role),
+    company_id: int = Depends(resolve_company_id_write),
 ):
     if body.category_id is not None:
         cat = (await db.execute(
-            select(Category).filter_by(id=body.category_id, company_id=current_user.company_id, active=True, deleted=False)
+            select(Category).filter_by(id=body.category_id, company_id=company_id, active=True, deleted=False)
         )).scalars().first()
         if not cat:
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
@@ -437,12 +466,12 @@ async def create_product(
     if body.category_id is not None:
         count_result = await db.execute(
             select(func.count()).select_from(Product).filter_by(
-                company_id=current_user.company_id, category_id=body.category_id, deleted=False
+                company_id=company_id, category_id=body.category_id, deleted=False
             )
         )
         next_sort_order = count_result.scalar_one()
     p = Product(
-        company_id=current_user.company_id,
+        company_id=company_id,
         category_id=body.category_id,
         name=body.name,
         description=body.description,
@@ -475,13 +504,13 @@ async def create_product(
 async def reorder_products(
     body: ReorderIn,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_write_role),
+    company_id: int = Depends(resolve_company_id_write),
 ):
     """Rota registrada antes de /catalog/products/{product_id} de propósito:
     caso contrário o path param capturaria "reorder" como product_id."""
     result = await db.execute(
         select(Product.id).filter_by(
-            company_id=current_user.company_id, category_id=body.category_id, deleted=False
+            company_id=company_id, category_id=body.category_id, deleted=False
         )
     )
     valid_ids = set(result.scalars().all())
@@ -505,14 +534,14 @@ async def update_product(
     product_id: int,
     body: ProductUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_write_role),
+    company_id: int = Depends(resolve_company_id_write),
 ):
-    result = await db.execute(select(Product).filter_by(id=product_id, company_id=current_user.company_id, deleted=False))
+    result = await db.execute(select(Product).filter_by(id=product_id, company_id=company_id, deleted=False))
     p = result.scalars().first()
     if not p: raise HTTPException(404)
     if body.category_id is not None:
         cat = (await db.execute(
-            select(Category).filter_by(id=body.category_id, company_id=current_user.company_id, active=True, deleted=False)
+            select(Category).filter_by(id=body.category_id, company_id=company_id, active=True, deleted=False)
         )).scalars().first()
         if not cat:
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
@@ -540,13 +569,13 @@ async def delete_product(
     product_id: int,
     permanent: bool = False,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_write_role),
+    company_id: int = Depends(resolve_company_id_write),
 ):
     """Por padrão só desativa (`active=False`), reversível via PUT com
     `active: true`. Com `permanent=true`, marca `deleted=True` — ação
     irreversível, nunca mais aparece em nenhuma consulta, mas continua no
     banco (vínculo com vendas já realizadas). Também remove a imagem do bucket."""
-    result = await db.execute(select(Product).filter_by(id=product_id, company_id=current_user.company_id, deleted=False))
+    result = await db.execute(select(Product).filter_by(id=product_id, company_id=company_id, deleted=False))
     p = result.scalars().first()
     if not p: raise HTTPException(404)
     if permanent:
@@ -584,9 +613,9 @@ async def upload_product_image_endpoint(
     product_id: int,
     image: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_write_role),
+    company_id: int = Depends(resolve_company_id_write),
 ):
-    result = await db.execute(select(Product).filter_by(id=product_id, company_id=current_user.company_id, deleted=False))
+    result = await db.execute(select(Product).filter_by(id=product_id, company_id=company_id, deleted=False))
     p = result.scalars().first()
     if not p: raise HTTPException(404)
     if p.category_id is None:
@@ -628,9 +657,9 @@ async def upload_product_image_endpoint(
 async def delete_product_image(
     product_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(require_write_role),
+    company_id: int = Depends(resolve_company_id_write),
 ):
-    result = await db.execute(select(Product).filter_by(id=product_id, company_id=current_user.company_id, deleted=False))
+    result = await db.execute(select(Product).filter_by(id=product_id, company_id=company_id, deleted=False))
     p = result.scalars().first()
     if not p: raise HTTPException(404)
     if p.image_url: delete_object(p.image_url)
