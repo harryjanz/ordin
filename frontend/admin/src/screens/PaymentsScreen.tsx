@@ -152,9 +152,43 @@ export default function PaymentsScreen() {
     { key: "created_at", header: "Data", render: (t) => new Date(t.created_at).toLocaleString("pt-BR") },
   ];
 
+  const scopeNote = isSuperadmin
+    ? (companyId ? companyOptions.find((o) => o.value === String(companyId))?.label : "Todas as empresas")
+    : null;
+
   return (
     <div className={styles.page}>
       <div className={styles.title}>Transações TEF</div>
+      {scopeNote && <div className={styles.subtitle}>{scopeNote}</div>}
+
+      <div className={styles.grid}>
+        {STATUS_CARDS.map((card) => {
+          const { count, amount } = sumSummary(summary, card.statuses);
+          const active = status === card.statuses[0];
+          return (
+            <button
+              key={card.key}
+              type="button"
+              className={`${styles.card} ${active ? styles.cardActive : ""}`}
+              style={{ borderLeftColor: card.color }}
+              onClick={() => { setStatus(active ? "" : card.statuses[0]); setSkip(0); }}
+            >
+              <div className={styles.cardLabel}>
+                <span>{card.label}</span>
+                {!loading && <span className={styles.cardCount}>{count}</span>}
+              </div>
+              {loading ? (
+                <Skeleton height={22} />
+              ) : (
+                <div className={styles.cardValue} style={{ color: card.color }}>
+                  {amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                </div>
+              )}
+              {card.note && <div className={styles.cardNote}>{card.note}</div>}
+            </button>
+          );
+        })}
+      </div>
 
       <div className={styles.filterBar}>
         {isSuperadmin && (
@@ -200,38 +234,13 @@ export default function PaymentsScreen() {
         <Button variant="secondary" onClick={clearFilters} disabled={!hasFilter}>Limpar</Button>
       </div>
 
-      <div className={styles.grid}>
-        {STATUS_CARDS.map((card) => {
-          const { count, amount } = sumSummary(summary, card.statuses);
-          const active = status === card.statuses[0];
-          return (
-            <button
-              key={card.key}
-              type="button"
-              className={`${styles.card} ${active ? styles.cardActive : ""}`}
-              style={{ borderLeftColor: card.color }}
-              onClick={() => { setStatus(active ? "" : card.statuses[0]); setSkip(0); }}
-            >
-              <div className={styles.cardLabel}>{card.label} {loading ? "" : `(${count})`}</div>
-              {loading ? (
-                <Skeleton height={28} />
-              ) : (
-                <div className={styles.cardValue} style={{ color: card.color }}>
-                  {amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                </div>
-              )}
-              {card.note && <div className={styles.cardNote}>{card.note}</div>}
-            </button>
-          );
-        })}
-      </div>
-
       {loading && transactions.length === 0 && total === 0 ? (
         <div className={styles.muted}>Carregando…</div>
       ) : (
         <>
           {transactions.length > 0 ? (
             <>
+              <div className={styles.count}><b>{total}</b> transaç{total === 1 ? "ão" : "ões"} encontrada{total === 1 ? "" : "s"}</div>
               <Table
                 columns={columns}
                 rows={transactions}
