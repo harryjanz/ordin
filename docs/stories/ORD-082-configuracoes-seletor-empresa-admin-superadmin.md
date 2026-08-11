@@ -1,6 +1,6 @@
 ---
 id: ORD-082
-status: Tech Explorer
+status: Ready
 fase: 6
 sprint: null
 responsavel: Frontend
@@ -171,7 +171,7 @@ Duas linhas, mesma causa raiz do Achado 2 — resolve o Dashboard de brinde.
 
 ## Sugestões de UX pra revisão do usuário
 
-1. **Seletor de empresa: campo único no topo, ou reaproveitar a mesma barra de filtro de Transações/Pedidos (mesmo que com um campo só)?** Recomendo campo único simples — não há lista pra filtrar aqui, uma barra de filtro completa pareceria fora de contexto. Mas se a intenção é ter uma "área de contexto de empresa" visualmente consistente nas 3 telas (Settings/Company/Pair) que agora vão compartilhar `selectedCompanyId`, pode valer a pena um componente pequeno e reutilizável (ex.: `CompanyContextBar`) usado nas três, em vez de reimplementar o campo em cada uma. Não fiz isso agora pra não expandir o escopo sem confirmação — é sugestão pra essa história ou uma próxima.
+1. **Seletor de empresa — decidido com o usuário (2026-08-11):** cada tela mantém autonomia total de UI/layout pro próprio seletor (sem componente visual compartilhado tipo `CompanyContextBar`) — mas todas leem/escrevem o **mesmo valor de sessão** (`selectedCompanyId`/`setSelectedCompany` do store), não um `useState` local isolado. Na prática: selecionar uma empresa em Transações e depois abrir Configurações já vem com essa empresa pré-selecionada (mesma sessão ativa), mas o campo em si — Dropdown solto, dentro de uma barra de filtro, onde for — é decisão de cada tela na hora de melhorá-la. **Escopo desta história:** só `SettingsScreen` lê/escreve `selectedCompanyId` agora. `PaymentsScreen`/`OrdersScreen` continuam com o `useState` local que já têm — migrar eles pro valor de sessão compartilhado fica a critério do usuário quando/se for melhorar essas telas de novo, não faz parte do ORD-082.
 2. **Modo claro/escuro do totem — `Toggle` do DS.** Confirmado: todos os temas suportam os dois modos (`themes.ts:23`), então o `Toggle` encaixa sem ressalva — mesmo ganho de consistência do ORD-076, aplicado agora à aparência do totem.
 3. **Estado vazio "nenhuma empresa selecionada"** — hoje, sem seletor, a tela sempre mostra dados de alguma empresa (mesmo que "errada"). Com o seletor, existe pela primeira vez a possibilidade de não ter nada selecionado. Sugiro um estado vazio explícito ("Selecione uma empresa para gerenciar PIN e aparência") em vez de deixar os cards em branco ou com erro de request — mais claro que a tela está funcionando, só esperando uma escolha.
 4. **Preview ao vivo já é um ponto forte da tela** — não mexi nisso, só registro que é um bom padrão (mudança reflete no preview antes de salvar) que outras telas do admin não têm; não é uma sugestão de mudança, é um elogio ao que já existe.
@@ -180,6 +180,6 @@ Duas linhas, mesma causa raiz do Achado 2 — resolve o Dashboard de brinde.
 
 ## Ready
 
-**Explorer:** [x] fluxo, persona e critérios de aceite definidos, achado crítico do seletor morto documentado · **QA Explorer:** [x] cenários cobrindo os dois roles, propagação entre telas, estado vazio e comportamento do botão · **Tech Explorer:** [x] diagnóstico com evidência de código, direção técnica com diffs propostos, dúvida do Toggle resolvida direto no código (`themes.ts`) · **Aprovação final:** [ ] pendente — só a sugestão de UX 1 (campo único em Settings vs. componente `CompanyContextBar` reutilizável nas 3 telas) segue em aberto pra decisão do usuário; sugestões 2 e 3 já resolvidas/incorporadas nos critérios de aceite
+**Explorer:** [x] fluxo, persona e critérios de aceite definidos, achado crítico do seletor morto documentado · **QA Explorer:** [x] cenários cobrindo os dois roles, propagação entre telas, estado vazio e comportamento do botão · **Tech Explorer:** [x] diagnóstico com evidência de código, direção técnica com diffs propostos, dúvida do Toggle resolvida direto no código (`themes.ts`) · **Aprovação final:** [x] aprovado no chat pelo usuário (2026-08-11) — seletor com autonomia visual por tela mas valor de sessão compartilhado (`selectedCompanyId`), escopo desta história limitado a `SettingsScreen` (Payments/Orders ficam pra depois, a critério do usuário)
 
-**Status: Tech Explorer** — não iniciar implementação até aprovação explícita.
+**Status: Ready** — pode começar a implementação.
