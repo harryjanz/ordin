@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { LinkButton } from "design-system";
+import { Toggle } from "design-system";
 import { useStore } from "../store";
 import api from "../api";
 import ConfirmDialog from "./ConfirmDialog";
@@ -93,23 +93,39 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Botão customizado (não LinkButton) porque o DS não tem ícone de
-          sol/lua no icon-font. */}
-      <button
-        onClick={toggleAdminThemeMode}
-        aria-label={adminThemeMode === "dark" ? "Mudar para modo claro" : "Mudar para modo escuro"}
-        data-testid="theme-toggle"
-        className={`${styles.actionBtn} ${styles.themeToggle}`}
-      >
-        <span className={styles.navIcon}>{adminThemeMode === "dark" ? "☀️" : "🌙"}</span>
+      {/* Toggle do design system em vez do emoji ☀️/🌙 (o icon-font não tem
+          ícone de sol/lua — ver ORD-076). O texto ao lado é nosso, não o
+          `label` do Toggle: o texto interno do componente usa color('dark')
+          fixo (#180a33), que é literalmente o --a-bg do modo escuro do admin
+          — ficaria invisível ali. */}
+      <div className={`${styles.actionBtn} ${styles.themeToggle}`}>
+        <Toggle
+          name="admin-theme-sidebar"
+          checked={adminThemeMode === "dark"}
+          onChange={toggleAdminThemeMode}
+          aria-label={adminThemeMode === "dark" ? "Mudar para modo claro" : "Mudar para modo escuro"}
+          data-testid="theme-toggle"
+        />
         <span className={styles.navLabel} style={{ opacity: open ? 1 : 0 }}>
-          {adminThemeMode === "dark" ? "Modo claro" : "Modo escuro"}
+          {adminThemeMode === "dark" ? "Modo escuro" : "Modo claro"}
+        </span>
+      </div>
+
+      {/* Item de navegação, não LinkButton — variant="inverse" do LinkButton
+          fixa texto/ícone branco, invisível sobre o fundo branco do sidebar
+          no modo claro (ver ORD-076, achado 1). Herda a mesma cor
+          theme-aware que os itens de navegação acima. */}
+      <button
+        type="button"
+        onClick={handleLogout}
+        className={`${styles.navItem} ${styles.logoutItem}`}
+        style={{ marginBottom: 16 }}
+      >
+        <i className={`icon-log-out ${styles.navIcon}`} />
+        <span className={styles.navLabel} style={{ opacity: open ? 1 : 0 }}>
+          Sair
         </span>
       </button>
-
-      <div className={styles.actionBtn} style={{ marginBottom: 16 }}>
-        <LinkButton onClick={handleLogout} variant="inverse" icon="log-out" label={open ? "Sair" : ""} />
-      </div>
 
       <ConfirmDialog
         open={!!pendingNav}
