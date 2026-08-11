@@ -17,10 +17,10 @@ import CompanyContractScreen from "./screens/CompanyContractScreen";
 import CompanyListScreen from "./screens/CompanyListScreen";
 
 const ROLE_ROUTES: Record<string, string[]> = {
-  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/payments"],
-  admin:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/settings", "/pair"],
-  owner:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/settings", "/pair"],
-  manager:  ["/dashboard", "/catalog", "/orders", "/payments", "/pair"],
+  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/pair", "/settings"],
+  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/pair", "/settings"],
+  owner:      ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
+  manager:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
   cashier:  ["/dashboard"],
 };
 

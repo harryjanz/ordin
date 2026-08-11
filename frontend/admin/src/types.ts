@@ -1,3 +1,8 @@
+// superadmin/admin são usuários da própria Ordin (gestão da plataforma, não
+// de uma empresa cliente) — hoje praticamente equivalentes em capacidades
+// (mesmas rotas em ROLE_ROUTES/MENU, mesmo _require_platform_admin no
+// company-service). A distinção entre os dois fica reservada pra quando uma
+// função específica precisar ser restrita só a um deles. Ver docs/ARQUITETURA.md §1.2.
 export type Role = "superadmin" | "admin" | "owner" | "manager" | "cashier";
 
 export interface AuthState {

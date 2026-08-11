@@ -8,14 +8,14 @@ import styles from "./Sidebar.module.scss";
 
 const MENU = [
   { to: "/dashboard",     label: "Dashboard",    icon: "home",        roles: ["superadmin", "admin", "owner", "manager", "cashier"] },
-  { to: "/companies",     label: "Clientes",     icon: "users",       roles: ["superadmin"] },
-  { to: "/companies/new", label: "Novo cliente", icon: "user-plus",   roles: ["superadmin"] },
-  { to: "/catalog",       label: "Catálogo",     icon: "package",     roles: ["admin", "owner", "manager"] },
-  { to: "/orders",        label: "Pedidos",      icon: "shopping-cart", roles: ["admin", "owner", "manager"] },
+  { to: "/companies",     label: "Clientes",     icon: "users",       roles: ["superadmin", "admin"] },
+  { to: "/companies/new", label: "Novo cliente", icon: "user-plus",   roles: ["superadmin", "admin"] },
+  { to: "/catalog",       label: "Catálogo",     icon: "package",     roles: ["superadmin", "admin", "owner", "manager"] },
+  { to: "/orders",        label: "Pedidos",      icon: "shopping-cart", roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/payments",      label: "Transações",   icon: "credit-card", roles: ["superadmin", "admin", "owner", "manager"] },
-  { to: "/company",       label: "Empresa",      icon: "briefcase",   roles: ["admin", "owner"] },
-  { to: "/pair",          label: "Dispositivos", icon: "monitor",     roles: ["admin", "owner", "manager"] },
-  { to: "/settings",      label: "Config.",      icon: "settings",    roles: ["admin", "owner"] },
+  { to: "/company",       label: "Empresa",      icon: "briefcase",   roles: ["owner", "manager"] },
+  { to: "/pair",          label: "Dispositivos", icon: "monitor",     roles: ["superadmin", "admin", "owner", "manager"] },
+  { to: "/settings",      label: "Config.",      icon: "settings",    roles: ["superadmin", "admin", "owner", "manager"] },
 ] as const;
 
 const W_OPEN = 220;

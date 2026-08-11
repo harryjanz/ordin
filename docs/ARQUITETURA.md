@@ -12,7 +12,7 @@ O Ordin é uma plataforma de autoatendimento para food service, multi-tenant por
 ### 1.1 Hierarquia de Entidades
 
 ```
-PLATAFORMA ORDIN (superadmin)
+PLATAFORMA ORDIN (superadmin, admin)
   └── EMPRESA (owner, manager, cashier)
         └── TERMINAL
               └── PEDIDO → ITENS → TICKETS → COLETA
@@ -20,11 +20,11 @@ PLATAFORMA ORDIN (superadmin)
 
 ### 1.2 Papéis (RBAC)
 
-> Roles reais confirmados no seed (`services/company/migrations/versions/20260611_0901_seed_initial.py`) e nas checagens de código — substituem `super_admin`/`admin`/`cashier`/`kiosk` de versões antigas deste doc.
+> Roles reais confirmados no seed (`services/company/migrations/versions/20260611_0901_seed_initial.py`) e nas checagens de código — substituem `super_admin`/`cashier`/`kiosk` de versões antigas deste doc.
 
 | Role | Escopo | Capacidades |
 |---|---|---|
-| `superadmin` | Plataforma | Único que cria/edita/desativa empresas, consulta CNPJ/CEP, mexe em status de contrato, aprova pareamento de totem |
+| `superadmin` / `admin` | Plataforma (usuários da própria Ordin, não de uma empresa cliente) | Praticamente equivalentes hoje — mesmas rotas/endpoints (`_require_platform_admin` no company-service aceita os dois): criar/editar/desativar empresas, consulta CNPJ/CEP, status de contrato, aprovar pareamento de totem, Catálogo/Pedidos/Transações/Dispositivos/Config. de qualquer empresa. Não existe hoje nenhuma capacidade exclusiva de `superadmin` — a distinção dos dois roles fica reservada pra quando uma função específica precisar ser restrita só a um deles (ex: algo destrutivo ou irreversível a nível de plataforma). Nenhum usuário seed tem role `admin` — só `superadmin` (`admin@ordin.app`) está em uso hoje. |
 | `owner` | Sua empresa | Tudo de `manager`, mais: promover usuário a `owner`, responsável legal da empresa |
 | `manager` | Sua empresa | CRUD de catálogo, terminais, usuários (exceto promover a `owner`), configurações de pagamento |
 | `cashier` | Sua empresa | Autenticado — hoje sem checagem de role própria no código além de estar logado |

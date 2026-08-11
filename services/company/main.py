@@ -187,9 +187,11 @@ async def get_db():
 
 # ── Access control ────────────────────────────────────────────────────────────
 
-def _require_superadmin(u: TokenPayload) -> None:
-    if u.role != "superadmin":
-        raise HTTPException(403, "Acesso restrito a super admin")
+def _require_platform_admin(u: TokenPayload) -> None:
+    # superadmin e admin são usuários da própria Ordin (não de empresa
+    # cliente) — hoje equivalentes em capacidade; ver docs/ARQUITETURA.md §1.2.
+    if u.role not in ("superadmin", "admin"):
+        raise HTTPException(403, "Acesso restrito a administração da plataforma")
 
 
 def _require_company_admin(u: TokenPayload, company_id: int) -> None:
@@ -702,7 +704,7 @@ async def list_companies(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    _require_platform_admin(current_user)
     stmt = select(Company).where(Company.active == True)
     if q:
         like = f"%{q}%"
@@ -731,7 +733,7 @@ async def create_company(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    _require_platform_admin(current_user)
     cadastral_status = "NAO_VERIFICADA"
     if body.document:
         # reconsulta server-side — nunca confia apenas no que o front enviou (janela lookup → submit)
@@ -792,7 +794,7 @@ async def cnpj_lookup(
     cnpj: str,
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    _require_platform_admin(current_user)
     normalized = normalize_cnpj(cnpj)
     if not is_valid_cnpj(normalized):
         raise HTTPException(422, "CNPJ inválido (formato ou dígito verificador)")
@@ -812,7 +814,7 @@ async def cep_lookup(
     cep: str,
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    _require_platform_admin(current_user)
     normalized = normalize_cep(cep)
     if not is_valid_cep(normalized):
         raise HTTPException(422, "CEP inválido — deve conter 8 dígitos")
@@ -853,7 +855,7 @@ async def update_company(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    _require_platform_admin(current_user)
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
@@ -875,7 +877,7 @@ async def delete_company(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    _require_platform_admin(current_user)
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
@@ -1528,7 +1530,7 @@ async def update_contract_status(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    _require_platform_admin(current_user)
     if status not in VALID_CONTRACT_STATUSES:
         raise HTTPException(422, f"status deve ser um de: {sorted(VALID_CONTRACT_STATUSES)}")
     co = await db.get(Company, company_id)
@@ -1579,7 +1581,7 @@ async def get_contract_document_url(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
-    _require_superadmin(current_user)
+    _require_platform_admin(current_user)
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
