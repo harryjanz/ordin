@@ -239,8 +239,9 @@ async def test_dir_list_orders(db_session):
     import main as svc
     order_id, oi_id, t_id = await _create_order(db_session)
     async with db_session() as db:
-        result = await svc.list_orders(None, 50, 0, db, _user("owner", 1))
+        result = await svc.list_orders(db=db, current_user=_user("owner", 1))
     assert "orders" in result
+    assert "summary" in result
     await _cleanup_order(db_session)
 
 
@@ -248,9 +249,194 @@ async def test_dir_list_orders_com_status(db_session):
     import main as svc
     order_id, oi_id, t_id = await _create_order(db_session)
     async with db_session() as db:
-        result = await svc.list_orders("pending", 50, 0, db, _user("owner", 1))
+        result = await svc.list_orders(status="pending", db=db, current_user=_user("owner", 1))
     assert "orders" in result
     await _cleanup_order(db_session)
+
+
+async def _mk_bare_order(SessionLocal, order_ref, company_id=1, status="pending",
+                          cpf=None, created_at=None, total=10.0):
+    """Pedido sem itens/tickets — suficiente pros filtros de list_orders,
+    que não dependem de OrderItem/Ticket. Pre-limpa o mesmo order_ref
+    primeiro (idempotente em retry, mesmo padrão de _create_order)."""
+    await _cleanup_orders(SessionLocal, [order_ref])
+    import main as svc
+    async with SessionLocal() as db:
+        order = svc.Order(company_id=company_id, terminal_id=1, order_ref=order_ref,
+                          total=total, discount=0.0, status=status, cpf=cpf)
+        if created_at is not None:
+            order.created_at = created_at
+        db.add(order)
+        await db.commit()
+
+
+async def _cleanup_orders(SessionLocal, order_refs):
+    import main as svc
+    from sqlalchemy import select as sa_select
+    async with SessionLocal() as db:
+        ids = (await db.execute(
+            sa_select(svc.Order.id).where(svc.Order.order_ref.in_(order_refs))
+        )).scalars().all()
+        if ids:
+            await db.execute(sa_delete(svc.Order).where(svc.Order.id.in_(ids)))
+            await db.commit()
+
+
+async def test_dir_list_orders_filtro_referencia(db_session):
+    """ORD-081: busca parcial por order_ref."""
+    import main as svc
+    refs = ["ORD-COVREF01", "ORD-COVREF02", "ORD-OUTRO01"]
+    for r in refs:
+        await _mk_bare_order(db_session, r)
+    async with db_session() as db:
+        result = await svc.list_orders(order_ref="COVREF", db=db, current_user=_user("owner", 1))
+    found = {o["order_ref"] for o in result["orders"]}
+    assert found == {"ORD-COVREF01", "ORD-COVREF02"}
+    await _cleanup_orders(db_session, refs)
+
+
+
+# company_id=999 (inexistente no seed) pros testes abaixo que fazem
+# asserção de igualdade exata — a empresa 1 do seed já tem 85 pedidos reais
+# (23 pending, 54 paid, 8 cancelled) que poluiriam qualquer comparação
+# exata de CPF/status/período/horário se usássemos company_id=1.
+ISOLATED_CO = 999
+
+
+async def test_dir_list_orders_filtro_cpf(db_session):
+    """ORD-081: filtro por CPF, normalizado (aceita com ou sem pontuação)."""
+    import main as svc
+    refs = ["ORD-COVCPF01", "ORD-COVCPF02"]
+    await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, cpf="99988877766")
+    await _mk_bare_order(db_session, refs[1], company_id=ISOLATED_CO, cpf="11122233344")
+    async with db_session() as db:
+        result = await svc.list_orders(cpf="999.888.777-66", db=db, current_user=_user("owner", ISOLATED_CO))
+    found = {o["order_ref"] for o in result["orders"]}
+    assert found == {"ORD-COVCPF01"}
+    await _cleanup_orders(db_session, refs)
+
+
+async def test_dir_list_orders_filtro_status_paid(db_session):
+    """Achado crítico do ORD-081: status 'paid' precisa ser filtrável (faltava no frontend antigo)."""
+    import main as svc
+    refs = ["ORD-COVPAID1", "ORD-COVPEND1"]
+    await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, status="paid")
+    await _mk_bare_order(db_session, refs[1], company_id=ISOLATED_CO, status="pending")
+    async with db_session() as db:
+        result = await svc.list_orders(status="paid", db=db, current_user=_user("owner", ISOLATED_CO))
+    found = {o["order_ref"] for o in result["orders"]}
+    assert found == {"ORD-COVPAID1"}
+    await _cleanup_orders(db_session, refs)
+
+
+async def test_dir_list_orders_periodo(db_session):
+    from datetime import datetime
+    import main as svc
+    refs = ["ORD-COVPER01", "ORD-COVPER02"]
+    await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 1, 10, 0))
+    await _mk_bare_order(db_session, refs[1], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 10, 10, 0))
+    async with db_session() as db:
+        result = await svc.list_orders(
+            date_from="2026-08-05", date_to="2026-08-15", db=db, current_user=_user("owner", ISOLATED_CO)
+        )
+    found = {o["order_ref"] for o in result["orders"]}
+    assert found == {"ORD-COVPER02"}
+    await _cleanup_orders(db_session, refs)
+
+
+async def test_dir_list_orders_faixa_horario_com_data(db_session):
+    """Faixa de horário aplica sobre o período, em qualquer dia dele — caso
+    de uso: cliente sem o número do pedido, lembra o horário aproximado."""
+    from datetime import datetime
+    import main as svc
+    refs = ["ORD-COVHOR01", "ORD-COVHOR02", "ORD-COVHOR03"]
+    await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 1, 12, 0))
+    await _mk_bare_order(db_session, refs[1], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 5, 12, 30))
+    await _mk_bare_order(db_session, refs[2], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 1, 20, 0))
+    async with db_session() as db:
+        result = await svc.list_orders(
+            date_from="2026-08-01", date_to="2026-08-10",
+            hour_from="11:00", hour_to="14:00",
+            db=db, current_user=_user("owner", ISOLATED_CO),
+        )
+    found = {o["order_ref"] for o in result["orders"]}
+    assert found == {"ORD-COVHOR01", "ORD-COVHOR02"}
+    await _cleanup_orders(db_session, refs)
+
+
+async def test_dir_list_orders_faixa_horario_ignorada_sem_data_from(db_session):
+    """hour_from/hour_to só têm efeito com date_from setado (mesma trava do
+    frontend, campo desabilitado até "De" ser preenchido)."""
+    from datetime import datetime
+    import main as svc
+    refs = ["ORD-COVHORX1", "ORD-COVHORX2"]
+    await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 1, 12, 0))
+    await _mk_bare_order(db_session, refs[1], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 1, 20, 0))
+    async with db_session() as db:
+        result = await svc.list_orders(
+            hour_from="11:00", hour_to="14:00", db=db, current_user=_user("owner", ISOLATED_CO),
+        )
+    found = {o["order_ref"] for o in result["orders"]}
+    assert refs[0] in found and refs[1] in found
+    await _cleanup_orders(db_session, refs)
+
+
+async def test_dir_list_orders_superadmin_ve_todas_empresas(db_session):
+    import main as svc
+    refs = ["ORD-COVSA01", "ORD-COVSA02"]
+    await _mk_bare_order(db_session, refs[0], company_id=1)
+    await _mk_bare_order(db_session, refs[1], company_id=2)
+    async with db_session() as db:
+        result = await svc.list_orders(db=db, current_user=_user("superadmin", 1))
+    found = {o["order_ref"] for o in result["orders"]}
+    assert refs[0] in found and refs[1] in found
+    await _cleanup_orders(db_session, refs)
+
+
+async def test_dir_list_orders_admin_filtra_por_empresa(db_session):
+    import main as svc
+    refs = ["ORD-COVAD01", "ORD-COVAD02"]
+    await _mk_bare_order(db_session, refs[0], company_id=1)
+    await _mk_bare_order(db_session, refs[1], company_id=2)
+    async with db_session() as db:
+        result = await svc.list_orders(company_id=2, db=db, current_user=_user("admin", 1))
+    found = {o["order_ref"] for o in result["orders"]}
+    assert found == {"ORD-COVAD02"}
+    await _cleanup_orders(db_session, refs)
+
+
+async def test_dir_list_orders_owner_ignora_company_id_de_outra_empresa(db_session):
+    """Owner não escapa da própria empresa nem manipulando company_id na
+    query — parâmetro é ignorado pra quem não é superadmin/admin. Usa
+    company_id isolados dos dois lados (nem a própria empresa do owner pode
+    ter dado real de seed, senão a asserção de igualdade exata quebra)."""
+    import main as svc
+    refs = ["ORD-COVOW01", "ORD-COVOW02"]
+    await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO)
+    await _mk_bare_order(db_session, refs[1], company_id=2)
+    async with db_session() as db:
+        result = await svc.list_orders(company_id=2, db=db, current_user=_user("owner", ISOLATED_CO))
+    found = {o["order_ref"] for o in result["orders"]}
+    assert found == {"ORD-COVOW01"}
+    await _cleanup_orders(db_session, refs)
+
+
+async def test_dir_list_orders_summary_ignora_filtro_de_status(db_session):
+    """Resumo por status sempre mostra a distribuição completa (empresa/
+    período/etc.), mesmo com a tabela filtrada por um status só — mesmo
+    padrão do ORD-078 em list_payments."""
+    import main as svc
+    refs = ["ORD-COVSUM01", "ORD-COVSUM02", "ORD-COVSUM03"]
+    await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, status="pending", total=10.0)
+    await _mk_bare_order(db_session, refs[1], company_id=ISOLATED_CO, status="paid", total=20.0)
+    await _mk_bare_order(db_session, refs[2], company_id=ISOLATED_CO, status="paid", total=30.0)
+    async with db_session() as db:
+        result = await svc.list_orders(status="pending", db=db, current_user=_user("owner", ISOLATED_CO))
+    assert len(result["orders"]) == 1
+    assert result["summary"]["pending"]["count"] == 1
+    assert result["summary"]["paid"]["count"] == 2
+    assert result["summary"]["paid"]["total"] == 50.0
+    await _cleanup_orders(db_session, refs)
 
 
 async def test_dir_update_status(db_session):
