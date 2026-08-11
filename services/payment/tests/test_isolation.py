@@ -75,6 +75,19 @@ async def test_sem_token_retorna_401(client):
     assert r.status_code == 401
 
 
+# ORD-079: cancelamento passa a exigir role de escrita (admin/owner/manager)
+# — antes qualquer JWT válido da empresa cancelava via API direta. O 403 vem
+# do Depends(require_write_role), avaliado antes do handler rodar, então nem
+# precisa existir uma transação com esse id pra reproduzir.
+async def test_cancel_sem_role_de_escrita_retorna_403(client, token_kiosk):
+    r = await client.post(
+        "/payments/9999/cancel",
+        json={"reason": "teste"},
+        headers=auth(token_kiosk),
+    )
+    assert r.status_code == 403
+
+
 # Empresa B enxerga apenas suas próprias transações
 async def test_empresa_b_enxerga_apenas_suas_transacoes(client, ids, token_company_b):
     r = await client.get("/payments", headers=auth(token_company_b))
