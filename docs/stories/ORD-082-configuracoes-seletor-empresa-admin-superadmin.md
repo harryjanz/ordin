@@ -1,6 +1,6 @@
 ---
 id: ORD-082
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Frontend
@@ -52,14 +52,19 @@ Como **superadmin/admin**, quero escolher qual empresa estou configurando na tel
 5. Owner/manager não veem esse seletor — comportamento inalterado
 
 ### Critérios de aceite
-- [ ] Seletor de empresa (`Dropdown` + `listCompanies()`, mesmo padrão de `PaymentsScreen`/`OrdersScreen`) visível só pra `superadmin`/`admin`
-- [ ] Selecionar uma empresa chama `setSelectedCompany` (store global) — `CompanyScreen`/`PairScreen` passam a refletir a mesma escolha automaticamente, de graça, sem tocar nesses dois arquivos
-- [ ] Sem empresa selecionada, mostra estado vazio claro (não card de PIN/aparência de uma empresa arbitrária sem o usuário saber qual)
-- [ ] `DashboardScreen.tsx:16,55` corrigido de `role === "admin"` pra `isPlatformAdmin` (mesmo padrão de `PaymentsScreen`/`OrdersScreen` desta sessão) — mesma causa raiz do Achado 2, resolve o seletor do Dashboard junto
-- [ ] Botão "Salvar aparência" migra pro componente `Button` do design system, com `loading={saving}` (sem o texto manual "Salvando…"), preservando a cor do tema do totem selecionado via prop `style` (mesmo padrão já usado — `Button` aceita `style`, só descarta `className`)
+- [x] Seletor de empresa (`Dropdown` + `listCompanies()`, mesmo padrão de `PaymentsScreen`/`OrdersScreen`) visível só pra `superadmin`/`admin`
+- [x] Selecionar uma empresa chama `setSelectedCompany` (store global) — `CompanyScreen`/`PairScreen` passam a refletir a mesma escolha automaticamente, de graça, sem tocar nesses dois arquivos
+- [x] Sem empresa selecionada, mostra estado vazio claro (não card de PIN/aparência de uma empresa arbitrária sem o usuário saber qual)
+- [x] `DashboardScreen.tsx:16,55` corrigido de `role === "admin"` pra `isPlatformAdmin` (mesmo padrão de `PaymentsScreen`/`OrdersScreen` desta sessão) — mesma causa raiz do Achado 2, resolve o seletor do Dashboard junto
+- [x] Botão "Salvar aparência" migra pro componente `Button` do design system, com `loading={saving}` — **ajustado em revisão ao vivo:** usuário pediu o mesmo visual padrão de "Regenerar PIN", sem cor custom do tema do totem (removida a prop `style` que preservava a cor)
 - [x] Toggle de modo claro/escuro do totem usa o componente `Toggle` do design system em vez de emoji — **confirmado no código:** `themes.ts:23`, `modes: Record<ThemeMode, ThemeTokens>` obriga TypeScript a exigir claro E escuro em todo tema; os 3 temas do registro têm os dois completos, sem exceção mono-modo. `Toggle` binário encaixa sem ressalva.
-- [ ] Copy corrigida: "usado pelos clientes" → referência ao operador/staff; menção a "login com PIN" generalizada pra cobrir pareamento também
-- [ ] Owner/manager continuam sem seletor, comportamento idêntico ao atual
+- [x] Copy corrigida: "usado pelos clientes" → referência à equipe da loja; menção a "login com PIN" generalizada pra "próximo login" (cobre pareamento também)
+- [x] Owner/manager continuam sem seletor, comportamento idêntico ao atual
+
+**Critérios adicionados em revisão ao vivo (escopo ampliado pelo usuário depois de testar a primeira entrega):**
+- [x] `CompanyScreen`/`PairScreen` mostram o nome da empresa ativa (subtítulo) — usuário reportou que a sessão "não fazia diferença" ao navegar; investigado: a leitura já funcionava, só não havia nenhuma indicação visual de qual empresa estava ativa em nenhuma das duas telas
+- [x] `PaymentsScreen`/`OrdersScreen` migrados de `useState` local pra `selectedCompanyId`/`setSelectedCompany` — a sessão agora vale nos dois sentidos entre as 5 telas (Configurações/Empresa/Dispositivos/Transações/Pedidos), não só Configurações → Empresa/Dispositivos como na primeira entrega
+- [x] Badge fixo no canto superior direito (`ActiveCompanyBadge`, novo componente), visível em toda a área autenticada, mostrando a empresa ativa com opção de remover a sessão (`setSelectedCompany(null)`)
 
 ### Wireframe / Mockup
 Não desenhei protótipo novo — reaproveita a estrutura de filtro de empresa já aprovada em `PaymentsScreen.tsx`/`OrdersScreen.tsx` (`.field` com `Dropdown`), adaptada pra um único campo no topo da página em vez de uma barra de filtros completa (aqui não há lista/tabela pra filtrar, é seleção de contexto pra edição).
@@ -171,7 +176,7 @@ Duas linhas, mesma causa raiz do Achado 2 — resolve o Dashboard de brinde.
 
 ## Sugestões de UX pra revisão do usuário
 
-1. **Seletor de empresa — decidido com o usuário (2026-08-11):** cada tela mantém autonomia total de UI/layout pro próprio seletor (sem componente visual compartilhado tipo `CompanyContextBar`) — mas todas leem/escrevem o **mesmo valor de sessão** (`selectedCompanyId`/`setSelectedCompany` do store), não um `useState` local isolado. Na prática: selecionar uma empresa em Transações e depois abrir Configurações já vem com essa empresa pré-selecionada (mesma sessão ativa), mas o campo em si — Dropdown solto, dentro de uma barra de filtro, onde for — é decisão de cada tela na hora de melhorá-la. **Escopo desta história:** só `SettingsScreen` lê/escreve `selectedCompanyId` agora. `PaymentsScreen`/`OrdersScreen` continuam com o `useState` local que já têm — migrar eles pro valor de sessão compartilhado fica a critério do usuário quando/se for melhorar essas telas de novo, não faz parte do ORD-082.
+1. **Seletor de empresa — decidido com o usuário (2026-08-11), escopo ampliado depois de testar a primeira entrega:** cada tela mantém autonomia total de UI/layout pro próprio seletor (sem componente visual compartilhado tipo `CompanyContextBar`) — mas todas leem/escrevem o **mesmo valor de sessão** (`selectedCompanyId`/`setSelectedCompany` do store), não um `useState` local isolado. Na entrega inicial, só `SettingsScreen` usava a sessão (`CompanyScreen`/`PairScreen` já liam, de graça). Ao testar, o usuário pediu que `PaymentsScreen`/`OrdersScreen` também passassem a usar a sessão nos dois sentidos — feito: as 5 telas agora compartilham `selectedCompanyId`, cada uma com seu próprio Dropdown/filtro, sem componente forçado em comum. Também pediram um indicador sempre visível (badge no canto superior direito) em vez de depender só do subtítulo por tela — implementado como componente novo (`ActiveCompanyBadge`), com opção de remover a seleção.
 2. **Modo claro/escuro do totem — `Toggle` do DS.** Confirmado: todos os temas suportam os dois modos (`themes.ts:23`), então o `Toggle` encaixa sem ressalva — mesmo ganho de consistência do ORD-076, aplicado agora à aparência do totem.
 3. **Estado vazio "nenhuma empresa selecionada"** — hoje, sem seletor, a tela sempre mostra dados de alguma empresa (mesmo que "errada"). Com o seletor, existe pela primeira vez a possibilidade de não ter nada selecionado. Sugiro um estado vazio explícito ("Selecione uma empresa para gerenciar PIN e aparência") em vez de deixar os cards em branco ou com erro de request — mais claro que a tela está funcionando, só esperando uma escolha.
 4. **Preview ao vivo já é um ponto forte da tela** — não mexi nisso, só registro que é um bom padrão (mudança reflete no preview antes de salvar) que outras telas do admin não têm; não é uma sugestão de mudança, é um elogio ao que já existe.
@@ -183,3 +188,21 @@ Duas linhas, mesma causa raiz do Achado 2 — resolve o Dashboard de brinde.
 **Explorer:** [x] fluxo, persona e critérios de aceite definidos, achado crítico do seletor morto documentado · **QA Explorer:** [x] cenários cobrindo os dois roles, propagação entre telas, estado vazio e comportamento do botão · **Tech Explorer:** [x] diagnóstico com evidência de código, direção técnica com diffs propostos, dúvida do Toggle resolvida direto no código (`themes.ts`) · **Aprovação final:** [x] aprovado no chat pelo usuário (2026-08-11) — seletor com autonomia visual por tela mas valor de sessão compartilhado (`selectedCompanyId`), escopo desta história limitado a `SettingsScreen` (Payments/Orders ficam pra depois, a critério do usuário)
 
 **Status: Ready** — pode começar a implementação.
+
+---
+
+## Downstream
+
+Fluxo simplificado de dev único, sem revisor formal nem branch protection (ver `docs/WORKFLOW.md`).
+
+- Branch `feature/ord-082-settings-company-selector` criada a partir de `main`.
+- Implementação em 4 commits, refletindo o ciclo real de revisão ao vivo do usuário:
+  1. Seletor em `SettingsScreen` + fix do `DashboardScreen` + `Button`/`Toggle` do DS + copy corrigida
+  2. Ajuste do botão "Salvar aparência" pro mesmo padrão visual de "Regenerar PIN" (sem cor custom)
+  3. Nome da empresa ativa em `CompanyScreen`/`PairScreen` — usuário reportou que a sessão "não fazia diferença" ao navegar; causa raiz era falta de indicação visual, não bug de estado
+  4. Escopo ampliado: `PaymentsScreen`/`OrdersScreen` migrados pra sessão compartilhada + `ActiveCompanyBadge` (indicador fixo global com opção de remover a seleção)
+- `tsc --noEmit` limpo em todos os commits.
+- Verificado ao vivo pelo usuário no navegador, com 2 rodadas de ajuste no mesmo ciclo (botão, depois indicação visual + escopo ampliado).
+- PR aberta e mesclada em `main`.
+
+**Status: Done**

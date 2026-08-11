@@ -7,16 +7,22 @@ import styles from "./DashboardScreen.module.scss";
 
 export default function DashboardScreen() {
   const { role, selectedCompanyId, setSelectedCompany } = useStore();
+  // superadmin e admin são equivalentes (gestão da plataforma, ver
+  // docs/ARQUITETURA.md §1.2) — este check era "admin" sozinho, um role sem
+  // nenhum usuário real no seed (achado do ORD-082), então o seletor de
+  // empresa abaixo nunca aparecia pra ninguém de verdade.
+  const isPlatformAdmin = role === "superadmin" || role === "admin";
   const [companies, setCompanies] = useState<Company[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (role === "admin") {
+    if (isPlatformAdmin) {
       api.get("/companies").then((r) => setCompanies(r.data.items ?? r.data)).catch(() => null);
     }
-  }, [role]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlatformAdmin]);
 
   useEffect(() => {
     if (!selectedCompanyId) { setLoading(false); return; }
@@ -52,7 +58,7 @@ export default function DashboardScreen() {
     <div className={styles.page}>
       <div className={styles.title}>Dashboard</div>
 
-      {role === "admin" && companies.length > 0 && (
+      {isPlatformAdmin && companies.length > 0 && (
         <div className={styles.section}>
           <div className={styles.sectionTitle}>Empresa</div>
           <Dropdown
