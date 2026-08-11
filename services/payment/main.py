@@ -70,6 +70,15 @@ class Transaction(Base):
     updated_at              = Column(DateTime, onupdate=datetime.utcnow)
 
 
+_WRITE_ROLES = {"admin", "owner", "manager"}
+
+
+def require_write_role(current_user: TokenPayload = Depends(get_current_user)) -> TokenPayload:
+    if current_user.role not in _WRITE_ROLES:
+        raise HTTPException(403, "Permissão insuficiente")
+    return current_user
+
+
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
@@ -503,7 +512,8 @@ async def list_payments(
     tags=["Pagamentos"],
     summary="Cancelar transação aprovada",
     responses={
-        400: {"description": "Transação não está no status `approved`"},
+        400: {"description": "Transação não está no status `approved`, ou é cartão Mercado Pago já aprovado (estorno ainda não suportado)"},
+        403: {"description": "Role sem permissão de cancelamento"},
         404: {"description": "Transação não encontrada"},
         422: {"description": "Cancelamento PayGo permitido apenas no mesmo dia"},
     },
@@ -512,7 +522,7 @@ async def cancel_payment(
     tx_id: int,
     body: CancelIn,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(require_write_role),
 ):
     result = await db.execute(
         select(Transaction).where(
@@ -525,6 +535,14 @@ async def cancel_payment(
         raise HTTPException(404)
     if tx.status != "approved":
         raise HTTPException(400, f"Status: {tx.status}")
+
+    # Cancelamento de cartão via Mercado Pago hoje chama a API de intenção de
+    # pagamento (payment-intents), pensada pra cancelar uma cobrança em
+    # andamento — não a API de Refunds, que é a correta pra estornar um
+    # pagamento já capturado. Recusa até confirmar o fluxo de estorno real
+    # (ver ORD-079, Achado 3).
+    if tx.provider == "mercadopago" and tx.method in ("credit", "debit"):
+        raise HTTPException(400, "Cancelamento de cartão via Mercado Pago ainda não suportado — contate o suporte")
 
     # Validação de data para PayGo
     if tx.provider == "paygo":
@@ -578,6 +596,7 @@ async def cancel_payment(
         "provider":                tx.provider,
         "environment":             tx.environment,
         "provider_transaction_id": tx.provider_transaction_id,
+        "cancelled_by":            current_user.sub,
         "events":                  [{"event": "cancelled", "ts": datetime.utcnow().isoformat(),
                                      "reason": body.reason}],
         "final_status":            "cancelled",

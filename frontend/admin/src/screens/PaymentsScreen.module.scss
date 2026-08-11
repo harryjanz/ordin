@@ -174,3 +174,26 @@
   color: rgba(var(--a-text-rgb), 0.4);
   font-style: italic;
 }
+
+// Formulário de cancelamento no ConfirmDialog (ORD-079).
+.cancelForm {
+  text-align: left;
+}
+
+.cancelSummary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+  @include font('xs');
+  background: var(--a-surface-2);
+  @include rounded('default');
+  @include padding('s', 'm', 's', 'm');
+  margin-bottom: 16px;
+
+  dt { color: rgba(var(--a-text-rgb), 0.5); }
+  dd { margin: 0; @include font('xs-emphasys'); }
+}
+
+.cancelOtherReason {
+  margin-top: 12px;
+}

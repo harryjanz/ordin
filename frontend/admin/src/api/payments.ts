@@ -38,3 +38,11 @@ export async function listPayments(filters: PaymentListFilters): Promise<Payment
   });
   return r.data;
 }
+
+export interface CancelPaymentPayload {
+  reason: string;
+}
+
+export async function cancelPayment(id: number, payload: CancelPaymentPayload): Promise<void> {
+  await api.post(`/payments/${id}/cancel`, payload);
+}
