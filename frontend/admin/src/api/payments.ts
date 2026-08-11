@@ -7,6 +7,7 @@ export interface PaymentListFilters {
   dateTo?: string;
   provider?: string;
   status?: string;
+  environment?: string;
   skip?: number;
   limit?: number;
 }
@@ -23,6 +24,7 @@ export function buildPaymentListQuery(filters: PaymentListFilters): Record<strin
   if (filters.dateTo) params.date_to = filters.dateTo;
   if (filters.provider) params.provider = filters.provider;
   if (filters.status) params.status = filters.status;
+  if (filters.environment) params.environment = filters.environment;
   return params;
 }
 

@@ -7,7 +7,7 @@
   overflow: hidden;
 }
 
-// Valores literais do protótipo aprovado de Transações TEF (payments-prototype
+// Valores literais do protótipo aprovado de Transações (payments-prototype
 // .m-table-wrap/.m-table) — ver feedback_fidelidade_prototipo. Só entra em
 // jogo com variant="compact" (hoje só PaymentsScreen); o Table "default"
 // acima continua igual ao que CompanyListScreen já usa.
@@ -40,7 +40,14 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   padding: 10px 12px;
-  background: var(--a-surface-2);
+  // var(--a-surface-2) é literalmente igual a var(--a-bg) no modo claro
+  // (ambos 'grey-100') — cabeçalho se confundia com o fundo da página atrás
+  // da tabela. Tingir a própria superfície do card em vez de usar um token
+  // fixo garante contraste com a página nos dois temas. Degrau mais forte
+  // que o painel de detalhe (.detail em PaymentsScreen.module.scss, 0.05) e
+  // o hover de linha (0.03) — cabeçalho é estrutura fixa, precisa do maior
+  // contraste dos três.
+  background: rgba(var(--a-text-rgb), 0.08);
   border-bottom: 1px solid var(--a-border);
   white-space: nowrap;
 }
@@ -53,6 +60,11 @@
 }
 
 .tdCompact {
+  // Altura fixa (32px do Button size="small" + 10px de padding em cima/
+  // embaixo) — sem isso, linhas com botão de ação (ex: "Cancelar") ficam
+  // mais altas que linhas sem ação (só texto/"—"), item a item, dando um
+  // efeito serrilhado na tabela inteira.
+  height: 52px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--a-border);
   white-space: nowrap;

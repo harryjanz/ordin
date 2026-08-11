@@ -371,3 +371,32 @@ async def test_dir_cancel_mercadopago_pix_permitido(db_session):
     async with db_session() as db:
         await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.id == tx_id))
         await db.commit()
+
+
+async def test_dir_cancel_superadmin_cancela_transacao_de_outra_empresa(db_session):
+    """Bug real reportado ao vivo: superadmin (company_id=1 no seed) tentou
+    cancelar uma transação e recebeu 403 (_WRITE_ROLES não incluía
+    superadmin) e, com o 403 corrigido, teria caído num 404 pra qualquer
+    transação fora da company_id=1 do próprio usuário — a query original
+    filtrava por Transaction.company_id == current_user.company_id sem
+    exceção pro superadmin, diferente de list_payments (que já trata isso).
+    Aqui a transação é da empresa 2, o usuário é superadmin da empresa 1:
+    precisa achar e cancelar mesmo assim."""
+    import main as svc
+    from main import CancelIn, Transaction
+    async with db_session() as db:
+        tx = Transaction(company_id=2, order_ref="ORD-C05", terminal_id=1,
+                         tef_number="T1", method="credit", amount=10.00,
+                         status="approved", provider="mock", environment="sandbox")
+        db.add(tx); await db.commit()
+        tx_id = tx.id
+    order_url = svc.ORDER_SVC
+    with respx.mock:
+        respx.patch(f"{order_url}/internal/orders/ORD-C05/status").mock(
+            return_value=httpx.Response(200))
+        async with db_session() as db:
+            result = await svc.cancel_payment(tx_id, CancelIn(reason="teste"), db, _user("superadmin", 1))
+    assert result["ok"] is True
+    async with db_session() as db:
+        await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.id == tx_id))
+        await db.commit()

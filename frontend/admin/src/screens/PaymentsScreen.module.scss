@@ -88,7 +88,7 @@
 // Filtros (ORD-077)
 .filterBar {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr auto;
+  grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr 1fr auto;
   gap: 10px;
   align-items: end;
   background: var(--a-surface);
@@ -124,12 +124,6 @@
   color: rgba(var(--a-text-rgb), 0.5);
 }
 
-.pagerActions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
 .empty {
   color: rgba(var(--a-text-rgb), 0.35);
   @include font('sm');
@@ -138,7 +132,12 @@
 
 // Painel de detalhe expansível da linha (ORD-080).
 .detail {
-  background: var(--a-surface-2);
+  // var(--a-surface-2) é literalmente igual a var(--a-bg) no modo claro —
+  // mesmo bug do cabeçalho da tabela (ver Table.module.scss .thCompact),
+  // painel de detalhe se confundia com o fundo da página. Degrau
+  // intermediário: mais forte que o hover de linha (0.03), mais fraco que
+  // o cabeçalho (0.08) — é conteúdo secundário "recuado", não estrutura fixa.
+  background: rgba(var(--a-text-rgb), 0.05);
   padding: 16px 20px;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -151,12 +150,17 @@
     font-size: 10.5px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: rgba(var(--a-text-rgb), 0.45);
+    color: rgba(var(--a-text-rgb), 0.55);
     margin-bottom: 3px;
   }
+  // Valor precisa ler como "a resposta", não mais um rótulo — cor plena
+  // (não a rgba tingida do dt) e peso maior, senão fica cinza-sobre-cinza
+  // em cima do fundo tingido do painel (ver .detail acima).
   dd {
     margin: 0;
     font-size: 12.5px;
+    color: var(--a-text);
+    font-weight: 600;
   }
 }
 

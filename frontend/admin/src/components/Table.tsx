@@ -22,7 +22,7 @@ export interface TableProps<T> {
   /** Conteúdo do painel expansível, renderizado numa linha extra logo abaixo. Só tem efeito junto com `expandedRowKey`. */
   renderExpanded?: (row: T) => ReactNode;
   /**
-   * "compact" reproduz literalmente o protótipo aprovado de Transações TEF
+   * "compact" reproduz literalmente o protótipo aprovado de Transações
    * (fonte/padding menores, borda real em vez de quase-invisível, fundo do
    * cabeçalho, hover de linha, borda da última linha removida). Só usado em
    * PaymentsScreen — não muda o Table "default" do CompanyListScreen.

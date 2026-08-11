@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Button, DateInput, Dropdown, Skeleton, Tag, TextArea, makeToast, type DropdownOptions, type TagProps } from "design-system";
+import { Button, DateInput, Dropdown, Pagination, Skeleton, Tag, TextArea, makeToast, type DropdownOptions, type TagProps } from "design-system";
 import { listPayments, cancelPayment } from "../api/payments";
 import { listCompanies, listTerminals } from "../api/companies";
 import { useStore } from "../store";
@@ -33,6 +33,12 @@ const STATUS_OPTIONS: DropdownOptions[] = [
   { value: "expired", label: "Expirado" },
 ];
 
+const ENVIRONMENT_OPTIONS: DropdownOptions[] = [
+  { value: "", label: "Todos" },
+  { value: "sandbox", label: "Sandbox" },
+  { value: "production", label: "Produção" },
+];
+
 const LIMIT = 50;
 
 // "expired" não vira card dedicado (baixíssimo volume) — soma junto com
@@ -58,6 +64,13 @@ function toIsoDate(brDate: string): string | undefined {
   const m = brDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!m) return undefined;
   return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+// Mesmo formato que o DateInput usa internamente pra comparar minDate/maxDate
+// (parseDate em DateInput.js) — T00:00:00 local, não UTC.
+function toDate(brDate: string): Date | undefined {
+  const iso = toIsoDate(brDate);
+  return iso ? new Date(`${iso}T00:00:00`) : undefined;
 }
 
 const CANCEL_REASONS: DropdownOptions[] = [
@@ -93,6 +106,7 @@ export default function PaymentsScreen() {
   const [dateTo, setDateTo] = useState("");
   const [provider, setProvider] = useState("");
   const [status, setStatus] = useState("");
+  const [environment, setEnvironment] = useState("");
   const [skip, setSkip] = useState(0);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -129,7 +143,7 @@ export default function PaymentsScreen() {
   useEffect(() => {
     fetchTransactions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [companyId, dateFrom, dateTo, provider, status, skip]);
+  }, [companyId, dateFrom, dateTo, provider, status, environment, skip]);
 
   function fetchTransactions() {
     setLoading(true);
@@ -139,6 +153,7 @@ export default function PaymentsScreen() {
       dateTo: toIsoDate(dateTo),
       provider: provider || undefined,
       status: status || undefined,
+      environment: environment || undefined,
       skip,
       limit: LIMIT,
     })
@@ -147,12 +162,26 @@ export default function PaymentsScreen() {
       .finally(() => setLoading(false));
   }
 
+  // O DateInput só revalida minDate/maxDate contra o valor atual quando o
+  // próprio campo muda (digitação/calendário) — não reage a um novo `minDate`
+  // vindo via prop. Sem isso, mudar "De" pra depois de um "Até" já escolhido
+  // deixaria os dois inconsistentes sem nenhum aviso.
+  function handleDateFromChange(value: string, valid: boolean) {
+    if (!valid && value) return;
+    setDateFrom(value);
+    const from = toDate(value);
+    const to = toDate(dateTo);
+    if (from && to && to < from) setDateTo("");
+    setSkip(0);
+  }
+
   function clearFilters() {
     setCompanyId(null);
     setDateFrom("");
     setDateTo("");
     setProvider("");
     setStatus("");
+    setEnvironment("");
     setSkip(0);
   }
 
@@ -173,9 +202,8 @@ export default function PaymentsScreen() {
     return terminal?.label ?? `Terminal ${t.terminal_id}`;
   }
 
-  const hasFilter = Boolean(companyId || dateFrom || dateTo || provider || status);
+  const hasFilter = Boolean(companyId || dateFrom || dateTo || provider || status || environment);
   const page = Math.floor(skip / LIMIT) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
   const companyOptions: DropdownOptions[] = [
     { value: "", label: "Todas as empresas" },
@@ -256,7 +284,7 @@ export default function PaymentsScreen() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.title}>Transações TEF</div>
+      <div className={styles.title}>Transações</div>
       {scopeNote && <div className={styles.subtitle}>{scopeNote}</div>}
 
       <div className={styles.grid}>
@@ -303,13 +331,16 @@ export default function PaymentsScreen() {
           <DateInput
             label="De"
             value={dateFrom}
-            onChange={(value, valid) => { if (valid || !value) { setDateFrom(value); setSkip(0); } }}
+            onChange={handleDateFromChange}
           />
         </div>
         <div className={styles.field}>
           <DateInput
             label="Até"
             value={dateTo}
+            disabled={!dateFrom}
+            minDate={toDate(dateFrom)}
+            invalidMinDateMessage="A data final deve ser igual ou posterior à data inicial."
             onChange={(value, valid) => { if (valid || !value) { setDateTo(value); setSkip(0); } }}
           />
         </div>
@@ -327,6 +358,14 @@ export default function PaymentsScreen() {
             value={STATUS_OPTIONS.find((o) => o.value === status) ?? STATUS_OPTIONS[0]}
             onValueSelected={(opt) => { setStatus(opt.value); setSkip(0); }}
             options={STATUS_OPTIONS}
+          />
+        </div>
+        <div className={styles.field}>
+          <Dropdown
+            label="Ambiente"
+            value={ENVIRONMENT_OPTIONS.find((o) => o.value === environment) ?? ENVIRONMENT_OPTIONS[0]}
+            onValueSelected={(opt) => { setEnvironment(opt.value); setSkip(0); }}
+            options={ENVIRONMENT_OPTIONS}
           />
         </div>
         <Button variant="secondary" onClick={clearFilters} disabled={!hasFilter}>Limpar</Button>
@@ -390,11 +429,12 @@ export default function PaymentsScreen() {
               />
               <div className={styles.pager}>
                 <span>Mostrando {skip + 1}–{Math.min(skip + LIMIT, total)} de {total}</span>
-                <div className={styles.pagerActions}>
-                  <Button variant="secondary" size="small" disabled={skip === 0} onClick={() => setSkip((s) => Math.max(0, s - LIMIT))}>Anterior</Button>
-                  <span>Página {page} de {totalPages}</span>
-                  <Button variant="secondary" size="small" disabled={skip + LIMIT >= total} onClick={() => setSkip((s) => s + LIMIT)}>Próxima</Button>
-                </div>
+                <Pagination
+                  activePage={page}
+                  itemsPerPage={LIMIT}
+                  totalItemsCount={total}
+                  onChange={(newPage) => setSkip((newPage - 1) * LIMIT)}
+                />
               </div>
             </>
           ) : (

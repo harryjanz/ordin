@@ -70,7 +70,7 @@ class Transaction(Base):
     updated_at              = Column(DateTime, onupdate=datetime.utcnow)
 
 
-_WRITE_ROLES = {"admin", "owner", "manager"}
+_WRITE_ROLES = {"admin", "owner", "manager", "superadmin"}
 
 
 def require_write_role(current_user: TokenPayload = Depends(get_current_user)) -> TokenPayload:
@@ -424,6 +424,7 @@ async def list_payments(
     current_user: TokenPayload = Depends(get_current_user),
     status: Optional[str] = None,
     provider: Optional[str] = None,
+    environment: Optional[str] = None,
     company_id: Optional[int] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
@@ -442,6 +443,8 @@ async def list_payments(
 
     if provider:
         base_filters.append(Transaction.provider == provider)
+    if environment:
+        base_filters.append(Transaction.environment == environment)
     if date_from:
         base_filters.append(Transaction.created_at >= date_from)
     if date_to:
@@ -524,12 +527,12 @@ async def cancel_payment(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(require_write_role),
 ):
-    result = await db.execute(
-        select(Transaction).where(
-            Transaction.id == tx_id,
-            Transaction.company_id == current_user.company_id,
-        )
-    )
+    # Superadmin cancela transação de qualquer empresa (mesmo padrão de
+    # list_payments) — outros roles seguem restritos à própria empresa.
+    tx_filters = [Transaction.id == tx_id]
+    if current_user.role != "superadmin":
+        tx_filters.append(Transaction.company_id == current_user.company_id)
+    result = await db.execute(select(Transaction).where(*tx_filters))
     tx = result.scalars().first()
     if not tx:
         raise HTTPException(404)
