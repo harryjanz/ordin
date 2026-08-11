@@ -15,6 +15,19 @@ $font-b: 'Inter', sans-serif;
   font-family: $font-d;
 }
 
+// ORD-082 — seletor de empresa, só pra superadmin/admin.
+.companySelector {
+  max-width: 320px;
+  margin-bottom: 20px;
+}
+
+.empty {
+  color: rgba(var(--a-text-rgb), 0.4);
+  @include font('sm');
+  font-family: $font-b;
+  padding: 32px 0;
+}
+
 .card {
   background: var(--a-surface);
   border: 1px solid var(--a-border);
@@ -140,23 +153,11 @@ $font-b: 'Inter', sans-serif;
   font-family: $font-b;
 }
 
-.modeBtn {
-  padding: 6px 18px;
-  border-radius: 999px;
-  font-family: $font-d;
-  font-weight: 700;
-  font-size: 12px;
-  border: 1px solid rgba(var(--a-neutral-rgb), 0.15);
-  background: transparent;
-  color: rgba(var(--a-neutral-rgb), 0.5);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.modeBtnActive {
-  border-color: #ffffff;
-  background: #ffffff;
-  color: #0a0a0f;
+.modeValueLabel {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--a-text);
+  font-family: $font-b;
 }
 
 .previewSection {
@@ -174,16 +175,6 @@ $font-b: 'Inter', sans-serif;
   display: flex;
   align-items: center;
   gap: 16px;
-}
-
-.saveBtn {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 999px;
-  font-size: 14px;
-  font-family: $font-d;
-  font-weight: 700;
-  cursor: pointer;
 }
 
 .saveMsg {

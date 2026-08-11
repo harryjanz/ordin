@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
-import { Button } from "design-system";
+import { Button, Dropdown, Toggle, type DropdownOptions } from "design-system";
 import api from "../api";
+import { listCompanies } from "../api/companies";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useStore } from "../store";
 import { THEME_REGISTRY, resolveTheme, type ThemeName, type ThemeMode } from "../themes";
+import type { Company } from "../types";
 import styles from "./SettingsScreen.module.scss";
 
 const FONT_D = "'Lexend', sans-serif";
@@ -76,7 +78,28 @@ function TotemPreview({ name, mode }: { name: string; mode: string }) {
 }
 
 export default function SettingsScreen() {
-  const companyId = useStore((s) => s.selectedCompanyId ?? s.companyId);
+  const role = useStore((s) => s.role);
+  // superadmin e admin são equivalentes (gestão da plataforma, ver
+  // docs/ARQUITETURA.md §1.2) — mesmo padrão de PaymentsScreen/OrdersScreen.
+  const isPlatformAdmin = role === "superadmin" || role === "admin";
+  const ownCompanyId = useStore((s) => s.companyId);
+  const selectedCompanyId = useStore((s) => s.selectedCompanyId);
+  const setSelectedCompany = useStore((s) => s.setSelectedCompany);
+  // ORD-082: valor de SESSÃO compartilhado (não um useState local isolado)
+  // — selecionar uma empresa aqui também é o que CompanyScreen/PairScreen
+  // já leem (selectedCompanyId ?? companyId), então a escolha se propaga
+  // pras outras telas ao navegar, sem acoplar a UI de cada uma.
+  const companyId = isPlatformAdmin ? selectedCompanyId : ownCompanyId;
+
+  const [companies, setCompanies] = useState<Company[]>([]);
+  useEffect(() => {
+    if (isPlatformAdmin) {
+      listCompanies({ limit: 200 }).then((r) => setCompanies(r.companies)).catch(() => null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlatformAdmin]);
+
+  const companyOptions: DropdownOptions[] = companies.map((c) => ({ value: String(c.id), label: c.name }));
 
   // ── PIN ───────────────────────────────────────────────────────────────────
   const [pin, setPin] = useState<string | null>(null);
@@ -130,103 +153,119 @@ export default function SettingsScreen() {
 
   const themes = Object.entries(THEME_REGISTRY) as [ThemeName, (typeof THEME_REGISTRY)[ThemeName]][];
   const previewTheme = resolveTheme(localTheme, localMode);
+  const showEmptyState = isPlatformAdmin && !companyId;
 
   return (
     <div className={styles.page}>
       <div className={styles.title}>Configurações</div>
 
-      {/* ── Card PIN ─────────────────────────────────────────────────────── */}
-      <div className={styles.card}>
-        <div className={styles.cardTitle}>PIN do totem</div>
-        <div className={styles.cardDesc}>
-          O PIN de 4 dígitos é usado pelos clientes para acessar o cardápio no quiosque.
-          Após regenerar, o PIN antigo é imediatamente invalidado.
+      {isPlatformAdmin && (
+        <div className={styles.companySelector}>
+          <Dropdown
+            label="Empresa"
+            placeholder="Selecionar empresa…"
+            value={companyOptions.find((o) => o.value === String(companyId ?? "")) ?? null}
+            onValueSelected={(opt) => setSelectedCompany(Number(opt.value))}
+            options={companyOptions}
+          />
         </div>
-        <Button onClick={regenerate} disabled={!companyId} loading={pinLoading}>
-          Regenerar PIN
-        </Button>
-        {pin && (
-          <>
-            <div className={styles.pinBox}>{pin}</div>
-            <div className={styles.pinHint}>Anote este PIN — ele não será exibido novamente.</div>
-          </>
-        )}
-      </div>
+      )}
 
-      {/* ── Card Aparência ───────────────────────────────────────────────── */}
-      <div className={styles.card}>
-        <div className={styles.cardTitle}>Aparência do totem</div>
-        <div className={styles.cardDesc}>
-          Escolha o tema visual e o modo de cor. O totem aplica a configuração automaticamente após o login com PIN.
-        </div>
+      {showEmptyState ? (
+        <div className={styles.empty}>Selecione uma empresa para gerenciar PIN e aparência do totem.</div>
+      ) : (
+        <>
+          {/* ── Card PIN ─────────────────────────────────────────────────── */}
+          <div className={styles.card}>
+            <div className={styles.cardTitle}>PIN do totem</div>
+            <div className={styles.cardDesc}>
+              O PIN de 4 dígitos é usado pela equipe da loja para acessar o totem.
+              Após regenerar, o PIN antigo é imediatamente invalidado.
+            </div>
+            <Button onClick={regenerate} disabled={!companyId} loading={pinLoading}>
+              Regenerar PIN
+            </Button>
+            {pin && (
+              <>
+                <div className={styles.pinBox}>{pin}</div>
+                <div className={styles.pinHint}>Anote este PIN — ele não será exibido novamente.</div>
+              </>
+            )}
+          </div>
 
-        {/* Grade de temas */}
-        <div className={styles.themeGrid}>
-          {themes.map(([key, entry]) => {
-            const selected = localTheme === key;
-            return (
-              <div
-                key={key}
-                onClick={() => setLocalTheme(key)}
-                className={`${styles.themeCard} ${selected ? styles.themeCardSelected : ""}`}
+          {/* ── Card Aparência ───────────────────────────────────────────── */}
+          <div className={styles.card}>
+            <div className={styles.cardTitle}>Aparência do totem</div>
+            <div className={styles.cardDesc}>
+              Escolha o tema visual e o modo de cor. O totem aplica a configuração automaticamente no próximo login.
+            </div>
+
+            {/* Grade de temas */}
+            <div className={styles.themeGrid}>
+              {themes.map(([key, entry]) => {
+                const selected = localTheme === key;
+                return (
+                  <div
+                    key={key}
+                    onClick={() => setLocalTheme(key)}
+                    className={`${styles.themeCard} ${selected ? styles.themeCardSelected : ""}`}
+                  >
+                    <div className={styles.themeCardHead}>
+                      <div className={styles.themeCardLabel}>{entry.label}</div>
+                      {selected && <div className={styles.themeCardCheck}>✓</div>}
+                    </div>
+                    <div className={styles.themeCardDesc}>{entry.description}</div>
+                    <div className={styles.themeCardDots}>
+                      {entry.colors.map((c: string, i: number) => (
+                        <div key={i} className={styles.themeCardDot} style={{ background: c }} />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Modo light/dark */}
+            <div className={styles.modeRow}>
+              <span className={styles.modeLabel}>Modo:</span>
+              <Toggle
+                name="totem-appearance-mode"
+                checked={localMode === "dark"}
+                onChange={() => setLocalMode(localMode === "dark" ? "light" : "dark")}
+              />
+              <span className={styles.modeValueLabel}>{localMode === "dark" ? "Escuro" : "Claro"}</span>
+            </div>
+
+            {/* Preview ao vivo */}
+            <div className={styles.previewSection}>
+              <div className={styles.previewLabel}>Preview ao vivo</div>
+              <TotemPreview name={localTheme} mode={localMode} />
+            </div>
+
+            {/* Salvar */}
+            <div className={styles.saveRow}>
+              <Button
+                onClick={saveAppearance}
+                disabled={!companyId}
+                loading={saving}
+                style={{
+                  background: previewTheme.btn,
+                  color: previewTheme.btnText,
+                  boxShadow: previewTheme.glow,
+                  borderRadius: 999,
+                }}
               >
-                <div className={styles.themeCardHead}>
-                  <div className={styles.themeCardLabel}>{entry.label}</div>
-                  {selected && <div className={styles.themeCardCheck}>✓</div>}
-                </div>
-                <div className={styles.themeCardDesc}>{entry.description}</div>
-                <div className={styles.themeCardDots}>
-                  {entry.colors.map((c: string, i: number) => (
-                    <div key={i} className={styles.themeCardDot} style={{ background: c }} />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Modo light/dark */}
-        <div className={styles.modeRow}>
-          <span className={styles.modeLabel}>Modo:</span>
-          {(["light", "dark"] as ThemeMode[]).map((m) => (
-            <button
-              key={m}
-              onClick={() => setLocalMode(m)}
-              className={`${styles.modeBtn} ${localMode === m ? styles.modeBtnActive : ""}`}
-            >
-              {m === "light" ? "☀️ Claro" : "🌙 Escuro"}
-            </button>
-          ))}
-        </div>
-
-        {/* Preview ao vivo */}
-        <div className={styles.previewSection}>
-          <div className={styles.previewLabel}>Preview ao vivo</div>
-          <TotemPreview name={localTheme} mode={localMode} />
-        </div>
-
-        {/* Salvar */}
-        <div className={styles.saveRow}>
-          <button
-            className={styles.saveBtn}
-            style={{
-              background: previewTheme.btn,
-              color: previewTheme.btnText,
-              boxShadow: previewTheme.glow,
-              opacity: saving ? 0.6 : 1,
-            }}
-            onClick={saveAppearance}
-            disabled={saving || !companyId}
-          >
-            {saving ? "Salvando…" : "Salvar aparência"}
-          </button>
-          {saveMsg && (
-            <span className={`${styles.saveMsg} ${saveMsg.ok ? styles.saveMsgOk : styles.saveMsgErr}`}>
-              {saveMsg.text}
-            </span>
-          )}
-        </div>
-      </div>
+                Salvar aparência
+              </Button>
+              {saveMsg && (
+                <span className={`${styles.saveMsg} ${saveMsg.ok ? styles.saveMsgOk : styles.saveMsgErr}`}>
+                  {saveMsg.text}
+                </span>
+              )}
+            </div>
+          </div>
+        </>
+      )}
 
       <ConfirmDialog
         open={confirmRegenerate}
