@@ -7,9 +7,21 @@
   overflow: hidden;
 }
 
+// Valores literais do protótipo aprovado de Transações (payments-prototype
+// .m-table-wrap/.m-table) — ver feedback_fidelidade_prototipo. Só entra em
+// jogo com variant="compact" (hoje só PaymentsScreen); o Table "default"
+// acima continua igual ao que CompanyListScreen já usa.
+.wrapCompact {
+  border-radius: 10px;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.tableCompact {
+  font-size: 12.5px;
 }
 
 .th {
@@ -23,11 +35,39 @@
   background: rgba(0, 0, 0, 0.15);
 }
 
+.thCompact {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 10px 12px;
+  // var(--a-surface-2) é literalmente igual a var(--a-bg) no modo claro
+  // (ambos 'grey-100') — cabeçalho se confundia com o fundo da página atrás
+  // da tabela. Tingir a própria superfície do card em vez de usar um token
+  // fixo garante contraste com a página nos dois temas. Degrau mais forte
+  // que o painel de detalhe (.detail em PaymentsScreen.module.scss, 0.05) e
+  // o hover de linha (0.03) — cabeçalho é estrutura fixa, precisa do maior
+  // contraste dos três.
+  background: rgba(var(--a-text-rgb), 0.08);
+  border-bottom: 1px solid var(--a-border);
+  white-space: nowrap;
+}
+
 .td {
   @include padding('m', 'l', 'm', 'l');
   border-bottom: 1px solid rgba(var(--a-neutral-rgb), 0.07);
   vertical-align: middle;
   @include font('sm');
+}
+
+.tdCompact {
+  // Altura fixa (32px do Button size="small" + 10px de padding em cima/
+  // embaixo) — sem isso, linhas com botão de ação (ex: "Cancelar") ficam
+  // mais altas que linhas sem ação (só texto/"—"), item a item, dando um
+  // efeito serrilhado na tabela inteira.
+  height: 52px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--a-border);
+  white-space: nowrap;
 }
 
 .tdMono {
@@ -36,6 +76,38 @@
 
 .row {
   cursor: pointer;
+}
+
+.rowCompact {
+  &:hover {
+    background: rgba(var(--a-text-rgb), 0.03);
+  }
+}
+
+.chev {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: rgba(var(--a-text-rgb), 0.35);
+}
+
+.chevOpen {
+  transform: rotate(90deg);
+}
+
+.expandedRow {
+  cursor: default;
+}
+
+.expandedCell {
+  padding: 0;
+  border-bottom: 1px solid rgba(var(--a-neutral-rgb), 0.07);
+}
+
+// tbody tr:last-child pega tanto a última linha de dado quanto (se a última
+// linha estiver expandida) a linha de detalhe — mesmo comportamento do
+// protótipo, que também usa :last-child sem tratar esse caso à parte.
+.tableCompact tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .empty {

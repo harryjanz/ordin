@@ -10,7 +10,7 @@ import httpx
 import respx
 from decimal import Decimal
 from fastapi import HTTPException
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -318,6 +318,84 @@ async def test_dir_cancel_mock_aprovada(db_session):
             return_value=httpx.Response(200))
         async with db_session() as db:
             result = await svc.cancel_payment(tx_id, CancelIn(reason="teste"), db, _user("owner", 1))
+    assert result["ok"] is True
+    async with db_session() as db:
+        await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.id == tx_id))
+        await db.commit()
+
+
+async def test_dir_cancel_mercadopago_cartao_bloqueado(db_session):
+    """ORD-079, Achado 3: cancelamento de cartão via Mercado Pago hoje chamaria
+    a API de payment-intents (cancela cobrança em andamento), não a API de
+    Refunds (estorna cobrança já capturada) — bloqueado até o fluxo de estorno
+    real ser resolvido. Transação deve permanecer approved, não cancelled."""
+    import main as svc
+    from main import CancelIn, Transaction
+    async with db_session() as db:
+        tx = Transaction(company_id=1, order_ref="ORD-C03", terminal_id=1,
+                         tef_number="T1", method="credit", amount=10.00,
+                         status="approved", provider="mercadopago", environment="sandbox")
+        db.add(tx); await db.commit()
+        tx_id = tx.id
+    async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.cancel_payment(tx_id, CancelIn(reason="teste"), db, _user("owner", 1))
+        assert exc.value.status_code == 400
+        assert "Mercado Pago" in exc.value.detail
+    async with db_session() as db:
+        result = await db.execute(select(svc.Transaction).where(svc.Transaction.id == tx_id))
+        assert result.scalars().first().status == "approved"
+        await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.id == tx_id))
+        await db.commit()
+
+
+async def test_dir_cancel_mercadopago_pix_permitido(db_session):
+    """O bloqueio do achado acima é só pra cartão (credit/debit) — PIX via
+    Mercado Pago não passa pela API de payment-intents e continua cancelável
+    normalmente."""
+    import main as svc
+    from main import CancelIn, Transaction
+    async with db_session() as db:
+        tx = Transaction(company_id=1, order_ref="ORD-C04", terminal_id=1,
+                         tef_number="T1", method="PIX", amount=10.00,
+                         status="approved", provider="mercadopago", environment="sandbox")
+        db.add(tx); await db.commit()
+        tx_id = tx.id
+    order_url = svc.ORDER_SVC
+    with respx.mock:
+        respx.patch(f"{order_url}/internal/orders/ORD-C04/status").mock(
+            return_value=httpx.Response(200))
+        async with db_session() as db:
+            result = await svc.cancel_payment(tx_id, CancelIn(reason="teste"), db, _user("owner", 1))
+    assert result["ok"] is True
+    async with db_session() as db:
+        await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.id == tx_id))
+        await db.commit()
+
+
+async def test_dir_cancel_superadmin_cancela_transacao_de_outra_empresa(db_session):
+    """Bug real reportado ao vivo: superadmin (company_id=1 no seed) tentou
+    cancelar uma transação e recebeu 403 (_WRITE_ROLES não incluía
+    superadmin) e, com o 403 corrigido, teria caído num 404 pra qualquer
+    transação fora da company_id=1 do próprio usuário — a query original
+    filtrava por Transaction.company_id == current_user.company_id sem
+    exceção pro superadmin, diferente de list_payments (que já trata isso).
+    Aqui a transação é da empresa 2, o usuário é superadmin da empresa 1:
+    precisa achar e cancelar mesmo assim."""
+    import main as svc
+    from main import CancelIn, Transaction
+    async with db_session() as db:
+        tx = Transaction(company_id=2, order_ref="ORD-C05", terminal_id=1,
+                         tef_number="T1", method="credit", amount=10.00,
+                         status="approved", provider="mock", environment="sandbox")
+        db.add(tx); await db.commit()
+        tx_id = tx.id
+    order_url = svc.ORDER_SVC
+    with respx.mock:
+        respx.patch(f"{order_url}/internal/orders/ORD-C05/status").mock(
+            return_value=httpx.Response(200))
+        async with db_session() as db:
+            result = await svc.cancel_payment(tx_id, CancelIn(reason="teste"), db, _user("superadmin", 1))
     assert result["ok"] is True
     async with db_session() as db:
         await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.id == tx_id))

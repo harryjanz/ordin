@@ -12,7 +12,7 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, select
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
@@ -65,8 +65,18 @@ class Transaction(Base):
     qr_code_base64          = Column(String(100000), nullable=True)
     cancelled_at            = Column(DateTime)
     cancel_reason           = Column(String(255))
+    refused_reason          = Column(String(255), nullable=True)
     created_at              = Column(DateTime, default=datetime.utcnow)
     updated_at              = Column(DateTime, onupdate=datetime.utcnow)
+
+
+_WRITE_ROLES = {"admin", "owner", "manager", "superadmin"}
+
+
+def require_write_role(current_user: TokenPayload = Depends(get_current_user)) -> TokenPayload:
+    if current_user.role not in _WRITE_ROLES:
+        raise HTTPException(403, "Permissão insuficiente")
+    return current_user
 
 
 async def get_db():
@@ -153,19 +163,40 @@ class PaymentStatusOut(BaseModel):
 
 
 class TransactionOut(BaseModel):
-    id:            int
-    order_ref:     str
-    method:        str
-    amount:        float
-    status:        str
-    provider:      str
-    nsu:           Optional[str] = None
-    authorization: Optional[str] = None
-    created_at:    str
+    id:                      int
+    order_ref:               str
+    method:                  str
+    amount:                  float
+    status:                  str
+    provider:                str
+    nsu:                     Optional[str] = None
+    authorization:           Optional[str] = None
+    created_at:              str
+    # Campos abaixo já existiam na tabela mas nunca eram serializados — ver
+    # ORD-080. Usados pelo painel de detalhe expansível da linha.
+    company_id:               int
+    terminal_id:              int
+    environment:              Optional[str] = None
+    provider_transaction_id:  Optional[str] = None
+    tef_number:               Optional[str] = None
+    cancelled_at:             Optional[str] = None
+    cancel_reason:            Optional[str] = None
+    refused_reason:           Optional[str] = None
+
+
+class StatusSummaryItem(BaseModel):
+    count: int
+    amount: float
 
 
 class PaymentListOut(BaseModel):
     items: list[TransactionOut]
+    total: int
+    # Agregado por status, ignorando o filtro de status (mas respeitando
+    # empresa/provider/período) — ver ORD-078. Sempre com os 5 status do
+    # enum presentes, count=0/amount=0 quando não há transação daquele
+    # status no recorte filtrado (o frontend não precisa tratar ausência).
+    summary: dict[str, StatusSummaryItem]
 
 
 class CancelOut(BaseModel):
@@ -305,6 +336,11 @@ async def create_payment(
     tx.provider_transaction_id = result.provider_transaction_id
     tx.qr_code                 = result.qr_code
     tx.qr_code_base64          = result.qr_code_base64
+    # Motivo de recusa — só existe pra transações a partir daqui (ORD-080).
+    # Transações antigas continuam com refused_reason NULL pra sempre, não
+    # dá pra reconstruir um dado que nunca foi capturado.
+    if result.status not in (TransactionStatus.approved, TransactionStatus.processing):
+        tx.refused_reason = result.error_message
     await db.commit()
 
     # 5. Auditoria MongoDB (best-effort)
@@ -381,19 +417,70 @@ async def create_payment(
     "/payments",
     response_model=PaymentListOut,
     tags=["Pagamentos"],
-    summary="Listar transações da empresa",
+    summary="Listar transações da empresa (superadmin vê todas, com filtro opcional de empresa)",
 )
 async def list_payments(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
+    status: Optional[str] = None,
+    provider: Optional[str] = None,
+    environment: Optional[str] = None,
+    company_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
 ):
+    # Superadmin enxerga todas as empresas (com filtro opcional de company_id
+    # pra restringir a uma) — qualquer outro role só vê a própria empresa,
+    # e o parâmetro company_id é ignorado nesse caso (não retorna 403 nem
+    # revela se a empresa pedida existe, só se comporta como se o parâmetro
+    # não tivesse sido enviado).
+    if current_user.role == "superadmin":
+        base_filters = [Transaction.company_id == company_id] if company_id else []
+    else:
+        base_filters = [Transaction.company_id == current_user.company_id]
+
+    if provider:
+        base_filters.append(Transaction.provider == provider)
+    if environment:
+        base_filters.append(Transaction.environment == environment)
+    if date_from:
+        base_filters.append(Transaction.created_at >= date_from)
+    if date_to:
+        base_filters.append(Transaction.created_at <= date_to)
+
+    # filters = base_filters + status, usado na lista/contagem paginada.
+    # O resumo por status (summary, abaixo) usa só base_filters — ignora o
+    # filtro de status de propósito, pra sempre mostrar a distribuição
+    # completa entre os status, mesmo com a tabela filtrada por um só.
+    filters = list(base_filters)
+    if status:
+        filters.append(Transaction.status == status)
+
+    total = (
+        await db.execute(select(func.count()).select_from(Transaction).where(*filters))
+    ).scalar_one()
+
     result = await db.execute(
         select(Transaction)
-        .where(Transaction.company_id == current_user.company_id)
+        .where(*filters)
         .order_by(Transaction.created_at.desc())
-        .limit(100)
+        .offset(skip)
+        .limit(limit)
     )
     txs = result.scalars().all()
+
+    summary = {s.value: {"count": 0, "amount": 0.0} for s in TransactionStatus}
+    summary_rows = await db.execute(
+        select(Transaction.status, func.count(), func.sum(Transaction.amount))
+        .where(*base_filters)
+        .group_by(Transaction.status)
+    )
+    for row_status, row_count, row_amount in summary_rows.all():
+        if row_status in summary:
+            summary[row_status] = {"count": row_count, "amount": float(row_amount or 0)}
+
     return {
         "items": [
             {
@@ -406,9 +493,19 @@ async def list_payments(
                 "nsu": t.nsu,
                 "authorization": t.authorization,
                 "created_at": str(t.created_at),
+                "company_id": t.company_id,
+                "terminal_id": t.terminal_id,
+                "environment": t.environment,
+                "provider_transaction_id": t.provider_transaction_id,
+                "tef_number": t.tef_number,
+                "cancelled_at": str(t.cancelled_at) if t.cancelled_at else None,
+                "cancel_reason": t.cancel_reason,
+                "refused_reason": t.refused_reason,
             }
             for t in txs
-        ]
+        ],
+        "total": total,
+        "summary": summary,
     }
 
 
@@ -418,7 +515,8 @@ async def list_payments(
     tags=["Pagamentos"],
     summary="Cancelar transação aprovada",
     responses={
-        400: {"description": "Transação não está no status `approved`"},
+        400: {"description": "Transação não está no status `approved`, ou é cartão Mercado Pago já aprovado (estorno ainda não suportado)"},
+        403: {"description": "Role sem permissão de cancelamento"},
         404: {"description": "Transação não encontrada"},
         422: {"description": "Cancelamento PayGo permitido apenas no mesmo dia"},
     },
@@ -427,19 +525,27 @@ async def cancel_payment(
     tx_id: int,
     body: CancelIn,
     db: AsyncSession = Depends(get_db),
-    current_user: TokenPayload = Depends(get_current_user),
+    current_user: TokenPayload = Depends(require_write_role),
 ):
-    result = await db.execute(
-        select(Transaction).where(
-            Transaction.id == tx_id,
-            Transaction.company_id == current_user.company_id,
-        )
-    )
+    # Superadmin cancela transação de qualquer empresa (mesmo padrão de
+    # list_payments) — outros roles seguem restritos à própria empresa.
+    tx_filters = [Transaction.id == tx_id]
+    if current_user.role != "superadmin":
+        tx_filters.append(Transaction.company_id == current_user.company_id)
+    result = await db.execute(select(Transaction).where(*tx_filters))
     tx = result.scalars().first()
     if not tx:
         raise HTTPException(404)
     if tx.status != "approved":
         raise HTTPException(400, f"Status: {tx.status}")
+
+    # Cancelamento de cartão via Mercado Pago hoje chama a API de intenção de
+    # pagamento (payment-intents), pensada pra cancelar uma cobrança em
+    # andamento — não a API de Refunds, que é a correta pra estornar um
+    # pagamento já capturado. Recusa até confirmar o fluxo de estorno real
+    # (ver ORD-079, Achado 3).
+    if tx.provider == "mercadopago" and tx.method in ("credit", "debit"):
+        raise HTTPException(400, "Cancelamento de cartão via Mercado Pago ainda não suportado — contate o suporte")
 
     # Validação de data para PayGo
     if tx.provider == "paygo":
@@ -493,6 +599,7 @@ async def cancel_payment(
         "provider":                tx.provider,
         "environment":             tx.environment,
         "provider_transaction_id": tx.provider_transaction_id,
+        "cancelled_by":            current_user.sub,
         "events":                  [{"event": "cancelled", "ts": datetime.utcnow().isoformat(),
                                      "reason": body.reason}],
         "final_status":            "cancelled",

@@ -61,6 +61,18 @@ i[class*=" icon-"] {
   box-sizing: content-box;
 }
 
+// Mesmo problema, dessa vez no botão-ícone de ação dentro de inputs (ex:
+// calendário do DateInput) — o wrapper `.ds-icon_button` do InputBase é
+// 20x20 + padding 16px assumindo content-box; com border-box os 16px de
+// padding comem os 20px inteiros (sobra -12px de conteúdo) e o ícone vaza
+// pra fora do campo. Essa classe é CSS Module (nome vem com hash em
+// runtime), então não dá pra selecionar pelo nome literal como acima — usa
+// o data-testid estável que o InputBase seta na LinkButton interna
+// (InputBase.js: "icon-linkButton").
+div:has(> [data-testid="icon-linkButton"]) {
+  box-sizing: content-box;
+}
+
 body {
   background: var(--a-bg);
   color: var(--a-text);

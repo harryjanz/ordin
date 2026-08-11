@@ -1,5 +1,5 @@
 import api from "../api";
-import type { CepLookupResult, CnpjLookupResult, Company, Contact, ContactType, LegalRepresentative } from "../types";
+import type { CepLookupResult, CnpjLookupResult, Company, Contact, ContactType, LegalRepresentative, Terminal } from "../types";
 import { normalizeCnpj } from "../lib/validators";
 
 export async function lookupCnpj(cnpj: string): Promise<CnpjLookupResult> {
@@ -10,6 +10,16 @@ export async function lookupCnpj(cnpj: string): Promise<CnpjLookupResult> {
 export async function lookupCep(cep: string): Promise<CepLookupResult> {
   const r = await api.get<CepLookupResult>(`/companies/cep-lookup/${encodeURIComponent(cep)}`);
   return r.data;
+}
+
+// Usado pelo painel de detalhe da transação (ORD-080) pra mostrar o nome do
+// terminal em vez do ID puro — busca a lista inteira da empresa de uma vez
+// (não existe GET de terminal único), cacheada por company_id no chamador.
+export async function listTerminals(companyId: number): Promise<Terminal[]> {
+  const r = await api.get<{ terminals: Terminal[]; total: number }>(`/companies/${companyId}/terminals`, {
+    params: { limit: 200 },
+  });
+  return r.data.terminals;
 }
 
 export type ContractStatusFilter = "pendente" | "enviado" | "assinado" | "";
