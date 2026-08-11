@@ -25,7 +25,7 @@ interface Store extends AuthState {
   login: (access: string, refresh: string) => void;
   logout: () => void;
   updateTokens: (access: string, refresh: string) => void;
-  setSelectedCompany: (id: number) => void;
+  setSelectedCompany: (id: number | null) => void;
   setUnsavedChanges: (v: boolean) => void;
   toggleAdminThemeMode: () => void;
 }

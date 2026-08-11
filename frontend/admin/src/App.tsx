@@ -4,6 +4,7 @@ import { ToastContainer } from "design-system";
 import { useStore } from "./store";
 import styles from "./App.module.scss";
 import Sidebar from "./components/Sidebar";
+import ActiveCompanyBadge from "./components/ActiveCompanyBadge";
 import LoginScreen from "./screens/LoginScreen";
 import DashboardScreen from "./screens/DashboardScreen";
 import CatalogScreen from "./screens/CatalogScreen";
@@ -52,6 +53,7 @@ export default function App() {
     <>
       <ToastContainer />
       <div className={styles.shell}>
+        <ActiveCompanyBadge />
         <Sidebar />
         <main className={styles.main}>
           <Routes>

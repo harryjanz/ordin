@@ -65,8 +65,13 @@ export default function OrdersScreen() {
   // docs/ARQUITETURA.md §1.2) — mesmo padrão de PaymentsScreen.
   const isPlatformAdmin = role === "superadmin" || role === "admin";
 
+  // ORD-082: valor de SESSÃO compartilhado (não useState local) — selecionar
+  // uma empresa aqui, em Transações ou em Configurações vale nas outras
+  // telas ao navegar, e o badge no canto superior direito mostra/permite
+  // limpar.
+  const companyId = useStore((s) => s.selectedCompanyId);
+  const setSelectedCompany = useStore((s) => s.setSelectedCompany);
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [companyId, setCompanyId] = useState<number | null>(null);
   const [orderRef, setOrderRef] = useState("");
   const [cpf, setCpf] = useState("");
   const [dateFrom, setDateFrom] = useState("");
@@ -158,7 +163,7 @@ export default function OrdersScreen() {
   }
 
   function clearFilters() {
-    setCompanyId(null);
+    setSelectedCompany(null);
     setOrderRef("");
     setCpf("");
     setDateFrom("");
@@ -253,7 +258,7 @@ export default function OrdersScreen() {
             <Dropdown
               label="Empresa"
               value={companyOptions.find((o) => o.value === String(companyId ?? "")) ?? companyOptions[0]}
-              onValueSelected={(opt) => { setCompanyId(opt.value ? Number(opt.value) : null); setSkip(0); }}
+              onValueSelected={(opt) => { setSelectedCompany(opt.value ? Number(opt.value) : null); setSkip(0); }}
               options={companyOptions}
             />
           </div>
