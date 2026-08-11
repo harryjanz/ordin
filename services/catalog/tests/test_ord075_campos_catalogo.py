@@ -36,8 +36,12 @@ async def seed(client):
         cat_b = svc.Category(company_id=2, name="__ord075_cat_b__", active=True)
         db.add_all([cat, cat_b])
         await db.flush()
-        allergen_trigo = svc.Allergen(code="trigo", name="Trigo", active=True)
-        allergen_leite = svc.Allergen(code="leite", name="Leite de todos os mamíferos", active=True)
+        # códigos fake propositalmente (__ord075_*__) — "trigo"/"leite" colidem
+        # com os códigos reais do seed de produção (unique=True em Allergen.code)
+        # e causaram a perda dos 19 alérgenos oficiais numa rodada de testes
+        # contra o banco compartilhado; ver incidente de 2026-08-11.
+        allergen_trigo = svc.Allergen(code="__ord075_trigo__", name="Trigo", active=True)
+        allergen_leite = svc.Allergen(code="__ord075_leite__", name="Leite de todos os mamíferos", active=True)
         db.add_all([allergen_trigo, allergen_leite])
         await db.commit()
         ids = {
@@ -66,7 +70,7 @@ async def test_list_allergens(client, seed, token_owner):
     r = await client.get("/catalog/allergens", headers=auth(token_owner))
     assert r.status_code == 200
     codes = {a["code"] for a in r.json()["allergens"]}
-    assert {"trigo", "leite"} <= codes
+    assert {"__ord075_trigo__", "__ord075_leite__"} <= codes
 
 
 # ── Cadastro continua mínimo ─────────────────────────────────────────────────
@@ -116,7 +120,7 @@ async def test_edicao_salva_todos_campos_novos(client, seed, token_owner):
     assert data["calories"] == 650
     assert data["sku"] == "LAN-002"
     assert set(data["tags"]) == {"mais vendido", "picante"}
-    assert {a["code"] for a in data["allergens"]} == {"trigo", "leite"}
+    assert {a["code"] for a in data["allergens"]} == {"__ord075_trigo__", "__ord075_leite__"}
 
 
 async def test_edicao_allergen_id_inexistente_retorna_400(client, seed, token_owner):
