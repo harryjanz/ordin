@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button, DateInput, Dropdown, Skeleton, Tag, type DropdownOptions, type TagProps } from "design-system";
 import { listPayments } from "../api/payments";
-import { listCompanies } from "../api/companies";
+import { listCompanies, listTerminals } from "../api/companies";
 import { useStore } from "../store";
 import Table, { type TableColumn } from "../components/Table";
-import type { Company, PaymentStatusSummary, Transaction } from "../types";
+import type { Company, PaymentStatusSummary, Terminal, Transaction } from "../types";
 import styles from "./PaymentsScreen.module.scss";
 
 const STATUS_VARIANT: Record<string, TagProps["variant"]> = {
@@ -75,6 +75,13 @@ export default function PaymentsScreen() {
   const [summary, setSummary] = useState<PaymentStatusSummary>({});
   const [loading, setLoading] = useState(true);
 
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  // Cache de terminais por empresa (ORD-080) — expandir a primeira linha de
+  // uma empresa busca a lista inteira de terminais dela de uma vez; expandir
+  // outra linha da mesma empresa não repete a requisição.
+  const [terminalsByCompany, setTerminalsByCompany] = useState<Record<number, Terminal[]>>({});
+  const fetchingCompanies = useRef<Set<number>>(new Set());
+
   useEffect(() => {
     if (isSuperadmin) {
       listCompanies({ limit: 200 }).then((r) => setCompanies(r.companies)).catch(() => null);
@@ -106,6 +113,23 @@ export default function PaymentsScreen() {
     setProvider("");
     setStatus("");
     setSkip(0);
+  }
+
+  function toggleExpand(t: Transaction) {
+    if (expandedId === t.id) { setExpandedId(null); return; }
+    setExpandedId(t.id);
+    if (!terminalsByCompany[t.company_id] && !fetchingCompanies.current.has(t.company_id)) {
+      fetchingCompanies.current.add(t.company_id);
+      listTerminals(t.company_id)
+        .then((terminals) => setTerminalsByCompany((prev) => ({ ...prev, [t.company_id]: terminals })))
+        .catch(() => null)
+        .finally(() => fetchingCompanies.current.delete(t.company_id));
+    }
+  }
+
+  function terminalLabel(t: Transaction): string {
+    const terminal = terminalsByCompany[t.company_id]?.find((term) => term.id === t.terminal_id);
+    return terminal?.label ?? `Terminal ${t.terminal_id}`;
   }
 
   const hasFilter = Boolean(companyId || dateFrom || dateTo || provider || status);
@@ -208,7 +232,54 @@ export default function PaymentsScreen() {
         <>
           {transactions.length > 0 ? (
             <>
-              <Table columns={columns} rows={transactions} rowKey={(t) => t.id} />
+              <Table
+                columns={columns}
+                rows={transactions}
+                rowKey={(t) => t.id}
+                onRowClick={toggleExpand}
+                expandedRowKey={expandedId}
+                renderExpanded={(t) => (
+                  <dl className={styles.detail}>
+                    <div className={styles.detailItem}>
+                      <dt>Ambiente</dt>
+                      <dd><Tag variant={t.environment === "sandbox" ? "warning" : "success"}>{t.environment === "sandbox" ? "Sandbox" : "Produção"}</Tag></dd>
+                    </div>
+                    <div className={styles.detailItem}>
+                      <dt>Terminal</dt>
+                      <dd>{terminalLabel(t)}</dd>
+                    </div>
+                    <div className={styles.detailItem}>
+                      <dt>Referência do provider</dt>
+                      <dd className={styles.detailMono}>{t.provider_transaction_id ?? "—"}</dd>
+                    </div>
+                    <div className={styles.detailItem}>
+                      <dt>Número TEF</dt>
+                      <dd className={styles.detailMono}>{t.tef_number ?? "—"}</dd>
+                    </div>
+                    {(t.status === "refused" || t.status === "expired") && (
+                      <div className={`${styles.detailItem} ${styles.detailWide}`}>
+                        <dt>Motivo da recusa</dt>
+                        <dd>
+                          {t.refused_reason ?? (
+                            <span className={styles.detailMissing}>
+                              Motivo não registrado — este dado só passou a ser salvo a partir desta atualização.
+                            </span>
+                          )}
+                        </dd>
+                      </div>
+                    )}
+                    {t.status === "cancelled" && (
+                      <div className={`${styles.detailItem} ${styles.detailWide}`}>
+                        <dt>Motivo do cancelamento</dt>
+                        <dd>
+                          {t.cancel_reason ?? "—"}
+                          {t.cancelled_at && ` · ${new Date(t.cancelled_at).toLocaleString("pt-BR")}`}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                )}
+              />
               <div className={styles.pager}>
                 <span>Mostrando {skip + 1}–{Math.min(skip + LIMIT, total)} de {total}</span>
                 <div className={styles.pagerActions}>

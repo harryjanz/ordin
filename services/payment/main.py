@@ -65,6 +65,7 @@ class Transaction(Base):
     qr_code_base64          = Column(String(100000), nullable=True)
     cancelled_at            = Column(DateTime)
     cancel_reason           = Column(String(255))
+    refused_reason          = Column(String(255), nullable=True)
     created_at              = Column(DateTime, default=datetime.utcnow)
     updated_at              = Column(DateTime, onupdate=datetime.utcnow)
 
@@ -153,15 +154,25 @@ class PaymentStatusOut(BaseModel):
 
 
 class TransactionOut(BaseModel):
-    id:            int
-    order_ref:     str
-    method:        str
-    amount:        float
-    status:        str
-    provider:      str
-    nsu:           Optional[str] = None
-    authorization: Optional[str] = None
-    created_at:    str
+    id:                      int
+    order_ref:               str
+    method:                  str
+    amount:                  float
+    status:                  str
+    provider:                str
+    nsu:                     Optional[str] = None
+    authorization:           Optional[str] = None
+    created_at:              str
+    # Campos abaixo já existiam na tabela mas nunca eram serializados — ver
+    # ORD-080. Usados pelo painel de detalhe expansível da linha.
+    company_id:               int
+    terminal_id:              int
+    environment:              Optional[str] = None
+    provider_transaction_id:  Optional[str] = None
+    tef_number:               Optional[str] = None
+    cancelled_at:             Optional[str] = None
+    cancel_reason:            Optional[str] = None
+    refused_reason:           Optional[str] = None
 
 
 class StatusSummaryItem(BaseModel):
@@ -316,6 +327,11 @@ async def create_payment(
     tx.provider_transaction_id = result.provider_transaction_id
     tx.qr_code                 = result.qr_code
     tx.qr_code_base64          = result.qr_code_base64
+    # Motivo de recusa — só existe pra transações a partir daqui (ORD-080).
+    # Transações antigas continuam com refused_reason NULL pra sempre, não
+    # dá pra reconstruir um dado que nunca foi capturado.
+    if result.status not in (TransactionStatus.approved, TransactionStatus.processing):
+        tx.refused_reason = result.error_message
     await db.commit()
 
     # 5. Auditoria MongoDB (best-effort)
@@ -465,6 +481,14 @@ async def list_payments(
                 "nsu": t.nsu,
                 "authorization": t.authorization,
                 "created_at": str(t.created_at),
+                "company_id": t.company_id,
+                "terminal_id": t.terminal_id,
+                "environment": t.environment,
+                "provider_transaction_id": t.provider_transaction_id,
+                "tef_number": t.tef_number,
+                "cancelled_at": str(t.cancelled_at) if t.cancelled_at else None,
+                "cancel_reason": t.cancel_reason,
+                "refused_reason": t.refused_reason,
             }
             for t in txs
         ],

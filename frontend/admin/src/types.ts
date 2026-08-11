@@ -175,6 +175,15 @@ export interface Transaction {
   nsu: string | null;
   authorization: string | null;
   created_at: string;
+  // Campos do painel de detalhe expansível — ver ORD-080.
+  company_id: number;
+  terminal_id: number;
+  environment: string | null;
+  provider_transaction_id: string | null;
+  tef_number: string | null;
+  cancelled_at: string | null;
+  cancel_reason: string | null;
+  refused_reason: string | null;
 }
 
 export interface StatusSummaryItem {

@@ -38,6 +38,15 @@
   cursor: pointer;
 }
 
+.expandedRow {
+  cursor: default;
+}
+
+.expandedCell {
+  padding: 0;
+  border-bottom: 1px solid rgba(var(--a-neutral-rgb), 0.07);
+}
+
 .empty {
   @include padding('xxl-2', 'l', 'xxl-2', 'l');
   text-align: center;

@@ -97,3 +97,44 @@
   @include font('sm');
   margin-top: 24px;
 }
+
+// Painel de detalhe expansível da linha (ORD-080) — mesmo espírito do
+// .ticketPanel do OrdersScreen, mas grid de pares label/valor em vez de
+// sub-tabela (não tem lista aninhada aqui, só campos).
+.detail {
+  background: rgba(var(--a-neutral-rgb), 0.03);
+  padding: 16px 24px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px 20px;
+  margin: 0;
+}
+
+.detailItem {
+  dt {
+    @include font('xs');
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgba(var(--a-text-rgb), 0.45);
+    margin-bottom: 3px;
+  }
+  dd {
+    margin: 0;
+    @include font('sm');
+  }
+}
+
+.detailWide {
+  grid-column: 1 / -1;
+  padding-top: 10px;
+  border-top: 1px dashed var(--a-border);
+}
+
+.detailMono {
+  font-family: "Courier New", monospace;
+}
+
+.detailMissing {
+  color: rgba(var(--a-text-rgb), 0.4);
+  font-style: italic;
+}
