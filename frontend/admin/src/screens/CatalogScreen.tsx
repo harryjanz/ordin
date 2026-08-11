@@ -17,8 +17,10 @@ import {
   type UploadFile,
 } from "design-system";
 import api from "../api";
+import { listCompanies } from "../api/companies";
 import ConfirmDialog, { type ConfirmDialogProps } from "../components/ConfirmDialog";
-import type { Allergen, Category, Product } from "../types";
+import { useStore } from "../store";
+import type { Allergen, Category, Company, Product } from "../types";
 import styles from "./CatalogScreen.module.scss";
 
 // Conjunto sugerido pra tags (usuário aprovou "adotar os padrões sugeridos,
@@ -73,6 +75,40 @@ interface EditProdState {
 }
 
 export default function CatalogScreen() {
+  const role = useStore((s) => s.role);
+  // superadmin e admin são equivalentes (gestão da plataforma, ver
+  // docs/ARQUITETURA.md §1.2) — administram catálogo de qualquer empresa
+  // cliente, mas precisam de uma empresa ativa na sessão pra fazer sentido
+  // (catálogo é sempre edição de UMA empresa, não visão agregada como
+  // Transações/Pedidos). Mesmo valor de sessão que Configurações/Empresa/
+  // Dispositivos/Transações/Pedidos já usam — selecionar em qualquer uma
+  // dessas telas já vem pré-selecionado aqui.
+  const isPlatformAdmin = role === "superadmin" || role === "admin";
+  const companyId = useStore((s) => s.selectedCompanyId);
+  const setSelectedCompany = useStore((s) => s.setSelectedCompany);
+  const hasCompanyContext = !isPlatformAdmin || !!companyId;
+
+  const [companies, setCompanies] = useState<Company[]>([]);
+  useEffect(() => {
+    if (isPlatformAdmin) {
+      listCompanies({ limit: 200 }).then((r) => setCompanies(r.companies)).catch(() => null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlatformAdmin]);
+  const companyOptions: DropdownOptions[] = companies.map((c) => ({ value: String(c.id), label: c.name }));
+
+  // Anexa company_id como query param em toda chamada de catálogo, só
+  // quando superadmin/admin têm uma empresa selecionada — owner/manager não
+  // mandam o parâmetro (o backend ignoraria mesmo, mas nem precisa).
+  function catalogParams(extra: Record<string, string | number | boolean | undefined> = {}) {
+    return {
+      params: {
+        ...extra,
+        ...(isPlatformAdmin && companyId ? { company_id: companyId } : {}),
+      },
+    };
+  }
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [allergens, setAllergens] = useState<Allergen[]>([]);
@@ -91,20 +127,29 @@ export default function CatalogScreen() {
   } | null>(null);
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
 
-  useEffect(() => { loadCategories(); loadAllergens(); }, []);
-  useEffect(() => { if (selectedCat) loadProducts(selectedCat); else setProducts([]); }, [selectedCat]);
+  useEffect(() => { loadAllergens(); }, []);
+  useEffect(() => {
+    if (!hasCompanyContext) { setCategories([]); setSelectedCat(null); return; }
+    loadCategories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCompanyContext, companyId]);
+  useEffect(() => {
+    if (selectedCat && hasCompanyContext) loadProducts(selectedCat); else setProducts([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCat, hasCompanyContext, companyId]);
 
   async function loadCategories() {
-    const r = await api.get("/catalog/categories?include_inactive=true");
+    const r = await api.get("/catalog/categories", catalogParams({ include_inactive: true }));
     setCategories(r.data.categories ?? r.data);
   }
 
   async function loadProducts(catId: number) {
-    const r = await api.get(`/catalog/products?category_id=${catId}&include_inactive=true`);
+    const r = await api.get("/catalog/products", catalogParams({ category_id: catId, include_inactive: true }));
     setProducts(r.data.products ?? r.data);
   }
 
   async function loadAllergens() {
+    // Master data global, não filtrado por empresa — sem catalogParams.
     const r = await api.get("/catalog/allergens");
     setAllergens(r.data.allergens ?? r.data);
   }
@@ -112,7 +157,7 @@ export default function CatalogScreen() {
   async function addCategory(e: FormEvent) {
     e.preventDefault();
     if (!newCatName.trim()) return;
-    await api.post("/catalog/categories", { name: newCatName.trim() });
+    await api.post("/catalog/categories", { name: newCatName.trim() }, catalogParams());
     setNewCatName("");
     loadCategories();
   }
@@ -120,7 +165,7 @@ export default function CatalogScreen() {
   async function saveEditCat(e: FormEvent) {
     e.preventDefault();
     if (!editCat) return;
-    await api.put(`/catalog/categories/${editCat.id}`, { name: editCat.name });
+    await api.put(`/catalog/categories/${editCat.id}`, { name: editCat.name }, catalogParams());
     setEditCat(null);
     loadCategories();
   }
@@ -130,7 +175,7 @@ export default function CatalogScreen() {
       message: "Desativar categoria? Ela some do totem, mas os produtos continuam cadastrados e reaparecem se a categoria for reativada.",
       onConfirm: async () => {
         setConfirmState(null);
-        await api.delete(`/catalog/categories/${id}`);
+        await api.delete(`/catalog/categories/${id}`, catalogParams());
         if (selectedCat === id) setSelectedCat(null);
         loadCategories();
       },
@@ -138,7 +183,7 @@ export default function CatalogScreen() {
   }
 
   async function activateCategory(id: number) {
-    await api.put(`/catalog/categories/${id}`, { active: true });
+    await api.put(`/catalog/categories/${id}`, { active: true }, catalogParams());
     loadCategories();
   }
 
@@ -149,7 +194,7 @@ export default function CatalogScreen() {
       alertIcon: "alert-triangle",
       onConfirm: async () => {
         setConfirmState(null);
-        await api.delete(`/catalog/categories/${id}?permanent=true`);
+        await api.delete(`/catalog/categories/${id}`, catalogParams({ permanent: true }));
         if (selectedCat === id) setSelectedCat(null);
         loadCategories();
       },
@@ -163,7 +208,7 @@ export default function CatalogScreen() {
       category_id: selectedCat,
       name: newProd.name.trim(),
       price: newProd.price,
-    });
+    }, catalogParams());
     setNewProd({ name: "", price: null });
     loadProducts(selectedCat);
   }
@@ -205,7 +250,7 @@ export default function CatalogScreen() {
       sku: editProd.sku.trim() || null,
       tags: editProd.tags,
       allergen_ids: editProd.allergen_ids.map(Number),
-    });
+    }, catalogParams());
     closeEditProd();
     if (selectedCat) loadProducts(selectedCat);
   }
@@ -233,7 +278,7 @@ export default function CatalogScreen() {
     await api.put("/catalog/products/reorder", {
       category_id: selectedCat,
       product_ids: reordered.map((p) => p.id),
-    });
+    }, catalogParams());
   }
 
   async function handleImageFiles(files: UploadFile[]) {
@@ -248,7 +293,7 @@ export default function CatalogScreen() {
     try {
       const formData = new FormData();
       formData.append("image", picked.file);
-      const r = await api.post(`/catalog/products/${productId}/image`, formData);
+      const r = await api.post(`/catalog/products/${productId}/image`, formData, catalogParams());
       setEditProd((prev) => (prev && prev.id === productId
         ? { ...prev, image_url: r.data.image_url, thumbnail_url: r.data.thumbnail_url }
         : prev));
@@ -266,7 +311,7 @@ export default function CatalogScreen() {
       message: "Remover a imagem deste produto?",
       onConfirm: async () => {
         setConfirmState(null);
-        const r = await api.delete(`/catalog/products/${productId}/image`);
+        const r = await api.delete(`/catalog/products/${productId}/image`, catalogParams());
         setEditProd((prev) => (prev && prev.id === productId
           ? { ...prev, image_url: r.data.image_url, thumbnail_url: r.data.thumbnail_url }
           : prev));
@@ -280,7 +325,7 @@ export default function CatalogScreen() {
       message: "Desativar produto?",
       onConfirm: async () => {
         setConfirmState(null);
-        await api.delete(`/catalog/products/${id}`);
+        await api.delete(`/catalog/products/${id}`, catalogParams());
         if (selectedCat) loadProducts(selectedCat);
       },
     });
@@ -293,14 +338,14 @@ export default function CatalogScreen() {
       alertIcon: "alert-triangle",
       onConfirm: async () => {
         setConfirmState(null);
-        await api.delete(`/catalog/products/${id}?permanent=true`);
+        await api.delete(`/catalog/products/${id}`, catalogParams({ permanent: true }));
         if (selectedCat) loadProducts(selectedCat);
       },
     });
   }
 
   async function activateProduct(id: number) {
-    await api.put(`/catalog/products/${id}`, { active: true });
+    await api.put(`/catalog/products/${id}`, { active: true }, catalogParams());
     if (selectedCat) loadProducts(selectedCat);
   }
 
@@ -312,6 +357,22 @@ export default function CatalogScreen() {
   return (
     <div className={styles.page}>
       <div className={styles.title}>Catálogo</div>
+
+      {isPlatformAdmin && (
+        <div className={styles.companySelector}>
+          <Dropdown
+            label="Empresa"
+            placeholder="Selecionar empresa…"
+            value={companyOptions.find((o) => o.value === String(companyId ?? "")) ?? null}
+            onValueSelected={(opt) => setSelectedCompany(opt.value ? Number(opt.value) : null)}
+            options={companyOptions}
+          />
+        </div>
+      )}
+
+      {!hasCompanyContext ? (
+        <div className={styles.empty}>Selecione uma empresa para gerenciar o catálogo.</div>
+      ) : (
       <div className={styles.row}>
         <div className={styles.col}>
           <div className={styles.sectionTitle}>Categorias</div>
@@ -580,6 +641,7 @@ export default function CatalogScreen() {
           )}
         </div>
       </div>
+      )}
 
       <ConfirmDialog
         open={!!confirmState}

@@ -180,3 +180,54 @@ async def test_update_produto_preco_invalido_retorna_422(client, seed, token_own
                          json={"price": 0.0},
                          headers=auth(token_owner))
     assert r.status_code == 422
+
+
+# ── superadmin/admin exigem company_id explícito, owner/manager ignoram o
+# parâmetro (mesmo padrão de list_payments/list_orders — mudança pra dar a
+# superadmin/admin acesso pra ajustar catálogo de qualquer empresa cliente) ──
+
+async def test_superadmin_sem_company_id_retorna_400(client, token_superadmin):
+    r = await client.get("/catalog/categories", headers=auth(token_superadmin))
+    assert r.status_code == 400
+
+
+async def test_admin_sem_company_id_retorna_400(client, token_admin):
+    r = await client.get("/catalog/categories", headers=auth(token_admin))
+    assert r.status_code == 400
+
+
+async def test_superadmin_com_company_id_ve_categorias_da_empresa(client, seed, token_superadmin):
+    r = await client.get(f"/catalog/categories?company_id=1&include_inactive=true", headers=auth(token_superadmin))
+    assert r.status_code == 200
+    names = [c["name"] for c in r.json()["categories"]]
+    assert "__cov_cat__" in names
+
+
+async def test_owner_ignora_company_id_de_outra_empresa(client, seed, token_owner):
+    """Owner (empresa 1) não escapa da própria empresa mesmo mandando
+    company_id=2 na query — parâmetro é ignorado pra quem não é
+    superadmin/admin, mesmo padrão de list_payments/list_orders."""
+    r = await client.get("/catalog/categories?company_id=2&include_inactive=true", headers=auth(token_owner))
+    assert r.status_code == 200
+    names = [c["name"] for c in r.json()["categories"]]
+    assert "__cov_cat__" in names  # viu a própria empresa (1), não a 2
+
+
+async def test_superadmin_cria_categoria_em_empresa_especifica(client, token_superadmin):
+    r = await client.post("/catalog/categories?company_id=1", json={"name": "__cov_sa_cat__"},
+                          headers=auth(token_superadmin))
+    assert r.status_code == 201
+    cat_id = r.json()["id"]
+    # limpeza
+    await client.delete(f"/catalog/categories/{cat_id}?permanent=true&company_id=1", headers=auth(token_superadmin))
+
+
+async def test_admin_cria_produto_em_empresa_especifica(client, seed, token_admin):
+    r = await client.post(
+        "/catalog/products?company_id=1",
+        json={"name": "__cov_admin_prod__", "price": 9.9, "category_id": seed["cat_id"]},
+        headers=auth(token_admin),
+    )
+    assert r.status_code == 201
+    prod_id = r.json()["id"]
+    await client.delete(f"/catalog/products/{prod_id}?permanent=true&company_id=1", headers=auth(token_admin))
