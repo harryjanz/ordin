@@ -14,6 +14,40 @@
   color: rgba(var(--a-text-rgb), 0.4);
 }
 
+// Mesmo padrão visual de CompanyListScreen.module.scss (.filterBar/.field/
+// .pager) — reaproveitado, não reinventado.
+.filterBar {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 1fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  @include padding('m', 'l', 'm', 'l');
+  margin-bottom: 18px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  @include padding('m', 'l', 'm', 'l');
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+}
+
+.pagerActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
 .summary {
   background: var(--a-surface);
   border: 1px solid var(--a-border);

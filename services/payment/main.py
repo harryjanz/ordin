@@ -12,7 +12,7 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, select
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
@@ -166,6 +166,7 @@ class TransactionOut(BaseModel):
 
 class PaymentListOut(BaseModel):
     items: list[TransactionOut]
+    total: int
 
 
 class CancelOut(BaseModel):
@@ -381,17 +382,48 @@ async def create_payment(
     "/payments",
     response_model=PaymentListOut,
     tags=["Pagamentos"],
-    summary="Listar transações da empresa",
+    summary="Listar transações da empresa (superadmin vê todas, com filtro opcional de empresa)",
 )
 async def list_payments(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
+    status: Optional[str] = None,
+    provider: Optional[str] = None,
+    company_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 50,
 ):
+    # Superadmin enxerga todas as empresas (com filtro opcional de company_id
+    # pra restringir a uma) — qualquer outro role só vê a própria empresa,
+    # e o parâmetro company_id é ignorado nesse caso (não retorna 403 nem
+    # revela se a empresa pedida existe, só se comporta como se o parâmetro
+    # não tivesse sido enviado).
+    if current_user.role == "superadmin":
+        filters = [Transaction.company_id == company_id] if company_id else []
+    else:
+        filters = [Transaction.company_id == current_user.company_id]
+
+    if status:
+        filters.append(Transaction.status == status)
+    if provider:
+        filters.append(Transaction.provider == provider)
+    if date_from:
+        filters.append(Transaction.created_at >= date_from)
+    if date_to:
+        filters.append(Transaction.created_at <= date_to)
+
+    total = (
+        await db.execute(select(func.count()).select_from(Transaction).where(*filters))
+    ).scalar_one()
+
     result = await db.execute(
         select(Transaction)
-        .where(Transaction.company_id == current_user.company_id)
+        .where(*filters)
         .order_by(Transaction.created_at.desc())
-        .limit(100)
+        .offset(skip)
+        .limit(limit)
     )
     txs = result.scalars().all()
     return {
@@ -408,7 +440,8 @@ async def list_payments(
                 "created_at": str(t.created_at),
             }
             for t in txs
-        ]
+        ],
+        "total": total,
     }
 
 

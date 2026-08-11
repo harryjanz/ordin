@@ -12,7 +12,7 @@ const MENU = [
   { to: "/companies/new", label: "Novo cliente", icon: "user-plus",   roles: ["superadmin"] },
   { to: "/catalog",       label: "Catálogo",     icon: "package",     roles: ["admin", "owner", "manager"] },
   { to: "/orders",        label: "Pedidos",      icon: "shopping-cart", roles: ["admin", "owner", "manager"] },
-  { to: "/payments",      label: "Transações",   icon: "credit-card", roles: ["admin", "owner", "manager"] },
+  { to: "/payments",      label: "Transações",   icon: "credit-card", roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/company",       label: "Empresa",      icon: "briefcase",   roles: ["admin", "owner"] },
   { to: "/pair",          label: "Dispositivos", icon: "monitor",     roles: ["admin", "owner", "manager"] },
   { to: "/settings",      label: "Config.",      icon: "settings",    roles: ["admin", "owner"] },

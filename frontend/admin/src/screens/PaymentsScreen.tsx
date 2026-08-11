@@ -1,31 +1,107 @@
 import { useState, useEffect } from "react";
-import { Tag, type TagProps } from "design-system";
-import api from "../api";
+import { Button, DateInput, Dropdown, Tag, type DropdownOptions, type TagProps } from "design-system";
+import { listPayments } from "../api/payments";
+import { listCompanies } from "../api/companies";
+import { useStore } from "../store";
 import Table, { type TableColumn } from "../components/Table";
-import type { Transaction } from "../types";
+import type { Company, Transaction } from "../types";
 import styles from "./PaymentsScreen.module.scss";
 
 const STATUS_VARIANT: Record<string, TagProps["variant"]> = {
   approved: "success",
   refused: "error",
   cancelled: "warning",
-  pending: "neutral",
+  processing: "neutral",
+  expired: "error",
 };
 
+const PROVIDER_OPTIONS: DropdownOptions[] = [
+  { value: "", label: "Todos" },
+  { value: "mock", label: "mock" },
+  { value: "paygo", label: "paygo" },
+  { value: "mercadopago", label: "mercadopago" },
+];
+
+const STATUS_OPTIONS: DropdownOptions[] = [
+  { value: "", label: "Todos" },
+  { value: "approved", label: "Aprovado" },
+  { value: "refused", label: "Recusado" },
+  { value: "cancelled", label: "Cancelado" },
+  { value: "processing", label: "Em processamento" },
+  { value: "expired", label: "Expirado" },
+];
+
+const LIMIT = 50;
+
+// DateInput trabalha em dd/mm/aaaa — o backend espera algo comparável a
+// created_at (DATETIME). "dd/mm/aaaa" -> "aaaa-mm-dd".
+function toIsoDate(brDate: string): string | undefined {
+  const m = brDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return undefined;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
 export default function PaymentsScreen() {
+  const role = useStore((s) => s.role);
+  const isSuperadmin = role === "superadmin";
+
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [provider, setProvider] = useState("");
+  const [status, setStatus] = useState("");
+  const [skip, setSkip] = useState(0);
+
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get("/payments")
-      .then((r) => setTransactions(r.data.items ?? []))
+    if (isSuperadmin) {
+      listCompanies({ limit: 200 }).then((r) => setCompanies(r.companies)).catch(() => null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSuperadmin]);
+
+  useEffect(() => {
+    setLoading(true);
+    listPayments({
+      companyId: companyId ?? undefined,
+      dateFrom: toIsoDate(dateFrom),
+      dateTo: toIsoDate(dateTo),
+      provider: provider || undefined,
+      status: status || undefined,
+      skip,
+      limit: LIMIT,
+    })
+      .then((r) => { setTransactions(r.items); setTotal(r.total); })
       .catch(() => null)
       .finally(() => setLoading(false));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, dateFrom, dateTo, provider, status, skip]);
 
   const totalApproved = transactions
     .filter((t) => t.status === "approved")
     .reduce((acc, t) => acc + t.amount, 0);
+
+  function clearFilters() {
+    setCompanyId(null);
+    setDateFrom("");
+    setDateTo("");
+    setProvider("");
+    setStatus("");
+    setSkip(0);
+  }
+
+  const hasFilter = Boolean(companyId || dateFrom || dateTo || provider || status);
+  const page = Math.floor(skip / LIMIT) + 1;
+  const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+
+  const companyOptions: DropdownOptions[] = [
+    { value: "", label: "Todas as empresas" },
+    ...companies.map((c) => ({ value: String(c.id), label: c.name })),
+  ];
 
   const columns: TableColumn<Transaction>[] = [
     { key: "id", header: "ID", render: (t) => t.id },
@@ -41,13 +117,58 @@ export default function PaymentsScreen() {
   return (
     <div className={styles.page}>
       <div className={styles.title}>Transações TEF</div>
-      {loading ? (
+
+      <div className={styles.filterBar}>
+        {isSuperadmin && (
+          <div className={styles.field}>
+            <Dropdown
+              label="Empresa"
+              value={companyOptions.find((o) => o.value === String(companyId ?? "")) ?? companyOptions[0]}
+              onValueSelected={(opt) => { setCompanyId(opt.value ? Number(opt.value) : null); setSkip(0); }}
+              options={companyOptions}
+            />
+          </div>
+        )}
+        <div className={styles.field}>
+          <DateInput
+            label="De"
+            value={dateFrom}
+            onChange={(value, valid) => { if (valid || !value) { setDateFrom(value); setSkip(0); } }}
+          />
+        </div>
+        <div className={styles.field}>
+          <DateInput
+            label="Até"
+            value={dateTo}
+            onChange={(value, valid) => { if (valid || !value) { setDateTo(value); setSkip(0); } }}
+          />
+        </div>
+        <div className={styles.field}>
+          <Dropdown
+            label="Provider"
+            value={PROVIDER_OPTIONS.find((o) => o.value === provider) ?? PROVIDER_OPTIONS[0]}
+            onValueSelected={(opt) => { setProvider(opt.value); setSkip(0); }}
+            options={PROVIDER_OPTIONS}
+          />
+        </div>
+        <div className={styles.field}>
+          <Dropdown
+            label="Status"
+            value={STATUS_OPTIONS.find((o) => o.value === status) ?? STATUS_OPTIONS[0]}
+            onValueSelected={(opt) => { setStatus(opt.value); setSkip(0); }}
+            options={STATUS_OPTIONS}
+          />
+        </div>
+        <Button variant="secondary" onClick={clearFilters} disabled={!hasFilter}>Limpar</Button>
+      </div>
+
+      {loading && transactions.length === 0 && total === 0 ? (
         <div className={styles.muted}>Carregando…</div>
       ) : (
         <>
           <div className={styles.summary}>
             <div className={styles.summaryLabel}>
-              Total aprovado ({transactions.filter((t) => t.status === "approved").length} transações)
+              Total aprovado ({transactions.filter((t) => t.status === "approved").length} transações{loading ? " · atualizando…" : ""})
             </div>
             <div className={styles.summaryValue}>
               {totalApproved.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
@@ -55,9 +176,21 @@ export default function PaymentsScreen() {
           </div>
 
           {transactions.length > 0 ? (
-            <Table columns={columns} rows={transactions} rowKey={(t) => t.id} />
+            <>
+              <Table columns={columns} rows={transactions} rowKey={(t) => t.id} />
+              <div className={styles.pager}>
+                <span>Mostrando {skip + 1}–{Math.min(skip + LIMIT, total)} de {total}</span>
+                <div className={styles.pagerActions}>
+                  <Button variant="secondary" size="small" disabled={skip === 0} onClick={() => setSkip((s) => Math.max(0, s - LIMIT))}>Anterior</Button>
+                  <span>Página {page} de {totalPages}</span>
+                  <Button variant="secondary" size="small" disabled={skip + LIMIT >= total} onClick={() => setSkip((s) => s + LIMIT)}>Próxima</Button>
+                </div>
+              </div>
+            </>
           ) : (
-            <div className={styles.empty}>Nenhuma transação encontrada.</div>
+            <div className={styles.empty}>
+              Nenhuma transação encontrada{hasFilter ? " para os filtros aplicados" : ""}.
+            </div>
           )}
         </>
       )}
