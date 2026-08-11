@@ -152,7 +152,6 @@ export default function SettingsScreen() {
   }
 
   const themes = Object.entries(THEME_REGISTRY) as [ThemeName, (typeof THEME_REGISTRY)[ThemeName]][];
-  const previewTheme = resolveTheme(localTheme, localMode);
   const showEmptyState = isPlatformAdmin && !companyId;
 
   return (
@@ -248,12 +247,6 @@ export default function SettingsScreen() {
                 onClick={saveAppearance}
                 disabled={!companyId}
                 loading={saving}
-                style={{
-                  background: previewTheme.btn,
-                  color: previewTheme.btnText,
-                  boxShadow: previewTheme.glow,
-                  borderRadius: 999,
-                }}
               >
                 Salvar aparência
               </Button>
