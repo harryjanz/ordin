@@ -382,8 +382,20 @@ function PaymentTab({ companyId }: PaymentTabProps) {
 // ── CompanyScreen ─────────────────────────────────────────────────────────────
 
 export default function CompanyScreen() {
+  const role = useStore((s) => s.role);
+  const isPlatformAdmin = role === "superadmin" || role === "admin";
   const companyId = useStore((s) => s.selectedCompanyId ?? s.companyId);
   const [tab, setTab] = useState<"terminals" | "users" | "payment">("terminals");
+
+  // ORD-082: nome da empresa selecionada, só pra mostrar de qual empresa
+  // esta tela está falando (superadmin/admin gerenciam qualquer uma) — sem
+  // isso não tem como confirmar visualmente que a seleção feita em outra
+  // tela (ex: Configurações) realmente carregou aqui.
+  const [companyName, setCompanyName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isPlatformAdmin || !companyId) { setCompanyName(null); return; }
+    api.get(`/companies/${companyId}`).then((r) => setCompanyName(r.data.name ?? null)).catch(() => null);
+  }, [isPlatformAdmin, companyId]);
 
   // ── Terminals ─────────────────────────────────────────────────────────────
   const [terminals, setTerminals] = useState<Terminal[]>([]);
@@ -493,7 +505,7 @@ export default function CompanyScreen() {
   if (!companyId) {
     return (
       <div className={styles.page}>
-        <div className={styles.muted}>Selecione uma empresa no Dashboard.</div>
+        <div className={styles.muted}>Selecione uma empresa no Dashboard ou em Configurações.</div>
       </div>
     );
   }
@@ -501,6 +513,7 @@ export default function CompanyScreen() {
   return (
     <div className={styles.page}>
       <div className={styles.title}>Empresa</div>
+      {isPlatformAdmin && companyName && <div className={styles.subtitle}>{companyName}</div>}
 
       <div className={styles.tabs}>
         <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as "terminals" | "users" | "payment")}>

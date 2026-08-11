@@ -6,8 +6,19 @@ import { useStore } from "../store";
 import styles from "./PairScreen.module.scss";
 
 export default function PairScreen() {
+  const role = useStore((s) => s.role);
+  const isPlatformAdmin = role === "superadmin" || role === "admin";
   const companyId = useStore((s) => s.selectedCompanyId ?? s.companyId);
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // ORD-082: nome da empresa selecionada — mesmo motivo do CompanyScreen,
+  // sem isso não dá pra confirmar visualmente que a seleção feita em outra
+  // tela (ex: Configurações) chegou aqui.
+  const [companyName, setCompanyName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isPlatformAdmin || !companyId) { setCompanyName(null); return; }
+    api.get(`/companies/${companyId}`).then((r) => setCompanyName(r.data.name ?? null)).catch(() => null);
+  }, [isPlatformAdmin, companyId]);
 
   const [code,      setCode]      = useState(() => searchParams.get("code") ?? "");
   const [terminal,  setTerminal]  = useState("");
@@ -55,6 +66,16 @@ export default function PairScreen() {
 
   const terminalOptions: DropdownOptions[] = terminals.map((t) => ({ value: String(t.id), label: t.label }));
 
+  if (isPlatformAdmin && !companyId) {
+    return (
+      <div className={styles.wrap}>
+        <div className={styles.card}>
+          <p className={styles.headerSub}>Selecione uma empresa no Dashboard ou em Configurações.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.wrap}>
       <div className={styles.card}>
@@ -64,6 +85,9 @@ export default function PairScreen() {
             <span className={styles.headerIcon}>⊞</span>
             <h1 className={styles.headerTitle}>Parear totem</h1>
           </div>
+          {isPlatformAdmin && companyName && (
+            <p className={styles.headerCompany}>{companyName}</p>
+          )}
           <p className={styles.headerSub}>
             Digite o código exibido no totem ou escaneie o QR com a câmera do celular para autenticar o dispositivo.
           </p>

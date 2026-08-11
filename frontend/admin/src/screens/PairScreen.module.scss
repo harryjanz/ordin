@@ -41,6 +41,12 @@
   margin: 0;
 }
 
+.headerCompany {
+  font-size: 12.5px;
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin: 0 0 6px;
+}
+
 .headerSub {
   @include font('sm');
   color: rgba(var(--a-text-rgb), 0.5);
