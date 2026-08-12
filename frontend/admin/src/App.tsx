@@ -53,9 +53,9 @@ export default function App() {
     <>
       <ToastContainer />
       <div className={styles.shell}>
-        <ActiveCompanyBadge />
         <Sidebar />
         <main className={styles.main}>
+          <ActiveCompanyBadge />
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/login" element={<Navigate to="/dashboard" replace />} />
