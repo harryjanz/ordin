@@ -20,6 +20,13 @@ const STATUS_OPTIONS: DropdownOptions[] = [
   { value: "assinado", label: "Assinado" },
 ];
 
+// minWidth igual nos dois — texto de tamanho diferente ("Ativar na Sessão"
+// vs "Desativar da Sessão") não deve mudar a largura do botão na coluna.
+// Cor de erro no texto de "Desativar" é o mesmo padrão de PaymentsScreen
+// (DANGER_BTN_STYLE, botão "Cancelar").
+const SESSION_BTN_STYLE = { minWidth: 168 };
+const DEACTIVATE_BTN_STYLE = { ...SESSION_BTN_STYLE, color: "var(--error-base)" };
+
 // Mesmo padrão visual dos cards de resumo de Transações (ORD-078) e Pedidos
 // (ORD-081) — aqui só contagem, sem valor monetário (ver ORD-084).
 const STATUS_CARDS: { key: "pendente" | "enviado" | "assinado"; label: string; color: string }[] = [
@@ -166,6 +173,7 @@ export default function CompanyListScreen() {
           <Button
             size="small"
             variant="secondary"
+            style={DEACTIVATE_BTN_STYLE}
             onClick={(e) => { e.stopPropagation(); setSelectedCompany(null); }}
           >
             Desativar da Sessão
@@ -173,7 +181,8 @@ export default function CompanyListScreen() {
         ) : (
           <Button
             size="small"
-            variant="secondary"
+            variant="primary"
+            style={SESSION_BTN_STYLE}
             onClick={(e) => { e.stopPropagation(); setSelectedCompany(c.id); }}
           >
             Ativar na Sessão
