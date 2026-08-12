@@ -104,5 +104,6 @@ Risco muito baixo — reuso total da store e do badge já existentes e testados 
 - Verificação visual no navegador **não realizada** — usuário optou por confiar em `tsc`/rebuild desta vez.
 - PR aberta e mesclada em `main`.
 - **Ajuste pós-implementação, pedido direto do usuário:** botão renomeado de "Ativar" pra "Ativar na Sessão"; a linha da empresa ativa deixou de mostrar uma tag "Ativa" estática e passou a mostrar um botão "Desativar da Sessão" (`setSelectedCompany(null)`), simetria com a ação de ativar em vez de só indicar estado.
+- **Segundo ajuste, pedido direto do usuário:** "Ativar na Sessão" virou `variant="primary"` (fundo roxo `brand-primary`, texto branco — mesma cor de "+ Novo cliente"); "Desativar da Sessão" manteve `variant="secondary"` com `color: var(--error-base)` no texto (mesmo padrão do botão "Cancelar" de `PaymentsScreen`); os dois ganharam `minWidth: 168` pra ficarem do mesmo tamanho apesar do texto de tamanho diferente.
 
 **Status: Done**
