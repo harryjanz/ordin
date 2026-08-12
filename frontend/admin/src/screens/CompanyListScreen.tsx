@@ -163,14 +163,20 @@ export default function CompanyListScreen() {
     {
       key: "action", header: "Ação", render: (c) =>
         c.id === selectedCompanyId ? (
-          <Tag variant="success">Ativa</Tag>
+          <Button
+            size="small"
+            variant="secondary"
+            onClick={(e) => { e.stopPropagation(); setSelectedCompany(null); }}
+          >
+            Desativar da Sessão
+          </Button>
         ) : (
           <Button
             size="small"
             variant="secondary"
             onClick={(e) => { e.stopPropagation(); setSelectedCompany(c.id); }}
           >
-            Ativar
+            Ativar na Sessão
           </Button>
         ),
     },

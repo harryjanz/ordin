@@ -103,5 +103,6 @@ Risco muito baixo — reuso total da store e do badge já existentes e testados 
 - `tsc --noEmit` limpo. Rebuild do admin, container sobe e responde 200.
 - Verificação visual no navegador **não realizada** — usuário optou por confiar em `tsc`/rebuild desta vez.
 - PR aberta e mesclada em `main`.
+- **Ajuste pós-implementação, pedido direto do usuário:** botão renomeado de "Ativar" pra "Ativar na Sessão"; a linha da empresa ativa deixou de mostrar uma tag "Ativa" estática e passou a mostrar um botão "Desativar da Sessão" (`setSelectedCompany(null)`), simetria com a ação de ativar em vez de só indicar estado.
 
 **Status: Done**
