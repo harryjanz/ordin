@@ -120,11 +120,17 @@
 
 .pager {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
+  gap: 8px 16px;
   @include padding('m', 'l', 'm', 'l');
   @include font('xs');
   color: rgba(var(--a-text-rgb), 0.5);
+}
+
+.pagerCount {
+  white-space: nowrap;
 }
 
 .pagerActions {

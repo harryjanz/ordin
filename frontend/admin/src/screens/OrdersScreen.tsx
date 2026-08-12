@@ -390,7 +390,7 @@ export default function OrdersScreen() {
                 }}
               />
               <div className={styles.pager}>
-                <span>Mostrando {skip + 1}–{Math.min(skip + LIMIT, total)} de {total}</span>
+                <span className={styles.pagerCount}>Mostrando {skip + 1}–{Math.min(skip + LIMIT, total)} de {total}</span>
                 <Pagination
                   activePage={page}
                   itemsPerPage={LIMIT}
