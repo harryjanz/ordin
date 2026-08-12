@@ -4,6 +4,7 @@ import { Alert, Button, DateInput, Dropdown, InputBase, Pagination, Skeleton, Ta
 import { listCompanies, type ContractStatusFilter } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCnpj } from "../lib/masks";
+import { useStore } from "../store";
 import Table, { type TableColumn } from "../components/Table";
 import type { Company, CompanyStatusSummary } from "../types";
 import styles from "./CompanyListScreen.module.scss";
@@ -49,6 +50,11 @@ function toDate(brDate: string): Date | undefined {
 
 export default function CompanyListScreen() {
   const navigate = useNavigate();
+  // ORD-085: mesma sessão compartilhada do ORD-082 (Configurações/Transações/
+  // Pedidos/Empresa/Dispositivos/Catálogo) — ativar por aqui já reflete
+  // nas outras telas e no badge "Empresa ativa" no topo.
+  const selectedCompanyId = useStore((s) => s.selectedCompanyId);
+  const setSelectedCompany = useStore((s) => s.setSelectedCompany);
   const [q, setQ] = useState("");
   const [document, setDocumentFilter] = useState("");
   const [contractStatus, setContractStatus] = useState<ContractStatusFilter>("");
@@ -154,6 +160,20 @@ export default function CompanyListScreen() {
       ),
     },
     { key: "created_at", header: "Cadastrado em", mono: true, render: (c) => fmtDate(c.created_at) },
+    {
+      key: "action", header: "Ação", render: (c) =>
+        c.id === selectedCompanyId ? (
+          <Tag variant="success">Ativa</Tag>
+        ) : (
+          <Button
+            size="small"
+            variant="secondary"
+            onClick={(e) => { e.stopPropagation(); setSelectedCompany(c.id); }}
+          >
+            Ativar
+          </Button>
+        ),
+    },
   ];
 
   return (
