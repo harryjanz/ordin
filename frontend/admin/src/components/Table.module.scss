@@ -114,4 +114,11 @@
   @include padding('xxl-2', 'l', 'xxl-2', 'l');
   text-align: center;
   color: rgba(var(--a-text-rgb), 0.5);
+  // Reset global zera margin de tudo (styles/theme.scss, `* { margin: 0 }`)
+  // — sem gap explícito, uma emptyMessage com texto + botão (ex.:
+  // CompanyListScreen "Limpar filtros") fica com os dois colados.
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
 }
