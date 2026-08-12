@@ -23,18 +23,20 @@ export default function ActiveCompanyBadge() {
   if (!isPlatformAdmin || !selectedCompanyId || !name) return null;
 
   return (
-    <div className={styles.badge}>
-      <span className={styles.label}>Empresa ativa</span>
-      <span className={styles.name}>{name}</span>
-      <button
-        type="button"
-        className={styles.clearBtn}
-        onClick={() => setSelectedCompany(null)}
-        aria-label="Remover seleção de empresa"
-        title="Remover seleção de empresa"
-      >
-        <i className="icon-x" />
-      </button>
+    <div className={styles.row}>
+      <div className={styles.badge}>
+        <span className={styles.label}>Empresa ativa</span>
+        <span className={styles.name}>{name}</span>
+        <button
+          type="button"
+          className={styles.clearBtn}
+          onClick={() => setSelectedCompany(null)}
+          aria-label="Remover seleção de empresa"
+          title="Remover seleção de empresa"
+        >
+          <i className="icon-x" />
+        </button>
+      </div>
     </div>
   );
 }

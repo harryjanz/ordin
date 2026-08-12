@@ -1,10 +1,17 @@
 @import 'design-system/dist/core/scss/styles';
 
+// Antes era position: fixed no canto superior direito — sobrepunha
+// qualquer elemento de tela que também ficasse ali (achado ao vivo:
+// colidia com o botão "+ Novo cliente" de CompanyListScreen depois que a
+// tela ganhou a largura total, ver ORD-084). Em fluxo normal, empurra o
+// conteúdo da página em vez de sobrepor, em qualquer tela.
+.row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 32px 0;
+}
+
 .badge {
-  position: fixed;
-  top: 16px;
-  right: 20px;
-  z-index: 20;
   display: flex;
   align-items: center;
   gap: 8px;

@@ -29,7 +29,12 @@
 
 .filterBar {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  // auto-fit (não auto-fill) — a tela ganhou a largura total (ver ORD-084)
+  // e só tem 5 campos + botão; auto-fill reservava colunas vazias de
+  // 180px conforme a tela ficava mais larga, sobrando espaço à direita em
+  // vez de redistribuir os campos existentes. auto-fit colapsa as colunas
+  // sem conteúdo e estica os campos que existem pra ocupar a largura toda.
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   align-items: end;
   background: var(--a-surface);
