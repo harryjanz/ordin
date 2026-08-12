@@ -1,6 +1,6 @@
 ---
 id: ORD-084
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Backend + Frontend
@@ -221,4 +221,6 @@ Fluxo simplificado de dev único, sem revisor formal nem branch protection (ver 
 - Verificado ao vivo via `curl` autenticado contra o gateway (não só teste automatizado): `GET /companies` sem filtro retorna as 3 empresas do seed com `summary: {"pendente": 2, "enviado": 0, "assinado": 1}` correto; `GET /companies?date_from=2020-01-01` retorna `total: 0` — comportamento esperado e já documentado (Achado 6: as 3 empresas seed têm `created_at` nulo, inseridas via `init.sql` fora do ORM).
 - Verificação visual no navegador **não realizada** — usuário optou por confiar nos testes automatizados (pytest/vitest/tsc) e na verificação via `curl` desta vez, sem abrir o Chrome MCP.
 
-**Status: In Progress** — PR ainda não aberta.
+- PR #42 aberta e mesclada em `main` (`da0f6f1`).
+
+**Status: Done**
