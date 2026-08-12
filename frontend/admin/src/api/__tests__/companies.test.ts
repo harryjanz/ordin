@@ -29,8 +29,21 @@ describe("buildCompanyListQuery", () => {
     expect(buildCompanyListQuery({ contractStatus: "" })).toEqual({ skip: 0, limit: 50 });
   });
 
+  it("inclui date_from/date_to só quando informados (ORD-084)", () => {
+    expect(buildCompanyListQuery({ dateFrom: "2026-08-01" }))
+      .toEqual({ skip: 0, limit: 50, date_from: "2026-08-01" });
+    expect(buildCompanyListQuery({ dateFrom: "2026-08-01", dateTo: "2026-08-31" }))
+      .toEqual({ skip: 0, limit: 50, date_from: "2026-08-01", date_to: "2026-08-31" });
+    expect(buildCompanyListQuery({})).toEqual({ skip: 0, limit: 50 });
+  });
+
   it("combina todos os filtros e paginação simultaneamente", () => {
-    expect(buildCompanyListQuery({ q: "sabor", document: "11222333000181", contractStatus: "pendente", skip: 50, limit: 20 }))
-      .toEqual({ skip: 50, limit: 20, q: "sabor", document: "11222333000181", contract_status: "pendente" });
+    expect(buildCompanyListQuery({
+      q: "sabor", document: "11222333000181", contractStatus: "pendente",
+      dateFrom: "2026-08-01", dateTo: "2026-08-31", skip: 50, limit: 20,
+    })).toEqual({
+      skip: 50, limit: 20, q: "sabor", document: "11222333000181", contract_status: "pendente",
+      date_from: "2026-08-01", date_to: "2026-08-31",
+    });
   });
 });

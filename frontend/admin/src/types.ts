@@ -210,3 +210,8 @@ export interface StatusSummaryItem {
 // Sempre com os 5 status do TransactionStatus (backend) presentes, mesmo
 // zerados — ver ORD-078.
 export type PaymentStatusSummary = Record<string, StatusSummaryItem>;
+
+// Sempre com os 3 status de contrato (pendente/enviado/assinado) presentes,
+// mesmo zerados — mesmo padrão do PaymentStatusSummary/OrderStatusSummary,
+// mas só contagem (sem valor monetário) — ver ORD-084.
+export type CompanyStatusSummary = Record<string, number>;

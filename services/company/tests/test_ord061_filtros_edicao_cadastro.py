@@ -127,7 +127,7 @@ async def test_filtros_combinados(client, superadmin_token, empresas):
 async def test_filtro_sem_correspondencia_retorna_lista_vazia(client, superadmin_token, empresas):
     r = await client.get("/companies?q=inexistenteZZZ999", headers=auth(superadmin_token))
     assert r.status_code == 200
-    assert r.json() == {"companies": [], "total": 0}
+    assert r.json()["companies"] == [] and r.json()["total"] == 0
 
 
 async def test_listagem_negada_para_role_nao_superadmin(client, owner_token, empresas):

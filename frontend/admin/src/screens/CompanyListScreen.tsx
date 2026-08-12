@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, Dropdown, InputBase, Tag, type DropdownOptions } from "design-system";
+import { Alert, Button, DateInput, Dropdown, InputBase, Pagination, Skeleton, Tag, type DropdownOptions } from "design-system";
 import { listCompanies, type ContractStatusFilter } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCnpj } from "../lib/masks";
 import Table, { type TableColumn } from "../components/Table";
-import type { Company } from "../types";
+import type { Company, CompanyStatusSummary } from "../types";
 import styles from "./CompanyListScreen.module.scss";
 
 const LIMIT = 50;
@@ -19,9 +19,32 @@ const STATUS_OPTIONS: DropdownOptions[] = [
   { value: "assinado", label: "Assinado" },
 ];
 
+// Mesmo padrão visual dos cards de resumo de Transações (ORD-078) e Pedidos
+// (ORD-081) — aqui só contagem, sem valor monetário (ver ORD-084).
+const STATUS_CARDS: { key: "pendente" | "enviado" | "assinado"; label: string; color: string }[] = [
+  { key: "pendente", label: "Pendente", color: "var(--warning-base)" },
+  { key: "enviado", label: "Enviado", color: "var(--brand-primary)" },
+  { key: "assinado", label: "Assinado", color: "var(--success-base)" },
+];
+
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("pt-BR");
+}
+
+// DateInput trabalha em dd/mm/aaaa — o backend espera algo comparável a
+// created_at (DATETIME). "dd/mm/aaaa" -> "aaaa-mm-dd". Mesmo helper de
+// PaymentsScreen/OrdersScreen (ver ORD-077/ORD-081).
+function toIsoDate(brDate: string): string | undefined {
+  const m = brDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return undefined;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+// Mesmo formato que o DateInput usa internamente pra comparar minDate/maxDate.
+function toDate(brDate: string): Date | undefined {
+  const iso = toIsoDate(brDate);
+  return iso ? new Date(`${iso}T00:00:00`) : undefined;
 }
 
 export default function CompanyListScreen() {
@@ -29,9 +52,12 @@ export default function CompanyListScreen() {
   const [q, setQ] = useState("");
   const [document, setDocumentFilter] = useState("");
   const [contractStatus, setContractStatus] = useState<ContractStatusFilter>("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [skip, setSkip] = useState(0);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState<CompanyStatusSummary>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -47,10 +73,15 @@ export default function CompanyListScreen() {
     setLoading(true);
     setError(null);
     try {
-      const result = await listCompanies({ q, document, contractStatus, skip, limit: LIMIT });
+      const result = await listCompanies({
+        q, document, contractStatus,
+        dateFrom: toIsoDate(dateFrom), dateTo: toIsoDate(dateTo),
+        skip, limit: LIMIT,
+      });
       if (thisRequest !== requestId.current) return; // resposta obsoleta, ignorar
       setCompanies(result.companies);
       setTotal(result.total);
+      setSummary(result.summary);
     } catch (err) {
       if (thisRequest !== requestId.current) return;
       setError(parseApiError(err).message);
@@ -71,18 +102,32 @@ export default function CompanyListScreen() {
     fetchCompanies();
     isFirstRender.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contractStatus, skip]);
+  }, [contractStatus, dateFrom, dateTo, skip]);
+
+  // O DateInput só revalida minDate/maxDate contra o valor atual quando o
+  // próprio campo muda — sem isso, mudar "De" pra depois de um "Até" já
+  // escolhido deixaria os dois inconsistentes sem nenhum aviso. Mesmo
+  // handler de PaymentsScreen/OrdersScreen.
+  function handleDateFromChange(value: string, valid: boolean) {
+    if (!valid && value) return;
+    setDateFrom(value);
+    const from = toDate(value);
+    const to = toDate(dateTo);
+    if (from && to && to < from) setDateTo("");
+    setSkip(0);
+  }
 
   function clearFilters() {
     setQ("");
     setDocumentFilter("");
     setContractStatus("");
+    setDateFrom("");
+    setDateTo("");
     setSkip(0);
   }
 
-  const hasFilter = Boolean(q || document || contractStatus);
+  const hasFilter = Boolean(q || document || contractStatus || dateFrom || dateTo);
   const page = Math.floor(skip / LIMIT) + 1;
-  const totalPages = Math.max(1, Math.ceil(total / LIMIT));
 
   const columns: TableColumn<Company>[] = [
     {
@@ -121,6 +166,27 @@ export default function CompanyListScreen() {
         <Button onClick={() => navigate("/companies/new")}>+ Novo cliente</Button>
       </div>
 
+      <div className={styles.grid}>
+        {STATUS_CARDS.map((card) => {
+          const count = summary[card.key] ?? 0;
+          const active = contractStatus === card.key;
+          return (
+            <button
+              key={card.key}
+              type="button"
+              className={`${styles.card} ${active ? styles.cardActive : ""}`}
+              style={{ borderLeftColor: card.color }}
+              onClick={() => { setContractStatus(active ? "" : card.key); setSkip(0); }}
+            >
+              <div className={styles.cardLabel}>
+                <span>{card.label}</span>
+                {loading ? <Skeleton height={18} width={24} /> : <span className={styles.cardCount}>{count}</span>}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
       <div className={styles.filterBar}>
         <div className={styles.field}>
           <InputBase
@@ -145,9 +211,26 @@ export default function CompanyListScreen() {
           <Dropdown
             label="Status do contrato"
             value={STATUS_OPTIONS.find((o) => o.value === contractStatus) ?? STATUS_OPTIONS[0]}
-            onValueSelected={(opt) => setContractStatus(opt.value as ContractStatusFilter)}
+            onValueSelected={(opt) => { setContractStatus(opt.value as ContractStatusFilter); setSkip(0); }}
             options={STATUS_OPTIONS}
             data-testid="select-filtro-status"
+          />
+        </div>
+        <div className={styles.field}>
+          <DateInput
+            label="De"
+            value={dateFrom}
+            onChange={handleDateFromChange}
+          />
+        </div>
+        <div className={styles.field}>
+          <DateInput
+            label="Até"
+            value={dateTo}
+            disabled={!dateFrom}
+            minDate={toDate(dateFrom)}
+            invalidMinDateMessage="A data final deve ser igual ou posterior à data inicial."
+            onChange={(value, valid) => { if (valid || !value) { setDateTo(value); setSkip(0); } }}
           />
         </div>
         <Button variant="secondary" onClick={clearFilters} disabled={!hasFilter} data-testid="btn-limpar-filtros">Limpar</Button>
@@ -168,6 +251,7 @@ export default function CompanyListScreen() {
 
       {!loading && !error && companies.length === 0 && total === 0 && (
         <Table
+          variant="compact"
           columns={columns}
           rows={[]}
           rowKey={(c) => c.id}
@@ -183,6 +267,7 @@ export default function CompanyListScreen() {
       {!error && companies.length > 0 && (
         <>
           <Table
+            variant="compact"
             columns={columns}
             rows={companies}
             rowKey={(c) => c.id}
@@ -191,11 +276,12 @@ export default function CompanyListScreen() {
           />
           <div className={styles.pager}>
             <span>Mostrando {skip + 1}–{Math.min(skip + LIMIT, total)} de {total}</span>
-            <div className={styles.pagerActions}>
-              <Button variant="secondary" size="small" disabled={skip === 0} onClick={() => setSkip((s) => Math.max(0, s - LIMIT))} data-testid="btn-pagina-anterior">Anterior</Button>
-              <span>Página {page} de {totalPages}</span>
-              <Button variant="secondary" size="small" disabled={skip + LIMIT >= total} onClick={() => setSkip((s) => s + LIMIT)} data-testid="btn-pagina-proxima">Próxima</Button>
-            </div>
+            <Pagination
+              activePage={page}
+              itemsPerPage={LIMIT}
+              totalItemsCount={total}
+              onChange={(newPage) => setSkip((newPage - 1) * LIMIT)}
+            />
           </div>
         </>
       )}
