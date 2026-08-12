@@ -327,6 +327,7 @@ class CompanyUpdate(BaseModel):
 class CompanyListOut(BaseModel):
     companies: list[CompanyOut]
     total: int
+    summary: dict[str, int]
 
 
 class CompanyCreateOut(BaseModel):
@@ -701,24 +702,50 @@ async def list_companies(
     q: Optional[str] = Query(None, description="Busca em nome fantasia ou razão social"),
     document: Optional[str] = Query(None, description="Prefixo de CNPJ (início), com ou sem máscara"),
     contract_status: Optional[str] = Query(None, pattern="^(pendente|enviado|assinado)$"),
+    date_from: Optional[str] = Query(None, description="Data de cadastro inicial (>=)"),
+    date_to: Optional[str] = Query(None, description="Data de cadastro final (<=)"),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_platform_admin(current_user)
-    stmt = select(Company).where(Company.active == True)
+    base_filters = [Company.active == True]
     if q:
         like = f"%{q}%"
-        stmt = stmt.where(or_(Company.name.ilike(like), Company.legal_name.ilike(like)))
+        base_filters.append(or_(Company.name.ilike(like), Company.legal_name.ilike(like)))
     if document:
         # Prefixo, não match exato — a listagem filtra progressivamente
         # conforme o usuário digita o CNPJ (a partir do 3º dígito no client).
-        stmt = stmt.where(Company.document.like(f"{normalize_cnpj(document)}%"))
-    if contract_status:
-        stmt = stmt.where(Company.contract_status == contract_status)
+        base_filters.append(Company.document.like(f"{normalize_cnpj(document)}%"))
+    if date_from:
+        base_filters.append(Company.created_at >= date_from)
+    if date_to:
+        base_filters.append(Company.created_at <= date_to)
 
-    total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar()
-    result = await db.execute(stmt.offset(skip).limit(limit))
-    return {"companies": result.scalars().all(), "total": total}
+    # filters = base_filters + contract_status, usado na lista/contagem
+    # paginada. O resumo por status (summary, abaixo) usa só base_filters —
+    # ignora o filtro de contract_status de propósito, pra sempre mostrar a
+    # distribuição completa entre os status (mesmo padrão do ORD-078 em
+    # list_payments/list_orders).
+    filters = list(base_filters)
+    if contract_status:
+        filters.append(Company.contract_status == contract_status)
+
+    total = (await db.execute(select(func.count()).select_from(Company).where(*filters))).scalar()
+    result = await db.execute(
+        select(Company).where(*filters).order_by(Company.created_at.desc()).offset(skip).limit(limit)
+    )
+
+    summary = {s: 0 for s in ("pendente", "enviado", "assinado")}
+    summary_rows = await db.execute(
+        select(Company.contract_status, func.count())
+        .where(*base_filters)
+        .group_by(Company.contract_status)
+    )
+    for row_status, row_count in summary_rows.all():
+        if row_status in summary:
+            summary[row_status] = row_count
+
+    return {"companies": result.scalars().all(), "total": total, "summary": summary}
 
 
 @app.post(

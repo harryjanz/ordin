@@ -1,5 +1,5 @@
 import api from "../api";
-import type { CepLookupResult, CnpjLookupResult, Company, Contact, ContactType, LegalRepresentative, Terminal } from "../types";
+import type { CepLookupResult, CnpjLookupResult, Company, CompanyStatusSummary, Contact, ContactType, LegalRepresentative, Terminal } from "../types";
 import { normalizeCnpj } from "../lib/validators";
 
 export async function lookupCnpj(cnpj: string): Promise<CnpjLookupResult> {
@@ -28,6 +28,8 @@ export interface CompanyListFilters {
   q?: string;
   document?: string;
   contractStatus?: ContractStatusFilter;
+  dateFrom?: string;
+  dateTo?: string;
   skip?: number;
   limit?: number;
 }
@@ -50,11 +52,15 @@ export function buildCompanyListQuery(filters: CompanyListFilters): Record<strin
     if (normalized.length >= 3) params.document = normalized;
   }
   if (filters.contractStatus) params.contract_status = filters.contractStatus;
+  if (filters.dateFrom) params.date_from = filters.dateFrom;
+  if (filters.dateTo) params.date_to = filters.dateTo;
   return params;
 }
 
-export async function listCompanies(filters: CompanyListFilters): Promise<{ companies: Company[]; total: number }> {
-  const r = await api.get<{ companies: Company[]; total: number }>("/companies", {
+export async function listCompanies(
+  filters: CompanyListFilters
+): Promise<{ companies: Company[]; total: number; summary: CompanyStatusSummary }> {
+  const r = await api.get<{ companies: Company[]; total: number; summary: CompanyStatusSummary }>("/companies", {
     params: buildCompanyListQuery(filters),
   });
   return r.data;

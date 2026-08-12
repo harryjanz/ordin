@@ -297,6 +297,7 @@ async def test_dir_list_companies(db_session):
     async with db_session() as db:
         result = await svc.list_companies(
             0, 50, q=None, document=None, contract_status=None,
+            date_from=None, date_to=None,
             db=db, current_user=_user("superadmin"),
         )
     assert "companies" in result and "total" in result
