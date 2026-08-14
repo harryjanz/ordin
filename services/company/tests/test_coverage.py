@@ -108,6 +108,16 @@ async def _cleanup_seed(SessionLocal, co_id):
     async with SessionLocal() as db:
         await db.execute(sa_delete(svc.CompanyPaymentConfig).where(
             svc.CompanyPaymentConfig.company_id == co_id))
+        # ORD-087: create_user emite um UserInviteToken — precisa sumir
+        # antes do User, senão fica órfão no banco compartilhado de dev
+        # (mesma classe de problema do incidente do ORD-075/orphaned
+        # companies, ver docs/stories/ORD-084 Downstream).
+        user_ids = (await db.execute(
+            select(svc.User.id).where(svc.User.company_id == co_id)
+        )).scalars().all()
+        if user_ids:
+            await db.execute(sa_delete(svc.UserInviteToken).where(
+                svc.UserInviteToken.user_id.in_(user_ids)))
         await db.execute(sa_delete(svc.User).where(svc.User.company_id == co_id))
         await db.execute(sa_delete(svc.Terminal).where(svc.Terminal.company_id == co_id))
         await db.execute(sa_delete(svc.Company).where(svc.Company.id == co_id))

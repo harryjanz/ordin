@@ -423,7 +423,7 @@ export default function CompanyScreen() {
   // ── Users ─────────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
-  const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "cashier" as Role });
+  const [newUser, setNewUser] = useState({ name: "", email: "", role: "cashier" as Role });
   const [errUsers, setErrUsers] = useState<string | null>(null);
   const [userNameFilter, setUserNameFilter] = useState("");
   const [userEmailFilter, setUserEmailFilter] = useState("");
@@ -541,10 +541,15 @@ export default function CompanyScreen() {
 
   async function addUser(e: FormEvent) {
     e.preventDefault();
-    if (!companyId || !newUser.name || !newUser.email || !newUser.password) return;
+    if (!companyId || !newUser.name || !newUser.email) return;
     await api.post(`/companies/${companyId}/users`, newUser);
-    setNewUser({ name: "", email: "", password: "", role: "cashier" });
+    setNewUser({ name: "", email: "", role: "cashier" });
     loadUsers();
+  }
+
+  async function resendInvite(id: number) {
+    if (!companyId) return;
+    await api.post(`/companies/${companyId}/users/${id}/resend-invite`);
   }
 
   function deactivateUser(id: number) {
@@ -664,10 +669,12 @@ export default function CompanyScreen() {
             </div>
           )}
           <form className={styles.form} onSubmit={addUser}>
+            <div className={styles.formHint}>
+              Sem senha aqui — o convidado recebe um e-mail com um link para definir a própria senha.
+            </div>
             <div className={styles.userFormRow}>
               <InputBase label="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
               <InputBase label="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
-              <InputBase label="Senha" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
               <Dropdown
                 label="Papel"
                 value={ROLE_OPTIONS.find((o) => o.value === newUser.role) ?? null}
@@ -676,7 +683,7 @@ export default function CompanyScreen() {
               />
             </div>
             <div className={styles.formActions}>
-              <Button type="submit">Criar usuário</Button>
+              <Button type="submit">Convidar usuário</Button>
             </div>
           </form>
 
@@ -709,14 +716,26 @@ export default function CompanyScreen() {
                 { key: "name", header: "Nome", render: (u) => u.name },
                 { key: "email", header: "E-mail", render: (u) => u.email },
                 { key: "role", header: "Papel", render: (u) => <Tag variant="neutral">{ROLE_LABELS[u.role] ?? u.role}</Tag> },
-                { key: "status", header: "Status", render: (u) => <Tag variant={u.active ? "success" : "error"}>{u.active ? "Ativo" : "Inativo"}</Tag> },
+                {
+                  key: "status", header: "Status", render: (u) => (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <Tag variant={u.active ? "success" : "error"}>{u.active ? "Ativo" : "Inativo"}</Tag>
+                      {u.pending_setup && <Tag variant="warning">Convite pendente</Tag>}
+                    </div>
+                  ),
+                },
                 {
                   key: "action", header: "", render: (u) => (
-                    u.active ? (
-                      <Button size="small" variant="secondary" onClick={() => deactivateUser(u.id)}>Desativar</Button>
-                    ) : (
-                      <Button size="small" variant="secondary" onClick={() => reactivateUser(u.id)}>Reativar</Button>
-                    )
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {u.pending_setup && (
+                        <Button size="small" variant="secondary" onClick={() => resendInvite(u.id)}>Reenviar convite</Button>
+                      )}
+                      {u.active ? (
+                        <Button size="small" variant="secondary" onClick={() => deactivateUser(u.id)}>Desativar</Button>
+                      ) : (
+                        <Button size="small" variant="secondary" onClick={() => reactivateUser(u.id)}>Reativar</Button>
+                      )}
+                    </div>
                   ),
                 },
               ]}

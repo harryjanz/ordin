@@ -1,10 +1,13 @@
 import base64
+import hashlib
 import json
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
+import httpx
 import redis as redis_lib
 
 import bcrypt
@@ -34,6 +37,14 @@ from audit import emit_audit
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
 redis_client    = redis_lib.from_url(require_env("REDIS_URL"), decode_responses=True)
+
+logger = logging.getLogger(__name__)
+
+# ORD-087 — convite de usuário por e-mail
+NOTIFICATION_SERVICE_URL = require_env("NOTIFICATION_SERVICE_URL")
+ADMIN_BASE_URL           = os.getenv("ADMIN_BASE_URL", "http://localhost:3001")
+INTERNAL_HEADERS         = {"X-Internal-Secret": INTERNAL_SECRET}
+INVITE_TOKEN_TTL_HOURS   = 48
 
 
 def require_internal(x_internal_secret: str = Header(default="")) -> None:
@@ -122,6 +133,24 @@ class User(Base):
     role          = Column(String(20), default="cashier")
     active        = Column(Boolean, default=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
+
+    @property
+    def pending_setup(self) -> bool:
+        # ORD-087: usuário criado por convite ainda não definiu a própria
+        # senha — password_hash fica nulo até ele completar o cadastro.
+        return self.password_hash is None
+
+
+class UserInviteToken(Base):
+    # Token de convite (ORD-087) — mesmo desenho de RefreshToken no
+    # auth-service: só o hash é persistido, nunca o token puro.
+    __tablename__ = "user_invite_tokens"
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, index=True)
+    token_hash = Column(String(64), unique=True)
+    expires_at = Column(DateTime)
+    used_at    = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Terminal(Base):
@@ -406,14 +435,16 @@ class UserOut(BaseModel):
     email: str
     role: str
     active: bool
+    pending_setup: bool
     created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 
 class UserIn(BaseModel):
+    # ORD-087: sem campo senha — o usuário convidado define a própria senha
+    # pelo link recebido por e-mail (ver POST /users/complete-registration).
     name: str
     email: str
-    password: str
     role: str = "cashier"
 
 
@@ -1113,6 +1144,36 @@ async def terminal_heartbeat(
 
 # ── Usuários (owner/manager da empresa) ──────────────────────────────────────
 
+async def _issue_invite(db: AsyncSession, user: "User") -> None:
+    """Gera um token de convite de uso único e tenta enviar o e-mail via
+    notification-service. Nunca propaga erro — falha no envio (serviço fora
+    do ar, timeout) não pode impedir a criação/reenvio do usuário, ver
+    Riscos da história ORD-087."""
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    db.add(UserInviteToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=datetime.utcnow() + timedelta(hours=INVITE_TOKEN_TTL_HOURS),
+    ))
+    await db.commit()
+
+    set_password_url = f"{ADMIN_BASE_URL}/set-password?token={raw_token}"
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post(
+                f"{NOTIFICATION_SERVICE_URL}/internal/send-invite",
+                json={
+                    "to": user.email, "name": user.name, "role": user.role,
+                    "set_password_url": set_password_url,
+                },
+                headers=INTERNAL_HEADERS,
+            )
+            r.raise_for_status()
+    except Exception:
+        logger.warning("Falha ao enviar convite pro usuário %s (id=%s)", user.email, user.id, exc_info=True)
+
+
 @app.get(
     "/companies/{company_id}/users",
     response_model=UserListOut,
@@ -1178,12 +1239,13 @@ async def create_user(
         company_id=company_id,
         name=body.name,
         email=body.email,
-        password_hash=bcrypt.hashpw(body.password.encode(), bcrypt.gensalt(12)).decode(),
+        password_hash=None,
         role=body.role,
     )
     db.add(u)
     await db.commit()
     await db.refresh(u)
+    await _issue_invite(db, u)
     return u
 
 
@@ -1241,6 +1303,78 @@ async def delete_user(
         raise HTTPException(403, "Não é possível desativar o próprio usuário")
     u.active = False
     await db.commit()
+
+
+@app.post(
+    "/companies/{company_id}/users/{user_id}/resend-invite",
+    tags=["Usuários"],
+    summary="Reenviar convite de definição de senha",
+)
+async def resend_invite(
+    company_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(User).filter_by(id=user_id, company_id=company_id))
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    if not u.pending_setup:
+        raise HTTPException(400, "Usuário já definiu a própria senha")
+    # Invalida qualquer token ainda ativo antes de emitir o novo — evita
+    # dois links do mesmo convite valendo ao mesmo tempo.
+    await db.execute(
+        update(UserInviteToken)
+        .where(UserInviteToken.user_id == u.id, UserInviteToken.used_at.is_(None))
+        .values(used_at=datetime.utcnow())
+    )
+    await db.commit()
+    await _issue_invite(db, u)
+    return {"sent": True}
+
+
+class CompleteRegistrationIn(BaseModel):
+    token: str
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def _password_min_length(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Senha deve ter ao menos 8 caracteres")
+        return v
+
+
+@app.post(
+    "/users/complete-registration",
+    tags=["Usuários"],
+    summary="Concluir cadastro definindo a senha (link do e-mail de convite)",
+    description=(
+        "Endpoint público — protegido pelo próprio token (uso único, expira em "
+        f"{INVITE_TOKEN_TTL_HOURS}h, alta entropia), não por JWT. É a porta de "
+        "entrada de um usuário que ainda não tem conta."
+    ),
+)
+async def complete_registration(
+    body: CompleteRegistrationIn,
+    db: AsyncSession = Depends(get_db),
+):
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
+    result = await db.execute(select(UserInviteToken).filter_by(token_hash=token_hash))
+    invite = result.scalars().first()
+    # Mensagem genérica em todo caso de falha — não revela se o token
+    # chegou a existir, se já foi usado ou se só expirou.
+    if not invite or invite.used_at is not None or invite.expires_at < datetime.utcnow():
+        raise HTTPException(400, "Convite inválido ou expirado")
+    user = await db.get(User, invite.user_id)
+    if not user:
+        raise HTTPException(400, "Convite inválido ou expirado")
+    user.password_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt(12)).decode()
+    invite.used_at = datetime.utcnow()
+    await db.commit()
+    return {"ok": True}
 
 
 # ── Configurações de pagamento (owner/superadmin) ─────────────────────────────

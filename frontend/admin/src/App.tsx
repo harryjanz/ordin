@@ -1,11 +1,12 @@
 import { useEffect } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { ToastContainer } from "design-system";
 import { useStore } from "./store";
 import styles from "./App.module.scss";
 import Sidebar from "./components/Sidebar";
 import ActiveCompanyBadge from "./components/ActiveCompanyBadge";
 import LoginScreen from "./screens/LoginScreen";
+import SetPasswordScreen from "./screens/SetPasswordScreen";
 import DashboardScreen from "./screens/DashboardScreen";
 import CatalogScreen from "./screens/CatalogScreen";
 import OrdersScreen from "./screens/OrdersScreen";
@@ -35,10 +36,24 @@ function ProtectedRoute({ path, element }: { path: string; element: JSX.Element 
 export default function App() {
   const isAuth = useStore((s) => !!s.accessToken);
   const adminThemeMode = useStore((s) => s.adminThemeMode);
+  const location = useLocation();
 
   useEffect(() => {
     document.documentElement.dataset.theme = adminThemeMode;
   }, [adminThemeMode]);
+
+  // ORD-087: rota pública, resolvida ANTES do gate de isAuth — o link do
+  // e-mail de convite (/set-password?token=...) precisa abrir mesmo sem
+  // sessão. Sem isso, !isAuth sempre caía direto no LoginScreen, ignorando
+  // o path (achado crítico do Tech Explorer).
+  if (location.pathname === "/set-password") {
+    return (
+      <>
+        <ToastContainer />
+        <SetPasswordScreen />
+      </>
+    );
+  }
 
   if (!isAuth) {
     return (

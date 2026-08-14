@@ -55,6 +55,7 @@ O gateway Nginx fica em `http://localhost:8000`. Cada serviço também expõe su
 | `catalog` | 8003 | `fk_catalog` | Catálogo de produtos: categorias e produtos por empresa |
 | `order` | 8004 | `fk_order` | Pedidos, tickets por unidade, WebSocket tempo real, QR com HMAC |
 | `payment` | 8005 | `fk_payment` | PayGo TEF (atualmente mockado 95% aprovação); notifica order-service |
+| `notification` | 8006 | — (stateless) | E-mail transacional (convite/definição de senha, ORD-087); sem rota pública, só `/internal/send-invite` via `X-Internal-Secret` |
 
 **Estado atual:** cada serviço é um `main.py` monolítico com SQLAlchemy async. **Estado alvo** (definido em `docs/ARQUITETURA.md`): Clean Architecture em 4 camadas — `domain / application / infrastructure / interfaces` — com referência de implementação em `ms-payment/`. As migrations correm via Alembic no startup do container (`alembic upgrade head && uvicorn ...`).
 
