@@ -19,7 +19,7 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     if (isPlatformAdmin) {
-      api.get("/companies").then((r) => setCompanies(r.data.items ?? r.data)).catch(() => null);
+      api.get("/companies").then((r) => setCompanies(r.data.companies ?? [])).catch(() => null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlatformAdmin]);
