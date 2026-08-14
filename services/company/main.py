@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 from datetime import datetime, timedelta
 from typing import Optional
@@ -449,6 +450,7 @@ class UserIn(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    name: Optional[str] = None
     role: Optional[str] = None
     active: Optional[bool] = None
 
@@ -1267,6 +1269,8 @@ async def update_user(
     u = result.scalars().first()
     if not u:
         raise HTTPException(404, "Usuário não encontrado")
+    if body.name is not None:
+        u.name = body.name
     if body.role is not None:
         if str(u.id) == current_user.sub and u.role != body.role:
             raise HTTPException(403, "Owner não pode alterar o próprio role")
@@ -1335,15 +1339,31 @@ async def resend_invite(
     return {"sent": True}
 
 
+def _password_strength(password: str) -> str:
+    # ORD-090: mesma regra replicada no frontend (SetPasswordScreen.tsx)
+    # pro medidor em tempo real — mudança aqui precisa de mudança lá também.
+    has_letter = bool(re.search(r"[A-Za-z]", password))
+    has_digit = bool(re.search(r"\d", password))
+    has_special = bool(re.search(r"[^A-Za-z0-9]", password))
+    strong_chars = has_letter and has_digit and has_special
+    if len(password) >= 12 and strong_chars:
+        return "forte"
+    if len(password) >= 8 and strong_chars:
+        return "media"
+    return "fraca"
+
+
 class CompleteRegistrationIn(BaseModel):
     token: str
     password: str
 
     @field_validator("password")
     @classmethod
-    def _password_min_length(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Senha deve ter ao menos 8 caracteres")
+    def _password_min_strength(cls, v: str) -> str:
+        if _password_strength(v) == "fraca":
+            raise ValueError(
+                "Senha fraca — use ao menos 8 caracteres com letra, número e caractere especial."
+            )
         return v
 
 

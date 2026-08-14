@@ -63,6 +63,8 @@ async def test_send_invite_happy_path(client):
     assert kwargs["to"] == "novo@teste.com"
     assert "Gerente" in kwargs["html"] or "manager" not in kwargs["html"]
     assert "http://localhost:3001/set-password?token=abc" in kwargs["html"]
+    assert ">ordin<" in kwargs["html"]  # ORD-090: wordmark do cabeçalho
+    assert "suporte@ordin.com" in kwargs["html"]  # ORD-090: assinatura no rodapé
 
 
 async def test_send_invite_papel_desconhecido_usa_texto_generico(client):

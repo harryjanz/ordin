@@ -149,14 +149,14 @@ async def test_complete_registration_happy_path(client, empresa):
     sent = jsonlib.loads(route.calls[0].request.content)
     raw_token = _extract_token(sent["set_password_url"])
 
-    r = await client.post("/users/complete-registration", json={"token": raw_token, "password": "senhaSegura123"})
+    r = await client.post("/users/complete-registration", json={"token": raw_token, "password": "senhaSegura123!"})
     assert r.status_code == 200
     assert r.json() == {"ok": True}
 
     # usuário criado consegue logar (senha efetivamente gravada)
     login_r = await client.post(
         "/internal/verify-credentials",
-        json={"email": f"{TOKEN.lower()}.happy@teste.com", "password": "senhaSegura123"},
+        json={"email": f"{TOKEN.lower()}.happy@teste.com", "password": "senhaSegura123!"},
         headers={"X-Internal-Secret": os.environ["INTERNAL_SECRET"]},
     )
     assert login_r.status_code == 200
@@ -175,14 +175,14 @@ async def test_complete_registration_token_usado_e_rejeitado(client, empresa):
     sent = jsonlib.loads(route.calls[0].request.content)
     raw_token = _extract_token(sent["set_password_url"])
 
-    r1 = await client.post("/users/complete-registration", json={"token": raw_token, "password": "senhaSegura123"})
+    r1 = await client.post("/users/complete-registration", json={"token": raw_token, "password": "senhaSegura123!"})
     assert r1.status_code == 200
-    r2 = await client.post("/users/complete-registration", json={"token": raw_token, "password": "outraSenha123"})
+    r2 = await client.post("/users/complete-registration", json={"token": raw_token, "password": "outraSenha123!"})
     assert r2.status_code == 400
 
 
 async def test_complete_registration_token_invalido_retorna_400(client, empresa):
-    r = await client.post("/users/complete-registration", json={"token": "token-que-nao-existe", "password": "senhaSegura123"})
+    r = await client.post("/users/complete-registration", json={"token": "token-que-nao-existe", "password": "senhaSegura123!"})
     assert r.status_code == 400
 
 
@@ -214,11 +214,11 @@ async def test_reenviar_convite_invalida_token_anterior(client, empresa):
     assert novo_token != primeiro_token
 
     # token antigo não vale mais
-    r_antigo = await client.post("/users/complete-registration", json={"token": primeiro_token, "password": "senhaSegura123"})
+    r_antigo = await client.post("/users/complete-registration", json={"token": primeiro_token, "password": "senhaSegura123!"})
     assert r_antigo.status_code == 400
 
     # token novo funciona
-    r_novo = await client.post("/users/complete-registration", json={"token": novo_token, "password": "senhaSegura123"})
+    r_novo = await client.post("/users/complete-registration", json={"token": novo_token, "password": "senhaSegura123!"})
     assert r_novo.status_code == 200
 
 
@@ -235,7 +235,7 @@ async def test_reenviar_convite_para_usuario_ja_definido_retorna_400(client, emp
         import json as jsonlib
         raw_token = _extract_token(jsonlib.loads(route.calls[0].request.content)["set_password_url"])
 
-    await client.post("/users/complete-registration", json={"token": raw_token, "password": "senhaSegura123"})
+    await client.post("/users/complete-registration", json={"token": raw_token, "password": "senhaSegura123!"})
 
     r = await client.post(
         f"/companies/{empresa['company_id']}/users/{user_id}/resend-invite",

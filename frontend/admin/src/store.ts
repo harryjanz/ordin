@@ -40,7 +40,10 @@ export const useStore = create<Store>()(
       role: null,
       selectedCompanyId: null,
       unsavedChanges: false,
-      adminThemeMode: "dark",
+      // ORD-090: padrão claro para qualquer sessão nova (inclusive de
+      // usuário recém-convidado) — tema é preferência de navegador
+      // (localStorage), nunca foi por conta no backend.
+      adminThemeMode: "light",
 
       login(access, refresh) {
         const p = decodeJwt(access);

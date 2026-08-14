@@ -1,6 +1,6 @@
 ---
 id: ORD-090
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Backend + Frontend
@@ -230,3 +230,22 @@ Nenhuma — `name` já é coluna existente em `User`, só faltava no schema Pyda
 **Explorer:** [x] fluxo, persona e critérios de aceite definidos para os 5 itens do pacote · **QA Explorer:** [x] cenários Gherkin cobrindo tema, classificação de senha (todas as transições), bloqueio de Fraca, edição com regras de permissão preservadas, e-mail com identidade visual, alinhamento · **Tech Explorer:** [x] direção técnica completa nos 3 serviços, sem migration, risco de quebrar testes do ORD-087 já identificado antes de acontecer · **Aprovação final:** [x] decisões de mínimo de senha (Média), tema (mudar padrão global) e logo (wordmark de texto) aprovadas no chat pelo usuário (2026-08-14)
 
 **Status: Ready** — pode começar a implementação.
+
+---
+
+## Downstream
+
+- **Branch:** `feature/ord-090-usuarios-edicao-forca-senha-tema-email`, a partir de `main`.
+- **`services/company/main.py`:** `_password_strength()` implementada exatamente como planejado no Tech Explorer; `CompleteRegistrationIn` (validador renomeado `_password_min_strength`) passa a rejeitar com `"Senha fraca — use ao menos 8 caracteres com letra, número e caractere especial."` em vez de só checar comprimento; `UserUpdate` ganhou `name: Optional[str] = None`; `update_user` aplica `u.name` quando presente, sem tocar na lógica de permissão de papel já existente.
+- **`services/company/tests/test_ord087_convite_email_senha.py`:** risco antecipado no Tech Explorer se confirmou — senhas como `"senhaSegura123"`/`"outraSenha123"` (sem caractere especial) passaram a ser classificadas como Fraca pela regra nova; corrigidas para `"senhaSegura123!"`/`"outraSenha123!"` (8 ocorrências).
+- **`services/company/tests/test_ord090_forca_senha_edicao_usuario.py` (novo):** 9 testes — classificação unitária de `_password_strength` (fraca/média/forte nas bordas de 8 e 12 caracteres), rejeição de senha sem especial via `POST /users/complete-registration` (com `respx` mockando o notification-service), edição de nome+papel, edição que não altera e-mail/status, regra de permissão preservada (manager não promove a owner).
+- **Suíte completa do company-service:** **214 passed**, 1 falha pré-existente e não relacionada (`test_require_superadmin_raises_for_owner`, já documentada nos stories anteriores).
+- **`services/notification/main.py`:** `_EMAIL_HEADER`/`_EMAIL_FOOTER` envolvendo o corpo já existente de `_build_invite_html` — wordmark "ordin" roxo/negrito no topo, rodapé com "Equipe Ordin", `suporte@ordin.com` e WhatsApp (ambos placeholders, mesma natureza do `SESEmailProvider` do ORD-087).
+- **`services/notification/tests/test_notification.py`:** `test_send_invite_happy_path` ganhou 2 asserts (wordmark e e-mail de suporte no HTML) — **8 passed**.
+- **`frontend/admin/src/store.ts`:** `adminThemeMode` inicial mudou de `"dark"` para `"light"`.
+- **`frontend/admin/src/screens/SetPasswordScreen.tsx`:** medidor de força em tempo real (`Tag` do design system, variantes error/warning/success), botão "Definir senha" desabilitado quando Fraca, mesma regra replicada em TS (comentário cruzado com o backend avisando que mudança num lado exige mudança no outro).
+- **`frontend/admin/src/screens/CompanyScreen.tsx`:** botão "Editar" por linha, formulário inline (Nome + Dropdown Papel, mesmo padrão de `PaymentTab`), coluna de ação com `justifyContent: "flex-end"`.
+- `tsc --noEmit`: limpo. `vitest run`: **48 passed**, sem regressão.
+- **Lint delta (ruff, `services/company` + `services/notification`) contra `origin/main` via `git worktree`:** branch com 315 achados vs. 312 em `main` — as 3 diferenças (`UP045` em `company/main.py`, `DTZ003` e `I001` no novo arquivo de teste) são todas de categorias já pervasivas na dívida técnica pré-existente do projeto, nenhuma categoria nova introduzida.
+- **Verificado ao vivo no Chrome** (owner `carlos@burgerhouse.com`, sessão com `localStorage` limpo para simular navegador novo): tela de login já carrega no tema claro antes mesmo do login (confirma o novo padrão global); edição de nome de usuário salva e reflete na listagem imediatamente; convite disparado, e-mail recebido no Mailtrap real com wordmark no cabeçalho e assinatura/suporte/WhatsApp no rodapé; link do e-mail abre `/set-password` com token válido, medidor mostra Fraca → Média → Forte em tempo real conforme a senha digitada, botão habilita só a partir de Média; senha definida com sucesso e usuário convidado desaparece da lista de "Convite pendente" na listagem. Usuário e token de teste removidos do banco compartilhado ao final.
+- PR aberta para `main`.

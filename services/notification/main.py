@@ -48,10 +48,30 @@ ROLE_DESCRIPTIONS = {
 }
 
 
+# ORD-090 — identidade visual do e-mail. Sem arquivo de logo nem hospedagem
+# de imagem pública configurada (Fase 2 ainda bloqueada), então o cabeçalho
+# usa o mesmo wordmark de texto ("ordin" roxo/negrito) já usado no admin
+# (LoginScreen/SetPasswordScreen), não uma imagem. E-mail de suporte e
+# WhatsApp são placeholders — sem canal de suporte real configurado ainda.
+_EMAIL_HEADER = """
+<div style="text-align: center; padding: 20px 0;">
+  <span style="font-size: 24px; font-weight: 800; color: #7c3aed; letter-spacing: -0.02em;">ordin</span>
+</div>
+"""
+
+_EMAIL_FOOTER = """
+<div style="border-top: 1px solid #eee; margin-top: 24px; padding-top: 16px; color: #888; font-size: 12px; text-align: center;">
+  Equipe Ordin<br>
+  suporte@ordin.com · WhatsApp (11) 91234-5678
+</div>
+"""
+
+
 def _build_invite_html(name: str, role: str, set_password_url: str) -> str:
     role_description = ROLE_DESCRIPTIONS.get(role, "Você foi convidado a fazer parte da equipe.")
     return f"""
     <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      {_EMAIL_HEADER}
       <h2>Bem-vindo(a) à Ordin, {name}!</h2>
       <p>{role_description}</p>
       <p>Para começar, defina sua senha de acesso:</p>
@@ -65,6 +85,7 @@ def _build_invite_html(name: str, role: str, set_password_url: str) -> str:
       <p style="color: #888; font-size: 12px;">
         Se você não esperava este e-mail, pode ignorá-lo com segurança.
       </p>
+      {_EMAIL_FOOTER}
     </div>
     """
 
