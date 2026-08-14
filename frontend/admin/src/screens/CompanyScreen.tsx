@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, useRef, FormEvent } from "react";
 import { Button, Dropdown, InputBase, Tab, Tabs, Tag, type DropdownOptions } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -92,6 +92,16 @@ const ROLE_OPTIONS: DropdownOptions[] = [
 const ROLE_LABELS: Record<string, string> = Object.fromEntries(
   ROLE_OPTIONS.map((o) => [o.value, o.label]),
 );
+
+const ROLE_FILTER_OPTIONS: DropdownOptions[] = [{ value: "", label: "Todos" }, ...ROLE_OPTIONS];
+
+type StatusFilter = "active" | "inactive" | "all";
+
+const STATUS_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "active", label: "Ativos" },
+  { value: "inactive", label: "Inativos" },
+  { value: "all", label: "Todos" },
+];
 
 // Converte { "api_key": "x", "extra_config.public_key": "y" } → payload da API
 function buildConfigPayload(
@@ -415,14 +425,42 @@ export default function CompanyScreen() {
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "cashier" as Role });
   const [errUsers, setErrUsers] = useState<string | null>(null);
+  const [userNameFilter, setUserNameFilter] = useState("");
+  const [userEmailFilter, setUserEmailFilter] = useState("");
+  const [userRoleFilter, setUserRoleFilter] = useState("");
+  const [userStatusFilter, setUserStatusFilter] = useState<StatusFilter>("active");
+  const userDebounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const userIsFirstRender = useRef(true);
+  // Evita que uma resposta de filtro obsoleta (ex: busca disparada com o
+  // nome ainda incompleto) chegue depois da mais recente e sobrescreva o
+  // resultado certo — mesmo padrão de CompanyListScreen/OrdersScreen.
+  const userRequestId = useRef(0);
 
   const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null);
 
   useEffect(() => {
     if (!companyId) return;
     loadTerminals();
-    loadUsers();
   }, [companyId]);
+
+  // Debounce só reage a digitação do usuário nos campos de texto — a carga
+  // inicial e a reação a papel/status ficam no efeito abaixo, que dispara
+  // no mount e a cada mudança, sem duplicar a requisição (mesmo padrão de
+  // CompanyListScreen/OrdersScreen).
+  useEffect(() => {
+    if (userIsFirstRender.current) return;
+    clearTimeout(userDebounceTimer.current);
+    userDebounceTimer.current = setTimeout(() => loadUsers(), 500);
+    return () => clearTimeout(userDebounceTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userNameFilter, userEmailFilter]);
+
+  useEffect(() => {
+    if (!companyId) return;
+    loadUsers();
+    userIsFirstRender.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, userRoleFilter, userStatusFilter]);
 
   async function loadTerminals() {
     if (!companyId) return;
@@ -442,15 +480,25 @@ export default function CompanyScreen() {
 
   async function loadUsers() {
     if (!companyId) return;
+    const thisRequest = ++userRequestId.current;
     setLoadingUsers(true);
     try {
-      const r = await api.get(`/companies/${companyId}/users`);
+      const r = await api.get(`/companies/${companyId}/users`, {
+        params: {
+          name: userNameFilter || undefined,
+          email: userEmailFilter || undefined,
+          role: userRoleFilter || undefined,
+          status: userStatusFilter,
+        },
+      });
+      if (thisRequest !== userRequestId.current) return; // resposta obsoleta, ignorar
       setUsers(r.data.users ?? r.data);
       setErrUsers(null);
     } catch {
+      if (thisRequest !== userRequestId.current) return;
       setErrUsers("Erro ao carregar usuários.");
     } finally {
-      setLoadingUsers(false);
+      if (thisRequest === userRequestId.current) setLoadingUsers(false);
     }
   }
 
@@ -499,16 +547,29 @@ export default function CompanyScreen() {
     loadUsers();
   }
 
-  function deleteUser(id: number) {
+  function deactivateUser(id: number) {
     if (!companyId) return;
     setConfirmState({
-      message: "Excluir usuário?",
+      message: "Desativar usuário?",
       onConfirm: async () => {
         setConfirmState(null);
         await api.delete(`/companies/${companyId}/users/${id}`);
         loadUsers();
       },
     });
+  }
+
+  async function reactivateUser(id: number) {
+    if (!companyId) return;
+    await api.put(`/companies/${companyId}/users/${id}`, { active: true });
+    loadUsers();
+  }
+
+  function clearUserFilters() {
+    setUserNameFilter("");
+    setUserEmailFilter("");
+    setUserRoleFilter("");
+    setUserStatusFilter("active");
   }
 
   if (!companyId) {
@@ -619,13 +680,31 @@ export default function CompanyScreen() {
             </div>
           </form>
 
+          <div className={styles.userFormRow} style={{ marginBottom: 14 }}>
+            <InputBase label="Nome" value={userNameFilter} onChange={(e) => setUserNameFilter(e.target.value)} />
+            <InputBase label="E-mail" value={userEmailFilter} onChange={(e) => setUserEmailFilter(e.target.value)} />
+            <Dropdown
+              label="Papel"
+              value={ROLE_FILTER_OPTIONS.find((o) => o.value === userRoleFilter) ?? ROLE_FILTER_OPTIONS[0]}
+              onValueSelected={(opt) => setUserRoleFilter(opt.value)}
+              options={ROLE_FILTER_OPTIONS}
+            />
+            <Dropdown
+              label="Status"
+              value={STATUS_FILTER_OPTIONS.find((o) => o.value === userStatusFilter) ?? STATUS_FILTER_OPTIONS[0]}
+              onValueSelected={(opt) => setUserStatusFilter(opt.value as StatusFilter)}
+              options={STATUS_FILTER_OPTIONS}
+            />
+            <Button type="button" variant="secondary" onClick={clearUserFilters}>Limpar filtros</Button>
+          </div>
+
           {loadingUsers ? (
             <div className={styles.muted}>Carregando…</div>
           ) : (
             <Table
               variant="compact"
               rowKey={(u) => u.id}
-              emptyMessage="Nenhum usuário cadastrado."
+              emptyMessage="Nenhum usuário encontrado."
               columns={[
                 { key: "name", header: "Nome", render: (u) => u.name },
                 { key: "email", header: "E-mail", render: (u) => u.email },
@@ -633,7 +712,11 @@ export default function CompanyScreen() {
                 { key: "status", header: "Status", render: (u) => <Tag variant={u.active ? "success" : "error"}>{u.active ? "Ativo" : "Inativo"}</Tag> },
                 {
                   key: "action", header: "", render: (u) => (
-                    <Button size="small" variant="secondary" onClick={() => deleteUser(u.id)}>Excluir</Button>
+                    u.active ? (
+                      <Button size="small" variant="secondary" onClick={() => deactivateUser(u.id)}>Desativar</Button>
+                    ) : (
+                      <Button size="small" variant="secondary" onClick={() => reactivateUser(u.id)}>Reativar</Button>
+                    )
                   ),
                 },
               ]}

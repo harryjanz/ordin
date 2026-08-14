@@ -1123,17 +1123,31 @@ async def list_users(
     company_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
+    name: Optional[str] = Query(None, min_length=1),
+    email: Optional[str] = Query(None, min_length=1),
+    role: Optional[str] = Query(None, pattern="^(owner|manager|cashier)$"),
+    status: str = Query("active", pattern="^(active|inactive|all)$"),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_company_admin(current_user, company_id)
+    filters = [User.company_id == company_id]
+    if status == "active":
+        filters.append(User.active == True)
+    elif status == "inactive":
+        filters.append(User.active == False)
+    if name:
+        filters.append(User.name.ilike(f"%{name}%"))
+    if email:
+        filters.append(User.email.ilike(f"%{email}%"))
+    if role:
+        filters.append(User.role == role)
+
     total = (await db.execute(
-        select(func.count()).select_from(User)
-        .where(User.company_id == company_id, User.active == True)
+        select(func.count()).select_from(User).where(*filters)
     )).scalar()
     result = await db.execute(
-        select(User).where(User.company_id == company_id, User.active == True)
-        .offset(skip).limit(limit)
+        select(User).where(*filters).offset(skip).limit(limit)
     )
     return {"users": result.scalars().all(), "total": total}
 

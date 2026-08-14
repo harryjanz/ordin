@@ -12,6 +12,8 @@ estimativa: 13 pontos
 ## Descrição
 Pedido direto do usuário: ao cadastrar um usuário na aba Usuários (`/company`), o campo "Senha" deixa de existir. Em vez disso, o sistema envia um e-mail de boas-vindas ao usuário convidado, com uma descrição básica do que ele vai operar no sistema (de acordo com o papel/role escolhido) e um link para ele finalizar o próprio cadastro definindo sua senha. Depende de [[ORD-086]] estar mesclada primeiro (mesma tela, evita diff misturado). Decisões de infraestrutura já fechadas com o usuário (2026-08-13): Mailtrap em desenvolvimento (decidido), AWS SES como alvo de produção (decidido, não implementado agora — Fase 2/AWS segue bloqueada por `docs/ARQUITETURA.md` §9/§14), interface abstrata desde já para trocar de provider sem retrabalho.
 
+**Reordenação de prioridade (2026-08-13):** [[ORD-089]] (filtro por nome/e-mail/papel/status) foi priorizada à frente desta história — mesma tela, mais uma mudança que precisa mesclar antes pra manter o diff desta história limpo. Ordem de implementação da sprint: ORD-086 (feito) → ORD-089 → ORD-087.
+
 ## Persona
 **Owner/manager** (quem convida) e o **usuário convidado** (novo `cashier`/`manager`/`owner` da empresa, ainda sem conta — ele só existe como persona a partir do clique no link do e-mail).
 
