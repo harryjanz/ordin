@@ -727,7 +727,7 @@ export default function CompanyScreen() {
           {editUserId !== null && (
             <form onSubmit={saveEditUser} className={styles.form}>
               <div className={styles.formTitle}>Editar usuário</div>
-              <div className={styles.userFormRow}>
+              <div className={styles.editUserRow}>
                 <InputBase
                   label="Nome completo"
                   value={editUserValues.name}

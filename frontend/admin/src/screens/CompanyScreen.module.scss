@@ -147,6 +147,17 @@
   align-items: end;
 }
 
+// Linha do formulário de editar usuário — só 2 campos + ações, poucos o
+// bastante pra o auto-fit/minmax do .userFormRow colapsar as colunas vazias
+// e deixar espaço sobrando à direita (ver ORD-090 e ajuste seguinte).
+// Colunas fixas em fr preenchem a largura toda mesmo com poucos campos.
+.editUserRow {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
 // Mesmo padrão visual das barras de filtro de Pedidos/Pagamentos (fundo
 // var(--a-surface), borda, card) — a barra de filtros de Usuários estava
 // solta, sem esse "cartão" por trás, diferente do resto do admin.
