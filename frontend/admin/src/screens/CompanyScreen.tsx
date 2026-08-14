@@ -400,7 +400,7 @@ export default function CompanyScreen() {
   const role = useStore((s) => s.role);
   const isPlatformAdmin = role === "superadmin" || role === "admin";
   const companyId = useStore((s) => s.selectedCompanyId ?? s.companyId);
-  const [tab, setTab] = useState<"terminals" | "users" | "payment">("terminals");
+  const [tab, setTab] = useState<"terminals" | "users" | "payment">("users");
 
   // ORD-082: nome da empresa selecionada, só pra mostrar de qual empresa
   // esta tela está falando (superadmin/admin gerenciam qualquer uma) — sem
@@ -613,8 +613,8 @@ export default function CompanyScreen() {
 
       <div className={styles.tabs}>
         <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as "terminals" | "users" | "payment")}>
-          <Tab value="terminals" label="Terminais" />
           <Tab value="users" label="Usuários" />
+          <Tab value="terminals" label="Terminais" />
           <Tab value="payment" label="Pagamento" />
         </Tabs>
       </div>
