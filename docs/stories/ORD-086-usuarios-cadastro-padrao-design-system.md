@@ -147,4 +147,7 @@ Risco muito baixo — puramente de apresentação, reuso de componentes já vali
 - `tsc --noEmit`: limpo. `vitest run`: **48 passed** (6 arquivos), sem regressão.
 - Verificado ao vivo no Chrome (owner `carlos@burgerhouse.com`, Burger House): tabela compacta renderiza corretamente, tag de papel (roxo neutro) separada da tag de status (verde "Ativo"), formulário com labels, sem erros no console.
 - **Achado colateral, fora do escopo:** a listagem mostra `admin@ordin.app` (role `superadmin`) como usuário da empresa Burger House — parece dado de seed pré-existente misturando um usuário de plataforma na tabela `users` de uma empresa específica. Não é regressão desta história (comportamento já existia antes, só ficou mais visível com a tabela nova) — documentado aqui para virar um Achado formal numa história futura, não investigado a fundo agora.
-- PR aberta para `main`.
+- PR #51 aberta e mesclada em `main`.
+
+### Fix pós-merge — formulário empilhava um campo por linha
+Feedback do usuário logo após o merge: o Tech Explorer só previu "adicionar `label` a cada `InputBase`", sem avaliar que o `.form` já era `flex-direction: column` — 4 campos (Nome/E-mail/Senha/Papel) empilhados viraram 4 linhas, quebrando a expectativa de "cabe tudo em 1-2 linhas". Corrigido em `fix/ord-086-form-usuarios-uma-linha`: campos agrupados num `.userFormRow` com `grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))`, mesmo padrão já usado nas barras de filtro (Empresas/Pedidos/Pagamentos) — não alterei `.form` diretamente pra não afetar os outros formulários da mesma tela (Terminais, Pagamento) que reaproveitam essa classe. `tsc`/`vitest` (48 passed) OK, verificado ao vivo: 4 campos + botão cabem numa linha só.
