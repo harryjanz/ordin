@@ -19,8 +19,11 @@ import CompanyContractScreen from "./screens/CompanyContractScreen";
 import CompanyListScreen from "./screens/CompanyListScreen";
 
 const ROLE_ROUTES: Record<string, string[]> = {
-  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/pair", "/settings"],
-  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/pair", "/settings"],
+  // "/company" liberado pra superadmin/admin — precisam acessar Usuários/
+  // Terminais/Pagamento de qualquer empresa pra dar suporte, mesmo padrão
+  // de seleção de empresa já usado em /settings (ORD-082).
+  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
+  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
   owner:      ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
   manager:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
   cashier:  ["/dashboard"],
