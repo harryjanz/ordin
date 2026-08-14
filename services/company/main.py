@@ -225,7 +225,12 @@ def _require_platform_admin(u: TokenPayload) -> None:
 
 
 def _require_company_admin(u: TokenPayload, company_id: int) -> None:
-    if u.role == "superadmin":
+    # admin e superadmin são equivalentes em capacidade (ver
+    # _require_platform_admin acima) — antes só superadmin tinha bypass
+    # aqui, então "admin" tomava 403 em qualquer endpoint de gestão de
+    # empresa, apesar de já ter acesso de plataforma nos endpoints
+    # gateados por _require_platform_admin.
+    if u.role in ("superadmin", "admin"):
         return
     if u.company_id != company_id or u.role not in ("owner", "manager"):
         raise HTTPException(403, "Acesso negado")
@@ -1195,6 +1200,13 @@ async def list_users(
 ):
     _require_company_admin(current_user, company_id)
     filters = [User.company_id == company_id]
+    # superadmin/admin são usuários da plataforma, não da empresa cliente
+    # (ver _require_platform_admin) — o schema exige um company_id NOT NULL
+    # pra qualquer User, então o seed acaba associando-os a uma empresa
+    # qualquer. Um owner/manager olhando a própria listagem não deveria ver
+    # esses usuários "vazando" ali; só quem já é admin/superadmin enxerga.
+    if current_user.role not in ("superadmin", "admin"):
+        filters.append(User.role.notin_(["superadmin", "admin"]))
     if status == "active":
         filters.append(User.active == True)
     elif status == "inactive":
