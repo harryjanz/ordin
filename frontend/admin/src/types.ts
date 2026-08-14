@@ -116,6 +116,7 @@ export interface User {
   email: string;
   role: Role;
   active: boolean;
+  pending_setup: boolean;
 }
 
 export interface Category {

@@ -1,6 +1,6 @@
 ---
 id: ORD-087
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Backend + Frontend
@@ -244,3 +244,40 @@ if (!isAuth) { ... LoginScreen ... }
 **Explorer:** [x] fluxo completo (do convite ao primeiro login), persona dupla (quem convida + convidado), critérios de aceite definidos · **QA Explorer:** [x] cenários Gherkin cobrindo happy path, expiração, reuso de token, reenvio, falha de envio, validação de senha, RBAC e isolamento entre empresas · **Tech Explorer:** [x] achado crítico do gate de autenticação documentado antes de virar bug em produção, endpoints e migration completos, novo microsserviço desenhado seguindo padrões já existentes no projeto (token hash, chamada interna, abstração de provider), riscos e estimativa · **Aprovação final:** [x] decisões de infraestrutura (Mailtrap dev / AWS SES prod / TOTP adiado pra próxima sprint) aprovadas no chat pelo usuário (2026-08-13)
 
 **Status: Ready** — pode começar a implementação, **depois** do [[ORD-086]] estar mesclado.
+
+---
+
+## Downstream
+
+- **Branch:** `feature/ord-087-convite-email-senha-notification-service`, a partir de `main` (depois do [[ORD-089]] mesclado — reordenação de prioridade registrada na Descrição).
+
+### Achados de implementação (não previstos no Tech Explorer)
+- **`nginx.conf` (gateway raiz) não tinha rota `/users`** — só `/companies`, `/auth`, `/catalog`, `/orders`, `/tickets`, `/payments`. Adicionado `location /users` roteando pro company-service.
+- **`frontend/admin/nginx.conf` (nginx **dentro** do container admin) também não tinha rota `/users`** — um terceiro nível de proxy que não apareceu no Tech Explorer. Sem isso, a chamada `axios.post("/users/complete-registration", ...)` do `SetPasswordScreen` batia no próprio nginx do admin e não ia a lugar nenhum. Adicionado `location /users` ali também (sem a lógica de `is_navigation` que `/companies` tem — `/users/complete-registration` é só API, a página SPA fica em `/set-password`, um path diferente, já coberto pelo catch-all `location /`).
+- Só depois de corrigir os dois nginx é que o fluxo completo (convite → e-mail → `/set-password` → login) funcionou de ponta a ponta.
+
+### notification-service (novo microsserviço, porta 8006)
+`services/notification/` — `IEmailProvider` (ABC) em `domain/interfaces/`, `SMTPEmailProvider` (Mailtrap, `aiosmtplib`) e `SESEmailProvider` (boto3, IAM role, **escrita mas não conectada em nenhum ambiente** — Fase 2/AWS segue bloqueada) em `infrastructure/providers/`, seleção por `EMAIL_PROVIDER=smtp|ses` no `provider_factory.py`, mesmo padrão do `broker_factory.py` do payment-service. Único endpoint: `POST /internal/send-invite`, protegido por `X-Internal-Secret`, sem rota pública. `ROLE_DESCRIPTIONS` (texto do e-mail por papel) mora no próprio serviço. 8 testes (happy path, secret ausente/errado, papel desconhecido usa texto genérico, factory smtp/ses/inválido).
+
+### company-service
+- Nova tabela `user_invite_tokens` (migration `20260814_0900`), mesmo desenho de `RefreshToken` no auth-service — só o hash SHA-256 do token é persistido.
+- `UserIn` perdeu o campo `password`; `create_user` cria com `password_hash=None` e chama `_issue_invite()` (gera token, grava, chama notification-service — nunca propaga erro, só loga warning).
+- `UserOut` ganhou `pending_setup: bool`, computado via `@property` no modelo `User` (`password_hash is None`) — nenhuma migration necessária pra esse campo.
+- Novos endpoints: `POST /companies/{id}/users/{id}/resend-invite` (autenticado, invalida token anterior antes de emitir novo) e `POST /users/complete-registration` (público — primeiro endpoint sem JWT nem `X-Internal-Secret` do serviço, protegido só pelo próprio token de alta entropia).
+- `_cleanup_seed` (test_coverage.py) atualizado pra também apagar `UserInviteToken` órfãos — sem isso, `test_dir_create_user` deixaria uma linha órfã no banco compartilhado de dev a cada execução (mesma classe de incidente do ORD-075/ORD-084, prevenida desta vez antes de acontecer).
+- `conftest.py` ganhou `NOTIFICATION_SERVICE_URL` default (não resolve de verdade nos testes — `_issue_invite` nunca propaga erro de rede, então isso nunca quebra um teste).
+- Novo arquivo de teste `test_ord087_convite_email_senha.py`: 9 testes (criação sem senha, conteúdo do e-mail via `respx`, falha de envio não bloqueia criação, happy path completo até verificar login com a senha definida, token reusado/inválido/curto rejeitados, reenvio invalida token anterior, reenvio recusado se já definiu senha).
+
+### Frontend
+- **`App.tsx`:** achado crítico do Tech Explorer corrigido — checagem de `location.pathname === "/set-password"` **antes** do gate `!isAuth`, usando `useLocation()` (já tinha `BrowserRouter` como ancestor).
+- **`SetPasswordScreen.tsx` + `.module.scss`** (novos): lê `token` via `useSearchParams`, formulário senha + confirmação (validação de 8+ caracteres e senhas coincidentes no client, espelhando a regra do backend), trata token ausente/inválido/expirado, sucesso mostra botão "Ir para o login". Mesmo layout de card centralizado do `LoginScreen`, stylesheet própria (não compartilhada, mesmo padrão de uma tela = um `.module.scss` do resto do projeto).
+- **`CompanyScreen.tsx`:** campo Senha removido do formulário; botão "Convidar usuário" (com texto explicando o fluxo sem senha); linha com `pending_setup` mostra Tag "Convite pendente" (variant warning) ao lado do status Ativo/Inativo, mais botão "Reenviar convite". Decisão de design: não há um toast pontual de "falha ao enviar e-mail" — a combinação Tag persistente + botão sempre disponível já cobre a recuperação sem depender do usuário ver uma notificação passageira.
+- **`types.ts`:** `User` ganhou `pending_setup: boolean`.
+
+### Testes e verificação
+- `pytest services/company/tests/`: **205 passed**, 1 falha pré-existente não relacionada (mesma de sempre).
+- `pytest services/notification/tests/`: **8 passed**.
+- `tsc --noEmit`: limpo. `vitest run`: **48 passed**, sem regressão.
+- **Lint:** 648 → 662 (+14) — quebrado em +3 `B008` e +5 `DTZ003` (`company/main.py`, mesmas categorias já com 63 e 4 ocorrências ali antes desta história) e +5 `I001` (import sorting, categoria já presente em ~50 arquivos do repo) nos arquivos novos. Nenhuma categoria nova — confirmado por diff estruturado contra `origin/main` (código+arquivo, não só contagem total), mesmo padrão de tolerância do ORD-084/089.
+- **Verificado ao vivo, de ponta a ponta, com e-mail de verdade:** convite criado no Chrome → e-mail chegou no Mailtrap real ("Bem-vindo(a) à Ordin, Fernanda Teste!", descrição do papel Caixa, botão "Definir minha senha") → link extraído do HTML source do Mailtrap → `/set-password?token=...` abriu direto (sem cair no login, confirmando o fix do `App.tsx`) → senha definida → login com as credenciais novas → sidebar restrita a `/dashboard` (RBAC de `cashier` correto) → conferido no owner que a Tag "Convite pendente" sumiu. Testado também o reenvio (segundo usuário, botão "Reenviar convite", 3º `send-invite` confirmado nos logs do notification-service). Dados de teste (2 usuários + tokens) removidos do banco de dev depois da verificação.
+- PR aberta para `main`.

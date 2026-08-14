@@ -16,6 +16,10 @@ os.environ.setdefault("AWS_REGION", "us-east-1")
 # endpoint_url, igual seria em produção contra o S3 real.
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "testing")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "testing")
+# ORD-087 — nunca resolve de verdade nos testes; _issue_invite() nunca
+# propaga exceção de rede (ver main.py), então uma URL que só falha a
+# conectar é suficiente e não trava nenhum teste.
+os.environ.setdefault("NOTIFICATION_SERVICE_URL", "http://localhost:19999")
 
 import pytest
 

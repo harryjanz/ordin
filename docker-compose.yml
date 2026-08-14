@@ -110,6 +110,8 @@ services:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-ordin}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-ordin_dev_minio}
       AWS_REGION: ${AWS_REGION:-us-east-1}
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL:-http://notification-service:8006}
+      ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://localhost:3001}
     networks:
       - ordin
     depends_on:
@@ -117,6 +119,24 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+
+  notification-service:
+    build: ./services/notification
+    restart: always
+    ports:
+      - "8006:8006"
+    env_file: .env
+    environment:
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-smtp}
+      SMTP_HOST: ${SMTP_HOST:-sandbox.smtp.mailtrap.io}
+      SMTP_PORT: ${SMTP_PORT:-2525}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-no-reply@ordin.app}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+    networks:
+      - ordin
 
   catalog-service:
     build: ./services/catalog
