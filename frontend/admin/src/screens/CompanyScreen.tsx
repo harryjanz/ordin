@@ -693,7 +693,7 @@ export default function CompanyScreen() {
             <div className={styles.formHint}>
               Sem senha aqui — o convidado recebe um e-mail com um link para definir a própria senha.
             </div>
-            <div className={styles.userFormRow}>
+            <div className={styles.inviteUserRow}>
               <InputBase label="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
               <InputBase label="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
               <Dropdown
