@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
-import { Button, Dropdown, InputBase, Tab, Tabs, Tag, type DropdownOptions } from "design-system";
+import { Button, Dropdown, InputBase, Tab, Tabs, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
@@ -553,6 +553,7 @@ export default function CompanyScreen() {
   async function resendInvite(id: number) {
     if (!companyId) return;
     await api.post(`/companies/${companyId}/users/${id}/resend-invite`);
+    makeToast("success", "Convite reenviado");
   }
 
   function deactivateUser(id: number) {
