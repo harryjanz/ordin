@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
-import { Button, Dropdown, InputBase, Tab, Tabs, Tag, type DropdownOptions } from "design-system";
+import { Button, Dropdown, InputBase, Tab, Tabs, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
@@ -553,6 +553,7 @@ export default function CompanyScreen() {
   async function resendInvite(id: number) {
     if (!companyId) return;
     await api.post(`/companies/${companyId}/users/${id}/resend-invite`);
+    makeToast("success", "Convite reenviado");
   }
 
   function deactivateUser(id: number) {
@@ -693,7 +694,7 @@ export default function CompanyScreen() {
             <div className={styles.formHint}>
               Sem senha aqui — o convidado recebe um e-mail com um link para definir a própria senha.
             </div>
-            <div className={styles.userFormRow}>
+            <div className={styles.inviteUserRow}>
               <InputBase label="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
               <InputBase label="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
               <Dropdown
@@ -702,13 +703,11 @@ export default function CompanyScreen() {
                 onValueSelected={(opt) => setNewUser({ ...newUser, role: opt.value as Role })}
                 options={ROLE_OPTIONS}
               />
-            </div>
-            <div className={styles.formActions}>
               <Button type="submit">Convidar usuário</Button>
             </div>
           </form>
 
-          <div className={styles.userFormRow} style={{ marginBottom: 14 }}>
+          <div className={styles.filterBar}>
             <InputBase label="Nome" value={userNameFilter} onChange={(e) => setUserNameFilter(e.target.value)} />
             <InputBase label="E-mail" value={userEmailFilter} onChange={(e) => setUserEmailFilter(e.target.value)} />
             <Dropdown
@@ -729,7 +728,7 @@ export default function CompanyScreen() {
           {editUserId !== null && (
             <form onSubmit={saveEditUser} className={styles.form}>
               <div className={styles.formTitle}>Editar usuário</div>
-              <div className={styles.userFormRow}>
+              <div className={styles.editUserRow}>
                 <InputBase
                   label="Nome completo"
                   value={editUserValues.name}
@@ -742,10 +741,10 @@ export default function CompanyScreen() {
                   onValueSelected={(opt) => setEditUserValues((v) => ({ ...v, role: opt.value as Role }))}
                   options={ROLE_OPTIONS}
                 />
-              </div>
-              <div className={styles.formActions}>
-                <Button type="submit" loading={editUserSaving}>Salvar</Button>
-                <Button type="button" variant="secondary" onClick={() => setEditUserId(null)}>Cancelar</Button>
+                <div className={styles.formActions}>
+                  <Button type="submit" loading={editUserSaving}>Salvar</Button>
+                  <Button type="button" variant="secondary" onClick={() => setEditUserId(null)}>Cancelar</Button>
+                </div>
               </div>
             </form>
           )}

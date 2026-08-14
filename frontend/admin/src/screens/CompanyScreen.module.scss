@@ -137,14 +137,40 @@
   gap: 8px;
 }
 
-// Linha de campos do formulário de usuário — mesmo padrão de grid
-// auto-fit/minmax das barras de filtro (Empresas/Pedidos/Pagamentos), pra
-// não empilhar um campo por linha num formulário com poucos campos curtos.
-.userFormRow {
+// Linha do formulário de convidar usuário — Nome/E-mail ganham mais espaço
+// (2fr cada), Papel um pouco menos (1fr), e o botão fica no tamanho do
+// próprio conteúdo (auto) em vez de esticar igual às colunas de campo.
+.inviteUserRow {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+// Linha do formulário de editar usuário — só 2 campos + ações, poucos o
+// bastante pra o auto-fit/minmax do .userFormRow colapsar as colunas vazias
+// e deixar espaço sobrando à direita (ver ORD-090 e ajuste seguinte).
+// Colunas fixas em fr preenchem a largura toda mesmo com poucos campos.
+.editUserRow {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+// Mesmo padrão visual das barras de filtro de Pedidos/Pagamentos (fundo
+// var(--a-surface), borda, card) — a barra de filtros de Usuários estava
+// solta, sem esse "cartão" por trás, diferente do resto do admin.
+.filterBar {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   align-items: end;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
 }
 
 .configItem {
