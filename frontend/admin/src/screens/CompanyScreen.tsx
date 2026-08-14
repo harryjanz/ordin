@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
 import { Button, Dropdown, InputBase, Tab, Tabs, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
+import { listCompanies } from "../api/companies";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { useStore } from "../store";
-import type { Terminal, User, Role, PaymentConfig } from "../types";
+import type { Terminal, User, Role, PaymentConfig, Company } from "../types";
 import styles from "./CompanyScreen.module.scss";
 
 // ── Provider catalog ─────────────────────────────────────────────────────────
@@ -398,19 +399,29 @@ function PaymentTab({ companyId }: PaymentTabProps) {
 
 export default function CompanyScreen() {
   const role = useStore((s) => s.role);
+  // superadmin e admin são equivalentes (gestão da plataforma, ver
+  // docs/ARQUITETURA.md §1.2) — mesmo padrão de PaymentsScreen/SettingsScreen.
   const isPlatformAdmin = role === "superadmin" || role === "admin";
-  const companyId = useStore((s) => s.selectedCompanyId ?? s.companyId);
+  const ownCompanyId = useStore((s) => s.companyId);
+  const selectedCompanyId = useStore((s) => s.selectedCompanyId);
+  const setSelectedCompany = useStore((s) => s.setSelectedCompany);
+  // ORD-082: valor de SESSÃO compartilhado (não um useState local isolado)
+  // — mesmo comportamento de seleção de empresa do SettingsScreen: sem
+  // sessão ativa, seleciona aqui; com sessão ativa (vinda de Config ou
+  // desta própria tela), usa pra carregar os dados da empresa.
+  const companyId = isPlatformAdmin ? selectedCompanyId : ownCompanyId;
   const [tab, setTab] = useState<"terminals" | "users" | "payment">("users");
 
-  // ORD-082: nome da empresa selecionada, só pra mostrar de qual empresa
-  // esta tela está falando (superadmin/admin gerenciam qualquer uma) — sem
-  // isso não tem como confirmar visualmente que a seleção feita em outra
-  // tela (ex: Configurações) realmente carregou aqui.
-  const [companyName, setCompanyName] = useState<string | null>(null);
+  const [companies, setCompanies] = useState<Company[]>([]);
   useEffect(() => {
-    if (!isPlatformAdmin || !companyId) { setCompanyName(null); return; }
-    api.get(`/companies/${companyId}`).then((r) => setCompanyName(r.data.name ?? null)).catch(() => null);
-  }, [isPlatformAdmin, companyId]);
+    if (isPlatformAdmin) {
+      listCompanies({ limit: 200 }).then((r) => setCompanies(r.companies)).catch(() => null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPlatformAdmin]);
+
+  const companyOptions: DropdownOptions[] = companies.map((c) => ({ value: String(c.id), label: c.name }));
+  const showEmptyState = isPlatformAdmin && !companyId;
 
   // ── Terminals ─────────────────────────────────────────────────────────────
   const [terminals, setTerminals] = useState<Terminal[]>([]);
@@ -599,10 +610,31 @@ export default function CompanyScreen() {
     setUserStatusFilter("active");
   }
 
+  // Mesmo comportamento de seleção de empresa do SettingsScreen (ORD-082):
+  // sem sessão ativa, o seletor abaixo permite escolher; com sessão ativa
+  // (vinda desta tela ou de Config), os dados da empresa carregam direto.
+  const companySelector = isPlatformAdmin && (
+    <div className={styles.companySelector}>
+      <Dropdown
+        label="Empresa"
+        placeholder="Selecionar empresa…"
+        value={companyOptions.find((o) => o.value === String(companyId ?? "")) ?? null}
+        onValueSelected={(opt) => setSelectedCompany(Number(opt.value))}
+        options={companyOptions}
+      />
+    </div>
+  );
+
   if (!companyId) {
     return (
       <div className={styles.page}>
-        <div className={styles.muted}>Selecione uma empresa no Dashboard ou em Configurações.</div>
+        <div className={styles.title}>Empresa</div>
+        {companySelector}
+        <div className={styles.empty}>
+          {isPlatformAdmin
+            ? "Selecione uma empresa para gerenciar usuários, terminais e pagamento."
+            : "Nenhuma empresa associada à sua conta."}
+        </div>
       </div>
     );
   }
@@ -610,7 +642,7 @@ export default function CompanyScreen() {
   return (
     <div className={styles.page}>
       <div className={styles.title}>Empresa</div>
-      {isPlatformAdmin && companyName && <div className={styles.subtitle}>{companyName}</div>}
+      {companySelector}
 
       <div className={styles.tabs}>
         <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as "terminals" | "users" | "payment")}>

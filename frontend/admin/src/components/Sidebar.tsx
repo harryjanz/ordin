@@ -13,7 +13,7 @@ const MENU = [
   { to: "/catalog",       label: "Catálogo",     icon: "package",     roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/orders",        label: "Pedidos",      icon: "shopping-cart", roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/payments",      label: "Transações",   icon: "credit-card", roles: ["superadmin", "admin", "owner", "manager"] },
-  { to: "/company",       label: "Empresa",      icon: "briefcase",   roles: ["owner", "manager"] },
+  { to: "/company",       label: "Empresa",      icon: "briefcase",   roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/pair",          label: "Dispositivos", icon: "monitor",     roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/settings",      label: "Config.",      icon: "settings",    roles: ["superadmin", "admin", "owner", "manager"] },
 ] as const;

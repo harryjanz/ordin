@@ -10,10 +10,16 @@
   margin-bottom: 4px;
 }
 
-.subtitle {
-  font-size: 12.5px;
-  color: rgba(var(--a-text-rgb), 0.5);
+// Mesmo padrão do SettingsScreen (seletor de empresa pra superadmin/admin).
+.companySelector {
+  max-width: 320px;
   margin-bottom: 20px;
+}
+
+.empty {
+  color: rgba(var(--a-text-rgb), 0.4);
+  @include font('sm');
+  padding: 32px 0;
 }
 
 .tabs {
