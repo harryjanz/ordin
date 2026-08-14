@@ -103,7 +103,7 @@ async def empresa_com_convite(client):
         await db.commit()
 
 
-async def test_complete_registration_rejeita_senha_sem_especial(client, empresa_com_convite):
+async def _criar_convite(client, empresa_com_convite, nome_sufixo):
     import main as svc
     import respx
     import httpx
@@ -116,14 +116,86 @@ async def test_complete_registration_rejeita_senha_sem_especial(client, empresa_
         )
         await client.post(
             f"/companies/{empresa_com_convite['company_id']}/users",
-            json={"name": f"{TOKEN} Fraca", "email": f"{TOKEN.lower()}.fraca@teste.com", "role": "cashier"},
+            json={
+                "name": f"{TOKEN} {nome_sufixo}",
+                "email": f"{TOKEN.lower()}.{nome_sufixo.lower()}@teste.com",
+                "role": "cashier",
+            },
             headers=auth(empresa_com_convite["token"]),
         )
     sent = jsonlib.loads(route.calls[0].request.content)
-    raw_token = parse_qs(urlparse(sent["set_password_url"]).query)["token"][0]
+    return parse_qs(urlparse(sent["set_password_url"]).query)["token"][0]
 
+
+async def test_complete_registration_rejeita_senha_sem_especial(client, empresa_com_convite):
+    raw_token = await _criar_convite(client, empresa_com_convite, "Fraca")
     r = await client.post("/users/complete-registration", json={"token": raw_token, "password": "semespecial123"})
     assert r.status_code == 422
+
+
+# ── Status do convite (verificação sem consumir o token) ─────────────────────
+
+async def test_invite_status_token_valido(client, empresa_com_convite):
+    raw_token = await _criar_convite(client, empresa_com_convite, "StatusValido")
+    r = await client.get("/users/invite-status", params={"token": raw_token})
+    assert r.status_code == 200
+    assert r.json() == {"valid": True}
+
+
+async def test_invite_status_token_inexistente(client):
+    r = await client.get("/users/invite-status", params={"token": "token-que-nunca-existiu"})
+    assert r.status_code == 200
+    assert r.json() == {"valid": False}
+
+
+async def test_invite_status_token_ja_usado(client, empresa_com_convite):
+    raw_token = await _criar_convite(client, empresa_com_convite, "StatusUsado")
+    r = await client.post(
+        "/users/complete-registration",
+        json={"token": raw_token, "password": "primeiraSenha123!"},
+    )
+    assert r.status_code == 200
+
+    r = await client.get("/users/invite-status", params={"token": raw_token})
+    assert r.status_code == 200
+    assert r.json() == {"valid": False}
+
+
+async def test_complete_registration_bloqueia_reuso_do_token(client, empresa_com_convite):
+    raw_token = await _criar_convite(client, empresa_com_convite, "Reuso")
+    r1 = await client.post(
+        "/users/complete-registration",
+        json={"token": raw_token, "password": "primeiraSenha123!"},
+    )
+    assert r1.status_code == 200
+
+    r2 = await client.post(
+        "/users/complete-registration",
+        json={"token": raw_token, "password": "segundaSenha456!"},
+    )
+    assert r2.status_code == 400
+
+
+async def test_invite_status_token_expirado(client, empresa_com_convite):
+    import main as svc
+    from datetime import datetime, timedelta
+
+    raw_token = await _criar_convite(client, empresa_com_convite, "StatusExpirado")
+    token_hash = svc.hashlib.sha256(raw_token.encode()).hexdigest()
+    async with svc.AsyncSessionLocal() as db:
+        result = await db.execute(svc.select(svc.UserInviteToken).filter_by(token_hash=token_hash))
+        invite = result.scalars().first()
+        invite.expires_at = datetime.utcnow() - timedelta(hours=1)
+        await db.commit()
+
+    r = await client.get("/users/invite-status", params={"token": raw_token})
+    assert r.status_code == 200
+    assert r.json() == {"valid": False}
+
+
+def test_invite_token_ttl_e_24_horas():
+    import main as svc
+    assert svc.INVITE_TOKEN_TTL_HOURS == 24
 
 
 # ── Editar nome e papel ───────────────────────────────────────────────────────
