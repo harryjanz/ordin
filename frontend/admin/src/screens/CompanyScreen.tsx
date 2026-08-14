@@ -702,13 +702,11 @@ export default function CompanyScreen() {
                 onValueSelected={(opt) => setNewUser({ ...newUser, role: opt.value as Role })}
                 options={ROLE_OPTIONS}
               />
-            </div>
-            <div className={styles.formActions}>
               <Button type="submit">Convidar usuário</Button>
             </div>
           </form>
 
-          <div className={styles.userFormRow} style={{ marginBottom: 14 }}>
+          <div className={styles.filterBar}>
             <InputBase label="Nome" value={userNameFilter} onChange={(e) => setUserNameFilter(e.target.value)} />
             <InputBase label="E-mail" value={userEmailFilter} onChange={(e) => setUserEmailFilter(e.target.value)} />
             <Dropdown
@@ -742,10 +740,10 @@ export default function CompanyScreen() {
                   onValueSelected={(opt) => setEditUserValues((v) => ({ ...v, role: opt.value as Role }))}
                   options={ROLE_OPTIONS}
                 />
-              </div>
-              <div className={styles.formActions}>
-                <Button type="submit" loading={editUserSaving}>Salvar</Button>
-                <Button type="button" variant="secondary" onClick={() => setEditUserId(null)}>Cancelar</Button>
+                <div className={styles.formActions}>
+                  <Button type="submit" loading={editUserSaving}>Salvar</Button>
+                  <Button type="button" variant="secondary" onClick={() => setEditUserId(null)}>Cancelar</Button>
+                </div>
               </div>
             </form>
           )}

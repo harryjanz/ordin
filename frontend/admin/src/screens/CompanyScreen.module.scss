@@ -147,6 +147,21 @@
   align-items: end;
 }
 
+// Mesmo padrão visual das barras de filtro de Pedidos/Pagamentos (fundo
+// var(--a-surface), borda, card) — a barra de filtros de Usuários estava
+// solta, sem esse "cartão" por trás, diferente do resto do admin.
+.filterBar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
 .configItem {
   flex-direction: column;
   align-items: stretch;
