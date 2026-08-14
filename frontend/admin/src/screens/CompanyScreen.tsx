@@ -429,6 +429,9 @@ export default function CompanyScreen() {
   const [userEmailFilter, setUserEmailFilter] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState("");
   const [userStatusFilter, setUserStatusFilter] = useState<StatusFilter>("active");
+  const [editUserId, setEditUserId] = useState<number | null>(null);
+  const [editUserValues, setEditUserValues] = useState({ name: "", role: "cashier" as Role });
+  const [editUserSaving, setEditUserSaving] = useState(false);
   const userDebounceTimer = useRef<ReturnType<typeof setTimeout>>();
   const userIsFirstRender = useRef(true);
   // Evita que uma resposta de filtro obsoleta (ex: busca disparada com o
@@ -570,6 +573,24 @@ export default function CompanyScreen() {
     loadUsers();
   }
 
+  function openEditUser(u: User) {
+    setEditUserId(u.id);
+    setEditUserValues({ name: u.name, role: u.role });
+  }
+
+  async function saveEditUser(e: FormEvent) {
+    e.preventDefault();
+    if (!companyId || editUserId === null) return;
+    setEditUserSaving(true);
+    try {
+      await api.put(`/companies/${companyId}/users/${editUserId}`, editUserValues);
+      setEditUserId(null);
+      loadUsers();
+    } finally {
+      setEditUserSaving(false);
+    }
+  }
+
   function clearUserFilters() {
     setUserNameFilter("");
     setUserEmailFilter("");
@@ -705,6 +726,30 @@ export default function CompanyScreen() {
             <Button type="button" variant="secondary" onClick={clearUserFilters}>Limpar filtros</Button>
           </div>
 
+          {editUserId !== null && (
+            <form onSubmit={saveEditUser} className={styles.form}>
+              <div className={styles.formTitle}>Editar usuário</div>
+              <div className={styles.userFormRow}>
+                <InputBase
+                  label="Nome completo"
+                  value={editUserValues.name}
+                  onChange={(e) => setEditUserValues((v) => ({ ...v, name: e.target.value }))}
+                  autoFocus
+                />
+                <Dropdown
+                  label="Papel"
+                  value={ROLE_OPTIONS.find((o) => o.value === editUserValues.role) ?? null}
+                  onValueSelected={(opt) => setEditUserValues((v) => ({ ...v, role: opt.value as Role }))}
+                  options={ROLE_OPTIONS}
+                />
+              </div>
+              <div className={styles.formActions}>
+                <Button type="submit" loading={editUserSaving}>Salvar</Button>
+                <Button type="button" variant="secondary" onClick={() => setEditUserId(null)}>Cancelar</Button>
+              </div>
+            </form>
+          )}
+
           {loadingUsers ? (
             <div className={styles.muted}>Carregando…</div>
           ) : (
@@ -726,7 +771,8 @@ export default function CompanyScreen() {
                 },
                 {
                   key: "action", header: "", render: (u) => (
-                    <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <Button size="small" variant="secondary" onClick={() => openEditUser(u)}>Editar</Button>
                       {u.pending_setup && (
                         <Button size="small" variant="secondary" onClick={() => resendInvite(u.id)}>Reenviar convite</Button>
                       )}
