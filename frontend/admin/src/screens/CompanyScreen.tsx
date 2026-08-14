@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent } from "react";
 import { Button, Dropdown, InputBase, Tab, Tabs, Tag, type DropdownOptions } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
+import Table from "../components/Table";
 import { useStore } from "../store";
 import type { Terminal, User, Role, PaymentConfig } from "../types";
 import styles from "./CompanyScreen.module.scss";
@@ -87,6 +88,10 @@ const ROLE_OPTIONS: DropdownOptions[] = [
   { value: "manager", label: "Gerente" },
   { value: "owner", label: "Owner" },
 ];
+
+const ROLE_LABELS: Record<string, string> = Object.fromEntries(
+  ROLE_OPTIONS.map((o) => [o.value, o.label]),
+);
 
 // Converte { "api_key": "x", "extra_config.public_key": "y" } → payload da API
 function buildConfigPayload(
@@ -407,6 +412,7 @@ export default function CompanyScreen() {
 
   // ── Users ─────────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
   const [newUser, setNewUser] = useState({ name: "", email: "", password: "", role: "cashier" as Role });
   const [errUsers, setErrUsers] = useState<string | null>(null);
 
@@ -436,12 +442,15 @@ export default function CompanyScreen() {
 
   async function loadUsers() {
     if (!companyId) return;
+    setLoadingUsers(true);
     try {
       const r = await api.get(`/companies/${companyId}/users`);
       setUsers(r.data.users ?? r.data);
       setErrUsers(null);
     } catch {
       setErrUsers("Erro ao carregar usuários.");
+    } finally {
+      setLoadingUsers(false);
     }
   }
 
@@ -594,10 +603,11 @@ export default function CompanyScreen() {
             </div>
           )}
           <form className={styles.form} onSubmit={addUser}>
-            <InputBase placeholder="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
-            <InputBase placeholder="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
-            <InputBase placeholder="Senha" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
+            <InputBase label="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
+            <InputBase label="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+            <InputBase label="Senha" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
             <Dropdown
+              label="Papel"
               value={ROLE_OPTIONS.find((o) => o.value === newUser.role) ?? null}
               onValueSelected={(opt) => setNewUser({ ...newUser, role: opt.value as Role })}
               options={ROLE_OPTIONS}
@@ -607,18 +617,26 @@ export default function CompanyScreen() {
             </div>
           </form>
 
-          {users.map((u) => (
-            <div key={u.id} className={styles.item}>
-              <span>
-                {u.name}
-                <span className={styles.itemEmail}>{u.email}</span>
-                <Tag variant={u.active ? "success" : "error"}>{u.role}</Tag>
-              </span>
-              <Button size="small" variant="secondary" onClick={() => deleteUser(u.id)}>Excluir</Button>
-            </div>
-          ))}
-          {users.length === 0 && (
-            <div className={styles.muted}>Nenhum usuário cadastrado.</div>
+          {loadingUsers ? (
+            <div className={styles.muted}>Carregando…</div>
+          ) : (
+            <Table
+              variant="compact"
+              rowKey={(u) => u.id}
+              emptyMessage="Nenhum usuário cadastrado."
+              columns={[
+                { key: "name", header: "Nome", render: (u) => u.name },
+                { key: "email", header: "E-mail", render: (u) => u.email },
+                { key: "role", header: "Papel", render: (u) => <Tag variant="neutral">{ROLE_LABELS[u.role] ?? u.role}</Tag> },
+                { key: "status", header: "Status", render: (u) => <Tag variant={u.active ? "success" : "error"}>{u.active ? "Ativo" : "Inativo"}</Tag> },
+                {
+                  key: "action", header: "", render: (u) => (
+                    <Button size="small" variant="secondary" onClick={() => deleteUser(u.id)}>Excluir</Button>
+                  ),
+                },
+              ]}
+              rows={users}
+            />
           )}
         </>
       )}
