@@ -603,15 +603,17 @@ export default function CompanyScreen() {
             </div>
           )}
           <form className={styles.form} onSubmit={addUser}>
-            <InputBase label="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
-            <InputBase label="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
-            <InputBase label="Senha" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
-            <Dropdown
-              label="Papel"
-              value={ROLE_OPTIONS.find((o) => o.value === newUser.role) ?? null}
-              onValueSelected={(opt) => setNewUser({ ...newUser, role: opt.value as Role })}
-              options={ROLE_OPTIONS}
-            />
+            <div className={styles.userFormRow}>
+              <InputBase label="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
+              <InputBase label="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
+              <InputBase label="Senha" type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} />
+              <Dropdown
+                label="Papel"
+                value={ROLE_OPTIONS.find((o) => o.value === newUser.role) ?? null}
+                onValueSelected={(opt) => setNewUser({ ...newUser, role: opt.value as Role })}
+                options={ROLE_OPTIONS}
+              />
+            </div>
             <div className={styles.formActions}>
               <Button type="submit">Criar usuário</Button>
             </div>

@@ -137,6 +137,16 @@
   gap: 8px;
 }
 
+// Linha de campos do formulário de usuário — mesmo padrão de grid
+// auto-fit/minmax das barras de filtro (Empresas/Pedidos/Pagamentos), pra
+// não empilhar um campo por linha num formulário com poucos campos curtos.
+.userFormRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
 .configItem {
   flex-direction: column;
   align-items: stretch;
