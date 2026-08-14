@@ -1,6 +1,6 @@
 ---
 id: ORD-086
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Frontend
@@ -137,3 +137,14 @@ Risco muito baixo — puramente de apresentação, reuso de componentes já vali
 **Explorer:** [x] fluxo, persona e critérios de aceite definidos, achados de UI documentados (incluindo o que fica fora do escopo e por quê) · **QA Explorer:** [x] cenários Gherkin cobrindo padrão visual e não-regressão de todas as ações existentes · **Tech Explorer:** [x] direção técnica frontend-only, sem impacto em backend, riscos e estimativa definidos · **Aprovação final:** [x] escopo derivado diretamente do pedido do usuário (2026-08-13); decisão de deixar paginação/edição de papel fora do escopo é uma leitura de PM, sinalizada explicitamente para o usuário poder corrigir se discordar.
 
 **Status: Ready** — pode começar a implementação.
+
+---
+
+## Downstream
+
+- **Branch:** `feature/ord-086-usuarios-padrao-design-system`, a partir de `main`.
+- **`CompanyScreen.tsx`:** listagem migrada para `Table` `variant="compact"`; papel e status agora são duas `Tag` separadas (`variant="neutral"` pro papel via `ROLE_LABELS`, `variant={active ? "success" : "error"}` pro status); `InputBase`/`Dropdown` do formulário ganharam `label`; novo estado `loadingUsers` com o mesmo texto "Carregando…" da `PaymentTab`. Nenhuma mudança de endpoint, payload ou regra de permissão — confirmado, zero diff em `services/company/main.py`.
+- `tsc --noEmit`: limpo. `vitest run`: **48 passed** (6 arquivos), sem regressão.
+- Verificado ao vivo no Chrome (owner `carlos@burgerhouse.com`, Burger House): tabela compacta renderiza corretamente, tag de papel (roxo neutro) separada da tag de status (verde "Ativo"), formulário com labels, sem erros no console.
+- **Achado colateral, fora do escopo:** a listagem mostra `admin@ordin.app` (role `superadmin`) como usuário da empresa Burger House — parece dado de seed pré-existente misturando um usuário de plataforma na tabela `users` de uma empresa específica. Não é regressão desta história (comportamento já existia antes, só ficou mais visível com a tabela nova) — documentado aqui para virar um Achado formal numa história futura, não investigado a fundo agora.
+- PR aberta para `main`.
