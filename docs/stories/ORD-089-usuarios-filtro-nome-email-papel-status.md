@@ -1,6 +1,6 @@
 ---
 id: ORD-089
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Backend + Frontend
@@ -180,3 +180,17 @@ Sem migration — `name`, `email`, `role`, `active` já são colunas existentes.
 **Explorer:** [x] fluxo, persona e critérios de aceite definidos, achado crítico de usuários desativados ficarem irrecuperáveis documentado · **QA Explorer:** [x] cenários Gherkin cobrindo os 4 filtros, combinação, reativação e isolamento multi-tenant · **Tech Explorer:** [x] endpoint com query params completos, sem migration, reuso do endpoint de reativação já existente, riscos e estimativa · **Aprovação final:** [x] aprovado no chat pelo usuário (2026-08-13) — inclusão do botão "Reativar" e renomeação "Excluir"→"Desativar" ambas aprovadas
 
 **Status: Ready** — priorizada antes do [[ORD-087]]. Pode começar a implementação.
+
+---
+
+## Downstream
+
+- **Branch:** `feature/ord-089-usuarios-filtro-nome-email-papel-status`, a partir de `main`.
+- **`services/company/main.py` (`list_users`):** ganhou `name`/`email`/`role`/`status` como query params; `status` com default `"active"` (preserva o comportamento implícito de antes pra qualquer chamador que não passe o parâmetro). Removido o `User.active == True` hardcoded da query — agora condicional a `status`.
+- **`services/company/tests/test_coverage.py` (`test_dir_list_users`):** chamada direta ao endpoint quebrava por posição (novos parâmetros entraram entre `limit` e `db`) — corrigida pra usar keyword args.
+- **`services/company/tests/test_ord089_filtro_usuarios.py` (novo):** 9 testes — filtro por nome/e-mail/papel, status default/inactive/all, reativação, combinação de filtros, isolamento multi-tenant. Fixture com 2 empresas e 4 usuários (prefixo `TOKEN` isolado, mesmo padrão do ORD-084).
+- **Suíte completa do company-service:** **196 passed**, 1 falha pré-existente e não relacionada (`test_require_superadmin_raises_for_owner`, já documentada no ORD-084 como quebrada antes desta história).
+- **`CompanyScreen.tsx`:** barra de filtros (Nome/E-mail com debounce 500ms + `userRequestId` race-guard, Papel e Status imediatos) no mesmo `.userFormRow` grid do formulário de criação; `deleteUser`→`deactivateUser` (mensagem do `ConfirmDialog` também ajustada pra "Desativar usuário?"); nova `reactivateUser` (`PUT .../users/{id}` com `{active: true}`, endpoint já existente, zero mudança de backend pra essa parte); coluna de ação alterna Desativar/Reativar conforme `u.active`; `clearUserFilters` reseta pro estado padrão (Status=Ativos).
+- `tsc --noEmit`: limpo. `vitest run`: **48 passed**, sem regressão.
+- **Verificado ao vivo no Chrome** (owner `carlos@burgerhouse.com`): filtro por nome funcionando; ciclo completo desativar → usuário some de Ativos → filtro Inativos mostra ele com "Reativar" → reativar → volta a aparecer em Ativos e Inativos fica vazio (empty state correto). Sem erros no console.
+- PR aberta para `main`.
