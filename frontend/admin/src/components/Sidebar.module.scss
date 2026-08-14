@@ -1,49 +1,63 @@
 @import 'design-system/dist/core/scss/styles';
 
-.sidebar {
+// Reserva o espaço no <div className={styles.shell}> flex do App — o
+// <aside> real é position:fixed (ver .sidebar abaixo) e some do fluxo, então
+// sem isso o conteúdo principal ficaria embaixo dele. Só cresce pra 220px
+// quando fixado; no hover (não fixado) o menu flutua por cima sem empurrar
+// nada, mesmo comportamento do Mailtrap.
+.spacer {
   flex-shrink: 0;
   height: 100vh;
-  position: sticky;
+  transition: width 200ms ease;
+}
+
+.sidebar {
+  position: fixed;
   top: 0;
+  left: 0;
+  height: 100vh;
   overflow: hidden;
   background: var(--a-surface);
   border-right: 1px solid var(--a-border);
   display: flex;
   flex-direction: column;
-  transition: width 220ms ease, min-width 220ms ease;
-  z-index: 10;
+  transition: width 200ms ease;
+  z-index: 20;
 }
 
-.hamburger {
+.header {
   flex-shrink: 0;
-  align-self: flex-start;
-  @include margin('m', 's', 's', 's');
-  width: 32px;
-  height: 32px;
-  background: transparent;
-  border: 1px solid rgba(153, 0, 255, 0.35);
-  @include rounded('default');
-  cursor: pointer;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  @include padding('s', 's', 's', 'm');
+  height: 52px;
+}
+
+.pinBtn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-}
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: rgba(var(--a-text-rgb), 0.5);
+  cursor: pointer;
 
-.hamburgerBar {
-  display: block;
-  width: 14px;
-  height: 2px;
-  background: color('brand-primary');
-  border-radius: 2px;
-  transition: transform 0.22s, opacity 0.22s;
-  transform-origin: center;
+  &:hover {
+    background: var(--a-surface-2);
+    color: rgba(var(--a-text-rgb), 0.8);
+  }
+
+  &.pinBtnActive {
+    color: color('brand-primary');
+  }
 }
 
 .logo {
-  padding-left: 14px;
-  padding-bottom: 16px;
   @include font('l-emphasys');
   color: color('brand-primary');
   white-space: nowrap;
@@ -103,16 +117,4 @@
 .actionBtn {
   flex-shrink: 0;
   @include margin('none', 's', 's', 's');
-}
-
-.themeToggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  @include padding('xs', 's', 'xs', 's');
-  color: rgba(var(--a-text-rgb), 0.6);
-  @include font('sm');
-  white-space: nowrap;
-  overflow: hidden;
 }

@@ -39,7 +39,18 @@ export default function App() {
   const location = useLocation();
 
   useEffect(() => {
-    document.documentElement.dataset.theme = adminThemeMode;
+    const apply = () => {
+      const resolved =
+        adminThemeMode === "system"
+          ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+          : adminThemeMode;
+      document.documentElement.dataset.theme = resolved;
+    };
+    apply();
+    if (adminThemeMode !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
   }, [adminThemeMode]);
 
   // ORD-087: rota pública, resolvida ANTES do gate de isAuth — o link do
