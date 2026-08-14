@@ -1,7 +1,8 @@
 import { useState, FormEvent } from "react";
 import axios from "axios";
-import { Alert, Button, InputBase, Toggle } from "design-system";
+import { Alert, Button, InputBase } from "design-system";
 import { useStore } from "../store";
+import ThemeModeSwitch from "../components/ThemeModeSwitch";
 import styles from "./LoginScreen.module.scss";
 
 export default function LoginScreen() {
@@ -10,8 +11,6 @@ export default function LoginScreen() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const login = useStore((s) => s.login);
-  const adminThemeMode = useStore((s) => s.adminThemeMode);
-  const toggleAdminThemeMode = useStore((s) => s.toggleAdminThemeMode);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -33,16 +32,8 @@ export default function LoginScreen() {
 
   return (
     <div className={styles.page}>
-      {/* Toggle do design system em vez do emoji ☀️/🌙 — mesmo bug/fix do
-          Sidebar, ver ORD-076. */}
       <div className={styles.themeToggle}>
-        <Toggle
-          name="admin-theme-login"
-          checked={adminThemeMode === "dark"}
-          onChange={toggleAdminThemeMode}
-          aria-label={adminThemeMode === "dark" ? "Mudar para modo claro" : "Mudar para modo escuro"}
-          data-testid="theme-toggle"
-        />
+        <ThemeModeSwitch />
       </div>
       <div className={styles.card}>
         <div className={styles.logo}>ordin</div>

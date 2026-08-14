@@ -1,4 +1,4 @@
-import { useState, FormEvent } from "react";
+import { useEffect, useState, FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { Alert, Button, InputBase, Tag } from "design-system";
@@ -32,6 +32,27 @@ export default function SetPasswordScreen() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  // Checa validade do link ao carregar — sem isso, um link já usado ou
+  // expirado ainda mostrava o formulário normal, só falhando na submissão.
+  const [inviteStatus, setInviteStatus] = useState<"checking" | "valid" | "invalid">(
+    token ? "checking" : "invalid"
+  );
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    axios
+      .get("/users/invite-status", { params: { token } })
+      .then((r) => {
+        if (!cancelled) setInviteStatus(r.data.valid ? "valid" : "invalid");
+      })
+      .catch(() => {
+        if (!cancelled) setInviteStatus("invalid");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const strength = passwordStrength(password);
   const strengthTooLow = strength === "fraca";
@@ -71,6 +92,33 @@ export default function SetPasswordScreen() {
           <div className={styles.logo}>ordin</div>
           <div className={styles.sub}>Definir senha</div>
           <Alert variant="error" text="Link inválido — falta o token de convite." fullWidth />
+        </div>
+      </div>
+    );
+  }
+
+  if (inviteStatus === "invalid") {
+    return (
+      <div className={styles.page}>
+        <div className={styles.card}>
+          <div className={styles.logo}>ordin</div>
+          <div className={styles.sub}>Definir senha</div>
+          <Alert
+            variant="error"
+            text="Este link já foi usado ou expirou. Peça um novo convite a quem te cadastrou."
+            fullWidth
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (inviteStatus === "checking") {
+    return (
+      <div className={styles.page}>
+        <div className={styles.card}>
+          <div className={styles.logo}>ordin</div>
+          <div className={styles.sub}>Verificando o link...</div>
         </div>
       </div>
     );

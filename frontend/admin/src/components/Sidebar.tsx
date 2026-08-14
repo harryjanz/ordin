@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Toggle } from "design-system";
 import { useStore } from "../store";
 import api from "../api";
 import ConfirmDialog from "./ConfirmDialog";
+import ThemeModeSwitch from "./ThemeModeSwitch";
 import styles from "./Sidebar.module.scss";
 
 const MENU = [
@@ -21,14 +21,30 @@ const MENU = [
 const W_OPEN = 220;
 const W_CLOSED = 52;
 
+// Ícone de fixar (thumbtack) — não existe no icon-font do design system,
+// SVG inline no mesmo estilo Feather/Lucide do resto do font (stroke,
+// currentColor, 24x24). Comportamento e layout espelhados do Mailtrap
+// (pedido explícito do usuário): recolhido por padrão, expande no hover,
+// o alfinete fixa expandido e empurra o conteúdo (ver Sidebar.module.scss).
+function PinIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 17v5" />
+      <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z" />
+    </svg>
+  );
+}
+
 export default function Sidebar() {
-  const { role, logout, adminThemeMode, toggleAdminThemeMode } = useStore();
+  const { role, logout, sidebarPinned, toggleSidebarPinned } = useStore();
   const location = useLocation();
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const [pendingNav, setPendingNav] = useState<string | null>(null);
 
-  useEffect(() => { setOpen(false); }, [location.pathname]);
+  const expanded = sidebarPinned || hovered;
+
+  useEffect(() => { setHovered(false); }, [location.pathname]);
 
   function handleNavClick(e: React.MouseEvent, to: string) {
     if (!useStore.getState().unsavedChanges) return;
@@ -52,87 +68,77 @@ export default function Sidebar() {
   const visibleItems = MENU.filter((m) => role && (m.roles as readonly string[]).includes(role));
 
   return (
-    <aside className={styles.sidebar} style={{ width: open ? W_OPEN : W_CLOSED, minWidth: open ? W_OPEN : W_CLOSED }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-label={open ? "Fechar menu" : "Abrir menu"}
-        className={styles.hamburger}
+    <>
+      {/* Reserva o espaço no layout de verdade — o <aside> abaixo é
+          position:fixed (flutua por cima do conteúdo no hover, sem
+          empurrar nada); só quando fixado essa reserva cresce pra 220px. */}
+      <div className={styles.spacer} style={{ width: sidebarPinned ? W_OPEN : W_CLOSED }} />
+
+      <aside
+        className={styles.sidebar}
+        style={{ width: expanded ? W_OPEN : W_CLOSED }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
       >
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className={styles.hamburgerBar}
-            style={
-              open
-                ? i === 0 ? { transform: "translateY(6px) rotate(45deg)" }
-                : i === 1 ? { opacity: 0, transform: "scaleX(0)" }
-                : { transform: "translateY(-6px) rotate(-45deg)" }
-                : {}
-            }
-          />
-        ))}
-      </button>
+        <div className={styles.header}>
+          <div className={styles.logo} style={{ opacity: expanded ? 1 : 0 }}>ordin</div>
+          {expanded && (
+            <button
+              type="button"
+              onClick={toggleSidebarPinned}
+              aria-label={sidebarPinned ? "Desafixar menu" : "Fixar menu expandido"}
+              className={`${styles.pinBtn} ${sidebarPinned ? styles.pinBtnActive : ""}`}
+            >
+              <PinIcon />
+            </button>
+          )}
+        </div>
 
-      <div className={styles.logo} style={{ opacity: open ? 1 : 0 }}>
-        ordin
-      </div>
+        <nav className={styles.nav}>
+          {visibleItems.map((m) => (
+            <NavLink
+              key={m.to}
+              to={m.to}
+              onClick={(e) => handleNavClick(e, m.to)}
+              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
+            >
+              <i className={`icon-${m.icon} ${styles.navIcon}`} />
+              <span className={styles.navLabel} style={{ opacity: expanded ? 1 : 0 }}>
+                {m.label}
+              </span>
+            </NavLink>
+          ))}
+        </nav>
 
-      <nav className={styles.nav}>
-        {visibleItems.map((m) => (
-          <NavLink
-            key={m.to}
-            to={m.to}
-            onClick={(e) => handleNavClick(e, m.to)}
-            className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
-          >
-            <i className={`icon-${m.icon} ${styles.navIcon}`} />
-            <span className={styles.navLabel} style={{ opacity: open ? 1 : 0 }}>
-              {m.label}
-            </span>
-          </NavLink>
-        ))}
-      </nav>
+        {expanded && (
+          <div className={styles.actionBtn}>
+            <ThemeModeSwitch />
+          </div>
+        )}
 
-      {/* Toggle do design system em vez do emoji ☀️/🌙 (o icon-font não tem
-          ícone de sol/lua — ver ORD-076). O texto ao lado é nosso, não o
-          `label` do Toggle: o texto interno do componente usa color('dark')
-          fixo (#180a33), que é literalmente o --a-bg do modo escuro do admin
-          — ficaria invisível ali. */}
-      <div className={`${styles.actionBtn} ${styles.themeToggle}`}>
-        <Toggle
-          name="admin-theme-sidebar"
-          checked={adminThemeMode === "dark"}
-          onChange={toggleAdminThemeMode}
-          aria-label={adminThemeMode === "dark" ? "Mudar para modo claro" : "Mudar para modo escuro"}
-          data-testid="theme-toggle"
+        {/* Item de navegação, não LinkButton — variant="inverse" do LinkButton
+            fixa texto/ícone branco, invisível sobre o fundo branco do sidebar
+            no modo claro (ver ORD-076, achado 1). Herda a mesma cor
+            theme-aware que os itens de navegação acima. */}
+        <button
+          type="button"
+          onClick={handleLogout}
+          className={`${styles.navItem} ${styles.logoutItem}`}
+          style={{ marginBottom: 16 }}
+        >
+          <i className={`icon-log-out ${styles.navIcon}`} />
+          <span className={styles.navLabel} style={{ opacity: expanded ? 1 : 0 }}>
+            Sair
+          </span>
+        </button>
+
+        <ConfirmDialog
+          open={!!pendingNav}
+          message="Você tem alterações não salvas. Deseja sair mesmo assim?"
+          onConfirm={confirmNav}
+          onCancel={() => setPendingNav(null)}
         />
-        <span className={styles.navLabel} style={{ opacity: open ? 1 : 0 }}>
-          {adminThemeMode === "dark" ? "Modo escuro" : "Modo claro"}
-        </span>
-      </div>
-
-      {/* Item de navegação, não LinkButton — variant="inverse" do LinkButton
-          fixa texto/ícone branco, invisível sobre o fundo branco do sidebar
-          no modo claro (ver ORD-076, achado 1). Herda a mesma cor
-          theme-aware que os itens de navegação acima. */}
-      <button
-        type="button"
-        onClick={handleLogout}
-        className={`${styles.navItem} ${styles.logoutItem}`}
-        style={{ marginBottom: 16 }}
-      >
-        <i className={`icon-log-out ${styles.navIcon}`} />
-        <span className={styles.navLabel} style={{ opacity: open ? 1 : 0 }}>
-          Sair
-        </span>
-      </button>
-
-      <ConfirmDialog
-        open={!!pendingNav}
-        message="Você tem alterações não salvas. Deseja sair mesmo assim?"
-        onConfirm={confirmNav}
-        onCancel={() => setPendingNav(null)}
-      />
-    </aside>
+      </aside>
+    </>
   );
 }

@@ -1,0 +1,42 @@
+@import 'design-system/dist/core/scss/styles';
+
+// Layout/comportamento espelhados do seletor de tema do Mailtrap (pedido
+// explícito do usuário) — grid de 3 células iguais numa "trilha" recuada,
+// célula ativa vira uma pílula mais clara. Cores trocadas pelos tokens
+// theme-aware do admin (--a-surface-2 é a superfície mais recuada já
+// definida em theme.scss, dá o mesmo efeito de "trilha" nos dois modos).
+.track {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 2px;
+  background: var(--a-surface-2);
+  @include rounded('default');
+  width: 96px;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(var(--a-text-rgb), 0.5);
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+
+  &:hover {
+    color: rgba(var(--a-text-rgb), 0.8);
+  }
+
+  &.optionActive {
+    background: var(--a-surface);
+    color: color('brand-primary');
+  }
+}
+
+.icon {
+  font-size: 14px;
+}

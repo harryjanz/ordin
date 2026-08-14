@@ -17,17 +17,21 @@ interface Store extends AuthState {
   // funciona aqui (só em data router); este flag é o mecanismo alternativo
   // pra confirmar antes de navegar pra fora de um formulário sujo.
   unsavedChanges: boolean;
-  // Tema claro/escuro da interface do próprio admin (não é a aparência do
-  // totem — isso fica em Company.visual_theme/visual_mode, via themes.ts).
-  // Disponível pra todos os papéis (Sidebar mostra o controle pra todos);
-  // persiste no localStorage.
-  adminThemeMode: "light" | "dark";
+  // Tema claro/escuro/sistema da interface do próprio admin (não é a
+  // aparência do totem — isso fica em Company.visual_theme/visual_mode, via
+  // themes.ts). "system" acompanha prefers-color-scheme do navegador (ver
+  // App.tsx). Disponível pra todos os papéis; persiste no localStorage.
+  adminThemeMode: "light" | "dark" | "system";
+  // Menu lateral fixado expandido (comportamento espelhado do Mailtrap) —
+  // sem isso, o menu só expande no hover e volta a recolher.
+  sidebarPinned: boolean;
   login: (access: string, refresh: string) => void;
   logout: () => void;
   updateTokens: (access: string, refresh: string) => void;
   setSelectedCompany: (id: number | null) => void;
   setUnsavedChanges: (v: boolean) => void;
-  toggleAdminThemeMode: () => void;
+  setAdminThemeMode: (mode: "light" | "dark" | "system") => void;
+  toggleSidebarPinned: () => void;
 }
 
 export const useStore = create<Store>()(
@@ -44,6 +48,7 @@ export const useStore = create<Store>()(
       // usuário recém-convidado) — tema é preferência de navegador
       // (localStorage), nunca foi por conta no backend.
       adminThemeMode: "light",
+      sidebarPinned: false,
 
       login(access, refresh) {
         const p = decodeJwt(access);
@@ -86,8 +91,12 @@ export const useStore = create<Store>()(
         set({ unsavedChanges: v });
       },
 
-      toggleAdminThemeMode() {
-        set((s) => ({ adminThemeMode: s.adminThemeMode === "dark" ? "light" : "dark" }));
+      setAdminThemeMode(mode) {
+        set({ adminThemeMode: mode });
+      },
+
+      toggleSidebarPinned() {
+        set((s) => ({ sidebarPinned: !s.sidebarPinned }));
       },
     }),
     {

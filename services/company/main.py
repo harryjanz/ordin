@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 NOTIFICATION_SERVICE_URL = require_env("NOTIFICATION_SERVICE_URL")
 ADMIN_BASE_URL           = os.getenv("ADMIN_BASE_URL", "http://localhost:3001")
 INTERNAL_HEADERS         = {"X-Internal-Secret": INTERNAL_SECRET}
-INVITE_TOKEN_TTL_HOURS   = 48
+INVITE_TOKEN_TTL_HOURS   = 24
 
 
 def require_internal(x_internal_secret: str = Header(default="")) -> None:
@@ -1367,6 +1367,33 @@ class CompleteRegistrationIn(BaseModel):
         return v
 
 
+def _invite_is_valid(invite: "UserInviteToken | None") -> bool:
+    return bool(invite) and invite.used_at is None and invite.expires_at >= datetime.utcnow()
+
+
+class InviteStatusOut(BaseModel):
+    valid: bool
+
+
+@app.get(
+    "/users/invite-status",
+    tags=["Usuários"],
+    summary="Verificar se um link de convite ainda é válido, sem consumi-lo",
+    description=(
+        "Endpoint público — usado pela tela de definir senha para avisar de "
+        "cara se o link já foi usado ou expirou, em vez de só falhar na "
+        "submissão. Não revela qual dos dois motivos (usado vs. expirado vs. "
+        "inexistente) é o caso, mesma cautela do complete-registration."
+    ),
+    response_model=InviteStatusOut,
+)
+async def invite_status(token: str, db: AsyncSession = Depends(get_db)):
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    result = await db.execute(select(UserInviteToken).filter_by(token_hash=token_hash))
+    invite = result.scalars().first()
+    return {"valid": _invite_is_valid(invite)}
+
+
 @app.post(
     "/users/complete-registration",
     tags=["Usuários"],
@@ -1386,7 +1413,7 @@ async def complete_registration(
     invite = result.scalars().first()
     # Mensagem genérica em todo caso de falha — não revela se o token
     # chegou a existir, se já foi usado ou se só expirou.
-    if not invite or invite.used_at is not None or invite.expires_at < datetime.utcnow():
+    if not _invite_is_valid(invite):
         raise HTTPException(400, "Convite inválido ou expirado")
     user = await db.get(User, invite.user_id)
     if not user:
