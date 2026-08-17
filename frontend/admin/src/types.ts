@@ -118,6 +118,7 @@ export interface User {
   active: boolean;
   pending_setup: boolean;
   mfa_enabled: boolean;
+  has_trusted_device: boolean;
 }
 
 export interface Category {
