@@ -471,11 +471,17 @@ async def list_order_tickets(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     """Retorna todos os tickets de um pedido com progresso de coleta. Isolamento multi-tenant aplicado."""
+    # Mesmo padrão de list_orders (ORD-081): superadmin/admin têm company_id
+    # próprio (empresa interna da plataforma, ORD-093), não o da empresa cujo
+    # pedido estão consultando — sem esse bypass, todo pedido de cliente
+    # dava 404 pra eles depois da migration do ORD-093.
+    filters = [Ticket.order_ref == order_ref]
+    if current_user.role not in ("superadmin", "admin"):
+        filters.append(Order.company_id == current_user.company_id)
     result = await db.execute(
         select(Ticket)
         .join(Order, Order.order_ref == Ticket.order_ref)
-        .where(Ticket.order_ref == order_ref,
-               Order.company_id == current_user.company_id)
+        .where(*filters)
     )
     tickets = result.scalars().all()
     if not tickets: raise HTTPException(404)
