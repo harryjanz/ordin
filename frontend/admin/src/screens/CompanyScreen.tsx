@@ -585,6 +585,22 @@ export default function CompanyScreen() {
     loadUsers();
   }
 
+  // ORD-088: recuperação assistida — owner/manager/superadmin/admin
+  // desativa o duplo fator de um usuário que perdeu o dispositivo
+  // autenticador e os códigos de backup (mesmo padrão de suporte do ORD-082).
+  function resetUserMfa(id: number) {
+    if (!companyId) return;
+    setConfirmState({
+      message: "Desativar o duplo fator deste usuário? Ele voltará a entrar só com e-mail e senha.",
+      onConfirm: async () => {
+        setConfirmState(null);
+        await api.post(`/companies/${companyId}/users/${id}/mfa/reset`);
+        makeToast("success", "Duplo fator desativado para este usuário");
+        loadUsers();
+      },
+    });
+  }
+
   function openEditUser(u: User) {
     setEditUserId(u.id);
     setEditUserValues({ name: u.name, role: u.role });
@@ -797,6 +813,7 @@ export default function CompanyScreen() {
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <Tag variant={u.active ? "success" : "error"}>{u.active ? "Ativo" : "Inativo"}</Tag>
                       {u.pending_setup && <Tag variant="warning">Convite pendente</Tag>}
+                      {u.mfa_enabled && <Tag variant="neutral">2FA ativo</Tag>}
                     </div>
                   ),
                 },
@@ -806,6 +823,9 @@ export default function CompanyScreen() {
                       <Button size="small" variant="secondary" onClick={() => openEditUser(u)}>Editar</Button>
                       {u.pending_setup && (
                         <Button size="small" variant="secondary" onClick={() => resendInvite(u.id)}>Reenviar convite</Button>
+                      )}
+                      {u.mfa_enabled && (
+                        <Button size="small" variant="secondary" onClick={() => resetUserMfa(u.id)}>Desativar 2FA</Button>
                       )}
                       {u.active ? (
                         <Button size="small" variant="secondary" onClick={() => deactivateUser(u.id)}>Desativar</Button>

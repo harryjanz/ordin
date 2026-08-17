@@ -15,7 +15,7 @@ const MENU = [
   { to: "/payments",      label: "Transações",   icon: "credit-card", roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/company",       label: "Empresa",      icon: "briefcase",   roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/pair",          label: "Dispositivos", icon: "monitor",     roles: ["superadmin", "admin", "owner", "manager"] },
-  { to: "/settings",      label: "Config.",      icon: "settings",    roles: ["superadmin", "admin", "owner", "manager"] },
+  { to: "/settings",      label: "Config.",      icon: "settings",    roles: ["superadmin", "admin", "owner", "manager", "cashier"] },
 ] as const;
 
 const W_OPEN = 220;

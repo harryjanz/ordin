@@ -42,3 +42,62 @@
 .error {
   margin-bottom: 16px;
 }
+
+// ── ORD-088: duplo fator ─────────────────────────────────────────────────────
+
+.mfaHint {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.6);
+  margin-bottom: 16px;
+}
+
+.mfaQrRow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  margin-bottom: 16px;
+
+  // Coluna, não linha — lado a lado (mesmo com flex-shrink:0 no QR) o texto
+  // do segredo ficava espremido numa faixa estreita ao lado do QR, difícil
+  // de ler (achado ao vivo pós-fix). QR maior + mensagem embaixo, centralizada.
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+.mfaSecretFallback {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  overflow-wrap: anywhere;
+  text-align: center;
+
+  code {
+    font-family: monospace;
+    background: var(--a-surface);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+}
+
+.mfaBackupCodes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 16px;
+  margin-bottom: 16px;
+
+  code {
+    font-family: monospace;
+    font-size: 15px;
+    letter-spacing: 1px;
+    text-align: center;
+  }
+}

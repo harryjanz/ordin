@@ -117,6 +117,7 @@ export interface User {
   role: Role;
   active: boolean;
   pending_setup: boolean;
+  mfa_enabled: boolean;
 }
 
 export interface Category {
