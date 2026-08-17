@@ -601,6 +601,22 @@ export default function CompanyScreen() {
     });
   }
 
+  // ORD-095: mais estreito que resetUserMfa acima — revoga só os
+  // dispositivos confiáveis (ex: notebook perdido), sem apagar o 2FA
+  // configurado, então o usuário não precisa reconfigurar do zero.
+  function revokeUserDevices(id: number) {
+    if (!companyId) return;
+    setConfirmState({
+      message: "Remover o dispositivo confiável deste usuário? Ele precisará confirmar o duplo fator no próximo login.",
+      onConfirm: async () => {
+        setConfirmState(null);
+        await api.delete(`/companies/${companyId}/users/${id}/trusted-devices`);
+        makeToast("success", "Dispositivo confiável removido");
+        loadUsers();
+      },
+    });
+  }
+
   function openEditUser(u: User) {
     setEditUserId(u.id);
     setEditUserValues({ name: u.name, role: u.role });
@@ -826,6 +842,9 @@ export default function CompanyScreen() {
                       )}
                       {u.mfa_enabled && (
                         <Button size="small" variant="secondary" onClick={() => resetUserMfa(u.id)}>Desativar 2FA</Button>
+                      )}
+                      {u.has_trusted_device && (
+                        <Button size="small" variant="secondary" onClick={() => revokeUserDevices(u.id)}>Remover dispositivo confiável</Button>
                       )}
                       {u.active ? (
                         <Button size="small" variant="secondary" onClick={() => deactivateUser(u.id)}>Desativar</Button>

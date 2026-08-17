@@ -484,6 +484,9 @@ class UserOut(BaseModel):
     pending_setup: bool
     mfa_enabled: bool
     created_at: Optional[datetime] = None
+    # ORD-095: calculado (TrustedDevice não é atributo de User) — preenchido
+    # manualmente em list_users, nunca vem de from_attributes.
+    has_trusted_device: bool = False
     model_config = {"from_attributes": True}
 
 
@@ -1111,6 +1114,17 @@ async def update_security(
     if co.is_platform and body.mfa_policy != "required":
         raise HTTPException(409, "Duplo fator é obrigatório e permanente para contas da plataforma")
     co.mfa_policy = body.mfa_policy
+    # ORD-095: desativar o 2FA da empresa não pode deixar usuário nenhum
+    # com o próprio 2FA ainda configurado — cascata usando o mesmo
+    # _clear_mfa dos resets individuais (limpa TOTP, códigos de backup e
+    # revoga dispositivos confiáveis). Idempotente: reaplicar sobre uma
+    # empresa já desativada não encontra ninguém com totp_enabled_at setado.
+    if body.mfa_policy == "disabled":
+        result = await db.execute(
+            select(User).where(User.company_id == company_id, User.totp_enabled_at.isnot(None))
+        )
+        for u in result.scalars().all():
+            await _clear_mfa(db, u)
     await db.commit()
     return {"ok": True, "mfa_policy": body.mfa_policy}
 
@@ -1362,7 +1376,27 @@ async def list_users(
     result = await db.execute(
         select(User).where(*filters).offset(skip).limit(limit)
     )
-    return {"users": result.scalars().all(), "total": total}
+    users = result.scalars().all()
+
+    # ORD-095: em lote (1 query pra página inteira, não por linha) — indica
+    # quem tem dispositivo confiável ativo, pro botão "Remover dispositivo
+    # confiável" na tela de Usuários.
+    trusted_ids: set[int] = set()
+    user_ids = [u.id for u in users]
+    if user_ids:
+        td = await db.execute(
+            select(TrustedDevice.user_id).distinct()
+            .where(TrustedDevice.user_id.in_(user_ids), TrustedDevice.revoked_at.is_(None))
+        )
+        trusted_ids = {row[0] for row in td.all()}
+
+    return {
+        "users": [
+            {**UserOut.model_validate(u).model_dump(), "has_trusted_device": u.id in trusted_ids}
+            for u in users
+        ],
+        "total": total,
+    }
 
 
 @app.post(
@@ -1813,6 +1847,35 @@ async def mfa_reset(
     if not u:
         raise HTTPException(404, "Usuário não encontrado")
     await _clear_mfa(db, u)
+    await db.commit()
+    return {"ok": True}
+
+
+@app.delete(
+    "/companies/{company_id}/users/{user_id}/trusted-devices",
+    tags=["MFA"],
+    summary="Revogar todos os dispositivos confiáveis de um usuário da empresa",
+)
+async def revoke_user_trusted_devices(
+    company_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # ORD-095: ação mais estreita que mfa/reset acima — revoga só os
+    # dispositivos confiáveis (ex: notebook perdido), sem apagar o segredo
+    # TOTP nem os códigos de backup, então o usuário não precisa reconfigurar
+    # o 2FA do zero, só provar identidade de novo no próximo login.
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(User).filter_by(id=user_id, company_id=company_id))
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    await db.execute(
+        update(TrustedDevice)
+        .where(TrustedDevice.user_id == user_id, TrustedDevice.revoked_at.is_(None))
+        .values(revoked_at=datetime.utcnow())
+    )
     await db.commit()
     return {"ok": True}
 
