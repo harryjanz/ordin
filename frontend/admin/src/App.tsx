@@ -17,13 +17,16 @@ import PairScreen from "./screens/PairScreen";
 import NewCompanyScreen from "./screens/NewCompanyScreen";
 import CompanyContractScreen from "./screens/CompanyContractScreen";
 import CompanyListScreen from "./screens/CompanyListScreen";
+import PlatformUsersScreen from "./screens/PlatformUsersScreen";
 
 const ROLE_ROUTES: Record<string, string[]> = {
   // "/company" liberado pra superadmin/admin — precisam acessar Usuários/
   // Terminais/Pagamento de qualquer empresa pra dar suporte, mesmo padrão
-  // de seleção de empresa já usado em /settings (ORD-082).
-  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
-  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
+  // de seleção de empresa já usado em /settings (ORD-082). "/platform-users"
+  // (ORD-093) é o CRUD separado pra usuários da própria Ordin — não confundir
+  // com "/company", que é sobre a equipe de uma empresa cliente.
+  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users"],
+  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users"],
   owner:      ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
   manager:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
   // ORD-088: cashier ganha acesso a /settings só pra seção "Minha segurança"
@@ -101,6 +104,7 @@ export default function App() {
             <Route path="/companies" element={<ProtectedRoute path="/companies" element={<CompanyListScreen />} />} />
             <Route path="/companies/new" element={<ProtectedRoute path="/companies/new" element={<NewCompanyScreen />} />} />
             <Route path="/companies/:id/contract" element={<ProtectedRoute path="/companies/:id/contract" element={<CompanyContractScreen />} />} />
+            <Route path="/platform-users" element={<ProtectedRoute path="/platform-users" element={<PlatformUsersScreen />} />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </main>
