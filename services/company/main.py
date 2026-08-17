@@ -1104,6 +1104,12 @@ async def update_security(
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
+    # ORD-096: duplo fator é obrigatório e permanente pra contas de
+    # plataforma — checado por is_platform, não por id fixo (mesmo
+    # princípio do ORD-093), pra nunca depender de qual id a empresa
+    # interna acabou recebendo no auto-increment.
+    if co.is_platform and body.mfa_policy != "required":
+        raise HTTPException(409, "Duplo fator é obrigatório e permanente para contas da plataforma")
     co.mfa_policy = body.mfa_policy
     await db.commit()
     return {"ok": True, "mfa_policy": body.mfa_policy}
@@ -1777,6 +1783,12 @@ async def mfa_disable(
     u = await db.get(User, int(current_user.sub))
     if not u:
         raise HTTPException(404, "Usuário não encontrado")
+    # ORD-096: contas de plataforma nunca se autodesativam o 2FA — só
+    # recuperação assistida por outro superadmin/admin (/platform-users/{id}/mfa/reset),
+    # que já força reconfiguração no próximo login por causa da política
+    # permanente da empresa interna.
+    if u.role in ("superadmin", "admin"):
+        raise HTTPException(403, "Duplo fator é obrigatório para contas da plataforma e não pode ser desativado")
     if not u.password_hash or not bcrypt.checkpw(body.password.encode(), u.password_hash.encode()):
         raise HTTPException(401, "Senha incorreta")
     await _clear_mfa(db, u)
