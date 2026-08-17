@@ -1,8 +1,9 @@
 import { useState, FormEvent } from "react";
 import axios from "axios";
-import { Alert, Button, InputBase } from "design-system";
+import { Alert, Button, Checkbox, InputBase } from "design-system";
 import { QRCodeSVG } from "qrcode.react";
 import { useStore } from "../store";
+import { getDeviceTrustToken, setDeviceTrustToken } from "../deviceTrust";
 import ThemeModeSwitch from "../components/ThemeModeSwitch";
 import styles from "./LoginScreen.module.scss";
 
@@ -24,13 +25,20 @@ export default function LoginScreen() {
   const [mfaSecret, setMfaSecret] = useState("");
   const [mfaUri, setMfaUri] = useState("");
   const [mfaBackupCodes, setMfaBackupCodes] = useState<string[]>([]);
+  // ORD-092: marcada por padrão — usuário desmarca ativamente em máquina
+  // compartilhada/pública. Só tem efeito no passo de código (não no setup).
+  const [trustDevice, setTrustDevice] = useState(true);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const r = await axios.post("/auth/login", { email, password });
+      const deviceToken = getDeviceTrustToken();
+      const r = await axios.post(
+        "/auth/login", { email, password },
+        deviceToken ? { headers: { "X-Device-Trust": deviceToken } } : undefined
+      );
       if (r.data.mfa_required) {
         setMfaToken(r.data.mfa_token);
         if (r.data.mfa_status === "setup_required") {
@@ -80,7 +88,10 @@ export default function LoginScreen() {
     setError("");
     setLoading(true);
     try {
-      const r = await axios.post("/auth/login/mfa-verify", { mfa_token: mfaToken, code: mfaCode });
+      const r = await axios.post("/auth/login/mfa-verify", {
+        mfa_token: mfaToken, code: mfaCode, trust_device: trustDevice,
+      });
+      if (r.data.device_token) setDeviceTrustToken(r.data.device_token);
       login(r.data.access_token, r.data.refresh_token);
     } catch {
       setError("Código inválido. Tente novamente.");
@@ -181,6 +192,14 @@ export default function LoginScreen() {
                 onChange={(e) => setMfaCode(e.target.value)}
                 autoFocus
                 required
+              />
+            </div>
+            <div className={styles.field}>
+              <Checkbox
+                id="trust-device"
+                checked={trustDevice}
+                onChange={setTrustDevice}
+                label="Confiar neste navegador por 7 dias"
               />
             </div>
             <Button type="submit" fullWidth loading={loading}>Entrar</Button>

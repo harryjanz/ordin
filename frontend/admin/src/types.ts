@@ -217,3 +217,13 @@ export type PaymentStatusSummary = Record<string, StatusSummaryItem>;
 // mesmo zerados — mesmo padrão do PaymentStatusSummary/OrderStatusSummary,
 // mas só contagem (sem valor monetário) — ver ORD-084.
 export type CompanyStatusSummary = Record<string, number>;
+
+// ORD-092: dispositivo confiável — não expõe token nem hash, só o
+// suficiente pro usuário reconhecer e decidir revogar.
+export interface TrustedDevice {
+  id: number;
+  device_label: string | null;
+  created_at: string | null;
+  last_used_at: string | null;
+  expires_at: string;
+}

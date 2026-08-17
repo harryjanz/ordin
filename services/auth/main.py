@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query
+from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -85,6 +85,7 @@ class RefreshReq(BaseModel):
 class MfaVerifyReq(BaseModel):
     mfa_token: str
     code: str
+    trust_device: bool = False
 
 # ── Response schemas ──────────────────────────────────────────────────────────
 
@@ -104,6 +105,10 @@ class TokenOut(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str
+    # ORD-092: presente só quando o login terminou com "confiar neste
+    # dispositivo" marcado — frontend guarda numa chave de localStorage à
+    # parte, que sobrevive a logout (é sobre o navegador, não a sessão).
+    device_token: Optional[str] = None
 
 class MfaRequiredOut(BaseModel):
     # ORD-088: retornado no lugar de TokenOut quando o usuário tem TOTP ativo
@@ -243,14 +248,14 @@ async def pin_login(body: PinLoginReq, request: Request, response: Response):
     token = make_token({"sub":"0","company":data["company"]["id"],"terminal":data["terminal"]["id"],"role":"kiosk"}, timedelta(hours=12))
     return {"ok":True,"access_token":token,"token_type":"bearer","company":data["company"],"terminal":data["terminal"]}
 
-async def _issue_login_tokens(u: dict, request: Request, actor: str, db: AsyncSession) -> dict:
+async def _issue_login_tokens(u: dict, request: Request, actor: str, db: AsyncSession, device_token: str | None = None) -> dict:
     access  = make_token({"sub":str(u["id"]),"company":u["company_id"],"role":u["role"]}, timedelta(minutes=ACCESS_EX))
     refresh = make_token({"sub":str(u["id"]),"type":"refresh","company":u["company_id"],"role":u["role"]}, timedelta(days=7))
     db.add(RefreshToken(user_id=u["id"],token_hash=hash_tok(refresh),expires_at=datetime.utcnow()+timedelta(days=7)))
     await db.commit()
     emit_audit("login_success", request,
                actor=actor, actor_id=u["id"], company_id=u["company_id"], result="success")
-    return {"access_token":access,"refresh_token":refresh,"token_type":"bearer"}
+    return {"access_token":access,"refresh_token":refresh,"token_type":"bearer","device_token":device_token}
 
 
 @app.post(
@@ -263,10 +268,14 @@ async def _issue_login_tokens(u: dict, request: Request, actor: str, db: AsyncSe
         429: {"description": "Rate limit atingido"},
     },
 )
-async def login(body: LoginReq, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+async def login(
+    body: LoginReq, request: Request, response: Response, db: AsyncSession = Depends(get_db),
+    x_device_trust: str | None = Header(None, alias="X-Device-Trust"),
+):
     """Login com email + senha para roles `admin`/`owner`/`manager`/`cashier`. Retorna access token + refresh
     token com rotação — ou, se o usuário já tiver duplo fator ativo ou a empresa exigir (ORD-088), um
-    `mfa_token` temporário em vez dos tokens finais (ver `POST /auth/login/mfa-verify`)."""
+    `mfa_token` temporário em vez dos tokens finais (ver `POST /auth/login/mfa-verify`). O header
+    `X-Device-Trust` (ORD-092), quando presente e reconhecido, pula o segundo fator mesmo assim."""
     check_rate_limit(request.client.host, body.email, response)
     async with httpx.AsyncClient() as c:
         r = await c.post(f"{COMPANY_SVC}/internal/verify-credentials", json={"email":body.email,"password":body.password}, headers=INTERNAL_HEADERS)
@@ -277,6 +286,15 @@ async def login(body: LoginReq, request: Request, response: Response, db: AsyncS
     reset_rate_limit(request.client.host, body.email)
     u = r.json()
     mfa_status = u.get("mfa_status", "none")
+    if mfa_status != "none" and x_device_trust:
+        async with httpx.AsyncClient() as c:
+            tr = await c.post(
+                f"{COMPANY_SVC}/internal/verify-trusted-device",
+                json={"email": body.email, "device_token": x_device_trust},
+                headers=INTERNAL_HEADERS,
+            )
+        if tr.status_code == 200 and tr.json().get("trusted"):
+            return await _issue_login_tokens(u, request, body.email, db)
     if mfa_status != "none":
         mfa_token = make_token(
             {"sub": str(u["id"]), "company": u["company_id"], "role": u["role"], "type": "mfa_pending"},
@@ -322,7 +340,17 @@ async def login_mfa_verify(body: MfaVerifyReq, request: Request, response: Respo
         raise HTTPException(401, "Código inválido")
     reset_rate_limit(request.client.host, body.mfa_token)
     u = {"id": user_id, "company_id": payload.get("company"), "role": payload.get("role")}
-    return await _issue_login_tokens(u, request, f"user-{user_id}", db)
+    device_token = None
+    if body.trust_device:
+        async with httpx.AsyncClient() as c:
+            dr = await c.post(
+                f"{COMPANY_SVC}/internal/trust-device",
+                json={"user_id": user_id, "device_label": request.headers.get("user-agent", "")},
+                headers=INTERNAL_HEADERS,
+            )
+        if dr.status_code == 200:
+            device_token = dr.json()["device_token"]
+    return await _issue_login_tokens(u, request, f"user-{user_id}", db, device_token=device_token)
 
 @app.post(
     "/auth/refresh",

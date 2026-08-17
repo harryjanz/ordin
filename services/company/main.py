@@ -175,6 +175,21 @@ class UserBackupCode(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class TrustedDevice(Base):
+    # Dispositivo confiável (ORD-092) — mesmo desenho de UserBackupCode, só
+    # o hash é persistido. expires_at é renovado (+7 dias) a cada uso
+    # bem-sucedido (janela deslizante, ver _verify_trusted_device).
+    __tablename__ = "trusted_devices"
+    id            = Column(Integer, primary_key=True)
+    user_id       = Column(Integer, index=True)
+    token_hash    = Column(String(64), unique=True)
+    device_label  = Column(String(200), nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    last_used_at  = Column(DateTime, nullable=True)
+    expires_at    = Column(DateTime)
+    revoked_at    = Column(DateTime, nullable=True)
+
+
 class Terminal(Base):
     __tablename__ = "terminals"
     id                = Column(Integer, primary_key=True)
@@ -527,6 +542,19 @@ class MfaConfirmOut(BaseModel):
 
 class MfaDisableIn(BaseModel):
     password: str
+
+
+class TrustedDeviceOut(BaseModel):
+    id: int
+    device_label: Optional[str] = None
+    created_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+    expires_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class TrustedDeviceListOut(BaseModel):
+    devices: list[TrustedDeviceOut]
 
 
 class PaymentConfigIn(BaseModel):
@@ -1452,6 +1480,13 @@ async def _clear_mfa(db: AsyncSession, user: "User") -> None:
     user.totp_secret = None
     user.totp_enabled_at = None
     await db.execute(delete(UserBackupCode).where(UserBackupCode.user_id == user.id))
+    # ORD-092: sem 2FA, "dispositivo já passou pelo 2FA" não tem mais sentido —
+    # revoga (soft) em vez de apagar, mantém histórico de auditoria.
+    await db.execute(
+        update(TrustedDevice)
+        .where(TrustedDevice.user_id == user.id, TrustedDevice.revoked_at.is_(None))
+        .values(revoked_at=datetime.utcnow())
+    )
 
 
 @app.get(
@@ -1587,6 +1622,95 @@ async def verify_totp(
     backup.used_at = datetime.utcnow()
     await db.commit()
     return {"ok": True, "used_backup_code": True}
+
+
+# ── Dispositivo confiável — ORD-092 ──────────────────────────────────────────
+
+TRUSTED_DEVICE_TTL_DAYS = 7
+
+
+def _hash_device_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@app.post("/internal/trust-device", include_in_schema=False)
+async def trust_device(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    raw_token = secrets.token_urlsafe(32)
+    db.add(TrustedDevice(
+        user_id=body["user_id"],
+        token_hash=_hash_device_token(raw_token),
+        device_label=(body.get("device_label") or "")[:200] or None,
+        expires_at=datetime.utcnow() + timedelta(days=TRUSTED_DEVICE_TTL_DAYS),
+    ))
+    await db.commit()
+    return {"device_token": raw_token}
+
+
+@app.post("/internal/verify-trusted-device", include_in_schema=False)
+async def verify_trusted_device(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    result = await db.execute(select(User).filter_by(email=body["email"], active=True))
+    u = result.scalars().first()
+    if not u:
+        return {"trusted": False}
+    token_hash = _hash_device_token(body["device_token"])
+    result = await db.execute(
+        select(TrustedDevice).filter_by(user_id=u.id, token_hash=token_hash, revoked_at=None)
+    )
+    device = result.scalars().first()
+    if not device or device.expires_at < datetime.utcnow():
+        return {"trusted": False}
+    # Janela deslizante: cada uso bem-sucedido renova mais 7 dias a partir de agora.
+    device.expires_at = datetime.utcnow() + timedelta(days=TRUSTED_DEVICE_TTL_DAYS)
+    device.last_used_at = datetime.utcnow()
+    await db.commit()
+    return {"trusted": True}
+
+
+@app.get(
+    "/users/me/trusted-devices",
+    response_model=TrustedDeviceListOut,
+    tags=["MFA"],
+    summary="Listar dispositivos confiáveis do próprio usuário",
+)
+async def list_trusted_devices(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(TrustedDevice)
+        .filter_by(user_id=int(current_user.sub), revoked_at=None)
+        .order_by(TrustedDevice.last_used_at.desc())
+    )
+    return {"devices": result.scalars().all()}
+
+
+@app.delete(
+    "/users/me/trusted-devices/{device_id}",
+    tags=["MFA"],
+    summary="Revogar um dispositivo confiável do próprio usuário",
+)
+async def revoke_trusted_device(
+    device_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(TrustedDevice).filter_by(id=device_id, user_id=int(current_user.sub), revoked_at=None)
+    )
+    device = result.scalars().first()
+    if not device:
+        raise HTTPException(404, "Dispositivo não encontrado")
+    device.revoked_at = datetime.utcnow()
+    await db.commit()
+    return {"ok": True}
 
 
 def _password_strength(password: str) -> str:

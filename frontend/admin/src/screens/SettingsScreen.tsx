@@ -4,9 +4,10 @@ import { QRCodeSVG } from "qrcode.react";
 import api from "../api";
 import { listCompanies } from "../api/companies";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { clearDeviceTrustToken } from "../deviceTrust";
 import { useStore } from "../store";
 import { THEME_REGISTRY, resolveTheme, type ThemeName, type ThemeMode } from "../themes";
-import type { Company } from "../types";
+import type { Company, TrustedDevice } from "../types";
 import styles from "./SettingsScreen.module.scss";
 
 const FONT_D = "'Lexend', sans-serif";
@@ -212,6 +213,29 @@ export default function SettingsScreen() {
 
   useEffect(refreshMyMfaStatus, []);
 
+  // ── ORD-092: dispositivos confiáveis ────────────────────────────────────
+  const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
+
+  function refreshTrustedDevices() {
+    api.get("/users/me/trusted-devices").then((r) => setTrustedDevices(r.data.devices)).catch(() => null);
+  }
+
+  useEffect(refreshTrustedDevices, []);
+
+  async function revokeTrustedDevice(id: number) {
+    await api.delete(`/users/me/trusted-devices/${id}`);
+    refreshTrustedDevices();
+    makeToast("success", "Dispositivo revogado.");
+  }
+
+  function forgetThisDevice() {
+    // Só limpa o token guardado neste navegador — sem ele, este navegador
+    // nunca mais consegue provar que já passou pelo 2FA, mesmo que a linha
+    // no servidor ainda exista (expira sozinha em 7 dias, sem uso).
+    clearDeviceTrustToken();
+    makeToast("success", "Este dispositivo não será mais reconhecido automaticamente.");
+  }
+
   async function startMfaSetup() {
     setMfaBusy(true);
     setMfaError(null);
@@ -262,6 +286,7 @@ export default function SettingsScreen() {
       setMyMfaEnabled(false);
       setMfaShowDisable(false);
       setMfaDisablePassword("");
+      refreshTrustedDevices();
       makeToast("success", "Duplo fator desativado.");
     } catch {
       setMfaError("Senha incorreta.");
@@ -327,6 +352,31 @@ export default function SettingsScreen() {
                 </div>
               </div>
             )}
+
+            <div className={styles.trustedDevicesBlock}>
+              <div className={styles.formLabel}>Dispositivos confiáveis</div>
+              {trustedDevices.length === 0 ? (
+                <div className={styles.cardDesc}>Nenhum dispositivo confiável ativo no momento.</div>
+              ) : (
+                trustedDevices.map((d) => (
+                  <div key={d.id} className={styles.trustedDeviceRow}>
+                    <div>
+                      <div className={styles.trustedDeviceLabel}>{d.device_label || "Dispositivo sem identificação"}</div>
+                      <div className={styles.trustedDeviceMeta}>
+                        Válido até {new Date(d.expires_at).toLocaleString("pt-BR")}
+                        {d.last_used_at && ` · último uso ${new Date(d.last_used_at).toLocaleString("pt-BR")}`}
+                      </div>
+                    </div>
+                    <Button size="small" variant="secondary" onClick={() => revokeTrustedDevice(d.id)}>
+                      Remover
+                    </Button>
+                  </div>
+                ))
+              )}
+              <Button size="small" variant="secondary" onClick={forgetThisDevice}>
+                Esquecer este dispositivo
+              </Button>
+            </div>
           </>
         ) : mfaStep === "idle" ? (
           <>
