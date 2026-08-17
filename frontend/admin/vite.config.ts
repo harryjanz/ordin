@@ -34,6 +34,14 @@ export default defineConfig({
           if (req.headers["sec-fetch-dest"] === "document") return req.url;
         },
       },
+      // ORD-093: mesmo caso de /companies — rota de API e de página do SPA
+      // (PlatformUsersScreen) ao mesmo tempo.
+      "/platform-users": {
+        target: "http://localhost:8000",
+        bypass(req) {
+          if (req.headers["sec-fetch-dest"] === "document") return req.url;
+        },
+      },
     },
   },
   test: {

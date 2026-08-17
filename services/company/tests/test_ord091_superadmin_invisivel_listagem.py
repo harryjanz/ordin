@@ -123,7 +123,10 @@ async def test_manager_nao_ve_superadmin_nem_admin_na_listagem(client, empresa_c
     assert roles == {"owner"}
 
 
-async def test_superadmin_ve_todos_incluindo_superadmin_e_admin(client, empresa_com_superadmin_associado):
+async def test_superadmin_tambem_nao_ve_superadmin_nem_admin_na_listagem(client, empresa_com_superadmin_associado):
+    # ORD-093: a exceção "superadmin/admin vê todo mundo" ficou obsoleta com
+    # a tela própria de Usuários da Plataforma (/platform-users) — a partir
+    # daqui, a exclusão é incondicional, mesmo pra quem já é superadmin/admin.
     r = await client.get(
         f"/companies/{empresa_com_superadmin_associado['company_id']}/users",
         params={"status": "all"},
@@ -131,10 +134,10 @@ async def test_superadmin_ve_todos_incluindo_superadmin_e_admin(client, empresa_
     )
     assert r.status_code == 200
     roles = {u["role"] for u in r.json()["users"]}
-    assert roles == {"owner", "superadmin", "admin"}
+    assert roles == {"owner"}
 
 
-async def test_admin_ve_todos_incluindo_superadmin_e_admin(client, empresa_com_superadmin_associado):
+async def test_admin_tambem_nao_ve_superadmin_nem_admin_na_listagem(client, empresa_com_superadmin_associado):
     r = await client.get(
         f"/companies/{empresa_com_superadmin_associado['company_id']}/users",
         params={"status": "all"},
@@ -142,4 +145,4 @@ async def test_admin_ve_todos_incluindo_superadmin_e_admin(client, empresa_com_s
     )
     assert r.status_code == 200
     roles = {u["role"] for u in r.json()["users"]}
-    assert roles == {"owner", "superadmin", "admin"}
+    assert roles == {"owner"}

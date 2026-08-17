@@ -15,7 +15,7 @@ import bcrypt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Form, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, JSON, Enum,
     UniqueConstraint, select, func, or_, update, delete,
@@ -125,6 +125,9 @@ class Company(Base):
     contract_document_url    = Column(String(255), nullable=True)
     # ORD-088: disabled|optional|required — ver VALID_MFA_POLICIES.
     mfa_policy                = Column(String(10), nullable=False, default="disabled")
+    # ORD-093: True só pra empresa interna "Ordin — Plataforma" (única linha).
+    # Nunca aparece em listagem/seletor voltado a empresa cliente.
+    is_platform               = Column(Boolean, nullable=False, default=False)
 
 
 class User(Base):
@@ -487,14 +490,29 @@ class UserOut(BaseModel):
 class UserIn(BaseModel):
     # ORD-087: sem campo senha — o usuário convidado define a própria senha
     # pelo link recebido por e-mail (ver POST /users/complete-registration).
+    # ORD-093: role validado — antes disso, nada impedia (fora da UI) criar
+    # um usuário com role="superadmin" direto numa empresa cliente.
     name: str
     email: str
-    role: str = "cashier"
+    role: str = Field("cashier", pattern="^(owner|manager|cashier)$")
 
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[str] = Field(None, pattern="^(owner|manager|cashier)$")
+    active: Optional[bool] = None
+
+
+class PlatformUserIn(BaseModel):
+    # ORD-093: espelha UserIn, mas só aceita papéis de plataforma.
+    name: str
+    email: str
+    role: str = Field(..., pattern="^(superadmin|admin)$")
+
+
+class PlatformUserUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = Field(None, pattern="^(superadmin|admin)$")
     active: Optional[bool] = None
 
 
@@ -654,6 +672,7 @@ _tags = [
     {"name": "Usuários",       "description": "Gestão de usuários por empresa (owner/manager)."},
     {"name": "Pagamento",      "description": "Configuração de provider TEF/PIX por empresa (owner/superadmin)."},
     {"name": "MFA",            "description": "Duplo fator de autenticação (TOTP) — setup pessoal e recuperação assistida."},
+    {"name": "Usuários da Plataforma", "description": "CRUD separado pra superadmin/admin (equipe da Ordin, não de cliente) — ver ORD-093."},
 ]
 
 app = FastAPI(
@@ -836,7 +855,9 @@ async def list_companies(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_platform_admin(current_user)
-    base_filters = [Company.active == True]
+    # ORD-093: a empresa interna da plataforma nunca é uma opção de suporte —
+    # exclusão incondicional, independe de quem está listando.
+    base_filters = [Company.active == True, Company.is_platform == False]
     if q:
         like = f"%{q}%"
         base_filters.append(or_(Company.name.ilike(like), Company.legal_name.ilike(like)))
@@ -1312,13 +1333,12 @@ async def list_users(
 ):
     _require_company_admin(current_user, company_id)
     filters = [User.company_id == company_id]
-    # superadmin/admin são usuários da plataforma, não da empresa cliente
-    # (ver _require_platform_admin) — o schema exige um company_id NOT NULL
-    # pra qualquer User, então o seed acaba associando-os a uma empresa
-    # qualquer. Um owner/manager olhando a própria listagem não deveria ver
-    # esses usuários "vazando" ali; só quem já é admin/superadmin enxerga.
-    if current_user.role not in ("superadmin", "admin"):
-        filters.append(User.role.notin_(["superadmin", "admin"]))
+    # ORD-093: exclusão incondicional — usuários de plataforma agora têm
+    # tela própria (/platform-users), então a aba Usuários de uma empresa
+    # cliente nunca mais mostra superadmin/admin, nem pra quem já é
+    # superadmin/admin (antes do ORD-093, só owner/manager tinham essa
+    # exclusão; a exceção pra admin/superadmin ficou obsoleta com a tela nova).
+    filters.append(User.role.notin_(["superadmin", "admin"]))
     if status == "active":
         filters.append(User.active == True)
     elif status == "inactive":
@@ -1461,6 +1481,193 @@ async def resend_invite(
     await db.commit()
     await _issue_invite(db, u)
     return {"sent": True}
+
+
+# ── Usuários da plataforma — ORD-093 ────────────────────────────────────────
+# CRUD separado do cadastro de usuários de empresa cliente — superadmin/admin
+# não aparecem mais na aba Usuários de nenhuma empresa (ver list_users acima).
+
+async def _get_platform_company_id(db: AsyncSession) -> int:
+    result = await db.execute(select(Company).filter_by(is_platform=True))
+    co = result.scalars().first()
+    if not co:
+        raise HTTPException(500, "Empresa interna da plataforma não configurada")
+    return co.id
+
+
+def _require_can_grant_role(current_user: TokenPayload, role: str) -> None:
+    # Ninguém cria/promove um perfil de plataforma com privilégio maior que
+    # o próprio — admin só cria/promove outro admin, nunca superadmin.
+    if role == "superadmin" and current_user.role != "superadmin":
+        raise HTTPException(403, "Somente superadmin pode criar ou promover outro superadmin")
+
+
+@app.get(
+    "/platform-users",
+    response_model=UserListOut,
+    tags=["Usuários da Plataforma"],
+    summary="Listar usuários da plataforma (superadmin/admin)",
+)
+async def list_platform_users(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    name: Optional[str] = Query(None, min_length=1),
+    email: Optional[str] = Query(None, min_length=1),
+    status: str = Query("active", pattern="^(active|inactive|all)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    platform_company_id = await _get_platform_company_id(db)
+    filters = [User.company_id == platform_company_id, User.role.in_(["superadmin", "admin"])]
+    if status == "active":
+        filters.append(User.active == True)
+    elif status == "inactive":
+        filters.append(User.active == False)
+    if name:
+        filters.append(User.name.ilike(f"%{name}%"))
+    if email:
+        filters.append(User.email.ilike(f"%{email}%"))
+
+    total = (await db.execute(select(func.count()).select_from(User).where(*filters))).scalar()
+    result = await db.execute(select(User).where(*filters).offset(skip).limit(limit))
+    return {"users": result.scalars().all(), "total": total}
+
+
+@app.post(
+    "/platform-users",
+    response_model=UserOut,
+    status_code=201,
+    tags=["Usuários da Plataforma"],
+    summary="Convidar usuário da plataforma",
+)
+async def create_platform_user(
+    body: PlatformUserIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    _require_can_grant_role(current_user, body.role)
+    platform_company_id = await _get_platform_company_id(db)
+    existing = (await db.execute(select(User).filter_by(email=body.email))).scalars().first()
+    if existing:
+        raise HTTPException(409, "E-mail já cadastrado")
+    u = User(
+        company_id=platform_company_id,
+        name=body.name,
+        email=body.email,
+        password_hash=None,
+        role=body.role,
+    )
+    db.add(u)
+    await db.commit()
+    await db.refresh(u)
+    await _issue_invite(db, u)
+    return u
+
+
+@app.put(
+    "/platform-users/{user_id}",
+    response_model=UserOut,
+    tags=["Usuários da Plataforma"],
+    summary="Editar usuário da plataforma (role / ativo)",
+)
+async def update_platform_user(
+    user_id: int,
+    body: PlatformUserUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    platform_company_id = await _get_platform_company_id(db)
+    result = await db.execute(select(User).filter_by(id=user_id, company_id=platform_company_id))
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    if body.name is not None:
+        u.name = body.name
+    if body.role is not None:
+        _require_can_grant_role(current_user, body.role)
+        u.role = body.role
+    if body.active is not None:
+        u.active = body.active
+    await db.commit()
+    await db.refresh(u)
+    return u
+
+
+@app.delete(
+    "/platform-users/{user_id}",
+    status_code=204,
+    tags=["Usuários da Plataforma"],
+    summary="Desativar usuário da plataforma",
+)
+async def delete_platform_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    platform_company_id = await _get_platform_company_id(db)
+    result = await db.execute(
+        select(User).filter_by(id=user_id, company_id=platform_company_id, active=True)
+    )
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    if str(u.id) == current_user.sub:
+        raise HTTPException(403, "Não é possível desativar o próprio usuário")
+    u.active = False
+    await db.commit()
+
+
+@app.post(
+    "/platform-users/{user_id}/resend-invite",
+    tags=["Usuários da Plataforma"],
+    summary="Reenviar convite de definição de senha",
+)
+async def resend_platform_invite(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    platform_company_id = await _get_platform_company_id(db)
+    result = await db.execute(select(User).filter_by(id=user_id, company_id=platform_company_id))
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    if not u.pending_setup:
+        raise HTTPException(400, "Usuário já definiu a própria senha")
+    await db.execute(
+        update(UserInviteToken)
+        .where(UserInviteToken.user_id == u.id, UserInviteToken.used_at.is_(None))
+        .values(used_at=datetime.utcnow())
+    )
+    await db.commit()
+    await _issue_invite(db, u)
+    return {"sent": True}
+
+
+@app.post(
+    "/platform-users/{user_id}/mfa/reset",
+    tags=["Usuários da Plataforma"],
+    summary="Desativar o duplo fator de outro usuário da plataforma (recuperação assistida)",
+)
+async def reset_platform_user_mfa(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    platform_company_id = await _get_platform_company_id(db)
+    result = await db.execute(select(User).filter_by(id=user_id, company_id=platform_company_id))
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    await _clear_mfa(db, u)
+    await db.commit()
+    return {"ok": True}
 
 
 # ── Duplo fator (TOTP) — ORD-088 ────────────────────────────────────────────
