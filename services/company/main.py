@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, JSON, Enum,
-    UniqueConstraint, select, func, or_, update,
+    UniqueConstraint, select, func, or_, update, delete,
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -32,7 +32,8 @@ from infrastructure.cnpj_lookup import lookup_cnpj
 from infrastructure.cep_lookup import lookup_cep
 from infrastructure.contract_storage import ensure_bucket, presigned_download_url, upload_contract
 from fastapi import Request
-from auth import get_current_user, TokenPayload
+from auth import get_current_user, get_setup_mfa_user, TokenPayload
+import pyotp
 from audit import emit_audit
 
 DB_URL          = require_env("DB_URL")
@@ -122,24 +123,33 @@ class Company(Base):
     contract_sent_at         = Column(DateTime, nullable=True)
     contract_signed_at       = Column(DateTime, nullable=True)
     contract_document_url    = Column(String(255), nullable=True)
+    # ORD-088: disabled|optional|required — ver VALID_MFA_POLICIES.
+    mfa_policy                = Column(String(10), nullable=False, default="disabled")
 
 
 class User(Base):
     __tablename__ = "users"
-    id            = Column(Integer, primary_key=True)
-    company_id    = Column(Integer)
-    name          = Column(String(80))
-    email         = Column(String(120))
-    password_hash = Column(String(128))
-    role          = Column(String(20), default="cashier")
-    active        = Column(Boolean, default=True)
-    created_at    = Column(DateTime, default=datetime.utcnow)
+    id              = Column(Integer, primary_key=True)
+    company_id      = Column(Integer)
+    name            = Column(String(80))
+    email           = Column(String(120))
+    password_hash   = Column(String(128))
+    role            = Column(String(20), default="cashier")
+    active          = Column(Boolean, default=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    # ORD-088: segredo TOTP em base32, nulo até o usuário confirmar o setup.
+    totp_secret      = Column(String(32), nullable=True)
+    totp_enabled_at  = Column(DateTime, nullable=True)
 
     @property
     def pending_setup(self) -> bool:
         # ORD-087: usuário criado por convite ainda não definiu a própria
         # senha — password_hash fica nulo até ele completar o cadastro.
         return self.password_hash is None
+
+    @property
+    def mfa_enabled(self) -> bool:
+        return self.totp_enabled_at is not None
 
 
 class UserInviteToken(Base):
@@ -152,6 +162,32 @@ class UserInviteToken(Base):
     expires_at = Column(DateTime)
     used_at    = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserBackupCode(Base):
+    # Código de recuperação de MFA (ORD-088) — mesmo desenho de
+    # UserInviteToken: só o hash é persistido, nunca o código puro.
+    __tablename__ = "user_backup_codes"
+    id         = Column(Integer, primary_key=True)
+    user_id    = Column(Integer, index=True)
+    code_hash  = Column(String(64))
+    used_at    = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TrustedDevice(Base):
+    # Dispositivo confiável (ORD-092) — mesmo desenho de UserBackupCode, só
+    # o hash é persistido. expires_at é renovado (+7 dias) a cada uso
+    # bem-sucedido (janela deslizante, ver _verify_trusted_device).
+    __tablename__ = "trusted_devices"
+    id            = Column(Integer, primary_key=True)
+    user_id       = Column(Integer, index=True)
+    token_hash    = Column(String(64), unique=True)
+    device_label  = Column(String(200), nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    last_used_at  = Column(DateTime, nullable=True)
+    expires_at    = Column(DateTime)
+    revoked_at    = Column(DateTime, nullable=True)
 
 
 class Terminal(Base):
@@ -267,6 +303,7 @@ class CompanyOut(BaseModel):
     contract_sent_at: Optional[datetime] = None
     contract_signed_at: Optional[datetime] = None
     contract_document_url: Optional[str] = None
+    mfa_policy: str = "disabled"
     model_config = {"from_attributes": True}
 
 
@@ -442,6 +479,7 @@ class UserOut(BaseModel):
     role: str
     active: bool
     pending_setup: bool
+    mfa_enabled: bool
     created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
@@ -471,11 +509,52 @@ class RegeneratePinOut(BaseModel):
 
 VALID_THEMES = {"ordin", "mc", "bk"}
 VALID_MODES  = {"light", "dark"}
+VALID_MFA_POLICIES = {"disabled", "optional", "required"}
 
 
 class AppearanceIn(BaseModel):
     theme: str
     mode: str
+
+
+class SecurityIn(BaseModel):
+    mfa_policy: str
+
+
+class MfaStatusOut(BaseModel):
+    mfa_enabled: bool
+    mfa_policy: str
+
+
+class MfaSetupOut(BaseModel):
+    secret: str
+    provisioning_uri: str
+
+
+class MfaConfirmIn(BaseModel):
+    code: str
+
+
+class MfaConfirmOut(BaseModel):
+    ok: bool
+    backup_codes: list[str]
+
+
+class MfaDisableIn(BaseModel):
+    password: str
+
+
+class TrustedDeviceOut(BaseModel):
+    id: int
+    device_label: Optional[str] = None
+    created_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+    expires_at: datetime
+    model_config = {"from_attributes": True}
+
+
+class TrustedDeviceListOut(BaseModel):
+    devices: list[TrustedDeviceOut]
 
 
 class PaymentConfigIn(BaseModel):
@@ -574,6 +653,7 @@ _tags = [
     {"name": "Terminais",      "description": "Gestão de terminais por empresa (owner/manager)."},
     {"name": "Usuários",       "description": "Gestão de usuários por empresa (owner/manager)."},
     {"name": "Pagamento",      "description": "Configuração de provider TEF/PIX por empresa (owner/superadmin)."},
+    {"name": "MFA",            "description": "Duplo fator de autenticação (TOTP) — setup pessoal e recuperação assistida."},
 ]
 
 app = FastAPI(
@@ -678,7 +758,17 @@ async def verify_credentials(
         raise HTTPException(401)
     if not bcrypt.checkpw(body["password"].encode(), u.password_hash.encode()):
         raise HTTPException(401)
-    return {"id": u.id, "company_id": u.company_id, "role": u.role, "name": u.name}
+    # ORD-088: mfa_status calculado aqui (dono de User e Company) evita um
+    # round-trip extra do auth-service só pra saber a política da empresa.
+    if u.mfa_enabled:
+        mfa_status = "verify"          # já tem TOTP — sempre desafiado, política à parte
+    else:
+        co = await db.get(Company, u.company_id)
+        mfa_status = "setup_required" if co and co.mfa_policy == "required" else "none"
+    return {
+        "id": u.id, "company_id": u.company_id, "role": u.role, "name": u.name,
+        "mfa_status": mfa_status,
+    }
 
 
 @app.get("/internal/terminals/{terminal_id}", include_in_schema=False)
@@ -974,6 +1064,28 @@ async def update_appearance(
     co.visual_mode  = body.mode
     await db.commit()
     return {"ok": True, "theme": body.theme, "mode": body.mode}
+
+
+@app.put(
+    "/companies/{company_id}/security",
+    tags=["Empresas"],
+    summary="Definir política de duplo fator (MFA) da empresa",
+)
+async def update_security(
+    company_id: int,
+    body: SecurityIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    if body.mfa_policy not in VALID_MFA_POLICIES:
+        raise HTTPException(422, f"Política inválida. Disponíveis: {sorted(VALID_MFA_POLICIES)}")
+    _require_company_admin(current_user, company_id)
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+    co.mfa_policy = body.mfa_policy
+    await db.commit()
+    return {"ok": True, "mfa_policy": body.mfa_policy}
 
 
 @app.post(
@@ -1349,6 +1461,256 @@ async def resend_invite(
     await db.commit()
     await _issue_invite(db, u)
     return {"sent": True}
+
+
+# ── Duplo fator (TOTP) — ORD-088 ────────────────────────────────────────────
+
+_BACKUP_CODE_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sem I/O/0/1
+
+
+def _generate_backup_codes(n: int = 10) -> list[str]:
+    return ["".join(secrets.choice(_BACKUP_CODE_CHARSET) for _ in range(8)) for _ in range(n)]
+
+
+def _hash_backup_code(code: str) -> str:
+    return hashlib.sha256(code.upper().encode()).hexdigest()
+
+
+async def _clear_mfa(db: AsyncSession, user: "User") -> None:
+    user.totp_secret = None
+    user.totp_enabled_at = None
+    await db.execute(delete(UserBackupCode).where(UserBackupCode.user_id == user.id))
+    # ORD-092: sem 2FA, "dispositivo já passou pelo 2FA" não tem mais sentido —
+    # revoga (soft) em vez de apagar, mantém histórico de auditoria.
+    await db.execute(
+        update(TrustedDevice)
+        .where(TrustedDevice.user_id == user.id, TrustedDevice.revoked_at.is_(None))
+        .values(revoked_at=datetime.utcnow())
+    )
+
+
+@app.get(
+    "/users/me/mfa/status",
+    response_model=MfaStatusOut,
+    tags=["MFA"],
+    summary="Status do próprio duplo fator e política de MFA da empresa",
+)
+async def mfa_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    u = await db.get(User, int(current_user.sub))
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    co = await db.get(Company, u.company_id)
+    return {"mfa_enabled": u.mfa_enabled, "mfa_policy": co.mfa_policy if co else "disabled"}
+
+
+@app.post(
+    "/users/me/mfa/setup",
+    response_model=MfaSetupOut,
+    tags=["MFA"],
+    summary="Iniciar ativação de duplo fator (gera segredo pendente + QR)",
+)
+async def mfa_setup(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_setup_mfa_user),
+):
+    u = await db.get(User, int(current_user.sub))
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    if u.mfa_enabled:
+        raise HTTPException(409, "Duplo fator já está ativo — desative antes de reconfigurar")
+    co = await db.get(Company, u.company_id)
+    if not co or co.mfa_policy == "disabled":
+        raise HTTPException(403, "Duplo fator não está disponível para esta empresa")
+    secret = pyotp.random_base32()
+    u.totp_secret = secret
+    await db.commit()
+    uri = pyotp.totp.TOTP(secret).provisioning_uri(name=u.email, issuer_name="Ordin")
+    return {"secret": secret, "provisioning_uri": uri}
+
+
+@app.post(
+    "/users/me/mfa/confirm",
+    response_model=MfaConfirmOut,
+    tags=["MFA"],
+    summary="Confirmar ativação de duplo fator com o primeiro código gerado",
+)
+async def mfa_confirm(
+    body: MfaConfirmIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_setup_mfa_user),
+):
+    u = await db.get(User, int(current_user.sub))
+    if not u or not u.totp_secret:
+        raise HTTPException(404, "Nenhuma ativação de duplo fator pendente")
+    if u.mfa_enabled:
+        raise HTTPException(400, "Duplo fator já está confirmado")
+    if not pyotp.totp.TOTP(u.totp_secret).verify(body.code, valid_window=1):
+        raise HTTPException(400, "Código inválido")
+    u.totp_enabled_at = datetime.utcnow()
+    backup_codes = _generate_backup_codes()
+    for code in backup_codes:
+        db.add(UserBackupCode(user_id=u.id, code_hash=_hash_backup_code(code)))
+    await db.commit()
+    return {"ok": True, "backup_codes": backup_codes}
+
+
+@app.post(
+    "/users/me/mfa/disable",
+    tags=["MFA"],
+    summary="Desativar o próprio duplo fator (reautenticação por senha)",
+)
+async def mfa_disable(
+    body: MfaDisableIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    u = await db.get(User, int(current_user.sub))
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    if not u.password_hash or not bcrypt.checkpw(body.password.encode(), u.password_hash.encode()):
+        raise HTTPException(401, "Senha incorreta")
+    await _clear_mfa(db, u)
+    await db.commit()
+    return {"ok": True}
+
+
+@app.post(
+    "/companies/{company_id}/users/{user_id}/mfa/reset",
+    tags=["MFA"],
+    summary="Desativar o duplo fator de outro usuário da empresa (recuperação assistida)",
+)
+async def mfa_reset(
+    company_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(User).filter_by(id=user_id, company_id=company_id))
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    await _clear_mfa(db, u)
+    await db.commit()
+    return {"ok": True}
+
+
+@app.post("/internal/verify-totp", include_in_schema=False)
+async def verify_totp(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    u = await db.get(User, body["user_id"])
+    if not u or not u.mfa_enabled:
+        raise HTTPException(401)
+    code = body["code"].strip()
+    if len(code) == 6 and code.isdigit():
+        if pyotp.totp.TOTP(u.totp_secret).verify(code, valid_window=1):
+            return {"ok": True, "used_backup_code": False}
+        raise HTTPException(401)
+    code_hash = _hash_backup_code(code)
+    result = await db.execute(
+        select(UserBackupCode).filter_by(user_id=u.id, code_hash=code_hash, used_at=None)
+    )
+    backup = result.scalars().first()
+    if not backup:
+        raise HTTPException(401)
+    backup.used_at = datetime.utcnow()
+    await db.commit()
+    return {"ok": True, "used_backup_code": True}
+
+
+# ── Dispositivo confiável — ORD-092 ──────────────────────────────────────────
+
+TRUSTED_DEVICE_TTL_DAYS = 7
+
+
+def _hash_device_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@app.post("/internal/trust-device", include_in_schema=False)
+async def trust_device(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    raw_token = secrets.token_urlsafe(32)
+    db.add(TrustedDevice(
+        user_id=body["user_id"],
+        token_hash=_hash_device_token(raw_token),
+        device_label=(body.get("device_label") or "")[:200] or None,
+        expires_at=datetime.utcnow() + timedelta(days=TRUSTED_DEVICE_TTL_DAYS),
+    ))
+    await db.commit()
+    return {"device_token": raw_token}
+
+
+@app.post("/internal/verify-trusted-device", include_in_schema=False)
+async def verify_trusted_device(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    result = await db.execute(select(User).filter_by(email=body["email"], active=True))
+    u = result.scalars().first()
+    if not u:
+        return {"trusted": False}
+    token_hash = _hash_device_token(body["device_token"])
+    result = await db.execute(
+        select(TrustedDevice).filter_by(user_id=u.id, token_hash=token_hash, revoked_at=None)
+    )
+    device = result.scalars().first()
+    if not device or device.expires_at < datetime.utcnow():
+        return {"trusted": False}
+    # Janela deslizante: cada uso bem-sucedido renova mais 7 dias a partir de agora.
+    device.expires_at = datetime.utcnow() + timedelta(days=TRUSTED_DEVICE_TTL_DAYS)
+    device.last_used_at = datetime.utcnow()
+    await db.commit()
+    return {"trusted": True}
+
+
+@app.get(
+    "/users/me/trusted-devices",
+    response_model=TrustedDeviceListOut,
+    tags=["MFA"],
+    summary="Listar dispositivos confiáveis do próprio usuário",
+)
+async def list_trusted_devices(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(TrustedDevice)
+        .filter_by(user_id=int(current_user.sub), revoked_at=None)
+        .order_by(TrustedDevice.last_used_at.desc())
+    )
+    return {"devices": result.scalars().all()}
+
+
+@app.delete(
+    "/users/me/trusted-devices/{device_id}",
+    tags=["MFA"],
+    summary="Revogar um dispositivo confiável do próprio usuário",
+)
+async def revoke_trusted_device(
+    device_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(TrustedDevice).filter_by(id=device_id, user_id=int(current_user.sub), revoked_at=None)
+    )
+    device = result.scalars().first()
+    if not device:
+        raise HTTPException(404, "Dispositivo não encontrado")
+    device.revoked_at = datetime.utcnow()
+    await db.commit()
+    return {"ok": True}
 
 
 def _password_strength(password: str) -> str:

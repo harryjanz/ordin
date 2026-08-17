@@ -16,6 +16,9 @@ class TokenPayload(BaseModel):
     company_id:  int
     role:        str
     terminal_id: Optional[int] = None
+    # ORD-088: tokens de escopo restrito (ex: refresh, mfa_pending) carregam
+    # "type" no JWT — nunca devem ser aceitos aqui como token de acesso normal.
+    type:        Optional[str] = None
 
 
 def get_current_user(
@@ -25,6 +28,8 @@ def get_current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Token ausente")
     try:
         payload = jwt.decode(credentials.credentials, SECRET, algorithms=[ALGO])
+        if payload.get("type") is not None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Token inválido para esta operação")
         return TokenPayload(
             sub=payload["sub"],
             company_id=payload["company"],

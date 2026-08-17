@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
-import { Button, Dropdown, Toggle, type DropdownOptions } from "design-system";
+import { Button, Dropdown, InputBase, Toggle, makeToast, type DropdownOptions } from "design-system";
+import { QRCodeSVG } from "qrcode.react";
 import api from "../api";
 import { listCompanies } from "../api/companies";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { clearDeviceTrustToken } from "../deviceTrust";
 import { useStore } from "../store";
 import { THEME_REGISTRY, resolveTheme, type ThemeName, type ThemeMode } from "../themes";
-import type { Company } from "../types";
+import type { Company, TrustedDevice } from "../types";
 import styles from "./SettingsScreen.module.scss";
 
 const FONT_D = "'Lexend', sans-serif";
@@ -82,6 +84,10 @@ export default function SettingsScreen() {
   // superadmin e admin são equivalentes (gestão da plataforma, ver
   // docs/ARQUITETURA.md §1.2) — mesmo padrão de PaymentsScreen/OrdersScreen.
   const isPlatformAdmin = role === "superadmin" || role === "admin";
+  // ORD-088: PIN/aparência/política de MFA são configuração da empresa —
+  // cashier chega nesta tela só pela seção "Minha segurança" (2FA pessoal),
+  // não deve ver/editar nada company-wide.
+  const canManageCompany = isPlatformAdmin || role === "owner" || role === "manager";
   const ownCompanyId = useStore((s) => s.companyId);
   const selectedCompanyId = useStore((s) => s.selectedCompanyId);
   const setSelectedCompany = useStore((s) => s.setSelectedCompany);
@@ -154,6 +160,141 @@ export default function SettingsScreen() {
   const themes = Object.entries(THEME_REGISTRY) as [ThemeName, (typeof THEME_REGISTRY)[ThemeName]][];
   const showEmptyState = isPlatformAdmin && !companyId;
 
+  // ── Segurança da empresa (política de MFA) ──────────────────────────────────
+  const [mfaPolicy, setMfaPolicy] = useState<string>("disabled");
+  const [mfaPolicySaving, setMfaPolicySaving] = useState(false);
+  const MFA_POLICY_OPTIONS: DropdownOptions[] = [
+    { value: "disabled", label: "Desativado — 2FA indisponível" },
+    { value: "optional", label: "Opcional — cada usuário decide" },
+    { value: "required", label: "Obrigatório — todo usuário precisa ativar" },
+  ];
+
+  useEffect(() => {
+    if (!companyId) return;
+    api.get(`/companies/${companyId}`).then((r) => {
+      setMfaPolicy(r.data.mfa_policy ?? "disabled");
+    }).catch(() => null);
+  }, [companyId]);
+
+  async function saveMfaPolicy(policy: string) {
+    if (!companyId) return;
+    setMfaPolicySaving(true);
+    try {
+      await api.put(`/companies/${companyId}/security`, { mfa_policy: policy });
+      setMfaPolicy(policy);
+      makeToast("success", "Política de duplo fator atualizada.");
+    } catch {
+      makeToast("error", "Erro ao salvar a política. Tente novamente.");
+    } finally {
+      setMfaPolicySaving(false);
+    }
+  }
+
+  // ── Minha segurança (2FA pessoal) — independente da empresa selecionada,
+  // opera sobre o próprio usuário logado (JWT), não sobre `companyId`.
+  const [myMfaEnabled, setMyMfaEnabled] = useState<boolean | null>(null);
+  const [myMfaCompanyPolicy, setMyMfaCompanyPolicy] = useState<string>("disabled");
+  const [mfaStep, setMfaStep] = useState<"idle" | "setup" | "backup-codes">("idle");
+  const [mfaSecret, setMfaSecret] = useState("");
+  const [mfaUri, setMfaUri] = useState("");
+  const [mfaCode, setMfaCode] = useState("");
+  const [mfaError, setMfaError] = useState<string | null>(null);
+  const [mfaBackupCodes, setMfaBackupCodes] = useState<string[]>([]);
+  const [mfaBusy, setMfaBusy] = useState(false);
+  const [mfaDisablePassword, setMfaDisablePassword] = useState("");
+  const [mfaShowDisable, setMfaShowDisable] = useState(false);
+
+  function refreshMyMfaStatus() {
+    api.get("/users/me/mfa/status").then((r) => {
+      setMyMfaEnabled(r.data.mfa_enabled);
+      setMyMfaCompanyPolicy(r.data.mfa_policy);
+    }).catch(() => null);
+  }
+
+  useEffect(refreshMyMfaStatus, []);
+
+  // ── ORD-092: dispositivos confiáveis ────────────────────────────────────
+  const [trustedDevices, setTrustedDevices] = useState<TrustedDevice[]>([]);
+
+  function refreshTrustedDevices() {
+    api.get("/users/me/trusted-devices").then((r) => setTrustedDevices(r.data.devices)).catch(() => null);
+  }
+
+  useEffect(refreshTrustedDevices, []);
+
+  async function revokeTrustedDevice(id: number) {
+    await api.delete(`/users/me/trusted-devices/${id}`);
+    refreshTrustedDevices();
+    makeToast("success", "Dispositivo revogado.");
+  }
+
+  function forgetThisDevice() {
+    // Só limpa o token guardado neste navegador — sem ele, este navegador
+    // nunca mais consegue provar que já passou pelo 2FA, mesmo que a linha
+    // no servidor ainda exista (expira sozinha em 7 dias, sem uso).
+    clearDeviceTrustToken();
+    makeToast("success", "Este dispositivo não será mais reconhecido automaticamente.");
+  }
+
+  async function startMfaSetup() {
+    setMfaBusy(true);
+    setMfaError(null);
+    try {
+      const r = await api.post("/users/me/mfa/setup");
+      setMfaSecret(r.data.secret);
+      setMfaUri(r.data.provisioning_uri);
+      setMfaStep("setup");
+    } catch {
+      makeToast("error", "Não foi possível iniciar a ativação. Tente novamente.");
+    } finally {
+      setMfaBusy(false);
+    }
+  }
+
+  async function confirmMfaSetup() {
+    setMfaBusy(true);
+    setMfaError(null);
+    try {
+      const r = await api.post("/users/me/mfa/confirm", { code: mfaCode });
+      setMfaBackupCodes(r.data.backup_codes);
+      setMfaStep("backup-codes");
+      // myMfaEnabled só vira true no fim (finishMfaSetup) — enquanto fica
+      // true aqui, a renderização (que checa myMfaEnabled antes de mfaStep)
+      // pula direto pro estado "ativo" e nunca mostra os códigos de backup,
+      // a única chance que o usuário tem de salvá-los (achado ao vivo).
+    } catch {
+      setMfaError("Código inválido. Confira o app autenticador e tente de novo.");
+    } finally {
+      setMfaBusy(false);
+    }
+  }
+
+  function finishMfaSetup() {
+    setMfaStep("idle");
+    setMfaCode("");
+    setMfaSecret("");
+    setMfaUri("");
+    setMfaBackupCodes([]);
+    setMyMfaEnabled(true);
+  }
+
+  async function disableMyMfa() {
+    setMfaBusy(true);
+    setMfaError(null);
+    try {
+      await api.post("/users/me/mfa/disable", { password: mfaDisablePassword });
+      setMyMfaEnabled(false);
+      setMfaShowDisable(false);
+      setMfaDisablePassword("");
+      refreshTrustedDevices();
+      makeToast("success", "Duplo fator desativado.");
+    } catch {
+      setMfaError("Senha incorreta.");
+    } finally {
+      setMfaBusy(false);
+    }
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.title}>Configurações</div>
@@ -170,9 +311,127 @@ export default function SettingsScreen() {
         </div>
       )}
 
+      {/* ── Card Minha segurança (2FA pessoal) ────────────────────────────
+          Sempre visível pra quem chega nesta tela (owner/manager/cashier/
+          superadmin/admin) — opera sobre o próprio usuário logado, não
+          depende de nenhuma empresa selecionada. */}
+      <div className={styles.card}>
+        <div className={styles.cardTitle}>Minha segurança</div>
+        {myMfaCompanyPolicy === "disabled" ? (
+          <div className={styles.cardDesc}>
+            Duplo fator de autenticação não está disponível — a empresa ainda não habilitou essa opção.
+          </div>
+        ) : myMfaEnabled === null ? (
+          <div className={styles.cardDesc}>Carregando…</div>
+        ) : myMfaEnabled ? (
+          <>
+            <div className={styles.cardDesc}>
+              Duplo fator está <strong>ativo</strong> na sua conta. A cada login, além da senha, você precisa
+              informar o código do app autenticador.
+            </div>
+            {!mfaShowDisable ? (
+              <Button variant="secondary" onClick={() => setMfaShowDisable(true)}>
+                Desativar duplo fator
+              </Button>
+            ) : (
+              <div className={styles.mfaInline}>
+                <InputBase
+                  type="password"
+                  label="Confirme sua senha para desativar"
+                  value={mfaDisablePassword}
+                  onChange={(e) => setMfaDisablePassword(e.target.value)}
+                  errorMessage={mfaError ?? undefined}
+                />
+                <div className={styles.formActions}>
+                  <Button onClick={disableMyMfa} loading={mfaBusy} disabled={!mfaDisablePassword}>
+                    Confirmar desativação
+                  </Button>
+                  <Button variant="secondary" onClick={() => { setMfaShowDisable(false); setMfaError(null); setMfaDisablePassword(""); }}>
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className={styles.trustedDevicesBlock}>
+              <div className={styles.formLabel}>Dispositivos confiáveis</div>
+              {trustedDevices.length === 0 ? (
+                <div className={styles.cardDesc}>Nenhum dispositivo confiável ativo no momento.</div>
+              ) : (
+                trustedDevices.map((d) => (
+                  <div key={d.id} className={styles.trustedDeviceRow}>
+                    <div>
+                      <div className={styles.trustedDeviceLabel}>{d.device_label || "Dispositivo sem identificação"}</div>
+                      <div className={styles.trustedDeviceMeta}>
+                        Válido até {new Date(d.expires_at).toLocaleString("pt-BR")}
+                        {d.last_used_at && ` · último uso ${new Date(d.last_used_at).toLocaleString("pt-BR")}`}
+                      </div>
+                    </div>
+                    <Button size="small" variant="secondary" onClick={() => revokeTrustedDevice(d.id)}>
+                      Remover
+                    </Button>
+                  </div>
+                ))
+              )}
+              <Button size="small" variant="secondary" onClick={forgetThisDevice}>
+                Esquecer este dispositivo
+              </Button>
+            </div>
+          </>
+        ) : mfaStep === "idle" ? (
+          <>
+            <div className={styles.cardDesc}>
+              Duplo fator está <strong>desativado</strong> na sua conta. Ative para exigir um código do app
+              autenticador (Google Authenticator, Authy, 1Password…) a cada login, além da senha.
+            </div>
+            <Button onClick={startMfaSetup} loading={mfaBusy} disabled={mfaBusy}>
+              Ativar duplo fator
+            </Button>
+          </>
+        ) : mfaStep === "setup" ? (
+          <div className={styles.mfaInline}>
+            <div className={styles.cardDesc}>
+              Escaneie o QR code com o app autenticador e digite o código de 6 dígitos gerado para confirmar.
+            </div>
+            <div className={styles.mfaQrRow}>
+              <QRCodeSVG value={mfaUri} size={200} />
+              <div className={styles.mfaSecretFallback}>
+                Não consegue escanear? Digite o código manualmente: <code>{mfaSecret}</code>
+              </div>
+            </div>
+            <InputBase
+              label="Código de 6 dígitos"
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              errorMessage={mfaError ?? undefined}
+              maxLength={6}
+            />
+            <div className={styles.formActions}>
+              <Button onClick={confirmMfaSetup} loading={mfaBusy} disabled={mfaCode.length !== 6}>
+                Confirmar ativação
+              </Button>
+              <Button variant="secondary" onClick={finishMfaSetup}>
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className={styles.mfaInline}>
+            <div className={styles.cardDesc}>
+              Duplo fator ativado! Guarde estes 10 códigos de backup — cada um funciona uma única vez e serve
+              para entrar caso você perca o acesso ao app autenticador. <strong>Eles não serão mostrados de novo.</strong>
+            </div>
+            <div className={styles.mfaBackupCodes}>
+              {mfaBackupCodes.map((c) => <code key={c}>{c}</code>)}
+            </div>
+            <Button onClick={finishMfaSetup}>Já salvei meus códigos</Button>
+          </div>
+        )}
+      </div>
+
       {showEmptyState ? (
         <div className={styles.empty}>Selecione uma empresa para gerenciar PIN e aparência do totem.</div>
-      ) : (
+      ) : !canManageCompany ? null : (
         <>
           {/* ── Card PIN ─────────────────────────────────────────────────── */}
           <div className={styles.card}>
@@ -256,6 +515,21 @@ export default function SettingsScreen() {
                 </span>
               )}
             </div>
+          </div>
+
+          {/* ── Card Segurança da empresa (política de MFA) ────────────── */}
+          <div className={styles.card}>
+            <div className={styles.cardTitle}>Segurança da empresa</div>
+            <div className={styles.cardDesc}>
+              Define se o duplo fator de autenticação é opcional ou obrigatório para os usuários desta empresa.
+            </div>
+            <Dropdown
+              label="Duplo fator (2FA)"
+              value={MFA_POLICY_OPTIONS.find((o) => o.value === mfaPolicy) ?? null}
+              onValueSelected={(opt) => saveMfaPolicy(String(opt.value))}
+              options={MFA_POLICY_OPTIONS}
+              disabled={mfaPolicySaving}
+            />
           </div>
         </>
       )}

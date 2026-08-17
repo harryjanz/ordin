@@ -26,7 +26,10 @@ const ROLE_ROUTES: Record<string, string[]> = {
   admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
   owner:      ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
   manager:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
-  cashier:  ["/dashboard"],
+  // ORD-088: cashier ganha acesso a /settings só pra seção "Minha segurança"
+  // (2FA pessoal) — SettingsScreen esconde PIN/Aparência/política de MFA
+  // pra quem não é owner/manager/superadmin/admin (ver canManageCompany).
+  cashier:  ["/dashboard", "/settings"],
 };
 
 function ProtectedRoute({ path, element }: { path: string; element: JSX.Element }) {

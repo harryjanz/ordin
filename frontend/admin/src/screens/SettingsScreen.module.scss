@@ -189,3 +189,105 @@ $font-b: 'Inter', sans-serif;
 .saveMsgErr {
   color: color('error-base');
 }
+
+// ── ORD-088: duplo fator ─────────────────────────────────────────────────────
+
+.mfaInline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+}
+
+.mfaQrRow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+
+  // Coluna, não linha — lado a lado o texto do segredo (32 caracteres
+  // monoespaçados) fica espremido numa faixa estreita ao lado do QR,
+  // difícil de ler (achado ao vivo). QR maior + mensagem embaixo, centralizada.
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+.mfaSecretFallback {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  font-family: $font-b;
+  overflow-wrap: anywhere;
+  text-align: center;
+
+  code {
+    font-family: monospace;
+    background: var(--a-surface);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+}
+
+.mfaBackupCodes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 16px;
+
+  code {
+    font-family: monospace;
+    font-size: 15px;
+    letter-spacing: 1px;
+    text-align: center;
+  }
+}
+
+// ── ORD-092: dispositivo confiável ───────────────────────────────────────────
+
+.formLabel {
+  @include font('sm-emphasys');
+  font-family: $font-d;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.trustedDevicesBlock {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.trustedDeviceRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 10px 14px;
+}
+
+.trustedDeviceLabel {
+  @include font('sm');
+  font-family: $font-b;
+}
+
+.trustedDeviceMeta {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.4);
+  font-family: $font-b;
+}
