@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, select
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, select, update
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 from pydantic import BaseModel
@@ -412,6 +412,26 @@ async def logout(body: RefreshReq, request: Request, db: AsyncSession = Depends(
                actor=actor, actor_id=int(actor) if actor else None,
                company_id=company_id, result="success")
     return {"detail":"Logout realizado"}
+
+def require_internal(x_internal_secret: str = Header(default="")) -> None:
+    if not secrets.compare_digest(x_internal_secret, INTERNAL_SECRET):
+        raise HTTPException(403, detail="Acesso interno não autorizado")
+
+class RevokeSessionsIn(BaseModel):
+    user_id: int
+
+@app.post("/internal/revoke-sessions", include_in_schema=False)
+async def revoke_sessions(body: RevokeSessionsIn, db: AsyncSession = Depends(get_db), _: None = Depends(require_internal)):
+    # ORD-097: usado pelo company-service ao concluir um reset de senha —
+    # desloga a conta de qualquer sessão ativa (ex: navegador onde a
+    # senha antiga vazou). Primeira chamada nessa direção (company → auth);
+    # mesmo padrão de X-Internal-Secret já usado nas outras direções.
+    await db.execute(
+        update(RefreshToken).where(RefreshToken.user_id == body.user_id, RefreshToken.revoked == False)
+        .values(revoked=True)
+    )
+    await db.commit()
+    return {"ok": True}
 
 @app.post(
     "/auth/device/challenge",

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Button, Dropdown, InputBase, Toggle, makeToast, type DropdownOptions } from "design-system";
+import { Button, Dropdown, InputBase, Tab, Tabs, Toggle, makeToast, type DropdownOptions } from "design-system";
 import { QRCodeSVG } from "qrcode.react";
 import api from "../api";
 import { listCompanies } from "../api/companies";
@@ -107,6 +107,9 @@ export default function SettingsScreen() {
 
   const companyOptions: DropdownOptions[] = companies.map((c) => ({ value: String(c.id), label: c.name }));
 
+  // ── ORD-094: abas ────────────────────────────────────────────────────────
+  const [tab, setTab] = useState<"security" | "pin" | "appearance">("security");
+
   // ── PIN ───────────────────────────────────────────────────────────────────
   const [pin, setPin] = useState<string | null>(null);
   const [pinLoading, setPinLoading] = useState(false);
@@ -159,6 +162,11 @@ export default function SettingsScreen() {
 
   const themes = Object.entries(THEME_REGISTRY) as [ThemeName, (typeof THEME_REGISTRY)[ThemeName]][];
   const showEmptyState = isPlatformAdmin && !companyId;
+  // ORD-095: admin/superadmin "dentro" de uma empresa cliente (suporte) —
+  // o 2FA da própria conta administrativa (empresa interna, ORD-093) não
+  // tem nenhuma relação com a empresa selecionada, então não faz sentido
+  // mostrar o card "Minha segurança" nesse contexto.
+  const inSupportMode = isPlatformAdmin && !!companyId;
 
   // ── Segurança da empresa (política de MFA) ──────────────────────────────────
   const [mfaPolicy, setMfaPolicy] = useState<string>("disabled");
@@ -182,12 +190,29 @@ export default function SettingsScreen() {
     try {
       await api.put(`/companies/${companyId}/security`, { mfa_policy: policy });
       setMfaPolicy(policy);
+      // ORD-094: sem isso, "Minha segurança" só reflete a política nova
+      // depois de um refresh manual da tela (achado ao vivo pelo usuário).
+      refreshMyMfaStatus();
       makeToast("success", "Política de duplo fator atualizada.");
     } catch {
       makeToast("error", "Erro ao salvar a política. Tente novamente.");
     } finally {
       setMfaPolicySaving(false);
     }
+  }
+
+  // ORD-095: desativar a política da empresa apaga o 2FA e os dispositivos
+  // confiáveis de TODOS os usuários dela (cascata no backend) — ação
+  // destrutiva demais pra aplicar direto no onValueSelected, precisa de
+  // confirmação. Trocar entre "opcional"/"obrigatório" continua imediato.
+  const [confirmDisableMfa, setConfirmDisableMfa] = useState(false);
+
+  function onMfaPolicySelected(policy: string) {
+    if (policy === "disabled" && mfaPolicy !== "disabled") {
+      setConfirmDisableMfa(true);
+      return;
+    }
+    saveMfaPolicy(policy);
   }
 
   // ── Minha segurança (2FA pessoal) — independente da empresa selecionada,
@@ -288,8 +313,17 @@ export default function SettingsScreen() {
       setMfaDisablePassword("");
       refreshTrustedDevices();
       makeToast("success", "Duplo fator desativado.");
-    } catch {
-      setMfaError("Senha incorreta.");
+    } catch (e: unknown) {
+      // ORD-096, achado ao vivo: erro genérico "Senha incorreta" também
+      // aparecia quando o motivo real era a conta ser de plataforma (403,
+      // duplo fator obrigatório e permanente) — mensagem enganosa, já que
+      // a senha estava certa.
+      const axErr = e as { response?: { status?: number } };
+      setMfaError(
+        axErr?.response?.status === 403
+          ? "Duplo fator é obrigatório para contas da plataforma e não pode ser desativado."
+          : "Senha incorreta."
+      );
     } finally {
       setMfaBusy(false);
     }
@@ -311,10 +345,49 @@ export default function SettingsScreen() {
         </div>
       )}
 
+      {/* ── ORD-094: abas — só aparecem pra quem também gerencia a empresa
+          (owner/manager/superadmin/admin). cashier só tem acesso ao
+          conteúdo de Segurança, então vai direto pra ele, sem barra de
+          abas com uma opção só. */}
+      {canManageCompany && (
+        <div className={styles.tabs}>
+          <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as typeof tab)}>
+            <Tab value="security" label="Segurança" />
+            <Tab value="pin" label="PIN do totem" />
+            <Tab value="appearance" label="Aparência do totem" />
+          </Tabs>
+        </div>
+      )}
+
+      {(!canManageCompany || tab === "security") && (
+      <>
+      {/* ── Card Segurança da empresa (política de MFA) ─────────────────── */}
+      {canManageCompany && (
+        showEmptyState ? (
+          <div className={styles.empty}>Selecione uma empresa para gerenciar a segurança da empresa.</div>
+        ) : (
+          <div className={styles.card}>
+            <div className={styles.cardTitle}>Segurança da empresa</div>
+            <div className={styles.cardDesc}>
+              Define se o duplo fator de autenticação é opcional ou obrigatório para os usuários desta empresa.
+            </div>
+            <Dropdown
+              label="Duplo fator (2FA)"
+              value={MFA_POLICY_OPTIONS.find((o) => o.value === mfaPolicy) ?? null}
+              onValueSelected={(opt) => onMfaPolicySelected(String(opt.value))}
+              options={MFA_POLICY_OPTIONS}
+              disabled={mfaPolicySaving}
+            />
+          </div>
+        )
+      )}
+
       {/* ── Card Minha segurança (2FA pessoal) ────────────────────────────
-          Sempre visível pra quem chega nesta tela (owner/manager/cashier/
-          superadmin/admin) — opera sobre o próprio usuário logado, não
-          depende de nenhuma empresa selecionada. */}
+          Visível pra quem opera sobre o próprio usuário logado — não pra
+          admin/superadmin em modo suporte (empresa cliente selecionada),
+          já que o 2FA da própria conta administrativa não tem nenhuma
+          relação com a empresa sendo suportada (ORD-095). */}
+      {!inSupportMode && (
       <div className={styles.card}>
         <div className={styles.cardTitle}>Minha segurança</div>
         {myMfaCompanyPolicy === "disabled" ? (
@@ -329,7 +402,14 @@ export default function SettingsScreen() {
               Duplo fator está <strong>ativo</strong> na sua conta. A cada login, além da senha, você precisa
               informar o código do app autenticador.
             </div>
-            {!mfaShowDisable ? (
+            {isPlatformAdmin ? (
+              // ORD-096: duplo fator é obrigatório e permanente pra contas
+              // de plataforma — nem oferece o botão, já que a tentativa
+              // sempre seria rejeitada pelo backend (403).
+              <div className={styles.cardDesc}>
+                Duplo fator é obrigatório para contas da plataforma e não pode ser desativado.
+              </div>
+            ) : !mfaShowDisable ? (
               <Button variant="secondary" onClick={() => setMfaShowDisable(true)}>
                 Desativar duplo fator
               </Button>
@@ -428,11 +508,15 @@ export default function SettingsScreen() {
           </div>
         )}
       </div>
+      )}
+      </>
+      )}
 
-      {showEmptyState ? (
-        <div className={styles.empty}>Selecione uma empresa para gerenciar PIN e aparência do totem.</div>
-      ) : !canManageCompany ? null : (
-        <>
+      {canManageCompany && tab === "pin" && (
+        showEmptyState ? (
+          <div className={styles.empty}>Selecione uma empresa para gerenciar o PIN do totem.</div>
+        ) : (
+          <>
           {/* ── Card PIN ─────────────────────────────────────────────────── */}
           <div className={styles.card}>
             <div className={styles.cardTitle}>PIN do totem</div>
@@ -450,7 +534,15 @@ export default function SettingsScreen() {
               </>
             )}
           </div>
+          </>
+        )
+      )}
 
+      {canManageCompany && tab === "appearance" && (
+        showEmptyState ? (
+          <div className={styles.empty}>Selecione uma empresa para gerenciar a aparência do totem.</div>
+        ) : (
+          <>
           {/* ── Card Aparência ───────────────────────────────────────────── */}
           <div className={styles.card}>
             <div className={styles.cardTitle}>Aparência do totem</div>
@@ -516,22 +608,8 @@ export default function SettingsScreen() {
               )}
             </div>
           </div>
-
-          {/* ── Card Segurança da empresa (política de MFA) ────────────── */}
-          <div className={styles.card}>
-            <div className={styles.cardTitle}>Segurança da empresa</div>
-            <div className={styles.cardDesc}>
-              Define se o duplo fator de autenticação é opcional ou obrigatório para os usuários desta empresa.
-            </div>
-            <Dropdown
-              label="Duplo fator (2FA)"
-              value={MFA_POLICY_OPTIONS.find((o) => o.value === mfaPolicy) ?? null}
-              onValueSelected={(opt) => saveMfaPolicy(String(opt.value))}
-              options={MFA_POLICY_OPTIONS}
-              disabled={mfaPolicySaving}
-            />
-          </div>
-        </>
+          </>
+        )
       )}
 
       <ConfirmDialog
@@ -539,6 +617,13 @@ export default function SettingsScreen() {
         message="Gerar novo PIN? O PIN atual será invalidado."
         onConfirm={doRegenerate}
         onCancel={() => setConfirmRegenerate(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmDisableMfa}
+        message="Desativar o duplo fator da empresa vai remover o 2FA e os dispositivos confiáveis de TODOS os usuários da empresa, imediatamente. Essa ação não pode ser desfeita. Deseja continuar?"
+        onConfirm={() => { setConfirmDisableMfa(false); saveMfaPolicy("disabled"); }}
+        onCancel={() => setConfirmDisableMfa(false)}
       />
     </div>
   );

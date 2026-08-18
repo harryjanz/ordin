@@ -378,7 +378,11 @@ async def test_verify_credentials_mfa_status_verify_quando_totp_ja_ativo(client,
     assert r.json()["mfa_status"] == "verify"
 
 
-async def test_mudar_politica_para_disabled_nao_remove_totp_ja_ativo(client, empresa):
+async def test_mudar_politica_para_disabled_remove_totp_ja_ativo(client, empresa):
+    # ORD-095: revisão de comportamento — desativar a política da empresa
+    # agora limpa em cascata o 2FA (e dispositivos confiáveis) de todo
+    # usuário dela, em vez de deixar quem já tinha 2FA configurado "preso"
+    # nele mesmo com a empresa dizendo que o recurso está indisponível.
     setup = await client.post("/users/me/mfa/setup", headers=auth(empresa["owner_token"]))
     code = pyotp.TOTP(setup.json()["secret"]).now()
     await client.post("/users/me/mfa/confirm", json={"code": code}, headers=auth(empresa["owner_token"]))
@@ -393,4 +397,4 @@ async def test_mudar_politica_para_disabled_nao_remove_totp_ja_ativo(client, emp
         json={"email": f"{TOKEN.lower()}.owner@teste.com", "password": "senhaSegura123!"},
         headers=INTERNAL_HEADERS,
     )
-    assert r.json()["mfa_status"] == "verify"  # continua sendo desafiado
+    assert r.json()["mfa_status"] == "none"  # 2FA foi limpo junto com a política

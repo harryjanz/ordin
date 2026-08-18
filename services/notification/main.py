@@ -104,6 +104,42 @@ async def send_invite(body: SendInviteIn, _: None = Depends(require_internal)):
     return {"sent": True}
 
 
+# ORD-097 — mesmo template base do convite, CTA e corpo diferentes (não é
+# "bem-vindo", é "alguém pediu uma senha nova pra essa conta").
+def _build_password_reset_html(name: str, set_password_url: str) -> str:
+    return f"""
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      {_EMAIL_HEADER}
+      <h2>Olá, {name}</h2>
+      <p>Recebemos um pedido para redefinir a senha da sua conta na Ordin.</p>
+      <p>
+        <a href="{set_password_url}"
+           style="display: inline-block; background: #7c3aed; color: #fff;
+                  padding: 12px 24px; border-radius: 8px; text-decoration: none;">
+          Redefinir minha senha
+        </a>
+      </p>
+      <p style="color: #888; font-size: 12px;">
+        Se você não pediu essa redefinição, pode ignorar este e-mail com segurança — sua senha atual continua valendo.
+      </p>
+      {_EMAIL_FOOTER}
+    </div>
+    """
+
+
+class SendPasswordResetIn(BaseModel):
+    to: str
+    name: str
+    set_password_url: str
+
+
+@app.post("/internal/send-password-reset", include_in_schema=False)
+async def send_password_reset(body: SendPasswordResetIn, _: None = Depends(require_internal)):
+    html = _build_password_reset_html(body.name, body.set_password_url)
+    await provider.send(to=body.to, subject="Ordin — redefinição de senha", html=html)
+    return {"sent": True}
+
+
 @app.get("/health")
 def health():
     return {"service": "notification", "status": "ok"}

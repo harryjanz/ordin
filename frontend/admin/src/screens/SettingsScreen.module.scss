@@ -21,6 +21,11 @@ $font-b: 'Inter', sans-serif;
   margin-bottom: 20px;
 }
 
+// ORD-094 — mesmo espaçamento de CompanyScreen.module.scss.
+.tabs {
+  margin-bottom: 24px;
+}
+
 .empty {
   color: rgba(var(--a-text-rgb), 0.4);
   @include font('sm');

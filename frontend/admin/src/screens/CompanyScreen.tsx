@@ -567,6 +567,14 @@ export default function CompanyScreen() {
     makeToast("success", "Convite reenviado");
   }
 
+  // ORD-097: funciona pra qualquer usuário ativo (não só pending_setup,
+  // diferença chave em relação a "reenviar convite").
+  async function sendPasswordReset(id: number) {
+    if (!companyId) return;
+    await api.post(`/companies/${companyId}/users/${id}/send-password-reset`);
+    makeToast("success", "E-mail de redefinição de senha enviado");
+  }
+
   function deactivateUser(id: number) {
     if (!companyId) return;
     setConfirmState({
@@ -596,6 +604,22 @@ export default function CompanyScreen() {
         setConfirmState(null);
         await api.post(`/companies/${companyId}/users/${id}/mfa/reset`);
         makeToast("success", "Duplo fator desativado para este usuário");
+        loadUsers();
+      },
+    });
+  }
+
+  // ORD-095: mais estreito que resetUserMfa acima — revoga só os
+  // dispositivos confiáveis (ex: notebook perdido), sem apagar o 2FA
+  // configurado, então o usuário não precisa reconfigurar do zero.
+  function revokeUserDevices(id: number) {
+    if (!companyId) return;
+    setConfirmState({
+      message: "Remover o dispositivo confiável deste usuário? Ele precisará confirmar o duplo fator no próximo login.",
+      onConfirm: async () => {
+        setConfirmState(null);
+        await api.delete(`/companies/${companyId}/users/${id}/trusted-devices`);
+        makeToast("success", "Dispositivo confiável removido");
         loadUsers();
       },
     });
@@ -824,8 +848,14 @@ export default function CompanyScreen() {
                       {u.pending_setup && (
                         <Button size="small" variant="secondary" onClick={() => resendInvite(u.id)}>Reenviar convite</Button>
                       )}
+                      {u.active && !u.pending_setup && (
+                        <Button size="small" variant="secondary" onClick={() => sendPasswordReset(u.id)}>Enviar redefinição de senha</Button>
+                      )}
                       {u.mfa_enabled && (
                         <Button size="small" variant="secondary" onClick={() => resetUserMfa(u.id)}>Desativar 2FA</Button>
+                      )}
+                      {u.has_trusted_device && (
+                        <Button size="small" variant="secondary" onClick={() => revokeUserDevices(u.id)}>Remover dispositivo confiável</Button>
                       )}
                       {u.active ? (
                         <Button size="small" variant="secondary" onClick={() => deactivateUser(u.id)}>Desativar</Button>
