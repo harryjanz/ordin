@@ -47,6 +47,10 @@ NOTIFICATION_SERVICE_URL = require_env("NOTIFICATION_SERVICE_URL")
 ADMIN_BASE_URL           = os.getenv("ADMIN_BASE_URL", "http://localhost:3001")
 INTERNAL_HEADERS         = {"X-Internal-Secret": INTERNAL_SECRET}
 INVITE_TOKEN_TTL_HOURS   = 24
+# ORD-097 — TTL próprio, mais curto que o convite: link de reset é de
+# maior risco (alguém tentando entrar na conta agora) e a expectativa de
+# uso é imediata, diferente do convite (pessoa pode abrir o e-mail depois).
+PASSWORD_RESET_TTL_HOURS = 1
 # ORD-097 — primeira vez que company-service chama auth-service (até aqui só
 # a direção contrária existia); usado só pra revogar sessões após reset de senha.
 AUTH_SERVICE_URL         = require_env("AUTH_SERVICE_URL")
@@ -1361,14 +1365,15 @@ def check_forgot_password_rate_limit(ip: str, email: str, response: Response) ->
 
 async def _issue_password_reset(db: AsyncSession, user: "User") -> None:
     """Mesmo desenho de _issue_invite — token de uso único reaproveitado
-    (UserInviteToken), e-mail com CTA/corpo diferente. Nunca propaga erro de
-    envio, mesma tolerância do convite."""
+    (UserInviteToken), e-mail com CTA/corpo diferente, TTL mais curto
+    (PASSWORD_RESET_TTL_HOURS). Nunca propaga erro de envio, mesma
+    tolerância do convite."""
     raw_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
     db.add(UserInviteToken(
         user_id=user.id,
         token_hash=token_hash,
-        expires_at=datetime.utcnow() + timedelta(hours=INVITE_TOKEN_TTL_HOURS),
+        expires_at=datetime.utcnow() + timedelta(hours=PASSWORD_RESET_TTL_HOURS),
     ))
     await db.commit()
 

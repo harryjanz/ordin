@@ -68,7 +68,7 @@ Como usuário que esqueceu a senha, quero pedir um link de redefinição pelo me
 ### Critérios de aceite funcionais
 - [ ] Link "Esqueci minha senha" na tela de login leva a uma tela de pedir e-mail
 - [ ] `POST /users/forgot-password` sempre responde com mensagem genérica de sucesso, exista ou não o e-mail
-- [ ] E-mail existente e ativo recebe link de redefinição por e-mail (token de uso único, mesmo TTL do convite)
+- [ ] E-mail existente e ativo recebe link de redefinição por e-mail (token de uso único, TTL de 1h — mais curto que o convite, 24h, decidido no chat após revisar o comportamento default)
 - [ ] Definir a senha nova pelo link funciona com a mesma validação de força já existente
 - [ ] Ao concluir: dispositivos confiáveis da conta revogados, sessões ativas (refresh tokens) revogadas
 - [ ] Duplo fator (TOTP/backup codes) não é alterado pelo reset de senha, em nenhum caso
@@ -176,7 +176,7 @@ async def forgot_password(
 `check_rate_limit`/Redis precisa ser portado (ou importado) pro company-service — hoje só existe no auth-service; company-service já tem `redis_client` configurado (usado pra blacklist/revogação imediata), então é reaproveitar a conexão já existente, só faltando a função.
 
 #### `_issue_password_reset(db, user)` (novo, espelha `_issue_invite`)
-Mesmo desenho: `UserInviteToken` novo (reaproveitado, sem mudança de schema), chama `POST /internal/send-password-reset` no notification-service em vez de `/internal/send-invite`. Mesma política de nunca propagar erro de envio.
+Mesmo desenho: `UserInviteToken` novo (reaproveitado, sem mudança de schema), chama `POST /internal/send-password-reset` no notification-service em vez de `/internal/send-invite`. Mesma política de nunca propagar erro de envio. **TTL próprio (`PASSWORD_RESET_TTL_HOURS = 1`)**, diferente de `INVITE_TOKEN_TTL_HOURS` (24h) — decidido no chat depois da implementação inicial: link de reset é maior risco (alguém tentando entrar na conta agora) e tem expectativa de uso imediato, diferente do convite (pessoa pode abrir o e-mail depois).
 
 #### `POST /users/complete-registration` (alterado)
 Ao final, depois de `invite.used_at = datetime.utcnow()`:

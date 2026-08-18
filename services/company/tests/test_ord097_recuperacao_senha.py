@@ -136,6 +136,25 @@ async def duas_empresas(client):
 
 # ── POST /users/forgot-password ─────────────────────────────────────────────
 
+async def test_forgot_password_token_expira_em_1h_nao_24h(client, duas_empresas):
+    # TTL próprio do reset, mais curto que o do convite (24h) — decidido no
+    # chat: link de reset é maior risco e tem expectativa de uso imediato.
+    import main as svc
+    with respx.mock:
+        respx.post(_reset_email_url(svc)).mock(return_value=httpx.Response(200, json={"sent": True}))
+        r = await client.post("/users/forgot-password", json={"email": duas_empresas["emails"]["owner_a"]})
+    assert r.status_code == 200
+
+    async with svc.AsyncSessionLocal() as db:
+        invite = (await db.execute(
+            svc.select(svc.UserInviteToken).where(
+                svc.UserInviteToken.user_id == duas_empresas["ids"]["owner_a"]
+            ).order_by(svc.UserInviteToken.id.desc())
+        )).scalars().first()
+    ttl = invite.expires_at - invite.created_at
+    assert timedelta(minutes=59) < ttl <= timedelta(hours=1)
+
+
 async def test_forgot_password_email_existente_envia_email(client, duas_empresas):
     import main as svc
     with respx.mock:
