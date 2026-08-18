@@ -1,6 +1,7 @@
 import { useState, FormEvent } from "react";
 import axios from "axios";
 import { Alert, Button, InputBase } from "design-system";
+import { OrdinSymbol } from "../assets/OrdinSymbol";
 import styles from "./ForgotPasswordScreen.module.scss";
 
 export default function ForgotPasswordScreen() {
@@ -34,7 +35,10 @@ export default function ForgotPasswordScreen() {
     return (
       <div className={styles.page}>
         <div className={styles.card}>
-          <div className={styles.logo}>ordin</div>
+          <div className={styles.logoRow}>
+            <OrdinSymbol size={26} />
+            <span className={styles.logo}>ordin</span>
+          </div>
           <div className={styles.sub}>Verifique seu e-mail</div>
           <p className={styles.text}>
             Se esse e-mail existir na nossa base, você vai receber um link de redefinição de senha em instantes.
@@ -50,7 +54,10 @@ export default function ForgotPasswordScreen() {
   return (
     <div className={styles.page}>
       <div className={styles.card}>
-        <div className={styles.logo}>ordin</div>
+        <div className={styles.logoRow}>
+          <OrdinSymbol size={26} />
+          <span className={styles.logo}>ordin</span>
+        </div>
         <div className={styles.sub}>Esqueci minha senha</div>
         <p className={styles.text}>
           Informe o e-mail da sua conta — vamos enviar um link para você definir uma senha nova.

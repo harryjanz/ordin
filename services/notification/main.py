@@ -48,14 +48,52 @@ ROLE_DESCRIPTIONS = {
 }
 
 
-# ORD-090 — identidade visual do e-mail. Sem arquivo de logo nem hospedagem
-# de imagem pública configurada (Fase 2 ainda bloqueada), então o cabeçalho
-# usa o mesmo wordmark de texto ("ordin" roxo/negrito) já usado no admin
-# (LoginScreen/SetPasswordScreen), não uma imagem. E-mail de suporte e
-# WhatsApp são placeholders — sem canal de suporte real configurado ainda.
-_EMAIL_HEADER = """
+# ORD-090/símbolo novo — identidade visual do e-mail. Sem hospedagem de
+# imagem pública configurada (Fase 2 ainda bloqueada), então o símbolo vai
+# embutido como PNG base64 (data URI) em vez de referenciar uma URL —
+# funciona offline e não depende de nenhum servidor de assets externo.
+# PNG (não SVG) de propósito: suporte a SVG em cliente de e-mail é
+# inconsistente (quebra no Outlook desktop); PNG base64 é o denominador
+# comum mais seguro. Gerado a partir do mesmo símbolo usado no favicon e
+# no admin (frontend/admin/public/favicon.svg), 96×96, fundo transparente.
+_ORDIN_SYMBOL_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAABmJLR0QA/wD/AP+gvaeTAAAGGUlE"
+    "QVR4nO2dW2wUVRjHf99aCxKFNvFCDRrhAYnKxQsvGhKMoEV9MBEJJBhCkN1WI5dEwFiQhXBRUYIY"
+    "dHcr1vgiqegTyE28PGiMmiAWI8bYGBSaEKEIBmkp+/kwG7o2lNLuN3OmeH6v7fz/38x/5+ycM+ec"
+    "BY/H4/F4PB6Px+PxeDwej8cTCeK6gL6SRsuq4DqASjg6DTnnuqa+0K8CaEAr2mG2wOMK44Hywp/a"
+    "Bb5V2FoO785GTrisszf0iwAa0fJWeBZYBgzp4d9PAKsq4Y1pSHv41ZVG7APIoZMUNgC39/LQX4C6"
+    "FPJBCGWZEdsAcuhIhfXAIyVK7c3DglrkgEVd1sQugAa04iw8r7CQzja+VDqAdwjuiD+NNE2ITQBp"
+    "NDEUZgqsA64Pyea4wMojsCmNdITk0StiEcBb6MRE0M6PjcjyoMLCGmRnRH7d4jSATehNZbAaeNKF"
+    "v8K2PMx/Gml24Q+OAsiig4DFwBJgoIsaimgHMm2wbB5yMmrzSANQVHIwFXgVuDlK70ugBUi3wNtp"
+    "JB+VaWQBZNB7ErBB4b6oPPvId4XH1i+jMAs9gM3ojR2wHHgKSITtZ4QCW4HnUsihMI1CC6ARLT8B"
+    "tQorgcFh+YTMaWBdObw0GzkThkEoAWTQaoE3geFh6DugGahNIbuthc2bhAy6QuBjLp+LDzAC2JlF"
+    "l1sLm94BhYv/oqXmBTgFHAQOA60KIlABDANuBa4J2T+dQlZYiZkFkEEnC+yy1CxiH7AF2NECP3b3"
+    "mFgYzhgNVAvMIJyetSpMrkH2WoiZXKzC8/0B4DYLvSK2J2DVXOTrvhycQ+8F6hQeNq6rKQljBdFS"
+    "hUwCyKL3A59aaBVoVqipQfZYiGXRB4EscIuFHoDAxCTyRak6Vl/CpY7Zn0ehsQzGWV18gBSyuy1o"
+    "jj600lSjc7YKYJyFiMLaFEyfg5yy0CtmHnIyCU8QDHeXjBids1UAQw001tQgL1i0q90hiKaQxRiE"
+    "oDbnbBbAlSUevyUJS00quQSSsESCoYZSGGBRSxzGZn7tgLlhfvK7IoiegTnAb1F5dofzAARqnkH+"
+    "jtp3HnJSoCZq3664DmB7EvnElXkS2QU4fS3pNIAErHLpD5B3XIPLAPb1tYdrSeHFS5Mrf5cBbHHo"
+    "/R8E3nfl7SyAhOO2txgNBhGd4CqAU4eDwbtYUAn7Cd5+RY6rAA5GOfOgJwprC3524e0qgMOOfC/G"
+    "7y5MnQQgEPkEqEvgLxemrjticcLJLEEnAWg8p6n0tPImFFzdAcMc+V4MJzW5CmBUGo1N85dGywhm"
+    "VESOq4twdWH2QiyogjHAIBfeLj+F1Q69uzLFlbGzAASmu/K+AM5qcXkHjCvM23FKPToBuMOVv9Mv"
+    "Qo3wPXB35B3X4PpJZEph0pQTcugUwJk/uA8AILMRjbxj1oBWKGSi9u1KHAIYPhA2KxrZUEAaTbRD"
+    "AzFYp2YVwNlSDlaYmoOXjWrpkapgkeBjJcq0WdRiFUCLgcaiLPpKmHeCopJF1xNsg1AqFudsE4DC"
+    "9xY6wKJ6aAzjOyGLDsnBR9hcfDA6Z6sAtlvoFLSmDoD9OfQhK80MWk3w2rHUZuc8CdhmoWO5QOMH"
+    "7Ds0O/Kwuq9rduvRCeegTsAszAL7k3BnbBZoAGTQBwT2WGoW0VSYOrKjApq62x+uEb3iGIxJBGM7"
+    "Mwinh5sHJqWQzyzETC9WFl1GsC44TE4TLNL7g85Xm0MIxvNHAVeF7F+XQtZYiZl/WjPoUglCiMVW"
+    "OIbkBZYmkbWWomEt1J4sQS9zRBj6DmhWSFqtjCzGb1VwcfrnVgXFZNEqII3frOOCRNZO16N3K7ze"
+    "H7arEZifRL6Kwsxv2NTJEWDFZbthUzF+y7JO4rJp30wXtfxvN+3rioNtK38SWFhYI+aUWDyV1CKf"
+    "t8BdCrOAoyFaHRdYUAmj43DxISZ3QDFFWxcvwGgxNH7r4t6TQ0fm4TWBR0uU8pt3l4Lfvj4GFP2A"
+    "Qx1Q2cO/twKr/Q84hMBGdHA5zJKgMzeezqHnf4BvgK1t8J6L5/m+0q8CKCaNJm6AaweAHoJjcVr0"
+    "5/F4PB6Px+PxeDwej8fj8XhiyL+joKWkFV0IuQAAAABJRU5ErkJggg=="
+)
+
+
+_EMAIL_HEADER = f"""
 <div style="text-align: center; padding: 20px 0;">
-  <span style="font-size: 24px; font-weight: 800; color: #7c3aed; letter-spacing: -0.02em;">ordin</span>
+  <img src="data:image/png;base64,{_ORDIN_SYMBOL_PNG_B64}" width="28" height="28"
+       alt="Ordin" style="vertical-align: middle; margin-right: 8px;" />
+  <span style="font-size: 24px; font-weight: 800; color: #7c3aed; letter-spacing: -0.02em; vertical-align: middle;">ordin</span>
 </div>
 """
 

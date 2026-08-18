@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import axios from "axios";
 import { Alert, Button, InputBase, Tag } from "design-system";
+import { OrdinSymbol } from "../assets/OrdinSymbol";
 import styles from "./SetPasswordScreen.module.scss";
 
 type Strength = "fraca" | "media" | "forte";
@@ -89,7 +90,10 @@ export default function SetPasswordScreen() {
     return (
       <div className={styles.page}>
         <div className={styles.card}>
-          <div className={styles.logo}>ordin</div>
+          <div className={styles.logoRow}>
+            <OrdinSymbol size={26} />
+            <span className={styles.logo}>ordin</span>
+          </div>
           <div className={styles.sub}>Definir senha</div>
           <Alert variant="error" text="Link inválido — falta o token de convite." fullWidth />
         </div>
@@ -101,7 +105,10 @@ export default function SetPasswordScreen() {
     return (
       <div className={styles.page}>
         <div className={styles.card}>
-          <div className={styles.logo}>ordin</div>
+          <div className={styles.logoRow}>
+            <OrdinSymbol size={26} />
+            <span className={styles.logo}>ordin</span>
+          </div>
           <div className={styles.sub}>Definir senha</div>
           <Alert
             variant="error"
@@ -117,7 +124,10 @@ export default function SetPasswordScreen() {
     return (
       <div className={styles.page}>
         <div className={styles.card}>
-          <div className={styles.logo}>ordin</div>
+          <div className={styles.logoRow}>
+            <OrdinSymbol size={26} />
+            <span className={styles.logo}>ordin</span>
+          </div>
           <div className={styles.sub}>Verificando o link...</div>
         </div>
       </div>
@@ -128,7 +138,10 @@ export default function SetPasswordScreen() {
     return (
       <div className={styles.page}>
         <div className={styles.card}>
-          <div className={styles.logo}>ordin</div>
+          <div className={styles.logoRow}>
+            <OrdinSymbol size={26} />
+            <span className={styles.logo}>ordin</span>
+          </div>
           <div className={styles.sub}>Senha definida com sucesso!</div>
           <Button fullWidth onClick={() => { window.location.href = "/login"; }}>
             Ir para o login
@@ -141,7 +154,10 @@ export default function SetPasswordScreen() {
   return (
     <div className={styles.page}>
       <div className={styles.card}>
-        <div className={styles.logo}>ordin</div>
+        <div className={styles.logoRow}>
+          <OrdinSymbol size={26} />
+          <span className={styles.logo}>ordin</span>
+        </div>
         {/* ORD-097: texto neutro — essa tela agora serve tanto pro primeiro
             acesso (convite, ORD-087) quanto pra um reset de senha; o
             token/endpoint por trás é o mesmo nos dois casos. */}
