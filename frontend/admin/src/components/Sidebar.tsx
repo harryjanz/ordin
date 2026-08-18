@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useStore } from "../store";
 import api from "../api";
+import { OrdinSymbol } from "../assets/OrdinSymbol";
 import ConfirmDialog from "./ConfirmDialog";
 import ThemeModeSwitch from "./ThemeModeSwitch";
 import styles from "./Sidebar.module.scss";
@@ -84,7 +85,12 @@ export default function Sidebar() {
         onMouseLeave={() => setHovered(false)}
       >
         <div className={styles.header}>
-          <div className={styles.logo} style={{ opacity: expanded ? 1 : 0 }}>ordin</div>
+          <div className={styles.logoRow}>
+            {/* Símbolo fica sempre visível, mesmo recolhida — vira a marca
+                permanente do menu; o texto "ordin" só aparece expandido. */}
+            <OrdinSymbol size={22} />
+            <span className={styles.logo} style={{ opacity: expanded ? 1 : 0 }}>ordin</span>
+          </div>
           {expanded && (
             <button
               type="button"

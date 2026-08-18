@@ -23,10 +23,17 @@
   width: 380px;
 }
 
+.logoRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: color('brand-primary');
+  margin-bottom: 4px;
+}
+
 .logo {
   @include font('xl-emphasys');
   color: color('brand-primary');
-  margin-bottom: 4px;
 }
 
 .sub {

@@ -4,6 +4,7 @@ import { Alert, Button, Checkbox, InputBase, LinkButton } from "design-system";
 import { QRCodeSVG } from "qrcode.react";
 import { useStore } from "../store";
 import { getDeviceTrustToken, setDeviceTrustToken } from "../deviceTrust";
+import { OrdinSymbol } from "../assets/OrdinSymbol";
 import ThemeModeSwitch from "../components/ThemeModeSwitch";
 import styles from "./LoginScreen.module.scss";
 
@@ -106,7 +107,10 @@ export default function LoginScreen() {
         <ThemeModeSwitch />
       </div>
       <div className={styles.card}>
-        <div className={styles.logo}>ordin</div>
+        <div className={styles.logoRow}>
+          <OrdinSymbol size={28} />
+          <span className={styles.logo}>ordin</span>
+        </div>
         <div className={styles.sub}>Painel administrativo</div>
         {error && <div className={styles.error}><Alert variant="error" text={error} fullWidth /></div>}
 
