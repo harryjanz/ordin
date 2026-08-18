@@ -567,6 +567,14 @@ export default function CompanyScreen() {
     makeToast("success", "Convite reenviado");
   }
 
+  // ORD-097: funciona pra qualquer usuário ativo (não só pending_setup,
+  // diferença chave em relação a "reenviar convite").
+  async function sendPasswordReset(id: number) {
+    if (!companyId) return;
+    await api.post(`/companies/${companyId}/users/${id}/send-password-reset`);
+    makeToast("success", "E-mail de redefinição de senha enviado");
+  }
+
   function deactivateUser(id: number) {
     if (!companyId) return;
     setConfirmState({
@@ -839,6 +847,9 @@ export default function CompanyScreen() {
                       <Button size="small" variant="secondary" onClick={() => openEditUser(u)}>Editar</Button>
                       {u.pending_setup && (
                         <Button size="small" variant="secondary" onClick={() => resendInvite(u.id)}>Reenviar convite</Button>
+                      )}
+                      {u.active && !u.pending_setup && (
+                        <Button size="small" variant="secondary" onClick={() => sendPasswordReset(u.id)}>Enviar redefinição de senha</Button>
                       )}
                       {u.mfa_enabled && (
                         <Button size="small" variant="secondary" onClick={() => resetUserMfa(u.id)}>Desativar 2FA</Button>

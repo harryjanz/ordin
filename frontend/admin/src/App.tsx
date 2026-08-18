@@ -7,6 +7,7 @@ import Sidebar from "./components/Sidebar";
 import ActiveCompanyBadge from "./components/ActiveCompanyBadge";
 import LoginScreen from "./screens/LoginScreen";
 import SetPasswordScreen from "./screens/SetPasswordScreen";
+import ForgotPasswordScreen from "./screens/ForgotPasswordScreen";
 import DashboardScreen from "./screens/DashboardScreen";
 import CatalogScreen from "./screens/CatalogScreen";
 import OrdersScreen from "./screens/OrdersScreen";
@@ -71,6 +72,16 @@ export default function App() {
       <>
         <ToastContainer />
         <SetPasswordScreen />
+      </>
+    );
+  }
+
+  // ORD-097: mesmo motivo do /set-password acima — precisa abrir sem sessão.
+  if (location.pathname === "/forgot-password") {
+    return (
+      <>
+        <ToastContainer />
+        <ForgotPasswordScreen />
       </>
     );
   }

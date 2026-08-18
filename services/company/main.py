@@ -31,7 +31,7 @@ from domain.cpf import normalize_cpf, is_valid_cpf
 from infrastructure.cnpj_lookup import lookup_cnpj
 from infrastructure.cep_lookup import lookup_cep
 from infrastructure.contract_storage import ensure_bucket, presigned_download_url, upload_contract
-from fastapi import Request
+from fastapi import Request, Response
 from auth import get_current_user, get_setup_mfa_user, TokenPayload
 import pyotp
 from audit import emit_audit
@@ -47,6 +47,11 @@ NOTIFICATION_SERVICE_URL = require_env("NOTIFICATION_SERVICE_URL")
 ADMIN_BASE_URL           = os.getenv("ADMIN_BASE_URL", "http://localhost:3001")
 INTERNAL_HEADERS         = {"X-Internal-Secret": INTERNAL_SECRET}
 INVITE_TOKEN_TTL_HOURS   = 24
+# ORD-097 — primeira vez que company-service chama auth-service (até aqui só
+# a direção contrária existia); usado só pra revogar sessões após reset de senha.
+AUTH_SERVICE_URL         = require_env("AUTH_SERVICE_URL")
+FORGOT_PASSWORD_RATE_MAX = 3
+FORGOT_PASSWORD_RATE_TTL = 15 * 60
 
 
 def require_internal(x_internal_secret: str = Header(default="")) -> None:
@@ -1334,6 +1339,80 @@ async def _issue_invite(db: AsyncSession, user: "User") -> None:
         logger.warning("Falha ao enviar convite pro usuário %s (id=%s)", user.email, user.id, exc_info=True)
 
 
+# ── Recuperação de senha (ORD-097) ───────────────────────────────────────────
+
+def check_forgot_password_rate_limit(ip: str, email: str, response: Response) -> None:
+    # Mesmo padrão de check_rate_limit do auth-service (pin_attempts) —
+    # protege contra enumeração de e-mail e spam de reset pra uma vítima.
+    bk = f"pwreset_blocked:{ip}"
+    ttl = redis_client.ttl(bk)
+    if ttl > 0:
+        response.headers["X-RateLimit-Blocked"] = "true"
+        raise HTTPException(429, f"Bloqueado. Tente em {ttl // 60}min {ttl % 60}s.")
+    rk = f"pwreset_attempts:{ip}:{hashlib.md5(email.encode()).hexdigest()}"
+    attempts = redis_client.incr(rk)
+    if attempts == 1:
+        redis_client.expire(rk, FORGOT_PASSWORD_RATE_TTL)
+    if attempts >= FORGOT_PASSWORD_RATE_MAX:
+        redis_client.set(bk, "1", ex=FORGOT_PASSWORD_RATE_TTL)
+        redis_client.delete(rk)
+        raise HTTPException(429, f"Bloqueado por {FORGOT_PASSWORD_RATE_TTL // 60} minutos.")
+
+
+async def _issue_password_reset(db: AsyncSession, user: "User") -> None:
+    """Mesmo desenho de _issue_invite — token de uso único reaproveitado
+    (UserInviteToken), e-mail com CTA/corpo diferente. Nunca propaga erro de
+    envio, mesma tolerância do convite."""
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    db.add(UserInviteToken(
+        user_id=user.id,
+        token_hash=token_hash,
+        expires_at=datetime.utcnow() + timedelta(hours=INVITE_TOKEN_TTL_HOURS),
+    ))
+    await db.commit()
+
+    set_password_url = f"{ADMIN_BASE_URL}/set-password?token={raw_token}"
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.post(
+                f"{NOTIFICATION_SERVICE_URL}/internal/send-password-reset",
+                json={"to": user.email, "name": user.name, "set_password_url": set_password_url},
+                headers=INTERNAL_HEADERS,
+            )
+            r.raise_for_status()
+    except Exception:
+        logger.warning("Falha ao enviar redefinição de senha pro usuário %s (id=%s)", user.email, user.id, exc_info=True)
+
+
+class ForgotPasswordIn(BaseModel):
+    email: str
+
+
+@app.post(
+    "/users/forgot-password",
+    tags=["Usuários"],
+    summary="Pedir redefinição de senha por e-mail",
+    description=(
+        "Endpoint público, com rate limit. Sempre responde com sucesso "
+        "genérico, exista ou não o e-mail — não revela enumeração de contas."
+    ),
+)
+async def forgot_password(
+    body: ForgotPasswordIn,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    ip = request.client.host if request.client else "unknown"
+    check_forgot_password_rate_limit(ip, body.email.lower(), response)
+    result = await db.execute(select(User).filter_by(email=body.email, active=True))
+    u = result.scalars().first()
+    if u:
+        await _issue_password_reset(db, u)
+    return {"sent": True}
+
+
 @app.get(
     "/companies/{company_id}/users",
     response_model=UserListOut,
@@ -1523,6 +1602,35 @@ async def resend_invite(
     return {"sent": True}
 
 
+@app.post(
+    "/companies/{company_id}/users/{user_id}/send-password-reset",
+    tags=["Usuários"],
+    summary="Enviar redefinição de senha (disparo administrativo)",
+)
+async def send_password_reset_admin(
+    company_id: int,
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # ORD-097: mesma autorização de resend_invite acima — mas funciona pra
+    # qualquer usuário ativo, não só pending_setup (diferença chave em
+    # relação a "reenviar convite").
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(User).filter_by(id=user_id, company_id=company_id, active=True))
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    await db.execute(
+        update(UserInviteToken)
+        .where(UserInviteToken.user_id == u.id, UserInviteToken.used_at.is_(None))
+        .values(used_at=datetime.utcnow())
+    )
+    await db.commit()
+    await _issue_password_reset(db, u)
+    return {"sent": True}
+
+
 # ── Usuários da plataforma — ORD-093 ────────────────────────────────────────
 # CRUD separado do cadastro de usuários de empresa cliente — superadmin/admin
 # não aparecem mais na aba Usuários de nenhuma empresa (ver list_users acima).
@@ -1686,6 +1794,32 @@ async def resend_platform_invite(
     )
     await db.commit()
     await _issue_invite(db, u)
+    return {"sent": True}
+
+
+@app.post(
+    "/platform-users/{user_id}/send-password-reset",
+    tags=["Usuários da Plataforma"],
+    summary="Enviar redefinição de senha (disparo administrativo)",
+)
+async def send_password_reset_platform(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    platform_company_id = await _get_platform_company_id(db)
+    result = await db.execute(select(User).filter_by(id=user_id, company_id=platform_company_id, active=True))
+    u = result.scalars().first()
+    if not u:
+        raise HTTPException(404, "Usuário não encontrado")
+    await db.execute(
+        update(UserInviteToken)
+        .where(UserInviteToken.user_id == u.id, UserInviteToken.used_at.is_(None))
+        .values(used_at=datetime.utcnow())
+    )
+    await db.commit()
+    await _issue_password_reset(db, u)
     return {"sent": True}
 
 
@@ -2076,7 +2210,27 @@ async def complete_registration(
         raise HTTPException(400, "Convite inválido ou expirado")
     user.password_hash = bcrypt.hashpw(body.password.encode(), bcrypt.gensalt(12)).decode()
     invite.used_at = datetime.utcnow()
+    # ORD-097: incondicional — roda tanto no primeiro acesso (convite)
+    # quanto num reset de senha, já que complete_registration não
+    # diferencia os dois casos. No primeiro acesso é um no-op inofensivo
+    # (usuário nunca logou antes, sem dispositivo/sessão pra revogar).
+    # Só limpa dispositivos confiáveis e sessões — nunca o TOTP/MFA em si
+    # (ver Contexto do ORD-097: os dois fatores são propositalmente
+    # independentes, resetar MFA junto abriria brecha via e-mail comprometido).
+    await db.execute(
+        update(TrustedDevice).where(TrustedDevice.user_id == user.id, TrustedDevice.revoked_at.is_(None))
+        .values(revoked_at=datetime.utcnow())
+    )
     await db.commit()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                f"{AUTH_SERVICE_URL}/internal/revoke-sessions",
+                json={"user_id": user.id},
+                headers=INTERNAL_HEADERS,
+            )
+    except Exception:
+        logger.warning("Falha ao revogar sessões do usuário %s (id=%s) após reset de senha", user.email, user.id, exc_info=True)
     return {"ok": True}
 
 

@@ -108,6 +108,11 @@ export default function PlatformUsersScreen() {
     makeToast("success", "Convite reenviado");
   }
 
+  async function sendPasswordReset(id: number) {
+    await api.post(`/platform-users/${id}/send-password-reset`);
+    makeToast("success", "E-mail de redefinição de senha enviado");
+  }
+
   function deactivateUser(id: number) {
     setConfirmState({
       message: "Desativar usuário?",
@@ -260,6 +265,9 @@ export default function PlatformUsersScreen() {
                   <Button size="small" variant="secondary" onClick={() => openEditUser(u)}>Editar</Button>
                   {u.pending_setup && (
                     <Button size="small" variant="secondary" onClick={() => resendInvite(u.id)}>Reenviar convite</Button>
+                  )}
+                  {u.active && !u.pending_setup && (
+                    <Button size="small" variant="secondary" onClick={() => sendPasswordReset(u.id)}>Enviar redefinição de senha</Button>
                   )}
                   {u.mfa_enabled && (
                     <Button size="small" variant="secondary" onClick={() => resetUserMfa(u.id)}>Desativar 2FA</Button>

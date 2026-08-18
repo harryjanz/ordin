@@ -1,6 +1,6 @@
 import { useState, FormEvent } from "react";
 import axios from "axios";
-import { Alert, Button, Checkbox, InputBase } from "design-system";
+import { Alert, Button, Checkbox, InputBase, LinkButton } from "design-system";
 import { QRCodeSVG } from "qrcode.react";
 import { useStore } from "../store";
 import { getDeviceTrustToken, setDeviceTrustToken } from "../deviceTrust";
@@ -134,6 +134,12 @@ export default function LoginScreen() {
               />
             </div>
             <Button type="submit" fullWidth loading={loading}>Entrar</Button>
+            <div className={styles.forgotPasswordRow}>
+              <LinkButton
+                label="Esqueci minha senha"
+                onClick={() => { window.location.href = "/forgot-password"; }}
+              />
+            </div>
           </form>
         )}
 

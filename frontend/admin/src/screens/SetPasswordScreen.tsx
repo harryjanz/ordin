@@ -142,7 +142,10 @@ export default function SetPasswordScreen() {
     <div className={styles.page}>
       <div className={styles.card}>
         <div className={styles.logo}>ordin</div>
-        <div className={styles.sub}>Bem-vindo(a)! Defina sua senha para concluir o cadastro.</div>
+        {/* ORD-097: texto neutro — essa tela agora serve tanto pro primeiro
+            acesso (convite, ORD-087) quanto pra um reset de senha; o
+            token/endpoint por trás é o mesmo nos dois casos. */}
+        <div className={styles.sub}>Defina sua nova senha.</div>
         {error && <div className={styles.error}><Alert variant="error" text={error} fullWidth /></div>}
         <form onSubmit={handleSubmit}>
           <div className={styles.field}>
