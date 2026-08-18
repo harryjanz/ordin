@@ -313,8 +313,17 @@ export default function SettingsScreen() {
       setMfaDisablePassword("");
       refreshTrustedDevices();
       makeToast("success", "Duplo fator desativado.");
-    } catch {
-      setMfaError("Senha incorreta.");
+    } catch (e: unknown) {
+      // ORD-096, achado ao vivo: erro genérico "Senha incorreta" também
+      // aparecia quando o motivo real era a conta ser de plataforma (403,
+      // duplo fator obrigatório e permanente) — mensagem enganosa, já que
+      // a senha estava certa.
+      const axErr = e as { response?: { status?: number } };
+      setMfaError(
+        axErr?.response?.status === 403
+          ? "Duplo fator é obrigatório para contas da plataforma e não pode ser desativado."
+          : "Senha incorreta."
+      );
     } finally {
       setMfaBusy(false);
     }
@@ -393,7 +402,14 @@ export default function SettingsScreen() {
               Duplo fator está <strong>ativo</strong> na sua conta. A cada login, além da senha, você precisa
               informar o código do app autenticador.
             </div>
-            {!mfaShowDisable ? (
+            {isPlatformAdmin ? (
+              // ORD-096: duplo fator é obrigatório e permanente pra contas
+              // de plataforma — nem oferece o botão, já que a tentativa
+              // sempre seria rejeitada pelo backend (403).
+              <div className={styles.cardDesc}>
+                Duplo fator é obrigatório para contas da plataforma e não pode ser desativado.
+              </div>
+            ) : !mfaShowDisable ? (
               <Button variant="secondary" onClick={() => setMfaShowDisable(true)}>
                 Desativar duplo fator
               </Button>

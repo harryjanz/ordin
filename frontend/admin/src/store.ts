@@ -52,13 +52,23 @@ export const useStore = create<Store>()(
 
       login(access, refresh) {
         const p = decodeJwt(access);
+        const role = (p.role as Role) ?? null;
+        // ORD-096 (achado ao vivo): pra superadmin/admin, o "company" do
+        // próprio JWT é a empresa interna da plataforma (ORD-093) — nunca
+        // uma empresa cliente de verdade. Antes do ORD-093, isso coincidia
+        // com uma empresa real (seed), então o default "selectedCompanyId
+        // = companyId" parecia funcionar; depois, ele passou a pré-selecionar
+        // silenciosamente uma empresa vazia/inacessível em toda tela que lê
+        // selectedCompanyId (Configurações, Empresa, Pareamento…), sem
+        // nenhum aviso pra selecionar uma empresa de verdade.
+        const isPlatformAdmin = role === "superadmin" || role === "admin";
         set({
           accessToken: access,
           refreshToken: refresh,
           userId: typeof p.sub === "string" ? parseInt(p.sub) : null,
           companyId: (p.company as number | null) ?? null,
-          role: (p.role as Role) ?? null,
-          selectedCompanyId: (p.company as number | null) ?? null,
+          role,
+          selectedCompanyId: isPlatformAdmin ? null : ((p.company as number | null) ?? null),
         });
       },
 
