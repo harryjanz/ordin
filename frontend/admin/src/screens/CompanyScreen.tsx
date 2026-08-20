@@ -79,6 +79,19 @@ const PROVIDER_OPTIONS: DropdownOptions[] = Object.entries(PROVIDERS).map(([key,
   label: def.label,
 }));
 
+const PROVIDER_FILTER_OPTIONS: DropdownOptions[] = [{ value: "", label: "Todos" }, ...PROVIDER_OPTIONS];
+
+// "Ativas"/"Inativas" concordam com "configuração" (feminino) — não
+// reaproveita STATUS_FILTER_OPTIONS abaixo, que concorda com "usuário"/
+// "terminal" (masculino). Default "Todas": diferente de usuário/terminal,
+// uma config inativa não é "removida" — é comum ter várias por ambiente e
+// só uma ativa por vez, então escondê-las por padrão esconderia a maioria.
+const PAYMENT_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "all", label: "Todas" },
+  { value: "active", label: "Ativas" },
+  { value: "inactive", label: "Inativas" },
+];
+
 const ENVIRONMENT_OPTIONS: DropdownOptions[] = [
   { value: "sandbox", label: "Sandbox" },
   { value: "production", label: "Produção" },
@@ -153,21 +166,39 @@ function PaymentTab({ companyId }: PaymentTabProps) {
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  // formulário de adição
+  // ORD-100: mesmo padrão de modal único do ORD-098/099 — editConfigId null
+  // = criando. Provider/Ambiente só existem no modal na criação (edição
+  // mantém o provider/ambiente já cadastrados, só troca credenciais).
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editConfigId, setEditConfigId] = useState<number | null>(null);
   const [provider, setProvider] = useState("mercadopago");
   const [environment, setEnvironment] = useState("sandbox");
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [modalKey, setModalKey] = useState(0);
   const [saving, setSaving] = useState(false);
-
-  // modal de edição inline
-  const [editId, setEditId] = useState<number | null>(null);
-  const [editValues, setEditValues] = useState<Record<string, string>>({});
-  const [editSaving, setEditSaving] = useState(false);
+  const [formError, setFormError] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  // Não-controlados de propósito (mesmo contorno do bug de foco do Modal
+  // documentado no ORD-098) — mapa em vez de refs individuais porque o
+  // conjunto de campos muda conforme o provider selecionado.
+  const fieldRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // ORD-100: filtro local — lista de configs por empresa é sempre pequena,
+  // sem necessidade de ida ao backend (diferente de Terminais/Usuários).
+  const [providerFilter, setProviderFilter] = useState("");
+  const [environmentFilter, setEnvironmentFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
 
   const providerDef = PROVIDERS[provider] ?? { label: provider, fields: [] };
-  const editCfg = configs.find((c) => c.id === editId);
+  const editCfg = configs.find((c) => c.id === editConfigId) ?? null;
   const editDef = editCfg ? (PROVIDERS[editCfg.provider] ?? { label: editCfg.provider, fields: [] }) : null;
+  const modalDef = editConfigId === null ? providerDef : editDef;
+  const filteredConfigs = configs.filter((c) => {
+    if (providerFilter && c.provider !== providerFilter) return false;
+    if (environmentFilter && c.environment !== environmentFilter) return false;
+    if (statusFilter === "active" && !c.active) return false;
+    if (statusFilter === "inactive" && c.active) return false;
+    return true;
+  });
 
   async function load() {
     try {
@@ -188,28 +219,68 @@ function PaymentTab({ companyId }: PaymentTabProps) {
     setTimeout(() => setMsg(null), 3000);
   }
 
-  function isAddValid() {
-    return providerDef.fields
-      .filter((f) => f.required)
-      .every((f) => fieldValues[f.key]?.trim());
+  function openNewConfig() {
+    setEditConfigId(null);
+    setProvider("mercadopago");
+    setEnvironment("sandbox");
+    fieldRefs.current = {};
+    setFormError("");
+    setModalKey((k) => k + 1);
+    setModalOpen(true);
   }
 
-  async function handleAdd(e: FormEvent) {
+  function openEditConfig(id: number) {
+    setEditConfigId(id);
+    fieldRefs.current = {};
+    setFormError("");
+    setModalKey((k) => k + 1);
+    setModalOpen(true);
+  }
+
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setSaving(true);
-    try {
-      await api.post(
-        `/companies/${companyId}/payment-configs`,
-        buildConfigPayload(provider, environment, fieldValues),
-      );
-      setFieldValues({});
-      flash(true, "Configuração salva! Clique em Ativar para usá-la.");
-      load();
-    } catch (e: unknown) {
-      const axErr = e as { response?: { data?: { detail?: string } } };
-      flash(false, axErr?.response?.data?.detail ?? "Erro ao salvar.");
-    } finally {
-      setSaving(false);
+    if (!modalDef) return;
+    const values: Record<string, string> = {};
+    for (const f of modalDef.fields) {
+      values[f.key] = fieldRefs.current[f.key]?.value ?? "";
+    }
+
+    if (editConfigId === null) {
+      const missing = modalDef.fields.filter((f) => f.required && !values[f.key]?.trim());
+      if (missing.length > 0) {
+        setFormError(`Preencha: ${missing.map((f) => f.label).join(", ")}.`);
+        return;
+      }
+      setSaving(true);
+      setFormError("");
+      try {
+        await api.post(`/companies/${companyId}/payment-configs`, buildConfigPayload(provider, environment, values));
+        setModalOpen(false);
+        flash(true, "Configuração salva! Clique em Ativar para usá-la.");
+        load();
+      } catch (e: unknown) {
+        const axErr = e as { response?: { data?: { detail?: string } } };
+        setFormError(axErr?.response?.data?.detail ?? "Erro ao salvar.");
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      if (!editCfg || Object.values(values).every((v) => !v.trim())) {
+        setFormError("Preencha ao menos um campo para atualizar.");
+        return;
+      }
+      setSaving(true);
+      setFormError("");
+      try {
+        await api.put(`/companies/${companyId}/payment-configs/${editConfigId}`, buildConfigPayload(editCfg.provider, editCfg.environment, values));
+        setModalOpen(false);
+        flash(true, "Credenciais atualizadas!");
+        load();
+      } catch {
+        setFormError("Erro ao atualizar.");
+      } finally {
+        setSaving(false);
+      }
     }
   }
 
@@ -225,167 +296,172 @@ function PaymentTab({ companyId }: PaymentTabProps) {
     try {
       await api.patch(`/companies/${companyId}/payment-configs/${id}/activate`);
       flash(true, "Configuração ativada!");
+      // Ativar muda o status de duas linhas de uma vez (a ativada e a que
+      // era ativa antes) — com o filtro de Status em Ativas/Inativas, isso
+      // fazia a linha sumir da visão sem nenhum feedback visual da troca.
+      setStatusFilter("all");
       load();
     } catch {
       flash(false, "Erro ao ativar.");
     }
   }
 
-  function openEdit(id: number) {
-    setEditId(id);
-    setEditValues({});
-  }
-
-  async function handleEdit(e: FormEvent) {
-    e.preventDefault();
-    if (!editId || !editCfg || !editDef) return;
-    setEditSaving(true);
-    try {
-      await api.put(
-        `/companies/${companyId}/payment-configs/${editId}`,
-        buildConfigPayload(editCfg.provider, editCfg.environment, editValues),
-      );
-      setEditId(null);
-      setEditValues({});
-      flash(true, "Credenciais atualizadas!");
-      load();
-    } catch {
-      flash(false, "Erro ao atualizar.");
-    } finally {
-      setEditSaving(false);
-    }
+  function clearConfigFilters() {
+    setProviderFilter("");
+    setEnvironmentFilter("");
+    setStatusFilter("all");
   }
 
   const envLabel: Record<string, string> = { sandbox: "Sandbox", production: "Produção" };
 
   return (
     <div>
-      {/* Configs existentes */}
+      <div className={styles.filterBar}>
+        <Dropdown
+          label="Provider"
+          value={PROVIDER_FILTER_OPTIONS.find((o) => o.value === providerFilter) ?? PROVIDER_FILTER_OPTIONS[0]}
+          onValueSelected={(opt) => setProviderFilter(opt.value)}
+          options={PROVIDER_FILTER_OPTIONS}
+        />
+        <Dropdown
+          label="Ambiente"
+          value={ENVIRONMENT_FILTER_OPTIONS.find((o) => o.value === environmentFilter) ?? ENVIRONMENT_FILTER_OPTIONS[0]}
+          onValueSelected={(opt) => setEnvironmentFilter(opt.value)}
+          options={ENVIRONMENT_FILTER_OPTIONS}
+        />
+        <Dropdown
+          label="Status"
+          value={PAYMENT_STATUS_FILTER_OPTIONS.find((o) => o.value === statusFilter) ?? PAYMENT_STATUS_FILTER_OPTIONS[0]}
+          onValueSelected={(opt) => setStatusFilter(opt.value as "all" | "active" | "inactive")}
+          options={PAYMENT_STATUS_FILTER_OPTIONS}
+        />
+        <Button type="button" variant="secondary" onClick={clearConfigFilters}>Limpar filtros</Button>
+        <Button type="button" onClick={openNewConfig}>+ Nova configuração</Button>
+      </div>
+
       {loading ? (
         <div className={styles.muted}>Carregando…</div>
       ) : err ? (
         <div className={styles.muted}>{err}</div>
-      ) : configs.length === 0 ? (
-        <div className={styles.muted} style={{ marginBottom: 20 }}>
-          Nenhuma configuração de pagamento cadastrada.
-        </div>
       ) : (
-        <div style={{ marginBottom: 20 }}>
-          {configs.map((c) => {
-            const def = PROVIDERS[c.provider] ?? { label: c.provider, fields: [] };
-            const lines = credentialLines(c, def);
-            return (
-              <div
-                key={c.id}
-                className={`${styles.item} ${styles.configItem} ${c.active ? styles.configItemActive : ""}`}
-              >
-                <div className={styles.configHead}>
-                  <div className={styles.configTags}>
-                    <span className={styles.configLabel}>{def.label}</span>
-                    <Tag variant={c.environment === "production" ? "warning" : "neutral"}>
-                      {envLabel[c.environment] ?? c.environment}
-                    </Tag>
-                    <Tag variant={c.active ? "success" : "greyscale"}>
-                      {c.active ? "● Ativa" : "○ Inativa"}
-                    </Tag>
-                  </div>
-
-                  <div className={styles.configActions}>
+        <Table
+          variant="compact"
+          rowKey={(c) => c.id}
+          emptyMessage="Nenhuma configuração encontrada."
+          columns={[
+            {
+              key: "provider", header: "Provider",
+              render: (c) => (PROVIDERS[c.provider] ?? { label: c.provider }).label,
+            },
+            {
+              key: "environment", header: "Ambiente",
+              render: (c) => (
+                <Tag variant={c.environment === "production" ? "warning" : "neutral"}>
+                  {envLabel[c.environment] ?? c.environment}
+                </Tag>
+              ),
+            },
+            {
+              key: "credentials", header: "Credenciais",
+              render: (c) => {
+                const def = PROVIDERS[c.provider] ?? { label: c.provider, fields: [] };
+                const lines = credentialLines(c, def);
+                return lines.length > 0
+                  ? <span className={styles.configLines}>{lines.join("  ·  ")}</span>
+                  : <span className={styles.muted}>—</span>;
+              },
+            },
+            {
+              key: "status", header: "Status",
+              render: (c) => <Tag variant={c.active ? "success" : "greyscale"}>{c.active ? "Ativa" : "Inativa"}</Tag>,
+            },
+            {
+              key: "action", header: "",
+              render: (c) => {
+                const def = PROVIDERS[c.provider] ?? { label: c.provider, fields: [] };
+                return (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     {!c.active && (
                       <Button size="small" onClick={() => handleActivate(c.id)}>Ativar</Button>
                     )}
                     {def.fields.length > 0 && (
-                      <Button size="small" variant="secondary" onClick={() => openEdit(c.id)}>
+                      <Button size="small" variant="secondary" onClick={() => openEditConfig(c.id)}>
                         Editar credenciais
                       </Button>
                     )}
                     <Button size="small" variant="secondary" onClick={() => setConfirmDeleteId(c.id)}>Remover</Button>
                   </div>
-                </div>
-
-                {lines.length > 0 && (
-                  <div className={styles.configLines}>{lines.join("  ·  ")}</div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Modal inline de edição */}
-      {editId !== null && editDef && (
-        <form onSubmit={handleEdit} className={styles.form}>
-          <div className={styles.formTitle}>Editar credenciais — {editDef.label}</div>
-          {editDef.fields.map((f) => (
-            <InputBase
-              key={f.key}
-              label={f.label}
-              type={f.type}
-              placeholder="Novo valor (deixe em branco para manter atual)"
-              value={editValues[f.key] ?? ""}
-              onChange={(e) => setEditValues((v) => ({ ...v, [f.key]: e.target.value }))}
-              autoComplete="new-password"
-              autoFocus={f === editDef.fields[0]}
-            />
-          ))}
-          <div className={styles.formActions}>
-            <Button
-              type="submit"
-              loading={editSaving}
-              disabled={editSaving || Object.values(editValues).every((v) => !v.trim())}
-            >
-              Salvar
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => setEditId(null)}>Cancelar</Button>
-          </div>
-        </form>
-      )}
-
-      {/* Formulário de nova config */}
-      <form onSubmit={handleAdd} className={styles.form}>
-        <div className={styles.formTitle}>Nova configuração</div>
-        <div className={styles.formHint}>
-          A configuração começa inativa. Clique em "Ativar" para usá-la.
-        </div>
-
-        <Dropdown
-          value={PROVIDER_OPTIONS.find((o) => o.value === provider) ?? null}
-          onValueSelected={(opt) => { setProvider(opt.value); setFieldValues({}); }}
-          options={PROVIDER_OPTIONS}
+                );
+              },
+            },
+          ]}
+          rows={filteredConfigs}
         />
-
-        <Dropdown
-          value={ENVIRONMENT_OPTIONS.find((o) => o.value === environment) ?? null}
-          onValueSelected={(opt) => setEnvironment(opt.value)}
-          options={ENVIRONMENT_OPTIONS}
-        />
-
-        {providerDef.fields.map((f) => (
-          <InputBase
-            key={f.key}
-            label={`${f.label}${f.required ? "" : " (opcional)"}`}
-            type={f.type}
-            placeholder={f.placeholder}
-            value={fieldValues[f.key] ?? ""}
-            onChange={(e) => setFieldValues((v) => ({ ...v, [f.key]: e.target.value }))}
-            autoComplete="new-password"
-          />
-        ))}
-
-        {providerDef.note && (
-          <div className={styles.configNote}>{providerDef.note}</div>
-        )}
-
-        <div className={styles.formActions}>
-          <Button type="submit" loading={saving} disabled={saving || !isAddValid()}>
-            Adicionar configuração
-          </Button>
-        </div>
-      </form>
+      )}
 
       {msg && (
         <div className={`${styles.flashMsg} ${msg.ok ? styles.flashOk : styles.flashErr}`}>{msg.text}</div>
       )}
+
+      <Modal
+        open={modalOpen}
+        width={560}
+        onClose={() => setModalOpen(false)}
+        onBackdropClick={() => setModalOpen(false)}
+        onCloseButtonClick={() => setModalOpen(false)}
+      >
+        {modalDef && (
+          <form key={modalKey} onSubmit={handleSubmit} className={styles.modalForm}>
+            <div className={styles.formTitle}>
+              {editConfigId === null ? "Nova configuração" : `Editar credenciais — ${modalDef.label}`}
+            </div>
+            {editConfigId === null && (
+              <div className={styles.formHint}>
+                A configuração começa inativa. Clique em "Ativar" para usá-la.
+              </div>
+            )}
+            {formError && <Alert variant="error" text={formError} fullWidth />}
+
+            {editConfigId === null && (
+              <>
+                <Dropdown
+                  label="Provider"
+                  value={PROVIDER_OPTIONS.find((o) => o.value === provider) ?? null}
+                  onValueSelected={(opt) => { setProvider(opt.value); fieldRefs.current = {}; }}
+                  options={PROVIDER_OPTIONS}
+                />
+                <Dropdown
+                  label="Ambiente"
+                  value={ENVIRONMENT_OPTIONS.find((o) => o.value === environment) ?? null}
+                  onValueSelected={(opt) => setEnvironment(opt.value)}
+                  options={ENVIRONMENT_OPTIONS}
+                />
+              </>
+            )}
+
+            {modalDef.fields.map((f, i) => (
+              <InputBase
+                key={f.key}
+                label={editConfigId === null ? `${f.label}${f.required ? "" : " (opcional)"}` : f.label}
+                type={f.type}
+                placeholder={editConfigId === null ? f.placeholder : "Novo valor (deixe em branco para manter atual)"}
+                ref={(el) => { fieldRefs.current[f.key] = el; }}
+                autoComplete="new-password"
+                autoFocus={i === 0}
+              />
+            ))}
+
+            {editConfigId === null && providerDef.note && (
+              <div className={styles.configNote}>{providerDef.note}</div>
+            )}
+
+            <div className={styles.formActions}>
+              <Button type="submit" loading={saving} disabled={saving}>Salvar</Button>
+              <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
       <ConfirmDialog
         open={confirmDeleteId !== null}
