@@ -85,6 +85,26 @@
   gap: 8px;
 }
 
+// Sem uso direto neste arquivo (CompanyScreen.tsx migrou pro Modal no
+// ORD-099) — mas PlatformUsersScreen.tsx reaproveita este stylesheet de
+// propósito (ver comentário no topo daquele arquivo, ORD-093: "clone
+// estrutural da aba Usuários, sem duplicar classes CSS") e ainda usa essas
+// duas classes no formulário inline de convite/edição de usuário de
+// plataforma. Remover daqui quebra aquela tela — já aconteceu uma vez.
+.inviteUserRow {
+  display: grid;
+  grid-template-columns: 2fr 2fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.editUserRow {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto;
+  gap: 12px;
+  align-items: end;
+}
+
 // Mesmo padrão visual das barras de filtro de Pedidos/Pagamentos (fundo
 // var(--a-surface), borda, card) — a barra de filtros de Usuários estava
 // solta, sem esse "cartão" por trás, diferente do resto do admin.

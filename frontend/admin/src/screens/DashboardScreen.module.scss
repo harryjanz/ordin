@@ -7,12 +7,34 @@
 
 .title {
   @include font('xl-emphasys');
-  margin-bottom: 24px;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.presetRow {
+  display: flex;
+  gap: 8px;
+}
+
+.customRange {
+  display: flex;
+  gap: 12px;
+  max-width: 480px;
+  margin-bottom: 20px;
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  // Mais larga que o padrão de outras telas — "período anterior" quebrava
+  // linha em 200px.
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 16px;
   margin-bottom: 32px;
 }
@@ -25,8 +47,8 @@
 }
 
 .cardLabel {
-  @include font('xs');
-  color: rgba(var(--a-text-rgb), 0.5);
+  @include font('sm-emphasys');
+  color: rgba(var(--a-text-rgb), 0.7);
   margin-bottom: 8px;
 }
 
@@ -40,15 +62,99 @@
   color: color('brand-primary');
 }
 
+.trendRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  min-height: 26px;
+  flex-wrap: wrap;
+
+  .muted {
+    @include font('xs');
+    white-space: nowrap;
+  }
+}
+
+.trendBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  @include font('sm-emphasys');
+
+  i {
+    font-size: 15px;
+  }
+}
+
+.trendUp {
+  color: color('success-base');
+}
+
+.trendDown {
+  color: color('error-base');
+}
+
+.terminalList {
+  margin-bottom: 32px;
+}
+
+.terminalRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  @include font('sm');
+  transition: border-color 0.15s ease;
+
+  &:hover {
+    border-color: color('brand-primary');
+  }
+}
+
+.terminalLabel {
+  font-weight: 600;
+  flex: 1;
+}
+
+.terminalValues {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.terminalRevenue {
+  color: color('brand-primary');
+  font-weight: 700;
+  @include font('sm-emphasys');
+}
+
+.terminalTicket {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.4);
+}
+
 .section {
   margin-bottom: 32px;
   max-width: 320px;
 }
 
 .sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   @include font('sm-emphasys');
   color: rgba(var(--a-text-rgb), 0.8);
   margin-bottom: 12px;
+
+  i {
+    font-size: 16px;
+    color: color('brand-primary');
+  }
 }
 
 .muted {

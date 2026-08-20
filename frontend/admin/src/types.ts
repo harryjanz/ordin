@@ -206,6 +206,35 @@ export interface Transaction {
   refused_reason: string | null;
 }
 
+// ORD-101 — GET /payments/analytics
+export interface PeriodMetrics {
+  revenue: number;
+  ticket_medio: number;
+  volume: number;
+}
+
+export interface HourlyRevenue {
+  hour: number;
+  revenue: number;
+}
+
+export interface TerminalBreakdown {
+  terminal_id: number;
+  revenue: number;
+  ticket_medio: number;
+  volume: number;
+}
+
+export interface PaymentAnalytics {
+  current: PeriodMetrics;
+  previous: PeriodMetrics;
+  // null quando o período anterior tem denominador 0 — não dá pra calcular
+  // variação percentual "a partir de zero".
+  change_pct: { revenue: number | null; ticket_medio: number | null; volume: number | null };
+  hourly: HourlyRevenue[];
+  by_terminal: TerminalBreakdown[];
+}
+
 export interface StatusSummaryItem {
   count: number;
   amount: number;

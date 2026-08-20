@@ -4,15 +4,15 @@ import json as _json
 import logging
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional, List
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, select, func
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
 
@@ -61,8 +61,14 @@ class Transaction(Base):
     nsu                     = Column(String(40))
     authorization           = Column(String(40))
     paygo_response          = Column(String(2000))
-    qr_code                 = Column(String(4000), nullable=True)
-    qr_code_base64          = Column(String(100000), nullable=True)
+    # Text (não String) — bate com as migrations reais (20260618_1100), que
+    # criam as duas colunas como TEXT. O model declarava String(4000)/
+    # String(100000), que nunca é usado pra criar a tabela em prod/dev (isso
+    # é trabalho do Alembic) mas quebra `Base.metadata.create_all()` nos
+    # testes que rodam contra MySQL de verdade — VARCHAR(100000) em utf8mb4
+    # estoura o limite de 16383 caracteres (65535 bytes ÷ 4).
+    qr_code                 = Column(Text, nullable=True)
+    qr_code_base64          = Column(Text, nullable=True)
     cancelled_at            = Column(DateTime)
     cancel_reason           = Column(String(255))
     refused_reason          = Column(String(255), nullable=True)
@@ -197,6 +203,34 @@ class PaymentListOut(BaseModel):
     # enum presentes, count=0/amount=0 quando não há transação daquele
     # status no recorte filtrado (o frontend não precisa tratar ausência).
     summary: dict[str, StatusSummaryItem]
+
+
+class PeriodMetrics(BaseModel):
+    revenue: float
+    ticket_medio: float
+    volume: int
+
+
+class HourlyRevenue(BaseModel):
+    hour: int
+    revenue: float
+
+
+class TerminalBreakdown(BaseModel):
+    terminal_id: int
+    revenue: float
+    ticket_medio: float
+    volume: int
+
+
+class PaymentAnalyticsOut(BaseModel):
+    current: PeriodMetrics
+    previous: PeriodMetrics
+    # None quando o período anterior tem denominador 0 (não dá pra calcular
+    # variação percentual "a partir de zero") — ver ORD-101.
+    change_pct: dict[str, Optional[float]]
+    hourly: list[HourlyRevenue]
+    by_terminal: list[TerminalBreakdown]
 
 
 class CancelOut(BaseModel):
@@ -508,6 +542,114 @@ async def list_payments(
         ],
         "total": total,
         "summary": summary,
+    }
+
+
+@app.get(
+    "/payments/analytics",
+    response_model=PaymentAnalyticsOut,
+    tags=["Pagamentos"],
+    summary="KPIs comparativos, receita por hora e venda por terminal (ORD-101)",
+)
+async def payments_analytics(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+    company_id: Optional[int] = None,
+    date_from: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+):
+    # Mesmo tratamento de escopo por empresa de list_payments (main.py:441-444).
+    if current_user.role in ("superadmin", "admin"):
+        base_filters = [Transaction.company_id == company_id] if company_id else []
+    else:
+        base_filters = [Transaction.company_id == current_user.company_id]
+
+    try:
+        start = datetime.strptime(date_from, "%Y-%m-%d")
+        # date_to é inclusive do dia inteiro — diferente do filtro simples de
+        # GET /payments (created_at <= date_to, que exclui parte do próprio
+        # dia). Vira limite exclusivo em start_do_dia_seguinte.
+        end = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+    except ValueError:
+        raise HTTPException(422, "date_from/date_to devem estar no formato AAAA-MM-DD")
+    if end <= start:
+        raise HTTPException(422, "date_to deve ser maior ou igual a date_from")
+
+    duration = end - start
+    prev_start = start - duration
+    prev_end = start
+
+    async def period_metrics(window_start: datetime, window_end: datetime) -> dict:
+        row = (await db.execute(
+            select(func.count(), func.sum(Transaction.amount))
+            .where(
+                *base_filters,
+                Transaction.status == TransactionStatus.approved,
+                Transaction.created_at >= window_start,
+                Transaction.created_at < window_end,
+            )
+        )).one()
+        count = row[0] or 0
+        revenue = float(row[1] or 0)
+        return {"revenue": revenue, "ticket_medio": (revenue / count) if count else 0.0, "volume": count}
+
+    current = await period_metrics(start, end)
+    previous = await period_metrics(prev_start, prev_end)
+
+    def pct(cur: float, prev: float) -> Optional[float]:
+        if not prev:
+            return None
+        return round((cur - prev) / prev * 100, 1)
+
+    change_pct = {
+        "revenue": pct(current["revenue"], previous["revenue"]),
+        "ticket_medio": pct(current["ticket_medio"], previous["ticket_medio"]),
+        "volume": pct(current["volume"], previous["volume"]),
+    }
+
+    hourly_rows = await db.execute(
+        select(func.hour(Transaction.created_at), func.sum(Transaction.amount))
+        .where(
+            *base_filters,
+            Transaction.status == TransactionStatus.approved,
+            Transaction.created_at >= start,
+            Transaction.created_at < end,
+        )
+        .group_by(func.hour(Transaction.created_at))
+    )
+    hourly_map = {int(h): float(rev or 0) for h, rev in hourly_rows.all()}
+    hourly = [{"hour": h, "revenue": hourly_map.get(h, 0.0)} for h in range(24)]
+
+    terminal_rows = await db.execute(
+        select(Transaction.terminal_id, func.count(), func.sum(Transaction.amount))
+        .where(
+            *base_filters,
+            Transaction.status == TransactionStatus.approved,
+            Transaction.created_at >= start,
+            Transaction.created_at < end,
+        )
+        .group_by(Transaction.terminal_id)
+    )
+    by_terminal = sorted(
+        (
+            {
+                "terminal_id": t_id,
+                "revenue": float(rev or 0),
+                "ticket_medio": (float(rev or 0) / cnt) if cnt else 0.0,
+                "volume": cnt,
+            }
+            for t_id, cnt, rev in terminal_rows.all()
+        ),
+        key=lambda t: t["revenue"],
+        reverse=True,
+    )
+
+    return {
+        "current": current,
+        "previous": previous,
+        "change_pct": change_pct,
+        "hourly": hourly,
+        "by_terminal": by_terminal,
     }
 
 
