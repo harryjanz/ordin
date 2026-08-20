@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
-import { Button, Dropdown, InputBase, Tab, Tabs, Tag, makeToast, type DropdownOptions } from "design-system";
+import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
 import { listCompanies } from "../api/companies";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -79,10 +79,25 @@ const PROVIDER_OPTIONS: DropdownOptions[] = Object.entries(PROVIDERS).map(([key,
   label: def.label,
 }));
 
+const PROVIDER_FILTER_OPTIONS: DropdownOptions[] = [{ value: "", label: "Todos" }, ...PROVIDER_OPTIONS];
+
+// "Ativas"/"Inativas" concordam com "configuração" (feminino) — não
+// reaproveita STATUS_FILTER_OPTIONS abaixo, que concorda com "usuário"/
+// "terminal" (masculino). Default "Todas": diferente de usuário/terminal,
+// uma config inativa não é "removida" — é comum ter várias por ambiente e
+// só uma ativa por vez, então escondê-las por padrão esconderia a maioria.
+const PAYMENT_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "all", label: "Todas" },
+  { value: "active", label: "Ativas" },
+  { value: "inactive", label: "Inativas" },
+];
+
 const ENVIRONMENT_OPTIONS: DropdownOptions[] = [
   { value: "sandbox", label: "Sandbox" },
   { value: "production", label: "Produção" },
 ];
+
+const ENVIRONMENT_FILTER_OPTIONS: DropdownOptions[] = [{ value: "", label: "Todos" }, ...ENVIRONMENT_OPTIONS];
 
 const ROLE_OPTIONS: DropdownOptions[] = [
   { value: "cashier", label: "Caixa" },
@@ -151,21 +166,39 @@ function PaymentTab({ companyId }: PaymentTabProps) {
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  // formulário de adição
+  // ORD-100: mesmo padrão de modal único do ORD-098/099 — editConfigId null
+  // = criando. Provider/Ambiente só existem no modal na criação (edição
+  // mantém o provider/ambiente já cadastrados, só troca credenciais).
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editConfigId, setEditConfigId] = useState<number | null>(null);
   const [provider, setProvider] = useState("mercadopago");
   const [environment, setEnvironment] = useState("sandbox");
-  const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [modalKey, setModalKey] = useState(0);
   const [saving, setSaving] = useState(false);
-
-  // modal de edição inline
-  const [editId, setEditId] = useState<number | null>(null);
-  const [editValues, setEditValues] = useState<Record<string, string>>({});
-  const [editSaving, setEditSaving] = useState(false);
+  const [formError, setFormError] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  // Não-controlados de propósito (mesmo contorno do bug de foco do Modal
+  // documentado no ORD-098) — mapa em vez de refs individuais porque o
+  // conjunto de campos muda conforme o provider selecionado.
+  const fieldRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // ORD-100: filtro local — lista de configs por empresa é sempre pequena,
+  // sem necessidade de ida ao backend (diferente de Terminais/Usuários).
+  const [providerFilter, setProviderFilter] = useState("");
+  const [environmentFilter, setEnvironmentFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
 
   const providerDef = PROVIDERS[provider] ?? { label: provider, fields: [] };
-  const editCfg = configs.find((c) => c.id === editId);
+  const editCfg = configs.find((c) => c.id === editConfigId) ?? null;
   const editDef = editCfg ? (PROVIDERS[editCfg.provider] ?? { label: editCfg.provider, fields: [] }) : null;
+  const modalDef = editConfigId === null ? providerDef : editDef;
+  const filteredConfigs = configs.filter((c) => {
+    if (providerFilter && c.provider !== providerFilter) return false;
+    if (environmentFilter && c.environment !== environmentFilter) return false;
+    if (statusFilter === "active" && !c.active) return false;
+    if (statusFilter === "inactive" && c.active) return false;
+    return true;
+  });
 
   async function load() {
     try {
@@ -186,28 +219,68 @@ function PaymentTab({ companyId }: PaymentTabProps) {
     setTimeout(() => setMsg(null), 3000);
   }
 
-  function isAddValid() {
-    return providerDef.fields
-      .filter((f) => f.required)
-      .every((f) => fieldValues[f.key]?.trim());
+  function openNewConfig() {
+    setEditConfigId(null);
+    setProvider("mercadopago");
+    setEnvironment("sandbox");
+    fieldRefs.current = {};
+    setFormError("");
+    setModalKey((k) => k + 1);
+    setModalOpen(true);
   }
 
-  async function handleAdd(e: FormEvent) {
+  function openEditConfig(id: number) {
+    setEditConfigId(id);
+    fieldRefs.current = {};
+    setFormError("");
+    setModalKey((k) => k + 1);
+    setModalOpen(true);
+  }
+
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setSaving(true);
-    try {
-      await api.post(
-        `/companies/${companyId}/payment-configs`,
-        buildConfigPayload(provider, environment, fieldValues),
-      );
-      setFieldValues({});
-      flash(true, "Configuração salva! Clique em Ativar para usá-la.");
-      load();
-    } catch (e: unknown) {
-      const axErr = e as { response?: { data?: { detail?: string } } };
-      flash(false, axErr?.response?.data?.detail ?? "Erro ao salvar.");
-    } finally {
-      setSaving(false);
+    if (!modalDef) return;
+    const values: Record<string, string> = {};
+    for (const f of modalDef.fields) {
+      values[f.key] = fieldRefs.current[f.key]?.value ?? "";
+    }
+
+    if (editConfigId === null) {
+      const missing = modalDef.fields.filter((f) => f.required && !values[f.key]?.trim());
+      if (missing.length > 0) {
+        setFormError(`Preencha: ${missing.map((f) => f.label).join(", ")}.`);
+        return;
+      }
+      setSaving(true);
+      setFormError("");
+      try {
+        await api.post(`/companies/${companyId}/payment-configs`, buildConfigPayload(provider, environment, values));
+        setModalOpen(false);
+        flash(true, "Configuração salva! Clique em Ativar para usá-la.");
+        load();
+      } catch (e: unknown) {
+        const axErr = e as { response?: { data?: { detail?: string } } };
+        setFormError(axErr?.response?.data?.detail ?? "Erro ao salvar.");
+      } finally {
+        setSaving(false);
+      }
+    } else {
+      if (!editCfg || Object.values(values).every((v) => !v.trim())) {
+        setFormError("Preencha ao menos um campo para atualizar.");
+        return;
+      }
+      setSaving(true);
+      setFormError("");
+      try {
+        await api.put(`/companies/${companyId}/payment-configs/${editConfigId}`, buildConfigPayload(editCfg.provider, editCfg.environment, values));
+        setModalOpen(false);
+        flash(true, "Credenciais atualizadas!");
+        load();
+      } catch {
+        setFormError("Erro ao atualizar.");
+      } finally {
+        setSaving(false);
+      }
     }
   }
 
@@ -223,167 +296,172 @@ function PaymentTab({ companyId }: PaymentTabProps) {
     try {
       await api.patch(`/companies/${companyId}/payment-configs/${id}/activate`);
       flash(true, "Configuração ativada!");
+      // Ativar muda o status de duas linhas de uma vez (a ativada e a que
+      // era ativa antes) — com o filtro de Status em Ativas/Inativas, isso
+      // fazia a linha sumir da visão sem nenhum feedback visual da troca.
+      setStatusFilter("all");
       load();
     } catch {
       flash(false, "Erro ao ativar.");
     }
   }
 
-  function openEdit(id: number) {
-    setEditId(id);
-    setEditValues({});
-  }
-
-  async function handleEdit(e: FormEvent) {
-    e.preventDefault();
-    if (!editId || !editCfg || !editDef) return;
-    setEditSaving(true);
-    try {
-      await api.put(
-        `/companies/${companyId}/payment-configs/${editId}`,
-        buildConfigPayload(editCfg.provider, editCfg.environment, editValues),
-      );
-      setEditId(null);
-      setEditValues({});
-      flash(true, "Credenciais atualizadas!");
-      load();
-    } catch {
-      flash(false, "Erro ao atualizar.");
-    } finally {
-      setEditSaving(false);
-    }
+  function clearConfigFilters() {
+    setProviderFilter("");
+    setEnvironmentFilter("");
+    setStatusFilter("all");
   }
 
   const envLabel: Record<string, string> = { sandbox: "Sandbox", production: "Produção" };
 
   return (
     <div>
-      {/* Configs existentes */}
+      <div className={styles.filterBar}>
+        <Dropdown
+          label="Provider"
+          value={PROVIDER_FILTER_OPTIONS.find((o) => o.value === providerFilter) ?? PROVIDER_FILTER_OPTIONS[0]}
+          onValueSelected={(opt) => setProviderFilter(opt.value)}
+          options={PROVIDER_FILTER_OPTIONS}
+        />
+        <Dropdown
+          label="Ambiente"
+          value={ENVIRONMENT_FILTER_OPTIONS.find((o) => o.value === environmentFilter) ?? ENVIRONMENT_FILTER_OPTIONS[0]}
+          onValueSelected={(opt) => setEnvironmentFilter(opt.value)}
+          options={ENVIRONMENT_FILTER_OPTIONS}
+        />
+        <Dropdown
+          label="Status"
+          value={PAYMENT_STATUS_FILTER_OPTIONS.find((o) => o.value === statusFilter) ?? PAYMENT_STATUS_FILTER_OPTIONS[0]}
+          onValueSelected={(opt) => setStatusFilter(opt.value as "all" | "active" | "inactive")}
+          options={PAYMENT_STATUS_FILTER_OPTIONS}
+        />
+        <Button type="button" variant="secondary" onClick={clearConfigFilters}>Limpar filtros</Button>
+        <Button type="button" onClick={openNewConfig}>+ Nova configuração</Button>
+      </div>
+
       {loading ? (
         <div className={styles.muted}>Carregando…</div>
       ) : err ? (
         <div className={styles.muted}>{err}</div>
-      ) : configs.length === 0 ? (
-        <div className={styles.muted} style={{ marginBottom: 20 }}>
-          Nenhuma configuração de pagamento cadastrada.
-        </div>
       ) : (
-        <div style={{ marginBottom: 20 }}>
-          {configs.map((c) => {
-            const def = PROVIDERS[c.provider] ?? { label: c.provider, fields: [] };
-            const lines = credentialLines(c, def);
-            return (
-              <div
-                key={c.id}
-                className={`${styles.item} ${styles.configItem} ${c.active ? styles.configItemActive : ""}`}
-              >
-                <div className={styles.configHead}>
-                  <div className={styles.configTags}>
-                    <span className={styles.configLabel}>{def.label}</span>
-                    <Tag variant={c.environment === "production" ? "warning" : "neutral"}>
-                      {envLabel[c.environment] ?? c.environment}
-                    </Tag>
-                    <Tag variant={c.active ? "success" : "greyscale"}>
-                      {c.active ? "● Ativa" : "○ Inativa"}
-                    </Tag>
-                  </div>
-
-                  <div className={styles.configActions}>
+        <Table
+          variant="compact"
+          rowKey={(c) => c.id}
+          emptyMessage="Nenhuma configuração encontrada."
+          columns={[
+            {
+              key: "provider", header: "Provider",
+              render: (c) => (PROVIDERS[c.provider] ?? { label: c.provider }).label,
+            },
+            {
+              key: "environment", header: "Ambiente",
+              render: (c) => (
+                <Tag variant={c.environment === "production" ? "warning" : "neutral"}>
+                  {envLabel[c.environment] ?? c.environment}
+                </Tag>
+              ),
+            },
+            {
+              key: "credentials", header: "Credenciais",
+              render: (c) => {
+                const def = PROVIDERS[c.provider] ?? { label: c.provider, fields: [] };
+                const lines = credentialLines(c, def);
+                return lines.length > 0
+                  ? <span className={styles.configLines}>{lines.join("  ·  ")}</span>
+                  : <span className={styles.muted}>—</span>;
+              },
+            },
+            {
+              key: "status", header: "Status",
+              render: (c) => <Tag variant={c.active ? "success" : "greyscale"}>{c.active ? "Ativa" : "Inativa"}</Tag>,
+            },
+            {
+              key: "action", header: "",
+              render: (c) => {
+                const def = PROVIDERS[c.provider] ?? { label: c.provider, fields: [] };
+                return (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     {!c.active && (
                       <Button size="small" onClick={() => handleActivate(c.id)}>Ativar</Button>
                     )}
                     {def.fields.length > 0 && (
-                      <Button size="small" variant="secondary" onClick={() => openEdit(c.id)}>
+                      <Button size="small" variant="secondary" onClick={() => openEditConfig(c.id)}>
                         Editar credenciais
                       </Button>
                     )}
                     <Button size="small" variant="secondary" onClick={() => setConfirmDeleteId(c.id)}>Remover</Button>
                   </div>
-                </div>
-
-                {lines.length > 0 && (
-                  <div className={styles.configLines}>{lines.join("  ·  ")}</div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Modal inline de edição */}
-      {editId !== null && editDef && (
-        <form onSubmit={handleEdit} className={styles.form}>
-          <div className={styles.formTitle}>Editar credenciais — {editDef.label}</div>
-          {editDef.fields.map((f) => (
-            <InputBase
-              key={f.key}
-              label={f.label}
-              type={f.type}
-              placeholder="Novo valor (deixe em branco para manter atual)"
-              value={editValues[f.key] ?? ""}
-              onChange={(e) => setEditValues((v) => ({ ...v, [f.key]: e.target.value }))}
-              autoComplete="new-password"
-              autoFocus={f === editDef.fields[0]}
-            />
-          ))}
-          <div className={styles.formActions}>
-            <Button
-              type="submit"
-              loading={editSaving}
-              disabled={editSaving || Object.values(editValues).every((v) => !v.trim())}
-            >
-              Salvar
-            </Button>
-            <Button type="button" variant="secondary" onClick={() => setEditId(null)}>Cancelar</Button>
-          </div>
-        </form>
-      )}
-
-      {/* Formulário de nova config */}
-      <form onSubmit={handleAdd} className={styles.form}>
-        <div className={styles.formTitle}>Nova configuração</div>
-        <div className={styles.formHint}>
-          A configuração começa inativa. Clique em "Ativar" para usá-la.
-        </div>
-
-        <Dropdown
-          value={PROVIDER_OPTIONS.find((o) => o.value === provider) ?? null}
-          onValueSelected={(opt) => { setProvider(opt.value); setFieldValues({}); }}
-          options={PROVIDER_OPTIONS}
+                );
+              },
+            },
+          ]}
+          rows={filteredConfigs}
         />
-
-        <Dropdown
-          value={ENVIRONMENT_OPTIONS.find((o) => o.value === environment) ?? null}
-          onValueSelected={(opt) => setEnvironment(opt.value)}
-          options={ENVIRONMENT_OPTIONS}
-        />
-
-        {providerDef.fields.map((f) => (
-          <InputBase
-            key={f.key}
-            label={`${f.label}${f.required ? "" : " (opcional)"}`}
-            type={f.type}
-            placeholder={f.placeholder}
-            value={fieldValues[f.key] ?? ""}
-            onChange={(e) => setFieldValues((v) => ({ ...v, [f.key]: e.target.value }))}
-            autoComplete="new-password"
-          />
-        ))}
-
-        {providerDef.note && (
-          <div className={styles.configNote}>{providerDef.note}</div>
-        )}
-
-        <div className={styles.formActions}>
-          <Button type="submit" loading={saving} disabled={saving || !isAddValid()}>
-            Adicionar configuração
-          </Button>
-        </div>
-      </form>
+      )}
 
       {msg && (
         <div className={`${styles.flashMsg} ${msg.ok ? styles.flashOk : styles.flashErr}`}>{msg.text}</div>
       )}
+
+      <Modal
+        open={modalOpen}
+        width={560}
+        onClose={() => setModalOpen(false)}
+        onBackdropClick={() => setModalOpen(false)}
+        onCloseButtonClick={() => setModalOpen(false)}
+      >
+        {modalDef && (
+          <form key={modalKey} onSubmit={handleSubmit} className={styles.modalForm}>
+            <div className={styles.formTitle}>
+              {editConfigId === null ? "Nova configuração" : `Editar credenciais — ${modalDef.label}`}
+            </div>
+            {editConfigId === null && (
+              <div className={styles.formHint}>
+                A configuração começa inativa. Clique em "Ativar" para usá-la.
+              </div>
+            )}
+            {formError && <Alert variant="error" text={formError} fullWidth />}
+
+            {editConfigId === null && (
+              <>
+                <Dropdown
+                  label="Provider"
+                  value={PROVIDER_OPTIONS.find((o) => o.value === provider) ?? null}
+                  onValueSelected={(opt) => { setProvider(opt.value); fieldRefs.current = {}; }}
+                  options={PROVIDER_OPTIONS}
+                />
+                <Dropdown
+                  label="Ambiente"
+                  value={ENVIRONMENT_OPTIONS.find((o) => o.value === environment) ?? null}
+                  onValueSelected={(opt) => setEnvironment(opt.value)}
+                  options={ENVIRONMENT_OPTIONS}
+                />
+              </>
+            )}
+
+            {modalDef.fields.map((f, i) => (
+              <InputBase
+                key={f.key}
+                label={editConfigId === null ? `${f.label}${f.required ? "" : " (opcional)"}` : f.label}
+                type={f.type}
+                placeholder={editConfigId === null ? f.placeholder : "Novo valor (deixe em branco para manter atual)"}
+                ref={(el) => { fieldRefs.current[f.key] = el; }}
+                autoComplete="new-password"
+                autoFocus={i === 0}
+              />
+            ))}
+
+            {editConfigId === null && providerDef.note && (
+              <div className={styles.configNote}>{providerDef.note}</div>
+            )}
+
+            <div className={styles.formActions}>
+              <Button type="submit" loading={saving} disabled={saving}>Salvar</Button>
+              <Button type="button" variant="secondary" onClick={() => setModalOpen(false)}>Cancelar</Button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
       <ConfirmDialog
         open={confirmDeleteId !== null}
@@ -425,24 +503,57 @@ export default function CompanyScreen() {
 
   // ── Terminals ─────────────────────────────────────────────────────────────
   const [terminals, setTerminals] = useState<Terminal[]>([]);
-  const [newTerminal, setNewTerminal] = useState("");
   const [errTerminals, setErrTerminals] = useState<string | null>(null);
-  const [mpEdits, setMpEdits] = useState<Record<number, string>>({});
-  const [mpSaving, setMpSaving] = useState<Record<number, boolean>>({});
-  const [mpMsg, setMpMsg] = useState<Record<number, string>>({});
+  const [terminalNameFilter, setTerminalNameFilter] = useState("");
+  const [terminalEnvironmentFilter, setTerminalEnvironmentFilter] = useState("");
+  const [terminalStatusFilter, setTerminalStatusFilter] = useState<StatusFilter>("active");
+  const terminalDebounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const terminalIsFirstRender = useRef(true);
+  // Evita que uma resposta de filtro obsoleta chegue depois da mais recente
+  // e sobrescreva o resultado certo — mesmo padrão de userRequestId acima.
+  const terminalRequestId = useRef(0);
+  // ORD-098: um único modal reaproveitado pra criar e editar — editingTerminalId
+  // null = criando (mesmo padrão de editUserId/openEditUser pra usuários).
+  const [terminalModalOpen, setTerminalModalOpen] = useState(false);
+  const [editingTerminalId, setEditingTerminalId] = useState<number | null>(null);
+  const [terminalDefaults, setTerminalDefaults] = useState({ label: "", mp_device_id: "" });
+  const [terminalEnvironment, setTerminalEnvironment] = useState("sandbox");
+  // Incrementado a cada abertura do modal — usado como `key` do form pra
+  // forçar remontar os inputs não-controlados com o defaultValue certo.
+  const [terminalModalKey, setTerminalModalKey] = useState(0);
+  const [terminalSaving, setTerminalSaving] = useState(false);
+  const [terminalFormError, setTerminalFormError] = useState("");
+  // Rótulo/MP Device ID são não-controlados de propósito: o Modal do design
+  // system gera um id novo a cada render do pai e usa isso pra criar o nó do
+  // portal — um input controlado por state, re-renderizado a cada tecla, faz
+  // o portal inteiro ser recriado e perde o foco a cada caractere digitado
+  // (mesmo bug documentado em PaymentsScreen.tsx, Modal.tsx:46 do vendor).
+  // Ler o valor só na hora de salvar evita re-renderizar o Modal ao digitar.
+  const terminalLabelRef = useRef<HTMLInputElement>(null);
+  const terminalMpDeviceRef = useRef<HTMLInputElement>(null);
 
   // ── Users ─────────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
-  const [newUser, setNewUser] = useState({ name: "", email: "", role: "cashier" as Role });
   const [errUsers, setErrUsers] = useState<string | null>(null);
   const [userNameFilter, setUserNameFilter] = useState("");
   const [userEmailFilter, setUserEmailFilter] = useState("");
   const [userRoleFilter, setUserRoleFilter] = useState("");
   const [userStatusFilter, setUserStatusFilter] = useState<StatusFilter>("active");
-  const [editUserId, setEditUserId] = useState<number | null>(null);
-  const [editUserValues, setEditUserValues] = useState({ name: "", role: "cashier" as Role });
-  const [editUserSaving, setEditUserSaving] = useState(false);
+  // ORD-099: mesmo padrão de modal único do ORD-098 — editingUserId null =
+  // criando. E-mail só é usado (e só existe no modal) na criação; edição
+  // manda só name/role, igual o comportamento de sempre.
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [userNameDefault, setUserNameDefault] = useState("");
+  const [userRole, setUserRole] = useState<Role>("cashier");
+  const [userModalKey, setUserModalKey] = useState(0);
+  const [userSaving, setUserSaving] = useState(false);
+  const [userFormError, setUserFormError] = useState("");
+  // Não-controlados de propósito, mesmo contorno do bug de foco do Modal
+  // documentado no ORD-098 (PaymentsScreen.tsx / Modal.tsx:46 do vendor).
+  const userNameRef = useRef<HTMLInputElement>(null);
+  const userEmailRef = useRef<HTMLInputElement>(null);
   const userDebounceTimer = useRef<ReturnType<typeof setTimeout>>();
   const userIsFirstRender = useRef(true);
   // Evita que uma resposta de filtro obsoleta (ex: busca disparada com o
@@ -455,7 +566,19 @@ export default function CompanyScreen() {
   useEffect(() => {
     if (!companyId) return;
     loadTerminals();
-  }, [companyId]);
+    terminalIsFirstRender.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companyId, terminalEnvironmentFilter, terminalStatusFilter]);
+
+  // Debounce só reage a digitação do usuário no campo de texto — a carga
+  // inicial e a reação a ambiente/status ficam no efeito acima.
+  useEffect(() => {
+    if (terminalIsFirstRender.current) return;
+    clearTimeout(terminalDebounceTimer.current);
+    terminalDebounceTimer.current = setTimeout(() => loadTerminals(), 500);
+    return () => clearTimeout(terminalDebounceTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terminalNameFilter]);
 
   // Debounce só reage a digitação do usuário nos campos de texto — a carga
   // inicial e a reação a papel/status ficam no efeito abaixo, que dispara
@@ -478,18 +601,28 @@ export default function CompanyScreen() {
 
   async function loadTerminals() {
     if (!companyId) return;
+    const thisRequest = ++terminalRequestId.current;
     try {
-      const r = await api.get(`/companies/${companyId}/terminals`);
-      const list: Terminal[] = r.data.terminals ?? r.data;
-      setTerminals(list);
-      // inicializa edits com valores atuais
-      const edits: Record<number, string> = {};
-      list.forEach((t) => { edits[t.id] = t.mp_device_id ?? ""; });
-      setMpEdits(edits);
+      const r = await api.get(`/companies/${companyId}/terminals`, {
+        params: {
+          label: terminalNameFilter || undefined,
+          environment: terminalEnvironmentFilter || undefined,
+          status: terminalStatusFilter,
+        },
+      });
+      if (thisRequest !== terminalRequestId.current) return; // resposta obsoleta, ignorar
+      setTerminals(r.data.terminals ?? r.data);
       setErrTerminals(null);
     } catch {
+      if (thisRequest !== terminalRequestId.current) return;
       setErrTerminals("Erro ao carregar terminais.");
     }
+  }
+
+  function clearTerminalFilters() {
+    setTerminalNameFilter("");
+    setTerminalEnvironmentFilter("");
+    setTerminalStatusFilter("active");
   }
 
   async function loadUsers() {
@@ -516,18 +649,58 @@ export default function CompanyScreen() {
     }
   }
 
-  async function addTerminal(e: FormEvent) {
-    e.preventDefault();
-    if (!companyId || !newTerminal.trim()) return;
-    await api.post(`/companies/${companyId}/terminals`, { label: newTerminal.trim() });
-    setNewTerminal("");
-    loadTerminals();
+  function openNewTerminal() {
+    setEditingTerminalId(null);
+    setTerminalDefaults({ label: "", mp_device_id: "" });
+    setTerminalEnvironment("sandbox");
+    setTerminalFormError("");
+    setTerminalModalKey((k) => k + 1);
+    setTerminalModalOpen(true);
   }
 
-  function deleteTerminal(id: number) {
+  function openEditTerminal(t: Terminal) {
+    setEditingTerminalId(t.id);
+    setTerminalDefaults({ label: t.label, mp_device_id: t.mp_device_id ?? "" });
+    setTerminalEnvironment(t.environment ?? "sandbox");
+    setTerminalFormError("");
+    setTerminalModalKey((k) => k + 1);
+    setTerminalModalOpen(true);
+  }
+
+  async function saveTerminal(e: FormEvent) {
+    e.preventDefault();
+    if (!companyId) return;
+    const label = terminalLabelRef.current?.value.trim() ?? "";
+    const mpDeviceId = terminalMpDeviceRef.current?.value.trim() ?? "";
+    if (!label) {
+      setTerminalFormError("Rótulo é obrigatório.");
+      return;
+    }
+    setTerminalSaving(true);
+    setTerminalFormError("");
+    try {
+      if (editingTerminalId === null) {
+        await api.post(`/companies/${companyId}/terminals`, {
+          label, environment: terminalEnvironment, mp_device_id: mpDeviceId || undefined,
+        });
+      } else {
+        await api.put(`/companies/${companyId}/terminals/${editingTerminalId}`, {
+          label, environment: terminalEnvironment, mp_device_id: mpDeviceId || null,
+        });
+      }
+      setTerminalModalOpen(false);
+      loadTerminals();
+    } catch {
+      setTerminalFormError("Erro ao salvar terminal.");
+    } finally {
+      setTerminalSaving(false);
+    }
+  }
+
+  function deactivateTerminal(id: number) {
     if (!companyId) return;
     setConfirmState({
-      message: "Excluir terminal?",
+      message: "Desativar terminal?",
       onConfirm: async () => {
         setConfirmState(null);
         await api.delete(`/companies/${companyId}/terminals/${id}`);
@@ -536,29 +709,50 @@ export default function CompanyScreen() {
     });
   }
 
-  async function saveMpDevice(terminalId: number) {
+  async function reactivateTerminal(id: number) {
     if (!companyId) return;
-    setMpSaving((s) => ({ ...s, [terminalId]: true }));
-    try {
-      await api.put(`/companies/${companyId}/terminals/${terminalId}`, {
-        mp_device_id: mpEdits[terminalId] || null,
-      });
-      setMpMsg((m) => ({ ...m, [terminalId]: "Salvo!" }));
-      setTimeout(() => setMpMsg((m) => ({ ...m, [terminalId]: "" })), 2000);
-      loadTerminals();
-    } catch {
-      setMpMsg((m) => ({ ...m, [terminalId]: "Erro ao salvar." }));
-    } finally {
-      setMpSaving((s) => ({ ...s, [terminalId]: false }));
-    }
+    await api.put(`/companies/${companyId}/terminals/${id}`, { active: true });
+    loadTerminals();
   }
 
-  async function addUser(e: FormEvent) {
+  function openNewUser() {
+    setEditingUserId(null);
+    setUserNameDefault("");
+    setUserRole("cashier");
+    setUserFormError("");
+    setUserModalKey((k) => k + 1);
+    setUserModalOpen(true);
+  }
+
+  async function saveUser(e: FormEvent) {
     e.preventDefault();
-    if (!companyId || !newUser.name || !newUser.email) return;
-    await api.post(`/companies/${companyId}/users`, newUser);
-    setNewUser({ name: "", email: "", role: "cashier" });
-    loadUsers();
+    if (!companyId) return;
+    const name = userNameRef.current?.value.trim() ?? "";
+    if (!name) {
+      setUserFormError("Nome completo é obrigatório.");
+      return;
+    }
+    setUserSaving(true);
+    setUserFormError("");
+    try {
+      if (editingUserId === null) {
+        const email = userEmailRef.current?.value.trim() ?? "";
+        if (!email) {
+          setUserFormError("E-mail é obrigatório.");
+          setUserSaving(false);
+          return;
+        }
+        await api.post(`/companies/${companyId}/users`, { name, email, role: userRole });
+      } else {
+        await api.put(`/companies/${companyId}/users/${editingUserId}`, { name, role: userRole });
+      }
+      setUserModalOpen(false);
+      loadUsers();
+    } catch {
+      setUserFormError("Erro ao salvar usuário.");
+    } finally {
+      setUserSaving(false);
+    }
   }
 
   async function resendInvite(id: number) {
@@ -626,21 +820,12 @@ export default function CompanyScreen() {
   }
 
   function openEditUser(u: User) {
-    setEditUserId(u.id);
-    setEditUserValues({ name: u.name, role: u.role });
-  }
-
-  async function saveEditUser(e: FormEvent) {
-    e.preventDefault();
-    if (!companyId || editUserId === null) return;
-    setEditUserSaving(true);
-    try {
-      await api.put(`/companies/${companyId}/users/${editUserId}`, editUserValues);
-      setEditUserId(null);
-      loadUsers();
-    } finally {
-      setEditUserSaving(false);
-    }
+    setEditingUserId(u.id);
+    setUserNameDefault(u.name);
+    setUserRole(u.role);
+    setUserFormError("");
+    setUserModalKey((k) => k + 1);
+    setUserModalOpen(true);
   }
 
   function clearUserFilters() {
@@ -701,55 +886,104 @@ export default function CompanyScreen() {
               <Button size="small" variant="secondary" onClick={loadTerminals}>Tentar novamente</Button>
             </div>
           )}
-          <form className={styles.form} onSubmit={addTerminal}>
+
+          <div className={styles.filterBar}>
             <InputBase
-              placeholder="Rótulo do terminal (ex: Caixa 2)"
-              value={newTerminal}
-              onChange={(e) => setNewTerminal(e.target.value)}
+              label="Terminal"
+              placeholder="Buscar por nome…"
+              value={terminalNameFilter}
+              onChange={(e) => setTerminalNameFilter(e.target.value)}
             />
-            <div className={styles.formActions}>
-              <Button type="submit">Adicionar terminal</Button>
-            </div>
-          </form>
+            <Dropdown
+              label="Ambiente"
+              value={ENVIRONMENT_FILTER_OPTIONS.find((o) => o.value === terminalEnvironmentFilter) ?? ENVIRONMENT_FILTER_OPTIONS[0]}
+              onValueSelected={(opt) => setTerminalEnvironmentFilter(opt.value)}
+              options={ENVIRONMENT_FILTER_OPTIONS}
+            />
+            <Dropdown
+              label="Status"
+              value={STATUS_FILTER_OPTIONS.find((o) => o.value === terminalStatusFilter) ?? STATUS_FILTER_OPTIONS[0]}
+              onValueSelected={(opt) => setTerminalStatusFilter(opt.value as StatusFilter)}
+              options={STATUS_FILTER_OPTIONS}
+            />
+            <Button type="button" variant="secondary" onClick={clearTerminalFilters}>Limpar filtros</Button>
+            <Button type="button" onClick={openNewTerminal}>+ Novo terminal</Button>
+          </div>
 
-          {terminals.map((t) => (
-            <div key={t.id} className={`${styles.item} ${styles.itemStack}`}>
-              <div className={styles.itemHead}>
-                <span>
-                  <strong className={styles.itemId}>#{t.id}</strong>
-                  {t.label}
-                  <Tag variant={t.active ? "success" : "error"} removable={false}>
-                    {t.active ? "ativo" : "inativo"}
-                  </Tag>
-                  {t.environment && <span className={styles.itemMeta}>{t.environment}</span>}
-                </span>
-                <Button size="small" variant="secondary" onClick={() => deleteTerminal(t.id)}>Excluir</Button>
-              </div>
+          <Table
+            variant="compact"
+            rowKey={(t) => t.id}
+            emptyMessage="Nenhum terminal encontrado."
+            columns={[
+              {
+                key: "label", header: "Terminal", render: (t) => (
+                  <>
+                    <strong>{t.label}</strong>
+                    {t.terminal_code && <span className={styles.itemMeta}>#{t.terminal_code}</span>}
+                  </>
+                ),
+              },
+              { key: "environment", header: "Ambiente", render: (t) => t.environment ?? "—" },
+              {
+                key: "mp_device_id", header: "MP Device ID", mono: true,
+                render: (t) => t.mp_device_id || <span className={styles.muted}>—</span>,
+              },
+              {
+                key: "status", header: "Status",
+                render: (t) => <Tag variant={t.active ? "success" : "error"}>{t.active ? "Ativo" : "Inativo"}</Tag>,
+              },
+              {
+                key: "action", header: "", render: (t) => (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <Button size="small" variant="secondary" onClick={() => openEditTerminal(t)}>Editar</Button>
+                    {t.active ? (
+                      <Button size="small" variant="secondary" onClick={() => deactivateTerminal(t.id)}>Desativar</Button>
+                    ) : (
+                      <Button size="small" variant="secondary" onClick={() => reactivateTerminal(t.id)}>Reativar</Button>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+            rows={terminals}
+          />
 
-              {/* MP Device ID */}
-              <div className={styles.mpRow}>
-                <span className={styles.mpLabel}>MP Device ID:</span>
-                <div className={styles.mpInput}>
-                  <InputBase
-                    placeholder="PAX_A910__SMARTPOS..."
-                    value={mpEdits[t.id] ?? ""}
-                    onChange={(e) => setMpEdits((m) => ({ ...m, [t.id]: e.target.value }))}
-                  />
-                </div>
-                <Button size="small" loading={mpSaving[t.id]} onClick={() => saveMpDevice(t.id)}>
-                  Salvar
-                </Button>
-                {mpMsg[t.id] && (
-                  <span className={`${styles.mpMsg} ${mpMsg[t.id] === "Salvo!" ? styles.mpMsgOk : styles.mpMsgErr}`}>
-                    {mpMsg[t.id]}
-                  </span>
-                )}
+          <Modal
+            open={terminalModalOpen}
+            width={480}
+            onClose={() => setTerminalModalOpen(false)}
+            onBackdropClick={() => setTerminalModalOpen(false)}
+            onCloseButtonClick={() => setTerminalModalOpen(false)}
+          >
+            <form key={terminalModalKey} onSubmit={saveTerminal} className={styles.modalForm}>
+              <div className={styles.formTitle}>{editingTerminalId === null ? "Novo terminal" : "Editar terminal"}</div>
+              {terminalFormError && <Alert variant="error" text={terminalFormError} fullWidth />}
+              <InputBase
+                label="Rótulo"
+                placeholder="ex: Caixa 2"
+                defaultValue={terminalDefaults.label}
+                ref={terminalLabelRef}
+                autoFocus
+                required
+              />
+              <Dropdown
+                label="Ambiente"
+                value={ENVIRONMENT_OPTIONS.find((o) => o.value === terminalEnvironment) ?? null}
+                onValueSelected={(opt) => setTerminalEnvironment(opt.value)}
+                options={ENVIRONMENT_OPTIONS}
+              />
+              <InputBase
+                label="MP Device ID"
+                placeholder="PAX_A910__SMARTPOS..."
+                defaultValue={terminalDefaults.mp_device_id}
+                ref={terminalMpDeviceRef}
+              />
+              <div className={styles.formActions}>
+                <Button type="submit" loading={terminalSaving} disabled={terminalSaving}>Salvar</Button>
+                <Button type="button" variant="secondary" onClick={() => setTerminalModalOpen(false)}>Cancelar</Button>
               </div>
-            </div>
-          ))}
-          {terminals.length === 0 && (
-            <div className={styles.muted}>Nenhum terminal cadastrado.</div>
-          )}
+            </form>
+          </Modal>
         </>
       )}
 
@@ -762,23 +996,6 @@ export default function CompanyScreen() {
               <Button size="small" variant="secondary" onClick={loadUsers}>Tentar novamente</Button>
             </div>
           )}
-          <form className={styles.form} onSubmit={addUser}>
-            <div className={styles.formHint}>
-              Sem senha aqui — o convidado recebe um e-mail com um link para definir a própria senha.
-            </div>
-            <div className={styles.inviteUserRow}>
-              <InputBase label="Nome completo" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} />
-              <InputBase label="E-mail" type="email" value={newUser.email} onChange={(e) => setNewUser({ ...newUser, email: e.target.value })} />
-              <Dropdown
-                label="Papel"
-                value={ROLE_OPTIONS.find((o) => o.value === newUser.role) ?? null}
-                onValueSelected={(opt) => setNewUser({ ...newUser, role: opt.value as Role })}
-                options={ROLE_OPTIONS}
-              />
-              <Button type="submit">Convidar usuário</Button>
-            </div>
-          </form>
-
           <div className={styles.filterBar}>
             <InputBase label="Nome" value={userNameFilter} onChange={(e) => setUserNameFilter(e.target.value)} />
             <InputBase label="E-mail" value={userEmailFilter} onChange={(e) => setUserEmailFilter(e.target.value)} />
@@ -795,31 +1012,51 @@ export default function CompanyScreen() {
               options={STATUS_FILTER_OPTIONS}
             />
             <Button type="button" variant="secondary" onClick={clearUserFilters}>Limpar filtros</Button>
+            <Button type="button" onClick={openNewUser}>+ Novo usuário</Button>
           </div>
 
-          {editUserId !== null && (
-            <form onSubmit={saveEditUser} className={styles.form}>
-              <div className={styles.formTitle}>Editar usuário</div>
-              <div className={styles.editUserRow}>
-                <InputBase
-                  label="Nome completo"
-                  value={editUserValues.name}
-                  onChange={(e) => setEditUserValues((v) => ({ ...v, name: e.target.value }))}
-                  autoFocus
-                />
-                <Dropdown
-                  label="Papel"
-                  value={ROLE_OPTIONS.find((o) => o.value === editUserValues.role) ?? null}
-                  onValueSelected={(opt) => setEditUserValues((v) => ({ ...v, role: opt.value as Role }))}
-                  options={ROLE_OPTIONS}
-                />
-                <div className={styles.formActions}>
-                  <Button type="submit" loading={editUserSaving}>Salvar</Button>
-                  <Button type="button" variant="secondary" onClick={() => setEditUserId(null)}>Cancelar</Button>
+          <Modal
+            open={userModalOpen}
+            width={480}
+            onClose={() => setUserModalOpen(false)}
+            onBackdropClick={() => setUserModalOpen(false)}
+            onCloseButtonClick={() => setUserModalOpen(false)}
+          >
+            <form key={userModalKey} onSubmit={saveUser} className={styles.modalForm}>
+              <div className={styles.formTitle}>{editingUserId === null ? "Novo usuário" : "Editar usuário"}</div>
+              {editingUserId === null && (
+                <div className={styles.formHint}>
+                  Sem senha aqui — o convidado recebe um e-mail com um link para definir a própria senha.
                 </div>
+              )}
+              {userFormError && <Alert variant="error" text={userFormError} fullWidth />}
+              <InputBase
+                label="Nome completo"
+                defaultValue={userNameDefault}
+                ref={userNameRef}
+                autoFocus
+                required
+              />
+              {editingUserId === null && (
+                <InputBase
+                  label="E-mail"
+                  type="email"
+                  ref={userEmailRef}
+                  required
+                />
+              )}
+              <Dropdown
+                label="Papel"
+                value={ROLE_OPTIONS.find((o) => o.value === userRole) ?? null}
+                onValueSelected={(opt) => setUserRole(opt.value as Role)}
+                options={ROLE_OPTIONS}
+              />
+              <div className={styles.formActions}>
+                <Button type="submit" loading={userSaving} disabled={userSaving}>Salvar</Button>
+                <Button type="button" variant="secondary" onClick={() => setUserModalOpen(false)}>Cancelar</Button>
               </div>
             </form>
-          )}
+          </Modal>
 
           {loadingUsers ? (
             <div className={styles.muted}>Carregando…</div>

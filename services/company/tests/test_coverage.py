@@ -433,7 +433,10 @@ async def test_dir_list_terminals(db_session):
     import main as svc
     co_id, t_id, u_id = await _create_seed(db_session)
     async with db_session() as db:
-        result = await svc.list_terminals(co_id, 0, 50, db, _user("owner", co_id))
+        result = await svc.list_terminals(
+            co_id, label=None, environment=None, status="active", skip=0, limit=50,
+            db=db, current_user=_user("owner", co_id),
+        )
     assert "terminals" in result and result["total"] >= 1
     await _cleanup_seed(db_session, co_id)
 

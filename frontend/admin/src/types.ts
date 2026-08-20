@@ -94,6 +94,7 @@ export interface Terminal {
   id: number;
   company_id: number;
   label: string;
+  terminal_code?: string | null;
   environment?: string;
   mp_device_id?: string | null;
   active: boolean;

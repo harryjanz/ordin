@@ -38,76 +38,18 @@
   margin-bottom: 12px;
 }
 
-.item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--a-surface);
-  border: 1px solid var(--a-border);
-  @include rounded('card');
-  padding: 10px 14px;
-  margin-bottom: 8px;
-  gap: 8px;
-  @include font('sm');
-}
-
-.itemStack {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.itemHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.itemId {
-  font-family: monospace;
-  margin-right: 8px;
-  color: color('brand-primary');
-}
-
 .itemMeta {
   @include font('xs');
   color: rgba(var(--a-text-rgb), 0.35);
   margin-left: 8px;
 }
 
-.mpRow {
+// Conteúdo do Modal de terminal — sem o "cartão" (fundo/borda/padding) do
+// .form solto na página, o próprio Modal já cuida disso.
+.modalForm {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.mpLabel {
-  @include font('xs');
-  color: rgba(var(--a-text-rgb), 0.45);
-  flex-shrink: 0;
-}
-
-.mpInput {
-  width: 200px;
-  flex-shrink: 0;
-}
-
-.mpMsg {
-  @include font('xs');
-}
-
-.mpMsgOk {
-  color: color('success-base');
-}
-
-.mpMsgErr {
-  color: color('error-base');
-}
-
-.itemEmail {
-  color: rgba(var(--a-text-rgb), 0.4);
-  margin-left: 8px;
-  @include font('xs');
+  flex-direction: column;
+  gap: 12px;
 }
 
 .form {
@@ -143,27 +85,6 @@
   gap: 8px;
 }
 
-// Linha do formulário de convidar usuário — Nome/E-mail ganham mais espaço
-// (2fr cada), Papel um pouco menos (1fr), e o botão fica no tamanho do
-// próprio conteúdo (auto) em vez de esticar igual às colunas de campo.
-.inviteUserRow {
-  display: grid;
-  grid-template-columns: 2fr 2fr 1fr auto;
-  gap: 12px;
-  align-items: end;
-}
-
-// Linha do formulário de editar usuário — só 2 campos + ações, poucos o
-// bastante pra o auto-fit/minmax do .userFormRow colapsar as colunas vazias
-// e deixar espaço sobrando à direita (ver ORD-090 e ajuste seguinte).
-// Colunas fixas em fr preenchem a largura toda mesmo com poucos campos.
-.editUserRow {
-  display: grid;
-  grid-template-columns: 2fr 1fr auto;
-  gap: 12px;
-  align-items: end;
-}
-
 // Mesmo padrão visual das barras de filtro de Pedidos/Pagamentos (fundo
 // var(--a-surface), borda, card) — a barra de filtros de Usuários estava
 // solta, sem esse "cartão" por trás, diferente do resto do admin.
@@ -177,39 +98,6 @@
   border-radius: 10px;
   padding: 14px 16px;
   margin-bottom: 14px;
-}
-
-.configItem {
-  flex-direction: column;
-  align-items: stretch;
-}
-
-.configItemActive {
-  border: 1px solid rgba(93, 212, 144, 0.4);
-}
-
-.configHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.configTags {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.configActions {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.configLabel {
-  font-weight: 600;
 }
 
 .configLines {
