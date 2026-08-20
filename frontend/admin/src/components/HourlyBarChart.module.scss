@@ -1,0 +1,84 @@
+@import 'design-system/dist/core/scss/styles';
+
+.wrap {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px 12px;
+  margin-bottom: 32px;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+}
+
+.yAxis {
+  position: relative;
+  flex-shrink: 0;
+  width: 44px;
+  height: 236px;
+}
+
+.yTick {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.4);
+  white-space: nowrap;
+}
+
+// Grid com 2 linhas: barras (altura fixa 236px, mesma referência da %
+// calculada em cada barra) e rótulos de hora (altura livre) — linhas
+// separadas evitam que o rótulo dispute espaço com a barra mais alta.
+.chart {
+  position: relative;
+  flex: 1;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: 236px auto;
+  grid-auto-columns: minmax(20px, 1fr);
+  column-gap: 10px;
+  row-gap: 6px;
+  // Linha vertical do eixo (borda esquerda) — indicador visual do eixo de
+  // valores, pedido explicitamente pelo usuário.
+  border-left: 1px solid var(--a-border);
+  padding-left: 8px;
+  overflow-x: auto;
+}
+
+// Posicionada em px (não %) — o containing block (.chart) inclui a linha
+// de rótulos abaixo das barras, então uma % aqui mediria contra a altura
+// total (barras + rótulos), não só a faixa de 200px das barras.
+.gridLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--a-border);
+  pointer-events: none;
+}
+
+.barCell {
+  grid-row: 1;
+  display: flex;
+  align-items: flex-end;
+  height: 100%;
+}
+
+.bar {
+  width: 100%;
+  min-height: 2px;
+  background: color('brand-primary');
+  border-radius: 3px 3px 0 0;
+  transition: opacity 0.15s ease;
+
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+.hourLabel {
+  grid-row: 2;
+  text-align: center;
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.4);
+  white-space: nowrap;
+}

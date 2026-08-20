@@ -85,3 +85,7 @@ Feature: Usuários — cadastro e edição em modal
 - `tsc --noEmit`: limpo. `vitest run`: **48 passed**, sem regressão.
 - Nenhuma mudança de backend — endpoints e payloads idênticos aos de antes.
 - Container `admin` reconstruído; verificação ao vivo desta rodada delegada ao usuário (mesmo formato do ajuste anterior no ORD-098).
+
+### Regressão encontrada e corrigida (relato do usuário: "quebrou o cadastro em /platform-users")
+
+A afirmação acima — "`.inviteUserRow`/`.editUserRow` removidos (sem uso em nenhuma outra tela)" — estava **errada**: `PlatformUsersScreen.tsx` (ORD-093) reaproveita de propósito o mesmo `CompanyScreen.module.scss` (comentário no topo do arquivo: "clone estrutural da aba Usuários, sem duplicar classes CSS") e ainda usa as duas classes no formulário inline de convite/edição de usuário de plataforma, que eu não tinha conferido antes de remover. Corrigido restaurando as duas classes no `CompanyScreen.module.scss` (com comentário explicando a dependência cruzada, pra não repetir o erro), sem tocar em `PlatformUsersScreen.tsx`. Conferido também que nenhuma das classes removidas no ORD-100 (`.item`/`.configItem`/etc.) tinha o mesmo problema — checagem cruzada de todas as classes usadas por `PlatformUsersScreen.tsx` contra o stylesheet, sem nenhuma faltando. `tsc`/`vitest` limpos, verificado ao vivo em `/platform-users`.
