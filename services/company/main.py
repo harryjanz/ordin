@@ -476,6 +476,7 @@ class TerminalUpdate(BaseModel):
     paygo_terminal_id: Optional[str] = None
     mp_device_id: Optional[str] = None
     environment: Optional[str] = None
+    active: Optional[bool] = None
 
 
 class TerminalListOut(BaseModel):
@@ -1177,20 +1178,30 @@ async def regenerate_pin(
 )
 async def list_terminals(
     company_id: int,
+    label: Optional[str] = Query(None, min_length=1),
+    environment: Optional[str] = Query(None, pattern="^(sandbox|production)$"),
+    status: str = Query("active", pattern="^(active|inactive|all)$"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_company_admin(current_user, company_id)
+    filters = [Terminal.company_id == company_id]
+    if status == "active":
+        filters.append(Terminal.active == True)
+    elif status == "inactive":
+        filters.append(Terminal.active == False)
+    # status == "all": sem filtro de active
+    if label:
+        filters.append(Terminal.label.ilike(f"%{label}%"))
+    if environment:
+        filters.append(Terminal.environment == environment)
     total = (await db.execute(
-        select(func.count()).select_from(Terminal)
-        .where(Terminal.company_id == company_id, Terminal.active == True)
+        select(func.count()).select_from(Terminal).where(*filters)
     )).scalar()
     result = await db.execute(
-        select(Terminal)
-        .where(Terminal.company_id == company_id, Terminal.active == True)
-        .offset(skip).limit(limit)
+        select(Terminal).where(*filters).offset(skip).limit(limit)
     )
     return {"terminals": result.scalars().all(), "total": total}
 
@@ -1244,7 +1255,7 @@ async def update_terminal(
 ):
     _require_company_admin(current_user, company_id)
     result = await db.execute(
-        select(Terminal).filter_by(id=terminal_id, company_id=company_id, active=True)
+        select(Terminal).filter_by(id=terminal_id, company_id=company_id)
     )
     t = result.scalars().first()
     if not t:
@@ -1261,6 +1272,8 @@ async def update_terminal(
         t.mp_device_id = body.mp_device_id or None
     if body.environment is not None:
         t.environment = body.environment
+    if body.active is not None:
+        t.active = body.active
     await db.commit()
     await db.refresh(t)
     return t
