@@ -52,6 +52,25 @@ function toDate(brDate: string): Date | undefined {
   return iso ? new Date(`${iso}T00:00:00`) : undefined;
 }
 
+function toBrDate(d: Date): string {
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${d.getFullYear()}`;
+}
+
+// Padrão de 30 dias (ORD-105, mesmo comportamento da ORD-104 em
+// PaymentsScreen) — sem isso a tela carrega o histórico inteiro por
+// padrão, que fica pesado conforme o volume de pedidos cresce.
+function defaultDateFromBr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
+  return toBrDate(d);
+}
+
+function defaultDateToBr(): string {
+  return toBrDate(new Date());
+}
+
 // 123.456.789-01 -> 123.***.**9-01 — mostra início e fim, esconde o meio.
 function maskCpf(cpf: string): string {
   const digits = cpf.replace(/\D/g, "");
@@ -74,8 +93,8 @@ export default function OrdersScreen() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [orderRef, setOrderRef] = useState("");
   const [cpf, setCpf] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(defaultDateFromBr);
+  const [dateTo, setDateTo] = useState(defaultDateToBr);
   const [hourFrom, setHourFrom] = useState("");
   const [hourTo, setHourTo] = useState("");
   // "Pago" como padrão ao abrir a tela — é o status mais analisado no
@@ -166,8 +185,11 @@ export default function OrdersScreen() {
     setSelectedCompany(null);
     setOrderRef("");
     setCpf("");
-    setDateFrom("");
-    setDateTo("");
+    // Data volta pro padrão de 30 dias, não fica sem filtro — mesma regra
+    // da ORD-104, "Limpar" nunca deve reintroduzir o carregamento do
+    // histórico inteiro sem querer.
+    setDateFrom(defaultDateFromBr());
+    setDateTo(defaultDateToBr());
     setHourFrom("");
     setHourTo("");
     setStatus("");
