@@ -31,6 +31,11 @@
   align-items: center;
   justify-content: space-between;
   @include padding('s', 's', 's', 'm');
+  // +3px — os itens de navegação reservam border-left: 3px (indicador de
+  // item ativo, ver .navItem), mesmo transparente/inativo, o que empurra
+  // os ícones 3px pra direita. Sem esse mesmo respiro aqui, a logo fica
+  // visivelmente mais à esquerda que os ícones do menu abaixo dela.
+  padding-left: 19px;
   height: 52px;
 }
 
@@ -122,7 +127,11 @@
   transition: opacity 150ms ease;
 }
 
+// Ocupa a largura toda do menu (mesmo respiro horizontal do restante do
+// conteúdo — 19px à esquerda pra alinhar com os ícones de navegação,
+// mesmo raciocínio do .header acima), em vez da trilha estreita de antes
+// que ficava solta/perdida no meio do espaço vazio do menu.
 .actionBtn {
   flex-shrink: 0;
-  @include margin('none', 's', 's', 's');
+  padding: 8px 16px 16px 19px;
 }
