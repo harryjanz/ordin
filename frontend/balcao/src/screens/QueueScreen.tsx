@@ -166,6 +166,17 @@ export default function QueueScreen() {
       color: "#ff4d6d",
       flexShrink: 0,
     } as React.CSSProperties,
+    // Cor âmbar — distinta do vermelho de URGENTE, pra não confundir os
+    // dois avisos quando aparecem juntos no mesmo card (ORD-108).
+    takeawayBadge: {
+      padding: "2px 8px",
+      borderRadius: 4,
+      fontSize: 10,
+      fontWeight: 700,
+      background: "rgba(245,158,11,0.15)",
+      color: "#f59e0b",
+      flexShrink: 0,
+    } as React.CSSProperties,
   };
 
   return (
@@ -217,6 +228,7 @@ export default function QueueScreen() {
                   {o.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                 </div>
               </div>
+              {o.consumption_type === "viagem" && <div style={S.takeawayBadge}>PARA LEVAR</div>}
               {urgent && <div style={S.urgentBadge}>URGENTE</div>}
               <div style={S.progress}>{o.tickets_collected}/{o.tickets_total} tickets</div>
             </div>

@@ -108,7 +108,7 @@ export default function SettingsScreen() {
   const companyOptions: DropdownOptions[] = companies.map((c) => ({ value: String(c.id), label: c.name }));
 
   // ── ORD-094: abas ────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<"security" | "pin" | "appearance">("security");
+  const [tab, setTab] = useState<"security" | "pin" | "appearance" | "behavior">("security");
 
   // ── PIN ───────────────────────────────────────────────────────────────────
   const [pin, setPin] = useState<string | null>(null);
@@ -142,6 +142,7 @@ export default function SettingsScreen() {
     api.get(`/companies/${companyId}`).then((r) => {
       setLocalTheme(r.data.visual_theme ?? "ordin");
       setLocalMode(r.data.visual_mode  ?? "light");
+      setConsumptionModeEnabled(r.data.consumption_mode_enabled ?? false);
     }).catch(() => null);
   }, [companyId]);
 
@@ -157,6 +158,26 @@ export default function SettingsScreen() {
     } finally {
       setSaving(false);
       setTimeout(() => setSaveMsg(null), 3000);
+    }
+  }
+
+  // ── Comportamento (ORD-108) ─────────────────────────────────────────────
+  const [consumptionModeEnabled, setConsumptionModeEnabled] = useState(false);
+  const [savingBehavior, setSavingBehavior] = useState(false);
+  const [saveBehaviorMsg, setSaveBehaviorMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function saveBehavior() {
+    if (!companyId) return;
+    setSavingBehavior(true);
+    setSaveBehaviorMsg(null);
+    try {
+      await api.patch(`/companies/${companyId}/behavior`, { consumption_mode_enabled: consumptionModeEnabled });
+      setSaveBehaviorMsg({ ok: true, text: "Comportamento salvo com sucesso!" });
+    } catch {
+      setSaveBehaviorMsg({ ok: false, text: "Erro ao salvar. Tente novamente." });
+    } finally {
+      setSavingBehavior(false);
+      setTimeout(() => setSaveBehaviorMsg(null), 3000);
     }
   }
 
@@ -355,6 +376,7 @@ export default function SettingsScreen() {
             <Tab value="security" label="Segurança" />
             <Tab value="pin" label="PIN do totem" />
             <Tab value="appearance" label="Aparência do totem" />
+            <Tab value="behavior" label="Comportamento" />
           </Tabs>
         </div>
       )}
@@ -609,6 +631,46 @@ export default function SettingsScreen() {
             </div>
           </div>
           </>
+        )
+      )}
+
+      {canManageCompany && tab === "behavior" && (
+        showEmptyState ? (
+          <div className={styles.empty}>Selecione uma empresa para gerenciar o comportamento do totem.</div>
+        ) : (
+          <div className={styles.card}>
+            <div className={styles.cardTitle}>Consumo no local ou para levar</div>
+            <div className={styles.cardDesc}>
+              Quando ativado, o totem pergunta ao cliente se o pedido é pra comer no local ou pra levar,
+              antes do pagamento. A escolha aparece pro atendimento/cozinha junto do pedido.
+            </div>
+
+            <div className={styles.modeRow}>
+              <Toggle
+                name="consumption-mode-enabled"
+                checked={consumptionModeEnabled}
+                onChange={() => setConsumptionModeEnabled((v) => !v)}
+              />
+              <span className={styles.modeValueLabel}>
+                {consumptionModeEnabled ? "Ativado" : "Desativado"}
+              </span>
+            </div>
+
+            <div className={styles.saveRow}>
+              <Button
+                onClick={saveBehavior}
+                disabled={!companyId}
+                loading={savingBehavior}
+              >
+                Salvar comportamento
+              </Button>
+              {saveBehaviorMsg && (
+                <span className={`${styles.saveMsg} ${saveBehaviorMsg.ok ? styles.saveMsgOk : styles.saveMsgErr}`}>
+                  {saveBehaviorMsg.text}
+                </span>
+              )}
+            </div>
+          </div>
         )
       )}
 

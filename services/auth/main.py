@@ -95,6 +95,10 @@ class CompanyInfo(BaseModel):
     plan: str
     visual_theme: str = "ordin"
     visual_mode: str = "light"
+    # ORD-108 — sem esse campo aqui, o totem nunca vê a opção mesmo que o
+    # company-service já mande: response_model filtra o dict solto que os
+    # handlers de pin-login/validate-pin/device-status retornam.
+    consumption_mode_enabled: bool = False
 
 class TerminalInfo(BaseModel):
     id: int

@@ -8,6 +8,7 @@ import SetupScreen from "./screens/SetupScreen";
 import { getStoredTerminalId } from "./screens/DeviceSetupScreen";
 import WelcomeScreen from "./screens/WelcomeScreen";
 import CatalogScreen from "./screens/CatalogScreen";
+import ConsumptionTypeScreen from "./screens/ConsumptionTypeScreen";
 import CpfScreen from "./screens/CpfScreen";
 import PaymentScreen from "./screens/PaymentScreen";
 import PIXPaymentScreen from "./screens/PIXPaymentScreen";
@@ -45,9 +46,9 @@ const INACTIVITY_WARN_SEC   = 10;
 
 export default function App() {
   const {
-    company, terminal, cart, cpf, completedOrder, screen,
+    company, terminal, cart, cpf, consumptionType, completedOrder, screen,
     setToken, setCompany, setTerminal, setScreen,
-    addToCart, removeFromCart, setCpf, setCompletedOrder,
+    addToCart, removeFromCart, setCpf, setConsumptionType, setCompletedOrder,
     newOrder, goIdle, resetSession, touch,
   } = useStore();
 
@@ -113,6 +114,7 @@ export default function App() {
         items: cart.map((i) => ({ product_id: i.id, name: i.name, qty: i.qty, unit_price: i.price })),
         discount: 0,
         cpf: c || null,
+        consumption_type: consumptionType,
       });
       setOrderRef(res.data.order_ref);
       setScreen("payment");
@@ -236,8 +238,16 @@ export default function App() {
           cart={cart}
           onAdd={(p: Product) => addToCart({ ...p, qty: 1 })}
           onRemove={removeFromCart}
-          onCheckout={() => setScreen("cpf")}
+          onCheckout={() => setScreen(company?.consumption_mode_enabled ? "consumption" : "cpf")}
           onHome={goIdle}
+        />
+      )}
+
+      {screen === "consumption" && (
+        <ConsumptionTypeScreen
+          T={T}
+          onSelect={(type) => { setConsumptionType(type); setScreen("cpf"); }}
+          onBack={() => setScreen("catalog")}
         />
       )}
 
@@ -246,7 +256,7 @@ export default function App() {
           T={T}
           onNext={(c) => handleCpfDone(c)}
           onSkip={() => handleCpfDone(null)}
-          onBack={() => setScreen("catalog")}
+          onBack={() => setScreen(company?.consumption_mode_enabled ? "consumption" : "catalog")}
         />
       )}
 

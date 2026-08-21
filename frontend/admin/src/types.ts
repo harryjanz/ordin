@@ -40,6 +40,8 @@ export interface Company {
   contract_sent_at?: string | null;
   contract_signed_at?: string | null;
   contract_document_url?: string | null;
+  // ORD-108 — quando true, o totem pergunta "Comer no local"/"Para levar".
+  consumption_mode_enabled?: boolean;
 }
 
 export type ContactType = "comercial" | "financeiro" | "tecnico";

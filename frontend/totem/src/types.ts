@@ -4,6 +4,9 @@ export interface CompanyInfo {
   plan: string;
   visual_theme: string;
   visual_mode: string;
+  // ORD-108 — quando true, mostra a tela "Comer no local"/"Para levar"
+  // depois de fechar o carrinho, antes do CPF.
+  consumption_mode_enabled: boolean;
 }
 
 export interface TerminalInfo {
@@ -58,8 +61,12 @@ export type Screen =
   | "pin"
   | "welcome"
   | "catalog"
+  | "consumption"
   | "cpf"
   | "payment"
   | "pix"
   | "success"
   | "refused";
+
+// ORD-108 — "local" (comer no local) ou "viagem" (para levar).
+export type ConsumptionType = "local" | "viagem";

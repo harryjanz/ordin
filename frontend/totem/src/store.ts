@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { CompanyInfo, TerminalInfo, CartItem, CompletedOrder, Screen } from "./types";
+import type { CompanyInfo, TerminalInfo, CartItem, CompletedOrder, Screen, ConsumptionType } from "./types";
 
 interface TotemStore {
   // auth — persiste em localStorage entre recargas
@@ -11,6 +11,9 @@ interface TotemStore {
   // carrinho / pedido
   cart: CartItem[];
   cpf: string | null;
+  // ORD-108 — null até o cliente escolher (ou quando a empresa não tem a
+  // opção ligada, nunca é perguntado).
+  consumptionType: ConsumptionType | null;
   completedOrder: CompletedOrder | null;
 
   // navegação
@@ -27,6 +30,7 @@ interface TotemStore {
   addToCart: (p: CartItem) => void;
   removeFromCart: (id: number) => void;
   setCpf: (c: string | null) => void;
+  setConsumptionType: (c: ConsumptionType) => void;
   setCompletedOrder: (o: CompletedOrder) => void;
   newOrder: () => void;
   goIdle: () => void;
@@ -54,6 +58,7 @@ export const useStore = create<TotemStore>()(
       terminal: null,
       cart: [],
       cpf: null,
+      consumptionType: null,
       completedOrder: null,
       screen: getInitialScreen(),
       lastActivity: Date.now(),
@@ -63,6 +68,7 @@ export const useStore = create<TotemStore>()(
       setTerminal: (terminal) => set({ terminal }),
       setScreen: (screen) => set({ screen, lastActivity: Date.now() }),
       setCpf: (cpf) => set({ cpf }),
+      setConsumptionType: (consumptionType) => set({ consumptionType }),
       setCompletedOrder: (completedOrder) => set({ completedOrder }),
       touch: () => set({ lastActivity: Date.now() }),
 
@@ -87,6 +93,7 @@ export const useStore = create<TotemStore>()(
         set({
           cart: [],
           cpf: null,
+          consumptionType: null,
           completedOrder: null,
           screen: "catalog",
           lastActivity: Date.now(),
@@ -96,6 +103,7 @@ export const useStore = create<TotemStore>()(
         set({
           cart: [],
           cpf: null,
+          consumptionType: null,
           completedOrder: null,
           screen: "welcome",
           lastActivity: Date.now(),
@@ -108,6 +116,7 @@ export const useStore = create<TotemStore>()(
           terminal: null,
           cart: [],
           cpf: null,
+          consumptionType: null,
           completedOrder: null,
           screen: "pin",
           lastActivity: Date.now(),
