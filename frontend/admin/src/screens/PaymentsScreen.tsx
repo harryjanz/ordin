@@ -201,7 +201,12 @@ export default function PaymentsScreen() {
   }
 
   function clearFilters() {
-    setSelectedCompany(null);
+    // Só superadmin/admin têm um seletor de empresa nesta tela (dropdown
+    // "Todas as empresas" abaixo) — pra owner/manager/cashier,
+    // selectedCompanyId vem só do login e não tem como ser reescolhido na
+    // UI. Zerar incondicionalmente aqui deixava esses papéis sem empresa
+    // nenhuma até fazer logout/login de novo (bug real, achado ao vivo).
+    if (isPlatformAdmin) setSelectedCompany(null);
     // Data volta pro padrão de 30 dias, não fica sem filtro — "Limpar"
     // nunca deve reintroduzir sem querer o carregamento do histórico
     // inteiro (ver ORD-104).
