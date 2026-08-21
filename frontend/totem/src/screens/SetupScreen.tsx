@@ -83,11 +83,17 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
     }
   }
 
+  // 6 dígitos — mesmo tamanho que company-service gera em create_company e
+  // regenerate_pin (secrets.randbelow(900000) + 100000), já coberto por
+  // teste (len(pin) == 6). Esta tela ficou travada em 4 dígitos por engano
+  // (ORD-109, achado ao vivo) — qualquer PIN regenerado ficava impossível
+  // de usar aqui, só os PINs de 4 dígitos gravados direto no seed antigo
+  // (pré-regenerate-pin) funcionavam.
   function pressPin(v: string) {
-    if (pinLoading || blocked || pin.length >= 4) return;
+    if (pinLoading || blocked || pin.length >= 6) return;
     const next = pin + v;
     setPin(next);
-    if (next.length === 4) setTimeout(() => tryPin(next), 150);
+    if (next.length === 6) setTimeout(() => tryPin(next), 150);
   }
 
   // ── Etapa 2: selecionar terminal ────────────────────────────────────────────
@@ -195,7 +201,7 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
             marginBottom: 24,
             animation: shake ? "shake 0.4s" : "none",
           }}>
-            {[0,1,2,3].map((i) => (
+            {[0,1,2,3,4,5].map((i) => (
               <div key={i} style={{
                 width: 16,
                 height: 16,

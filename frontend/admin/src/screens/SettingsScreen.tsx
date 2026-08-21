@@ -521,7 +521,7 @@ export default function SettingsScreen() {
           <div className={styles.card}>
             <div className={styles.cardTitle}>PIN do totem</div>
             <div className={styles.cardDesc}>
-              O PIN de 4 dígitos é usado pela equipe da loja para acessar o totem.
+              O PIN de 6 dígitos é usado pela equipe da loja para acessar o totem.
               Após regenerar, o PIN antigo é imediatamente invalidado.
             </div>
             <Button onClick={regenerate} disabled={!companyId} loading={pinLoading}>

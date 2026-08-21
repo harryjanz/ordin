@@ -148,7 +148,7 @@ Stack: React 18 + TypeScript, Zustand (estado), Axios (HTTP), Expo (mobile), Asy
 ## Banco de Dados
 
 `init.sql` cria os 5 bancos MySQL (`fk_auth/company/catalog/order/payment`), usuários com grants, e seed data de desenvolvimento:
-- Empresas demo: Burger House (PIN 1234), Pasta & Co (5678), Sweet Corner (9999)
+- Empresas demo: Burger House (PIN 184623), Pasta & Co (507219), Sweet Corner (936845) — PIN do totem tem 6 dígitos (ORD-109; os PINs de 4 dígitos originais da seed inicial foram substituídos numa migration posterior pra bater com o tamanho gerado por regenerate-pin)
 - 3 terminais e usuário admin: carlos@burgerhouse.com / burger123
 
 O schema canônico e as migrations ficam em `services/<nome>/migrations/`. O `init.sql` não define schema de tabelas — isso é responsabilidade do Alembic.
