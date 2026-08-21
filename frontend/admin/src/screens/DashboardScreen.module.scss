@@ -30,6 +30,50 @@
   margin-bottom: 20px;
 }
 
+// Navegação ‹ › entre dias/meses (ORD-103) — grudada no título "Receita
+// por período" (perto do gráfico que ela controla, não lá em cima perto
+// dos chips de preset — pedido do usuário depois de ter dificuldade de
+// achar o controle na primeira posição). Só aparece em modo dia/mês, nunca
+// em customizado (intervalo arbitrário não tem "próximo/anterior").
+.navRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.navButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  color: var(--a-text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, opacity 0.15s ease;
+
+  i {
+    font-size: 14px;
+  }
+
+  &:hover:not(:disabled) {
+    border-color: color('brand-primary');
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+}
+
+.navLabel {
+  @include font('sm-emphasys');
+  min-width: 120px;
+  text-align: center;
+}
+
 .grid {
   display: grid;
   // Mais larga que o padrão de outras telas — "período anterior" quebrava
@@ -189,9 +233,55 @@
   }
 }
 
+.chartTitleGroup {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.chartControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .granularityRow {
   display: flex;
   gap: 6px;
+}
+
+// Toggle "Comparar com período anterior" (ORD-103) — botão nativo (não o
+// Button do design system, que só aceita children: string — ver gotcha
+// documentado na ORD-102) pra poder ter ícone + texto.
+.compareToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 32px;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  @include font('sm');
+  color: var(--a-text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+
+  i {
+    font-size: 15px;
+  }
+
+  &:hover {
+    border-color: color('brand-primary');
+  }
+}
+
+.compareToggleActive {
+  background: color('brand-primary');
+  border-color: color('brand-primary');
+  color: white;
 }
 
 .sectionTitle {
