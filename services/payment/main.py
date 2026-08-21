@@ -216,6 +216,10 @@ class PeriodMetrics(BaseModel):
 class RevenuePoint(BaseModel):
     label: str
     revenue: float
+    # Mesma posição/granularidade, mas da janela anterior — alinhado por
+    # índice, não por data (a janela anterior pode ter buckets em datas bem
+    # diferentes da atual). Usado pro gráfico comparativo, ver ORD-103.
+    previous_revenue: float
 
 
 class TerminalBreakdown(BaseModel):
@@ -684,6 +688,22 @@ async def payments_analytics(
     )).all()
 
     series = _build_series(rows, start, end, granularity)
+
+    # Série da janela anterior (mesma já usada pelos KPIs `previous`/
+    # `change_pct`) — alinhada por posição com `series`, não por data, já
+    # que as duas janelas cobrem calendários diferentes (ver ORD-103).
+    prev_rows = (await db.execute(
+        select(Transaction.created_at, Transaction.amount)
+        .where(
+            *base_filters,
+            Transaction.status == TransactionStatus.approved,
+            Transaction.created_at >= prev_start,
+            Transaction.created_at < prev_end,
+        )
+    )).all()
+    prev_series = _build_series(prev_rows, prev_start, prev_end, granularity)
+    for i, point in enumerate(series):
+        point["previous_revenue"] = prev_series[i]["revenue"] if i < len(prev_series) else 0.0
 
     terminal_totals: dict[int, dict] = {}
     for created_at, amount, terminal_id, _method in rows:

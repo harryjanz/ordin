@@ -224,6 +224,54 @@ async def test_receita_por_forma_de_pagamento(client, analytics_seed, token_owne
     assert by_method[1]["revenue"] == 200.0
 
 
+async def test_series_com_previous_revenue(client, analytics_seed, token_owner):
+    r = await client.get(
+        "/payments/analytics",
+        params={"date_from": DAY, "date_to": DAY},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 200
+    series = r.json()["series"]
+    # Período anterior (DAY_BEFORE) tem 1 transação aprovada de 400.00 às 8h.
+    by_label = {s["label"]: s["previous_revenue"] for s in series}
+    assert by_label["08h"] == 400.0
+    assert by_label["09h"] == 0.0
+    # Soma de previous_revenue bate com body["previous"]["revenue"].
+    assert round(sum(s["previous_revenue"] for s in series), 2) == 400.0
+
+
+async def test_isolamento_multi_tenant_na_serie_anterior(client, token_owner):
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        db.add_all([
+            svc.Transaction(
+                company_id=1, terminal_id=10, order_ref="ORDANL040",
+                method="credit", amount=150.00, status="approved", provider="mock",
+                created_at=datetime(2024, 9, 14, 9, 0, 0),
+            ),
+            svc.Transaction(
+                company_id=2, terminal_id=20, order_ref="ORDANL041",
+                method="credit", amount=9999.00, status="approved", provider="mock",
+                created_at=datetime(2024, 9, 14, 9, 0, 0),
+            ),
+        ])
+        await db.commit()
+
+    r = await client.get(
+        "/payments/analytics",
+        params={"date_from": "2024-09-15", "date_to": "2024-09-15", "granularity": "hour"},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 200
+    series = r.json()["series"]
+    total_prev = sum(s["previous_revenue"] for s in series)
+    assert total_prev == 150.0  # não inclui os 9999 da empresa 2
+
+    async with svc.AsyncSessionLocal() as db:
+        await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.order_ref.in_(["ORDANL040", "ORDANL041"])))
+        await db.commit()
+
+
 async def test_venda_por_terminal_ordenada_por_receita(client, analytics_seed, token_owner):
     r = await client.get(
         "/payments/analytics",

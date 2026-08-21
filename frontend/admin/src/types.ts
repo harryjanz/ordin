@@ -220,6 +220,9 @@ export type AnalyticsGranularity = "hour" | "day" | "week" | "month";
 export interface RevenuePoint {
   label: string;
   revenue: number;
+  // Mesma posição/granularidade, janela do período anterior — alinhado por
+  // índice, não por data. Ver ORD-103.
+  previous_revenue: number;
 }
 
 export interface TerminalBreakdown {

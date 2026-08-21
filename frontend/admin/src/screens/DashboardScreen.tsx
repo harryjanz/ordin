@@ -8,6 +8,10 @@ import RevenueBarChart from "../components/RevenueBarChart";
 import styles from "./DashboardScreen.module.scss";
 
 type Preset = "today" | "yesterday" | "month" | "custom";
+// Modo derivado do preset — "day"/"month" ganham navegação ‹ › e o toggle
+// de comparação com período anterior (ORD-103); "custom" não tem unidade
+// natural de "próximo/anterior".
+type Mode = "day" | "month" | "custom";
 
 const PRESET_OPTIONS: { value: Preset; label: string }[] = [
   { value: "today", label: "Hoje" },
@@ -21,6 +25,11 @@ const GRANULARITY_OPTIONS: { value: AnalyticsGranularity; label: string }[] = [
   { value: "day", label: "Dia" },
   { value: "week", label: "Semana" },
   { value: "month", label: "Mês" },
+];
+
+const MONTH_NAMES = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
 
 // Ordin não tem operador atribuído à venda (totem é autoatendimento) — os
@@ -59,6 +68,28 @@ function addDays(d: Date, days: number): Date {
   return copy;
 }
 
+function addMonths(d: Date, months: number): Date {
+  const copy = new Date(d);
+  copy.setMonth(copy.getMonth() + months);
+  return copy;
+}
+
+function startOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function endOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+
+function sameMonth(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+function minDate(a: Date, b: Date): Date {
+  return a < b ? a : b;
+}
+
 // DateInput trabalha em dd/mm/aaaa — mesmo conversor de PaymentsScreen.tsx.
 function brToIso(brDate: string): string | undefined {
   const m = brDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -69,19 +100,6 @@ function brToIso(brDate: string): string | undefined {
 function brToDate(brDate: string): Date | undefined {
   const iso = brToIso(brDate);
   return iso ? new Date(`${iso}T00:00:00`) : undefined;
-}
-
-function presetRange(preset: Preset): { from: string; to: string } {
-  const today = new Date();
-  if (preset === "yesterday") {
-    const y = addDays(today, -1);
-    return { from: isoDate(y), to: isoDate(y) };
-  }
-  if (preset === "month") {
-    const first = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { from: isoDate(first), to: isoDate(today) };
-  }
-  return { from: isoDate(today), to: isoDate(today) };
 }
 
 function formatCurrency(v: number): string {
@@ -151,12 +169,16 @@ export default function DashboardScreen() {
   const isPlatformAdmin = role === "superadmin" || role === "admin";
   const [companyOptions, setCompanyOptions] = useState<DropdownOptions[]>([]);
 
-  const [preset, setPreset] = useState<Preset>("today");
+  const [mode, setMode] = useState<Mode>("day");
+  // Dia (modo "day") ou qualquer dia dentro do mês selecionado (modo
+  // "month") — a data-âncora que a navegação ‹ › desloca (ORD-103).
+  const [anchor, setAnchor] = useState(new Date());
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   // null = segue o padrão calculado pelo tamanho do período; um valor
   // explícito é o que o owner escolheu manualmente no chip (ver ORD-102).
   const [manualGranularity, setManualGranularity] = useState<AnalyticsGranularity | null>(null);
+  const [compareEnabled, setCompareEnabled] = useState(false);
 
   const [analytics, setAnalytics] = useState<PaymentAnalytics | null>(null);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
@@ -172,15 +194,47 @@ export default function DashboardScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlatformAdmin]);
 
-  const range = preset === "custom"
+  function applyPreset(value: Preset) {
+    const today = new Date();
+    if (value === "yesterday") { setMode("day"); setAnchor(addDays(today, -1)); }
+    else if (value === "month") { setMode("month"); setAnchor(today); }
+    else if (value === "custom") { setMode("custom"); }
+    else { setMode("day"); setAnchor(today); }
+  }
+
+  const today = new Date();
+  const isToday = mode === "day" && isoDate(anchor) === isoDate(today);
+  const isYesterday = mode === "day" && isoDate(anchor) === isoDate(addDays(today, -1));
+  const isCurrentMonth = mode === "month" && sameMonth(anchor, today);
+
+  const range = mode === "custom"
     ? { from: brToIso(customFrom), to: brToIso(customTo) }
-    : presetRange(preset);
+    : mode === "day"
+      ? { from: isoDate(anchor), to: isoDate(anchor) }
+      : { from: isoDate(startOfMonth(anchor)), to: isoDate(minDate(endOfMonth(anchor), today)) };
+
+  const navLabel = mode === "day"
+    ? anchor.toLocaleDateString("pt-BR")
+    : mode === "month"
+      ? `${MONTH_NAMES[anchor.getMonth()]}/${anchor.getFullYear()}`
+      : "";
+  const navDisabledNext = mode === "day" ? isToday : mode === "month" ? isCurrentMonth : true;
+
+  function navPrev() {
+    if (mode === "day") setAnchor(addDays(anchor, -1));
+    else if (mode === "month") setAnchor(addMonths(anchor, -1));
+  }
+
+  function navNext() {
+    if (mode === "day" && !isToday) setAnchor(addDays(anchor, 1));
+    else if (mode === "month" && !isCurrentMonth) setAnchor(addMonths(anchor, 1));
+  }
 
   const granularity: AnalyticsGranularity = manualGranularity
     ?? (range.from && range.to ? defaultGranularity(range.from, range.to) : "hour");
 
-  // Troca de período limpa a escolha manual — o novo período nasce no
-  // padrão calculado pelo tamanho dele; o owner pode sobrescrever de novo.
+  // Recalcula o padrão de granularidade a cada troca de período — o owner
+  // continua livre pra sobrescrever depois via chip (ver ORD-102).
   useEffect(() => {
     setManualGranularity(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -202,22 +256,30 @@ export default function DashboardScreen() {
 
   const terminalLabel = (id: number) => terminals.find((t) => t.id === id)?.label ?? `#${id}`;
   const companyLabel = companyOptions.find((o) => o.value === String(selectedCompanyId ?? ""))?.label ?? `#${selectedCompanyId ?? ""}`;
+  const showPrevious = compareEnabled && mode !== "custom";
 
   return (
     <div className={styles.page}>
       <div className={styles.headerRow}>
         <div className={styles.title}>Análises</div>
         <div className={styles.presetRow}>
-          {PRESET_OPTIONS.map((o) => (
-            <Button
-              key={o.value}
-              size="small"
-              variant={preset === o.value ? "primary" : "secondary"}
-              onClick={() => setPreset(o.value)}
-            >
-              {o.label}
-            </Button>
-          ))}
+          {PRESET_OPTIONS.map((o) => {
+            const active =
+              (o.value === "today" && isToday) ||
+              (o.value === "yesterday" && isYesterday) ||
+              (o.value === "month" && isCurrentMonth) ||
+              (o.value === "custom" && mode === "custom");
+            return (
+              <Button
+                key={o.value}
+                size="small"
+                variant={active ? "primary" : "secondary"}
+                onClick={() => applyPreset(o.value)}
+              >
+                {o.label}
+              </Button>
+            );
+          })}
           {analytics && (
             <Button
               size="small"
@@ -230,7 +292,7 @@ export default function DashboardScreen() {
         </div>
       </div>
 
-      {preset === "custom" && (
+      {mode === "custom" && (
         <div className={styles.customRange}>
           <DateInput label="De" value={customFrom} onChange={(v, valid) => { if (valid || !v) setCustomFrom(v); }} />
           <DateInput
@@ -298,21 +360,51 @@ export default function DashboardScreen() {
           </div>
 
           <div className={styles.chartHeader}>
-            <div className={styles.sectionTitle}><i className="icon-bar-chart" /> Receita por período</div>
-            <div className={styles.granularityRow}>
-              {GRANULARITY_OPTIONS.map((o) => (
-                <Button
-                  key={o.value}
-                  size="small"
-                  variant={granularity === o.value ? "primary" : "secondary"}
-                  onClick={() => setManualGranularity(o.value)}
+            <div className={styles.chartTitleGroup}>
+              <div className={styles.sectionTitle}><i className="icon-bar-chart" /> Receita por período</div>
+              {mode !== "custom" && (
+                <div className={styles.navRow}>
+                  <button type="button" className={styles.navButton} onClick={navPrev} aria-label="Período anterior">
+                    <i className="icon-chevron-left" />
+                  </button>
+                  <span className={styles.navLabel}>{navLabel}</span>
+                  <button
+                    type="button"
+                    className={styles.navButton}
+                    onClick={navNext}
+                    disabled={navDisabledNext}
+                    aria-label="Próximo período"
+                  >
+                    <i className="icon-chevron-right" />
+                  </button>
+                </div>
+              )}
+            </div>
+            <div className={styles.chartControls}>
+              {mode !== "custom" && (
+                <button
+                  type="button"
+                  className={`${styles.compareToggle} ${compareEnabled ? styles.compareToggleActive : ""}`}
+                  onClick={() => setCompareEnabled((v) => !v)}
                 >
-                  {o.label}
-                </Button>
-              ))}
+                  <i className="icon-layers" /> Comparar com período anterior
+                </button>
+              )}
+              <div className={styles.granularityRow}>
+                {GRANULARITY_OPTIONS.map((o) => (
+                  <Button
+                    key={o.value}
+                    size="small"
+                    variant={granularity === o.value ? "primary" : "secondary"}
+                    onClick={() => setManualGranularity(o.value)}
+                  >
+                    {o.label}
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
-          <RevenueBarChart data={analytics.series} />
+          <RevenueBarChart data={analytics.series} showPrevious={showPrevious} />
 
           <div className={styles.twoColumnSection}>
             <div className={styles.column}>
