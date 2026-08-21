@@ -73,6 +73,25 @@ function toDate(brDate: string): Date | undefined {
   return iso ? new Date(`${iso}T00:00:00`) : undefined;
 }
 
+function toBrDate(d: Date): string {
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  return `${day}/${month}/${d.getFullYear()}`;
+}
+
+// Padrão de 30 dias (ORD-104) — sem isso a tela carrega o histórico
+// inteiro por padrão, que fica pesado conforme o volume de transações
+// cresce. Usuário continua livre pra alargar editando os campos.
+function defaultDateFromBr(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 30);
+  return toBrDate(d);
+}
+
+function defaultDateToBr(): string {
+  return toBrDate(new Date());
+}
+
 const CANCEL_REASONS: DropdownOptions[] = [
   { value: "contestacao", label: "Contestação do cliente" },
   { value: "erro_operacional", label: "Erro operacional" },
@@ -108,8 +127,8 @@ export default function PaymentsScreen() {
   const companyId = useStore((s) => s.selectedCompanyId);
   const setSelectedCompany = useStore((s) => s.setSelectedCompany);
   const [companies, setCompanies] = useState<Company[]>([]);
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [dateFrom, setDateFrom] = useState(defaultDateFromBr);
+  const [dateTo, setDateTo] = useState(defaultDateToBr);
   const [provider, setProvider] = useState("");
   const [status, setStatus] = useState("");
   const [environment, setEnvironment] = useState("");
@@ -183,8 +202,11 @@ export default function PaymentsScreen() {
 
   function clearFilters() {
     setSelectedCompany(null);
-    setDateFrom("");
-    setDateTo("");
+    // Data volta pro padrão de 30 dias, não fica sem filtro — "Limpar"
+    // nunca deve reintroduzir sem querer o carregamento do histórico
+    // inteiro (ver ORD-104).
+    setDateFrom(defaultDateFromBr());
+    setDateTo(defaultDateToBr());
     setProvider("");
     setStatus("");
     setEnvironment("");
