@@ -10,7 +10,7 @@
 .chartArea {
   display: flex;
   gap: 12px;
-  padding: 12px 16px 12px;
+  padding: 28px 16px 12px;
   background: var(--a-surface);
   border: 1px solid var(--a-border);
   @include rounded('card');
@@ -48,6 +48,7 @@
   // valores, pedido explicitamente pelo usuário.
   border-left: 1px solid var(--a-border);
   padding-left: 8px;
+  padding-right: 8px;
   overflow-x: auto;
 }
 
