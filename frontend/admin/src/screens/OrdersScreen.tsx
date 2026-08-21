@@ -182,7 +182,12 @@ export default function OrdersScreen() {
   }
 
   function clearFilters() {
-    setSelectedCompany(null);
+    // Só superadmin/admin têm um seletor de empresa nesta tela — pra
+    // owner/manager/cashier, selectedCompanyId vem só do login e não tem
+    // como ser reescolhido na UI. Zerar incondicionalmente aqui deixava
+    // esses papéis sem empresa nenhuma até logout/login de novo (bug real,
+    // achado ao vivo — mesmo fix de PaymentsScreen).
+    if (isPlatformAdmin) setSelectedCompany(null);
     setOrderRef("");
     setCpf("");
     // Data volta pro padrão de 30 dias, não fica sem filtro — mesma regra
