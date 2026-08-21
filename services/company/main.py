@@ -137,6 +137,9 @@ class Company(Base):
     # ORD-093: True só pra empresa interna "Ordin — Plataforma" (única linha).
     # Nunca aparece em listagem/seletor voltado a empresa cliente.
     is_platform               = Column(Boolean, nullable=False, default=False)
+    # ORD-108: quando True, o totem pergunta "Comer no local" ou "Para
+    # levar" antes do checkout, e o pedido carrega essa escolha.
+    consumption_mode_enabled  = Column(Boolean, nullable=False, default=False)
 
 
 class User(Base):
@@ -316,6 +319,7 @@ class CompanyOut(BaseModel):
     contract_signed_at: Optional[datetime] = None
     contract_document_url: Optional[str] = None
     mfa_policy: str = "disabled"
+    consumption_mode_enabled: bool = False
     model_config = {"from_attributes": True}
 
 
@@ -548,6 +552,10 @@ class AppearanceIn(BaseModel):
     mode: str
 
 
+class BehaviorIn(BaseModel):
+    consumption_mode_enabled: bool
+
+
 class SecurityIn(BaseModel):
     mfa_policy: str
 
@@ -744,6 +752,7 @@ async def validate_pin(
         "company": {
             "id": co.id, "name": co.name, "plan": co.plan,
             "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
+            "consumption_mode_enabled": co.consumption_mode_enabled,
         },
         "terminals": [
             {"id": t.id, "label": t.label, "terminal_code": t.terminal_code, "tef_number": t.tef_number}
@@ -773,6 +782,7 @@ async def verify_pin(
         "company": {
             "id": co.id, "name": co.name, "plan": co.plan,
             "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
+            "consumption_mode_enabled": co.consumption_mode_enabled,
         },
         "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
     }
@@ -1098,6 +1108,27 @@ async def update_appearance(
     co.visual_mode  = body.mode
     await db.commit()
     return {"ok": True, "theme": body.theme, "mode": body.mode}
+
+
+@app.patch(
+    "/companies/{company_id}/behavior",
+    tags=["Empresas"],
+    summary="Atualizar comportamento do totem (ORD-108)",
+)
+async def update_behavior(
+    company_id: int,
+    body: BehaviorIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    if current_user.company_id != company_id and current_user.role != "superadmin":
+        raise HTTPException(403, "Acesso negado")
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+    co.consumption_mode_enabled = body.consumption_mode_enabled
+    await db.commit()
+    return {"ok": True, "consumption_mode_enabled": body.consumption_mode_enabled}
 
 
 @app.put(
@@ -2683,7 +2714,8 @@ async def approve_device(
     redis_client.set(key, json.dumps({
         "status": "approved",
         "company":  {"id": co.id, "name": co.name, "plan": co.plan or "free",
-                     "visual_theme": co.visual_theme, "visual_mode": co.visual_mode},
+                     "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
+                     "consumption_mode_enabled": co.consumption_mode_enabled},
         "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
     }), ex=60)
 

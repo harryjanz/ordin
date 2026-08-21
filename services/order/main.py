@@ -45,6 +45,10 @@ class Order(Base):
     total       = Column(Numeric(10,2), nullable=False)
     discount    = Column(Numeric(10,2), default=0)
     cpf         = Column(String(14))
+    # ORD-108 — "local" | "viagem" | NULL (empresa sem a opção ligada, ou
+    # pedido anterior à feature). Só o totem grava; sem enum rígido no
+    # banco, mesmo nível de confiança já dado ao resto do payload do kiosk.
+    consumption_type = Column(String(10), nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, onupdate=datetime.utcnow)
     items       = relationship("OrderItem", back_populates="order", cascade="all, delete")
@@ -93,6 +97,7 @@ class OrderIn(BaseModel):
     items: List[ItemIn]
     cpf: Optional[str] = None
     discount: float = 0
+    consumption_type: Optional[str] = None
 
 class CollectIn(BaseModel):
     collected_by: Optional[str] = "balcao"
@@ -113,6 +118,7 @@ class OrderListItem(BaseModel):
     company_id: int
     terminal_id: int
     cpf: Optional[str] = None
+    consumption_type: Optional[str] = None
     created_at: str
     tickets_total: int
     tickets_collected: int
@@ -240,6 +246,7 @@ async def create_order(
         company_id=current_user.company_id,
         terminal_id=terminal_id,
         order_ref=ref, total=total, discount=body.discount, cpf=body.cpf,
+        consumption_type=body.consumption_type,
     )
     db.add(order); await db.flush()
     for item in body.items:
@@ -431,6 +438,7 @@ async def list_orders(
             "company_id": o.company_id,
             "terminal_id": o.terminal_id,
             "cpf": o.cpf,
+            "consumption_type": o.consumption_type,
             "created_at": o.created_at.isoformat() if o.created_at else "",
             "tickets_total": len(tix_rows),
             "tickets_collected": sum(1 for t in tix_rows if t.status == "collected"),

@@ -16,6 +16,9 @@ export interface OrderSummary {
   created_at: string;
   tickets_total: number;
   tickets_collected: number;
+  // ORD-108 — "local" | "viagem" | null (empresa sem a opção ligada, ou
+  // pedido anterior à feature).
+  consumption_type?: string | null;
 }
 
 export interface Ticket {
