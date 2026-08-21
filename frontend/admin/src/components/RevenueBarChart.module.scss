@@ -27,8 +27,8 @@
 }
 
 // Grid com 2 linhas: barras (altura fixa 236px, mesma referência da %
-// calculada em cada barra) e rótulos de hora (altura livre) — linhas
-// separadas evitam que o rótulo dispute espaço com a barra mais alta.
+// calculada em cada barra) e rótulos (altura livre) — linhas separadas
+// evitam que o rótulo dispute espaço com a barra mais alta.
 .chart {
   position: relative;
   flex: 1;
@@ -47,7 +47,7 @@
 
 // Posicionada em px (não %) — o containing block (.chart) inclui a linha
 // de rótulos abaixo das barras, então uma % aqui mediria contra a altura
-// total (barras + rótulos), não só a faixa de 200px das barras.
+// total (barras + rótulos), não só a faixa de 236px das barras.
 .gridLine {
   position: absolute;
   left: 0;
@@ -75,7 +75,7 @@
   }
 }
 
-.hourLabel {
+.pointLabel {
   grid-row: 2;
   text-align: center;
   @include font('xs');

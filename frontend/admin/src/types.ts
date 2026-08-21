@@ -206,20 +206,31 @@ export interface Transaction {
   refused_reason: string | null;
 }
 
-// ORD-101 — GET /payments/analytics
+// ORD-101/ORD-102 — GET /payments/analytics
 export interface PeriodMetrics {
   revenue: number;
   ticket_medio: number;
   volume: number;
 }
 
-export interface HourlyRevenue {
-  hour: number;
+export type AnalyticsGranularity = "hour" | "day" | "week" | "month";
+
+// label já formatado pelo backend conforme a granularidade pedida
+// ("00h".."23h" | "DD/MM" | "MM/AAAA") — ver ORD-102.
+export interface RevenuePoint {
+  label: string;
   revenue: number;
 }
 
 export interface TerminalBreakdown {
   terminal_id: number;
+  revenue: number;
+  ticket_medio: number;
+  volume: number;
+}
+
+export interface MethodBreakdown {
+  method: string;
   revenue: number;
   ticket_medio: number;
   volume: number;
@@ -231,8 +242,10 @@ export interface PaymentAnalytics {
   // null quando o período anterior tem denominador 0 — não dá pra calcular
   // variação percentual "a partir de zero".
   change_pct: { revenue: number | null; ticket_medio: number | null; volume: number | null };
-  hourly: HourlyRevenue[];
+  granularity: AnalyticsGranularity;
+  series: RevenuePoint[];
   by_terminal: TerminalBreakdown[];
+  by_method: MethodBreakdown[];
 }
 
 export interface StatusSummaryItem {

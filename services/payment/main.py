@@ -6,7 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Query, Request
@@ -211,13 +211,22 @@ class PeriodMetrics(BaseModel):
     volume: int
 
 
-class HourlyRevenue(BaseModel):
-    hour: int
+# label já formatado pelo backend ("00h", "05/08", "MM/AAAA" conforme a
+# granularidade pedida) — evita duplicar regra de formatação no frontend.
+class RevenuePoint(BaseModel):
+    label: str
     revenue: float
 
 
 class TerminalBreakdown(BaseModel):
     terminal_id: int
+    revenue: float
+    ticket_medio: float
+    volume: int
+
+
+class MethodBreakdown(BaseModel):
+    method: str
     revenue: float
     ticket_medio: float
     volume: int
@@ -229,8 +238,10 @@ class PaymentAnalyticsOut(BaseModel):
     # None quando o período anterior tem denominador 0 (não dá pra calcular
     # variação percentual "a partir de zero") — ver ORD-101.
     change_pct: dict[str, Optional[float]]
-    hourly: list[HourlyRevenue]
+    granularity: str
+    series: list[RevenuePoint]
     by_terminal: list[TerminalBreakdown]
+    by_method: list[MethodBreakdown]
 
 
 class CancelOut(BaseModel):
@@ -545,11 +556,61 @@ async def list_payments(
     }
 
 
+def _build_series(
+    rows: list,
+    start: datetime,
+    end: datetime,
+    granularity: Literal["hour", "day", "week", "month"],
+) -> list[dict]:
+    """Agrupa `rows` (created_at, amount, ...) em baldes zero-preenchidos
+    cobrindo toda a janela [start, end), conforme a granularidade — mesmo
+    princípio do antigo `hourly` (sempre 24 entradas), generalizado."""
+    if granularity == "hour":
+        buckets = [(f"{h:02d}", f"{h:02d}h") for h in range(24)]
+        key_of = lambda dt: f"{dt.hour:02d}"
+    elif granularity == "day":
+        buckets = []
+        d = start.date()
+        last = (end - timedelta(days=1)).date()
+        while d <= last:
+            buckets.append((d.isoformat(), d.strftime("%d/%m")))
+            d += timedelta(days=1)
+        key_of = lambda dt: dt.date().isoformat()
+    elif granularity == "week":
+        buckets = []
+        d = start.date() - timedelta(days=start.date().weekday())  # segunda-feira da semana de start
+        last = (end - timedelta(days=1)).date()
+        while d <= last:
+            buckets.append((d.isoformat(), d.strftime("%d/%m")))
+            d += timedelta(days=7)
+        def key_of(dt):
+            wd = dt.date() - timedelta(days=dt.date().weekday())
+            return wd.isoformat()
+    else:  # month
+        buckets = []
+        y, m = start.year, start.month
+        last_dt = end - timedelta(days=1)
+        while (y, m) <= (last_dt.year, last_dt.month):
+            buckets.append((f"{y:04d}-{m:02d}", f"{m:02d}/{y:04d}"))
+            m += 1
+            if m == 13:
+                m = 1
+                y += 1
+        key_of = lambda dt: f"{dt.year:04d}-{dt.month:02d}"
+
+    totals: dict[str, float] = {}
+    for created_at, amount, *_rest in rows:
+        k = key_of(created_at)
+        totals[k] = totals.get(k, 0.0) + float(amount)
+
+    return [{"label": label, "revenue": round(totals.get(k, 0.0), 2)} for k, label in buckets]
+
+
 @app.get(
     "/payments/analytics",
     response_model=PaymentAnalyticsOut,
     tags=["Pagamentos"],
-    summary="KPIs comparativos, receita por hora e venda por terminal (ORD-101)",
+    summary="KPIs comparativos, série temporal, venda por terminal e por forma de pagamento (ORD-101/ORD-102)",
 )
 async def payments_analytics(
     db: AsyncSession = Depends(get_db),
@@ -557,6 +618,7 @@ async def payments_analytics(
     company_id: Optional[int] = None,
     date_from: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
     date_to: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    granularity: Literal["hour", "day", "week", "month"] = "hour",
 ):
     # Mesmo tratamento de escopo por empresa de list_payments (main.py:441-444).
     if current_user.role in ("superadmin", "admin"):
@@ -607,40 +669,57 @@ async def payments_analytics(
         "volume": pct(current["volume"], previous["volume"]),
     }
 
-    hourly_rows = await db.execute(
-        select(func.hour(Transaction.created_at), func.sum(Transaction.amount))
+    # Uma única busca bruta do período atual alimenta as 3 quebras abaixo
+    # (série temporal, por terminal, por forma de pagamento) — menos
+    # round-trip que uma query GROUP BY por quebra, e portável (não depende
+    # mais de func.hour(), específico de MySQL).
+    rows = (await db.execute(
+        select(Transaction.created_at, Transaction.amount, Transaction.terminal_id, Transaction.method)
         .where(
             *base_filters,
             Transaction.status == TransactionStatus.approved,
             Transaction.created_at >= start,
             Transaction.created_at < end,
         )
-        .group_by(func.hour(Transaction.created_at))
-    )
-    hourly_map = {int(h): float(rev or 0) for h, rev in hourly_rows.all()}
-    hourly = [{"hour": h, "revenue": hourly_map.get(h, 0.0)} for h in range(24)]
+    )).all()
 
-    terminal_rows = await db.execute(
-        select(Transaction.terminal_id, func.count(), func.sum(Transaction.amount))
-        .where(
-            *base_filters,
-            Transaction.status == TransactionStatus.approved,
-            Transaction.created_at >= start,
-            Transaction.created_at < end,
-        )
-        .group_by(Transaction.terminal_id)
-    )
+    series = _build_series(rows, start, end, granularity)
+
+    terminal_totals: dict[int, dict] = {}
+    for created_at, amount, terminal_id, _method in rows:
+        acc = terminal_totals.setdefault(terminal_id, {"revenue": 0.0, "volume": 0})
+        acc["revenue"] += float(amount)
+        acc["volume"] += 1
     by_terminal = sorted(
         (
             {
                 "terminal_id": t_id,
-                "revenue": float(rev or 0),
-                "ticket_medio": (float(rev or 0) / cnt) if cnt else 0.0,
-                "volume": cnt,
+                "revenue": acc["revenue"],
+                "ticket_medio": acc["revenue"] / acc["volume"] if acc["volume"] else 0.0,
+                "volume": acc["volume"],
             }
-            for t_id, cnt, rev in terminal_rows.all()
+            for t_id, acc in terminal_totals.items()
         ),
         key=lambda t: t["revenue"],
+        reverse=True,
+    )
+
+    method_totals: dict[str, dict] = {}
+    for created_at, amount, _terminal_id, method in rows:
+        acc = method_totals.setdefault(method, {"revenue": 0.0, "volume": 0})
+        acc["revenue"] += float(amount)
+        acc["volume"] += 1
+    by_method = sorted(
+        (
+            {
+                "method": m,
+                "revenue": acc["revenue"],
+                "ticket_medio": acc["revenue"] / acc["volume"] if acc["volume"] else 0.0,
+                "volume": acc["volume"],
+            }
+            for m, acc in method_totals.items()
+        ),
+        key=lambda m: m["revenue"],
         reverse=True,
     )
 
@@ -648,8 +727,10 @@ async def payments_analytics(
         "current": current,
         "previous": previous,
         "change_pct": change_pct,
-        "hourly": hourly,
+        "granularity": granularity,
+        "series": series,
         "by_terminal": by_terminal,
+        "by_method": by_method,
     }
 
 

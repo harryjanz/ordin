@@ -95,6 +95,38 @@
   color: color('error-base');
 }
 
+// "Venda por terminal" e "Receita por forma de pagamento" lado a lado —
+// mesma estrutura de lista, cabem confortavelmente em 2 colunas em telas
+// largas, evitando a rolagem vertical desnecessária de empilhar as duas.
+.twoColumnSection {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+// Cada coluna é um card próprio (mesmo fundo/borda/raio do .card de KPI) —
+// sem isso as listas ficavam "soltas" na página, sem um contorno que
+// delimitasse onde uma seção termina e a outra começa (feedback do
+// usuário). Como a coluna já é o card, as linhas dentro dela (.terminalRow)
+// não têm mais fundo/borda própria — vira lista com divisórias simples, em
+// vez de "card dentro de card".
+.column {
+  min-width: 0;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  @include padding('l', 'xl', 'l', 'xl');
+
+  .terminalList {
+    margin-bottom: 0;
+  }
+
+  .sectionTitle {
+    margin-bottom: 20px;
+  }
+}
+
 .terminalList {
   margin-bottom: 32px;
 }
@@ -103,16 +135,17 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  background: var(--a-surface);
-  border: 1px solid var(--a-border);
-  @include rounded('card');
-  padding: 12px 16px;
-  margin-bottom: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--a-border);
   @include font('sm');
-  transition: border-color 0.15s ease;
 
-  &:hover {
-    border-color: color('brand-primary');
+  &:first-child {
+    padding-top: 0;
+  }
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
   }
 }
 
@@ -141,6 +174,24 @@
 .section {
   margin-bottom: 32px;
   max-width: 320px;
+}
+
+.chartHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+
+  .sectionTitle {
+    margin-bottom: 0;
+  }
+}
+
+.granularityRow {
+  display: flex;
+  gap: 6px;
 }
 
 .sectionTitle {
