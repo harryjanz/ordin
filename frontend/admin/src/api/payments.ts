@@ -1,5 +1,5 @@
 import api from "../api";
-import type { PaymentAnalytics, PaymentStatusSummary, Transaction } from "../types";
+import type { AnalyticsGranularity, PaymentAnalytics, PaymentStatusSummary, Transaction } from "../types";
 
 export interface PaymentListFilters {
   companyId?: number;
@@ -45,12 +45,14 @@ export interface PaymentAnalyticsFilters {
   companyId?: number;
   dateFrom: string;
   dateTo: string;
+  granularity: AnalyticsGranularity;
 }
 
 export async function getPaymentsAnalytics(filters: PaymentAnalyticsFilters): Promise<PaymentAnalytics> {
   const params: Record<string, string | number> = {
     date_from: filters.dateFrom,
     date_to: filters.dateTo,
+    granularity: filters.granularity,
   };
   if (filters.companyId) params.company_id = filters.companyId;
   const r = await api.get<PaymentAnalytics>("/payments/analytics", { params });

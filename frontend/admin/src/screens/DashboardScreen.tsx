@@ -3,8 +3,8 @@ import { Button, DateInput, Dropdown, Skeleton, type DropdownOptions } from "des
 import { getPaymentsAnalytics } from "../api/payments";
 import { listCompanies, listTerminals } from "../api/companies";
 import { useStore } from "../store";
-import type { PaymentAnalytics, Terminal } from "../types";
-import HourlyBarChart from "../components/HourlyBarChart";
+import type { AnalyticsGranularity, PaymentAnalytics, Terminal } from "../types";
+import RevenueBarChart from "../components/RevenueBarChart";
 import styles from "./DashboardScreen.module.scss";
 
 type Preset = "today" | "yesterday" | "month" | "custom";
@@ -15,6 +15,34 @@ const PRESET_OPTIONS: { value: Preset; label: string }[] = [
   { value: "month", label: "Este mês" },
   { value: "custom", label: "Customizado" },
 ];
+
+const GRANULARITY_OPTIONS: { value: AnalyticsGranularity; label: string }[] = [
+  { value: "hour", label: "Hora" },
+  { value: "day", label: "Dia" },
+  { value: "week", label: "Semana" },
+  { value: "month", label: "Mês" },
+];
+
+// Ordin não tem operador atribuído à venda (totem é autoatendimento) — os
+// rótulos são só os métodos aceitos, ver `main.py` do payment-service
+// ("Métodos aceitos: credit, debit, pix, voucher").
+const METHOD_LABELS: Record<string, string> = {
+  credit: "Crédito",
+  debit: "Débito",
+  pix: "PIX",
+  voucher: "Voucher",
+};
+
+// Padrão pelo tamanho do período (ORD-102) — período de 1 dia continua
+// mostrando por hora (comportamento herdado do ORD-101); períodos maiores
+// já nascem numa granularidade legível, mas o owner pode trocar livremente.
+function defaultGranularity(from: string, to: string): AnalyticsGranularity {
+  const days = Math.round((new Date(`${to}T00:00:00`).getTime() - new Date(`${from}T00:00:00`).getTime()) / 86400000) + 1;
+  if (days <= 1) return "hour";
+  if (days <= 31) return "day";
+  if (days <= 180) return "week";
+  return "month";
+}
 
 // Formata em componentes locais (não toISOString, que usa UTC e pode
 // deslocar o dia dependendo do fuso do navegador).
@@ -60,6 +88,48 @@ function formatCurrency(v: number): string {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function csvEscape(v: string | number): string {
+  const s = String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// Exportação client-side (ORD-102) — sem chamada de API nova, só serializa
+// o `analytics` já carregado na tela.
+function exportAnalyticsCsv(
+  analytics: PaymentAnalytics,
+  meta: { companyLabel: string; from: string; to: string },
+  terminalLabel: (id: number) => string,
+): void {
+  const rows: (string | number)[][] = [];
+  rows.push(["Análises", meta.companyLabel, `${meta.from} a ${meta.to}`]);
+  rows.push([]);
+  rows.push(["KPI", "Atual", "Anterior", "Variação %"]);
+  rows.push(["Receita", analytics.current.revenue, analytics.previous.revenue, analytics.change_pct.revenue ?? ""]);
+  rows.push(["Ticket médio", analytics.current.ticket_medio, analytics.previous.ticket_medio, analytics.change_pct.ticket_medio ?? ""]);
+  rows.push(["Volume", analytics.current.volume, analytics.previous.volume, analytics.change_pct.volume ?? ""]);
+  rows.push([]);
+  rows.push([`Série temporal (${analytics.granularity})`]);
+  rows.push(["Período", "Receita"]);
+  analytics.series.forEach((p) => rows.push([p.label, p.revenue]));
+  rows.push([]);
+  rows.push(["Venda por terminal"]);
+  rows.push(["Terminal", "Receita", "Ticket médio"]);
+  analytics.by_terminal.forEach((t) => rows.push([terminalLabel(t.terminal_id), t.revenue, t.ticket_medio]));
+  rows.push([]);
+  rows.push(["Receita por forma de pagamento"]);
+  rows.push(["Forma", "Receita", "Ticket médio"]);
+  analytics.by_method.forEach((m) => rows.push([METHOD_LABELS[m.method] ?? m.method, m.revenue, m.ticket_medio]));
+
+  const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
+  const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `analises_${meta.from}_${meta.to}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // Badge próprio (não o Tag do design system, compacto demais pra essa
 // informação) — ícone e percentual com respiro entre eles e fonte maior,
 // pedido explícito do usuário.
@@ -84,6 +154,9 @@ export default function DashboardScreen() {
   const [preset, setPreset] = useState<Preset>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  // null = segue o padrão calculado pelo tamanho do período; um valor
+  // explícito é o que o owner escolheu manualmente no chip (ver ORD-102).
+  const [manualGranularity, setManualGranularity] = useState<AnalyticsGranularity | null>(null);
 
   const [analytics, setAnalytics] = useState<PaymentAnalytics | null>(null);
   const [terminals, setTerminals] = useState<Terminal[]>([]);
@@ -103,21 +176,32 @@ export default function DashboardScreen() {
     ? { from: brToIso(customFrom), to: brToIso(customTo) }
     : presetRange(preset);
 
+  const granularity: AnalyticsGranularity = manualGranularity
+    ?? (range.from && range.to ? defaultGranularity(range.from, range.to) : "hour");
+
+  // Troca de período limpa a escolha manual — o novo período nasce no
+  // padrão calculado pelo tamanho dele; o owner pode sobrescrever de novo.
+  useEffect(() => {
+    setManualGranularity(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range.from, range.to]);
+
   useEffect(() => {
     if (!selectedCompanyId || !range.from || !range.to) { setLoading(false); return; }
     setLoading(true);
     setErr(null);
     Promise.all([
-      getPaymentsAnalytics({ companyId: selectedCompanyId, dateFrom: range.from, dateTo: range.to }),
+      getPaymentsAnalytics({ companyId: selectedCompanyId, dateFrom: range.from, dateTo: range.to, granularity }),
       listTerminals(selectedCompanyId),
     ])
       .then(([a, t]) => { setAnalytics(a); setTerminals(t); })
       .catch(() => setErr("Erro ao carregar os dados do período."))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId, range.from, range.to]);
+  }, [selectedCompanyId, range.from, range.to, granularity]);
 
   const terminalLabel = (id: number) => terminals.find((t) => t.id === id)?.label ?? `#${id}`;
+  const companyLabel = companyOptions.find((o) => o.value === String(selectedCompanyId ?? ""))?.label ?? `#${selectedCompanyId ?? ""}`;
 
   return (
     <div className={styles.page}>
@@ -134,6 +218,15 @@ export default function DashboardScreen() {
               {o.label}
             </Button>
           ))}
+          {analytics && (
+            <Button
+              size="small"
+              variant="secondary"
+              onClick={() => exportAnalyticsCsv(analytics, { companyLabel, from: range.from ?? "", to: range.to ?? "" }, terminalLabel)}
+            >
+              Exportar CSV
+            </Button>
+          )}
         </div>
       </div>
 
@@ -204,25 +297,62 @@ export default function DashboardScreen() {
             </div>
           </div>
 
-          <div className={styles.sectionTitle}><i className="icon-bar-chart" /> Receita por hora</div>
-          <HourlyBarChart data={analytics.hourly} />
-
-          <div className={styles.sectionTitle}><i className="icon-monitor" /> Venda por terminal</div>
-          {analytics.by_terminal.length === 0 ? (
-            <div className={styles.empty}>Nenhuma venda no período selecionado.</div>
-          ) : (
-            <div className={styles.terminalList}>
-              {analytics.by_terminal.map((t) => (
-                <div key={t.terminal_id} className={styles.terminalRow}>
-                  <span className={styles.terminalLabel}>{terminalLabel(t.terminal_id)}</span>
-                  <span className={styles.terminalValues}>
-                    <span className={styles.terminalRevenue}>{formatCurrency(t.revenue)}</span>
-                    <span className={styles.terminalTicket}>Ticket médio: {formatCurrency(t.ticket_medio)}</span>
-                  </span>
-                </div>
+          <div className={styles.chartHeader}>
+            <div className={styles.sectionTitle}><i className="icon-bar-chart" /> Receita por período</div>
+            <div className={styles.granularityRow}>
+              {GRANULARITY_OPTIONS.map((o) => (
+                <Button
+                  key={o.value}
+                  size="small"
+                  variant={granularity === o.value ? "primary" : "secondary"}
+                  onClick={() => setManualGranularity(o.value)}
+                >
+                  {o.label}
+                </Button>
               ))}
             </div>
-          )}
+          </div>
+          <RevenueBarChart data={analytics.series} />
+
+          <div className={styles.twoColumnSection}>
+            <div className={styles.column}>
+              <div className={styles.sectionTitle}><i className="icon-monitor" /> Venda por terminal</div>
+              {analytics.by_terminal.length === 0 ? (
+                <div className={styles.empty}>Nenhuma venda no período selecionado.</div>
+              ) : (
+                <div className={styles.terminalList}>
+                  {analytics.by_terminal.map((t) => (
+                    <div key={t.terminal_id} className={styles.terminalRow}>
+                      <span className={styles.terminalLabel}>{terminalLabel(t.terminal_id)}</span>
+                      <span className={styles.terminalValues}>
+                        <span className={styles.terminalRevenue}>{formatCurrency(t.revenue)}</span>
+                        <span className={styles.terminalTicket}>Ticket médio: {formatCurrency(t.ticket_medio)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className={styles.column}>
+              <div className={styles.sectionTitle}><i className="icon-credit-card" /> Receita por forma de pagamento</div>
+              {analytics.by_method.length === 0 ? (
+                <div className={styles.empty}>Nenhuma venda no período selecionado.</div>
+              ) : (
+                <div className={styles.terminalList}>
+                  {analytics.by_method.map((m) => (
+                    <div key={m.method} className={styles.terminalRow}>
+                      <span className={styles.terminalLabel}>{METHOD_LABELS[m.method] ?? m.method}</span>
+                      <span className={styles.terminalValues}>
+                        <span className={styles.terminalRevenue}>{formatCurrency(m.revenue)}</span>
+                        <span className={styles.terminalTicket}>Ticket médio: {formatCurrency(m.ticket_medio)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </>
       ) : null}
     </div>

@@ -129,12 +129,99 @@ async def test_receita_por_hora(client, analytics_seed, token_owner):
         headers=auth(token_owner),
     )
     assert r.status_code == 200
-    hourly = r.json()["hourly"]
-    assert len(hourly) == 24
-    by_hour = {h["hour"]: h["revenue"] for h in hourly}
-    assert by_hour[9] == 300.0
-    assert by_hour[14] == 200.0
-    assert by_hour[0] == 0.0
+    body = r.json()
+    assert body["granularity"] == "hour"
+    series = body["series"]
+    assert len(series) == 24
+    by_label = {s["label"]: s["revenue"] for s in series}
+    assert by_label["09h"] == 300.0
+    assert by_label["14h"] == 200.0
+    assert by_label["00h"] == 0.0
+
+
+async def test_granularidade_dia_zero_preenchida(client, token_owner):
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        db.add_all([
+            svc.Transaction(
+                company_id=1, terminal_id=10, order_ref="ORDANL020",
+                method="credit", amount=100.00, status="approved", provider="mock",
+                created_at=datetime(2024, 5, 1, 9, 0, 0),
+            ),
+            svc.Transaction(
+                company_id=1, terminal_id=10, order_ref="ORDANL021",
+                method="credit", amount=50.00, status="approved", provider="mock",
+                created_at=datetime(2024, 5, 3, 9, 0, 0),
+            ),
+        ])
+        await db.commit()
+
+    r = await client.get(
+        "/payments/analytics",
+        params={"date_from": "2024-05-01", "date_to": "2024-05-03", "granularity": "day"},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["granularity"] == "day"
+    series = body["series"]
+    assert len(series) == 3
+    by_label = {s["label"]: s["revenue"] for s in series}
+    assert by_label["01/05"] == 100.0
+    assert by_label["02/05"] == 0.0
+    assert by_label["03/05"] == 50.0
+
+    async with svc.AsyncSessionLocal() as db:
+        await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.order_ref.in_(["ORDANL020", "ORDANL021"])))
+        await db.commit()
+
+
+async def test_granularidade_mes(client, token_owner):
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        db.add_all([
+            svc.Transaction(
+                company_id=1, terminal_id=10, order_ref="ORDANL030",
+                method="credit", amount=100.00, status="approved", provider="mock",
+                created_at=datetime(2024, 6, 15, 9, 0, 0),
+            ),
+            svc.Transaction(
+                company_id=1, terminal_id=10, order_ref="ORDANL031",
+                method="credit", amount=200.00, status="approved", provider="mock",
+                created_at=datetime(2024, 7, 5, 9, 0, 0),
+            ),
+        ])
+        await db.commit()
+
+    r = await client.get(
+        "/payments/analytics",
+        params={"date_from": "2024-06-01", "date_to": "2024-07-31", "granularity": "month"},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 200
+    series = r.json()["series"]
+    assert len(series) == 2
+    by_label = {s["label"]: s["revenue"] for s in series}
+    assert by_label["06/2024"] == 100.0
+    assert by_label["07/2024"] == 200.0
+
+    async with svc.AsyncSessionLocal() as db:
+        await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.order_ref.in_(["ORDANL030", "ORDANL031"])))
+        await db.commit()
+
+
+async def test_receita_por_forma_de_pagamento(client, analytics_seed, token_owner):
+    r = await client.get(
+        "/payments/analytics",
+        params={"date_from": DAY, "date_to": DAY},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 200
+    by_method = r.json()["by_method"]
+    assert [m["method"] for m in by_method] == ["credit", "pix"]
+    assert by_method[0]["revenue"] == 300.0
+    assert by_method[0]["volume"] == 1
+    assert by_method[1]["revenue"] == 200.0
 
 
 async def test_venda_por_terminal_ordenada_por_receita(client, analytics_seed, token_owner):
@@ -160,6 +247,10 @@ async def test_isolamento_multi_tenant(client, analytics_seed, token_owner):
     body = r.json()
     assert body["current"]["revenue"] == 500.0  # não inclui os 1000 da empresa 2
     assert all(t["terminal_id"] != 20 for t in body["by_terminal"])
+    # empresa 2 só tem transação "credit" de 1000 — se vazasse, o total de
+    # "credit" em by_method seria 1300 (300 + 1000) em vez de 300.
+    by_method = {m["method"]: m["revenue"] for m in body["by_method"]}
+    assert by_method["credit"] == 300.0
 
 
 async def test_data_invalida_retorna_422(client, token_owner):
