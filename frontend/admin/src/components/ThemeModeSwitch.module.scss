@@ -12,7 +12,9 @@
   padding: 2px;
   background: var(--a-surface-2);
   @include rounded('default');
-  width: 96px;
+  // Preenche a largura do container (ver .actionBtn em Sidebar.module.scss)
+  // em vez de um valor fixo estreito — evita sobrar espaço vazio ao redor.
+  width: 100%;
 }
 
 .option {

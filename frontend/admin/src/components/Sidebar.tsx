@@ -119,12 +119,6 @@ export default function Sidebar() {
           ))}
         </nav>
 
-        {expanded && (
-          <div className={styles.actionBtn}>
-            <ThemeModeSwitch />
-          </div>
-        )}
-
         {/* Item de navegação, não LinkButton — variant="inverse" do LinkButton
             fixa texto/ícone branco, invisível sobre o fundo branco do sidebar
             no modo claro (ver ORD-076, achado 1). Herda a mesma cor
@@ -133,13 +127,18 @@ export default function Sidebar() {
           type="button"
           onClick={handleLogout}
           className={`${styles.navItem} ${styles.logoutItem}`}
-          style={{ marginBottom: 16 }}
         >
           <i className={`icon-log-out ${styles.navIcon}`} />
           <span className={styles.navLabel} style={{ opacity: expanded ? 1 : 0 }}>
             Sair
           </span>
         </button>
+
+        {expanded && (
+          <div className={styles.actionBtn}>
+            <ThemeModeSwitch />
+          </div>
+        )}
 
         <ConfirmDialog
           open={!!pendingNav}
