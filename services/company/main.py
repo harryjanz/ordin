@@ -31,6 +31,12 @@ from domain.cpf import normalize_cpf, is_valid_cpf
 from infrastructure.cnpj_lookup import lookup_cnpj
 from infrastructure.cep_lookup import lookup_cep
 from infrastructure.contract_storage import ensure_bucket, presigned_download_url, upload_contract
+from infrastructure.video_storage import (
+    ensure_bucket as ensure_video_bucket,
+    presigned_download_url as presigned_video_url,
+    upload_video,
+    delete_object as delete_video_object,
+)
 from fastapi import Request, Response
 from auth import get_current_user, get_setup_mfa_user, TokenPayload
 import pyotp
@@ -219,6 +225,19 @@ class Terminal(Base):
     active            = Column(Boolean, default=True)
     created_at        = Column(DateTime, default=datetime.utcnow)
     last_heartbeat    = Column(DateTime, nullable=True)
+
+
+class TotemVideo(Base):
+    """Vídeo de modo espera (attract mode) do totem — ORD-115.
+    video_key é a key do objeto no bucket, não uma URL (mesmo padrão de
+    Company.contract_document_url e Product.image_url no catalog-service)."""
+    __tablename__ = "totem_videos"
+    id         = Column(Integer, primary_key=True)
+    company_id = Column(Integer, nullable=False, index=True)
+    name       = Column(String(100), nullable=False)
+    video_key  = Column(String(500), nullable=False)
+    active     = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class CompanyPaymentConfig(Base):
@@ -560,6 +579,21 @@ class SecurityIn(BaseModel):
     mfa_policy: str
 
 
+class TotemVideoOut(BaseModel):
+    id: int
+    name: str
+    active: bool
+    video_url: str  # URL assinada, gerada sob demanda — não é o video_key guardado no banco
+
+
+class TotemVideoListOut(BaseModel):
+    videos: list[TotemVideoOut]
+
+
+class TotemVideoUpdateIn(BaseModel):
+    active: bool
+
+
 class MfaStatusOut(BaseModel):
     mfa_enabled: bool
     mfa_policy: str
@@ -721,6 +755,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def _create_contracts_bucket_if_local() -> None:
     ensure_bucket()
+    ensure_video_bucket()
 
 
 # ── Endpoints internos — acessíveis apenas via VPC ────────────────────────────
@@ -1129,6 +1164,143 @@ async def update_behavior(
     co.consumption_mode_enabled = body.consumption_mode_enabled
     await db.commit()
     return {"ok": True, "consumption_mode_enabled": body.consumption_mode_enabled}
+
+
+_VIDEO_CONTENT_TYPES = {"video/mp4": "mp4"}
+_VIDEO_MAX_BYTES = 500 * 1024 * 1024  # 500 MB
+
+
+async def _serialize_totem_video(v: TotemVideo) -> TotemVideoOut:
+    return TotemVideoOut(
+        id=v.id, name=v.name, active=v.active,
+        video_url=presigned_video_url(v.video_key),
+    )
+
+
+@app.post(
+    "/companies/{company_id}/totem-videos",
+    response_model=TotemVideoOut,
+    tags=["Empresas"],
+    summary="Enviar vídeo de modo espera do totem (ORD-115)",
+    responses={
+        415: {"description": "Formato de arquivo não aceito (só MP4)"},
+        413: {"description": "Arquivo maior que 500 MB"},
+    },
+)
+async def upload_totem_video(
+    company_id: int,
+    name: str = Form(..., max_length=100),
+    video: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    if video.content_type not in _VIDEO_CONTENT_TYPES:
+        raise HTTPException(415, detail="Formato de arquivo não aceito — envie um vídeo MP4")
+
+    content = await video.read()
+    if len(content) > _VIDEO_MAX_BYTES:
+        raise HTTPException(413, detail=f"Arquivo maior que {_VIDEO_MAX_BYTES // (1024 * 1024)} MB")
+
+    v = TotemVideo(company_id=company_id, name=name, video_key="", active=True)
+    db.add(v)
+    await db.flush()  # gera v.id sem commitar, pra montar a key antes de subir o arquivo
+
+    v.video_key = upload_video(company_id, v.id, content)
+    await db.commit(); await db.refresh(v)
+    return await _serialize_totem_video(v)
+
+
+@app.get(
+    "/companies/{company_id}/totem-videos",
+    response_model=TotemVideoListOut,
+    tags=["Empresas"],
+    summary="Listar vídeos de modo espera do totem, ativos e inativos (gestão)",
+)
+async def list_totem_videos(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(
+        select(TotemVideo).filter_by(company_id=company_id).order_by(TotemVideo.created_at)
+    )
+    videos = result.scalars().all()
+    return TotemVideoListOut(videos=[await _serialize_totem_video(v) for v in videos])
+
+
+@app.get(
+    "/companies/{company_id}/totem-videos/active",
+    response_model=TotemVideoListOut,
+    tags=["Empresas"],
+    summary="Listar vídeos ativos de modo espera do totem (consumido pelo totem)",
+)
+async def list_active_totem_videos(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # Kiosk também pode ler (é quem realmente consome este endpoint), além
+    # de quem já tem acesso de gestão da empresa.
+    if current_user.role != "kiosk":
+        _require_company_admin(current_user, company_id)
+    elif current_user.company_id != company_id:
+        raise HTTPException(403, "Acesso negado")
+    result = await db.execute(
+        select(TotemVideo)
+        .filter_by(company_id=company_id, active=True)
+        .order_by(TotemVideo.created_at)
+    )
+    videos = result.scalars().all()
+    return TotemVideoListOut(videos=[await _serialize_totem_video(v) for v in videos])
+
+
+@app.patch(
+    "/companies/{company_id}/totem-videos/{video_id}",
+    response_model=TotemVideoOut,
+    tags=["Empresas"],
+    summary="Ativar/desativar vídeo de modo espera do totem",
+)
+async def update_totem_video(
+    company_id: int,
+    video_id: int,
+    body: TotemVideoUpdateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(TotemVideo).filter_by(id=video_id, company_id=company_id))
+    v = result.scalars().first()
+    if not v: raise HTTPException(404)
+    v.active = body.active
+    await db.commit(); await db.refresh(v)
+    return await _serialize_totem_video(v)
+
+
+@app.delete(
+    "/companies/{company_id}/totem-videos/{video_id}",
+    tags=["Empresas"],
+    summary="Excluir vídeo de modo espera do totem",
+)
+async def delete_totem_video(
+    company_id: int,
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(TotemVideo).filter_by(id=video_id, company_id=company_id))
+    v = result.scalars().first()
+    if not v: raise HTTPException(404)
+    delete_video_object(v.video_key)
+    await db.delete(v)
+    await db.commit()
+    return {"ok": True}
 
 
 @app.put(

@@ -105,6 +105,10 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS}
       CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY}
       S3_BUCKET: ${S3_BUCKET:-ordin-contracts}
+      # Bucket separado pros vídeos de modo espera do totem (ORD-115) — nome
+      # de env var próprio pra não colidir com o S3_BUCKET de contratos
+      # acima, já que os dois vivem no mesmo container/processo.
+      S3_BUCKET_TOTEM_VIDEOS: ${S3_BUCKET_TOTEM_VIDEOS:-ordin-totem-videos}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
       S3_PUBLIC_ENDPOINT_URL: ${S3_PUBLIC_ENDPOINT_URL:-http://localhost:9000}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-ordin}

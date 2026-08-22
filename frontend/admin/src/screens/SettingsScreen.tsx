@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
-import { Button, Dropdown, InputBase, Tab, Tabs, Toggle, makeToast, type DropdownOptions } from "design-system";
+import {
+  Button, Dropdown, InputBase, Tab, Tabs, Toggle, Upload, UploadListFiles, makeToast,
+  type DropdownOptions, type UploadFile,
+} from "design-system";
 import { QRCodeSVG } from "qrcode.react";
 import api from "../api";
 import { listCompanies } from "../api/companies";
@@ -7,7 +10,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { clearDeviceTrustToken } from "../deviceTrust";
 import { useStore } from "../store";
 import { THEME_REGISTRY, resolveTheme, type ThemeName, type ThemeMode } from "../themes";
-import type { Company, TrustedDevice } from "../types";
+import type { Company, TotemVideo, TrustedDevice } from "../types";
 import styles from "./SettingsScreen.module.scss";
 
 const FONT_D = "'Lexend', sans-serif";
@@ -179,6 +182,74 @@ export default function SettingsScreen() {
       setSavingBehavior(false);
       setTimeout(() => setSaveBehaviorMsg(null), 3000);
     }
+  }
+
+  // ── Vídeos em modo espera do totem (ORD-115) ────────────────────────────
+  const VIDEO_MAX_SIZE_MB = 500;
+  const VIDEO_TYPES = ["video/mp4"];
+
+  const [videos, setVideos] = useState<TotemVideo[]>([]);
+  const [videoName, setVideoName] = useState("");
+  const [videoUploadFiles, setVideoUploadFiles] = useState<UploadFile[]>([]);
+  const [videoUploadProgress, setVideoUploadProgress] = useState<number | null>(null);
+  const [confirmDeleteVideo, setConfirmDeleteVideo] = useState<TotemVideo | null>(null);
+
+  function refreshVideos() {
+    if (!companyId) return;
+    api.get(`/companies/${companyId}/totem-videos`).then((r) => setVideos(r.data.videos)).catch(() => null);
+  }
+  useEffect(refreshVideos, [companyId]);
+
+  async function uploadVideo(files: UploadFile[]) {
+    const picked = files[0];
+    if (!picked) return;
+    if (picked.status === "error-read") {
+      setVideoUploadFiles([picked]);
+      return;
+    }
+    if (!videoName.trim()) {
+      makeToast("error", "Dê um nome ao vídeo antes de enviar.");
+      return;
+    }
+    if (!companyId) return;
+    setVideoUploadFiles([{ ...picked, status: "loading" }]);
+    setVideoUploadProgress(0);
+    try {
+      const formData = new FormData();
+      formData.append("name", videoName.trim());
+      formData.append("video", picked.file);
+      await api.post(`/companies/${companyId}/totem-videos`, formData, {
+        onUploadProgress: (e) => {
+          if (e.total) setVideoUploadProgress(Math.round((e.loaded / e.total) * 100));
+        },
+      });
+      setVideoName("");
+      setVideoUploadFiles([]);
+      makeToast("success", "Vídeo enviado com sucesso!");
+      refreshVideos();
+    } catch {
+      setVideoUploadFiles([{ ...picked, status: "error-send" }]);
+      makeToast("error", "Erro ao enviar o vídeo. Tente novamente.");
+    } finally {
+      setVideoUploadProgress(null);
+    }
+  }
+
+  async function toggleVideo(video: TotemVideo) {
+    if (!companyId) return;
+    await api.patch(`/companies/${companyId}/totem-videos/${video.id}`, { active: !video.active });
+    refreshVideos();
+  }
+
+  function deleteVideo(video: TotemVideo) {
+    setConfirmDeleteVideo(video);
+  }
+
+  async function doDeleteVideo() {
+    if (!companyId || !confirmDeleteVideo) return;
+    await api.delete(`/companies/${companyId}/totem-videos/${confirmDeleteVideo.id}`);
+    setConfirmDeleteVideo(null);
+    refreshVideos();
   }
 
   const themes = Object.entries(THEME_REGISTRY) as [ThemeName, (typeof THEME_REGISTRY)[ThemeName]][];
@@ -630,6 +701,68 @@ export default function SettingsScreen() {
               )}
             </div>
           </div>
+
+          {/* ── Card Vídeos em modo espera (ORD-115) ─────────────────────── */}
+          <div className={styles.card}>
+            <div className={styles.cardTitle}>Vídeos em modo espera</div>
+            <div className={styles.cardDesc}>
+              Enquanto o totem está ocioso, ele mostra os vídeos ativos em loop, um após o outro,
+              no lugar da tela estática. Sem nenhum vídeo ativo, a tela estática continua normalmente.
+            </div>
+
+            <div className={styles.formLabel}>Nome do vídeo</div>
+            <InputBase
+              aria-label="Nome do vídeo"
+              value={videoName}
+              onChange={(e) => setVideoName(e.target.value)}
+              maxLength={100}
+              placeholder="Ex: Promoção combo verão"
+            />
+
+            <div style={{ marginTop: 16 }}>
+              <Upload
+                fullWidth
+                maxFileSize={VIDEO_MAX_SIZE_MB}
+                multipleFiles={false}
+                types={VIDEO_TYPES}
+                showMaxFileSize={false}
+                helperMessage="MP4, até 500 MB"
+                errorMessage="Envie um arquivo MP4 de até 500 MB"
+                onCallbackUpload={uploadVideo}
+              />
+              <UploadListFiles items={videoUploadFiles} removable={false} />
+              {videoUploadProgress !== null && (
+                <div className={styles.cardDesc} style={{ marginTop: 8, marginBottom: 0 }}>
+                  Enviando… {videoUploadProgress}%
+                </div>
+              )}
+            </div>
+
+            <div className={styles.trustedDevicesBlock} style={{ marginTop: 20 }}>
+              {videos.length === 0 ? (
+                <div className={styles.cardDesc} style={{ marginBottom: 0 }}>Nenhum vídeo enviado ainda.</div>
+              ) : (
+                videos.map((v) => (
+                  <div key={v.id} className={styles.trustedDeviceRow}>
+                    <div>
+                      <div className={styles.trustedDeviceLabel}>{v.name}</div>
+                      <div className={styles.trustedDeviceMeta}>{v.active ? "Ativo" : "Inativo"}</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <Toggle
+                        name={`video-active-${v.id}`}
+                        checked={v.active}
+                        onChange={() => toggleVideo(v)}
+                      />
+                      <Button size="small" variant="secondary" onClick={() => deleteVideo(v)}>
+                        Excluir
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
           </>
         )
       )}
@@ -686,6 +819,13 @@ export default function SettingsScreen() {
         message="Desativar o duplo fator da empresa vai remover o 2FA e os dispositivos confiáveis de TODOS os usuários da empresa, imediatamente. Essa ação não pode ser desfeita. Deseja continuar?"
         onConfirm={() => { setConfirmDisableMfa(false); saveMfaPolicy("disabled"); }}
         onCancel={() => setConfirmDisableMfa(false)}
+      />
+
+      <ConfirmDialog
+        open={!!confirmDeleteVideo}
+        message={`Excluir o vídeo "${confirmDeleteVideo?.name}"? Essa ação não pode ser desfeita.`}
+        onConfirm={doDeleteVideo}
+        onCancel={() => setConfirmDeleteVideo(null)}
       />
     </div>
   );
