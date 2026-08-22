@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Theme } from "../themes";
+import { RADIUS, FONT } from "../scale";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -37,7 +38,7 @@ export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
 
   const KEY: React.CSSProperties = {
     height: KEY_H,
-    fontSize: 46,
+    fontSize: FONT.headlineLg,
     fontWeight: 700,
     fontFamily: FONT_D,
     background: T.numBg,
@@ -62,14 +63,14 @@ export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
       transition: "background 0.3s",
       padding: "32px 0 24px",
     }}>
-      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 26 }}>
+      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 28 }}>
 
         {/* Título */}
         <div style={{ textAlign: "center" }}>
-          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: 38, fontWeight: 800, margin: "0 0 8px" }}>
+          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800, margin: "0 0 8px" }}>
             Informe seu documento
           </h2>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 20, margin: 0 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
             Digite seu CPF
           </p>
         </div>
@@ -78,20 +79,20 @@ export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
         <div style={{
           display: "flex",
           alignItems: "center",
-          gap: 14,
-          padding: "22px 28px",
+          gap: 16,
+          padding: "24px 28px",
           border: `2px solid ${T.border}`,
-          borderRadius: 12,
+          borderRadius: RADIUS.sm,
           background: T.numBg,
         }}>
           <span style={{
             color: T.muted, fontFamily: FONT_B,
-            fontSize: 22, fontWeight: 700, whiteSpace: "nowrap",
+            fontSize: FONT.subtitle, fontWeight: 700, whiteSpace: "nowrap",
           }}>
             CPF:
           </span>
           <span style={{
-            fontFamily: FONT_D, fontSize: 44, fontWeight: 800,
+            fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800,
             letterSpacing: 4, flex: 1,
             color: digits.length > 0 ? T.text : T.muted,
           }}>
@@ -102,7 +103,7 @@ export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
         {/* Numpad — altura fixa por tecla, nunca cresce */}
         <div style={{
           border: `1px solid ${T.border}`,
-          borderRadius: 12,
+          borderRadius: RADIUS.sm,
           overflow: "hidden",
         }}>
           {/* Linhas 7-8-9 / 4-5-6 / 1-2-3 */}
@@ -136,7 +137,7 @@ export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
             </button>
             <button
               onClick={del}
-              style={{ ...KEY, flex: 2, fontSize: 36 }}
+              style={{ ...KEY, flex: 2, fontSize: FONT.headline }}
               onMouseEnter={(e) => { e.currentTarget.style.background = T.numHover; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = T.numBg; }}
             >
@@ -153,10 +154,10 @@ export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
             border: "none",
             color: T.muted,
             cursor: "pointer",
-            fontSize: 22,
+            fontSize: FONT.subtitle,
             fontWeight: 600,
             fontFamily: FONT_D,
-            padding: "6px 0",
+            padding: "8px 0",
             textAlign: "center",
           }}
         >
@@ -172,11 +173,11 @@ export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
               height: 88,
               background: T.surface,
               border: `1.5px solid ${T.border}`,
-              borderRadius: 12,
+              borderRadius: RADIUS.sm,
               color: T.text,
               cursor: "pointer",
               fontFamily: FONT_D,
-              fontSize: 22,
+              fontSize: FONT.subtitle,
               textTransform: "uppercase",
               letterSpacing: 1,
               fontWeight: 700,
@@ -195,9 +196,9 @@ export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
               background: done ? T.btn : T.surface,
               color: done ? T.btnText : T.muted,
               border: done ? "none" : `1.5px solid ${T.border}`,
-              borderRadius: 12,
+              borderRadius: RADIUS.sm,
               fontFamily: FONT_D,
-              fontSize: 24,
+              fontSize: FONT.title,
               fontWeight: 800,
               textTransform: "uppercase",
               letterSpacing: 1,

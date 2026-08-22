@@ -1,5 +1,6 @@
 import { useState, FormEvent } from "react";
 import type { Theme } from "../themes";
+import { RADIUS, FONT } from "../scale";
 
 const STORAGE_KEY = "ordin_terminal_id";
 
@@ -32,17 +33,17 @@ export default function DeviceSetupScreen({ T, onDone }: Props) {
       <div style={{
         background: T.surface,
         border: `1px solid ${T.border}`,
-        borderRadius: 24,
+        borderRadius: RADIUS.lg,
         padding: "40px 48px",
         width: 360,
         boxShadow: "0 8px 40px rgba(153,0,255,0.12)",
         textAlign: "center",
       }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>🖥️</div>
-        <h2 style={{ color: T.text, fontSize: 22, fontWeight: 800, marginBottom: 8 }}>
+        <div style={{ fontSize: FONT.headlineLg, marginBottom: 16 }}>🖥️</div>
+        <h2 style={{ color: T.text, fontSize: FONT.subtitle, fontWeight: 800, marginBottom: 8 }}>
           Configuração do Dispositivo
         </h2>
-        <p style={{ color: T.muted, fontSize: 13, marginBottom: 28 }}>
+        <p style={{ color: T.muted, fontSize: FONT.body, marginBottom: 28 }}>
           Informe o ID do terminal configurado no Admin Panel.
           Esta tela aparece apenas na primeira vez.
         </p>
@@ -50,9 +51,9 @@ export default function DeviceSetupScreen({ T, onDone }: Props) {
           <div style={{
             color: T.errorText,
             background: T.errorBg,
-            borderRadius: 8,
+            borderRadius: RADIUS.sm,
             padding: "8px 12px",
-            fontSize: 13,
+            fontSize: FONT.body,
             marginBottom: 16,
           }}>
             {error}
@@ -71,9 +72,9 @@ export default function DeviceSetupScreen({ T, onDone }: Props) {
               padding: "12px 16px",
               background: T.numBg,
               border: `1px solid ${T.border}`,
-              borderRadius: 10,
+              borderRadius: RADIUS.sm,
               color: T.text,
-              fontSize: 18,
+              fontSize: FONT.subtitle,
               textAlign: "center",
               outline: "none",
               marginBottom: 16,
@@ -83,12 +84,12 @@ export default function DeviceSetupScreen({ T, onDone }: Props) {
             type="submit"
             style={{
               width: "100%",
-              padding: "14px",
+              padding: "16px",
               background: T.btn,
               color: T.btnText,
               border: "none",
-              borderRadius: 12,
-              fontSize: 16,
+              borderRadius: RADIUS.sm,
+              fontSize: FONT.bodyLg,
               fontWeight: 700,
               cursor: "pointer",
               boxShadow: T.glow,

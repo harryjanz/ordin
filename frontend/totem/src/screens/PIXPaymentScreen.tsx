@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import api from "../api";
 import type { Theme } from "../themes";
+import { RADIUS, FONT } from "../scale";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const FONT_D = "'Lexend', sans-serif";
@@ -91,11 +92,11 @@ export default function PIXPaymentScreen({
       padding: "32px 16px",
     }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 36, marginBottom: 6 }}>⚡</div>
-        <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: 24, fontWeight: 800, margin: 0 }}>
+        <div style={{ fontSize: FONT.headline, marginBottom: 8 }}>⚡</div>
+        <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800, margin: 0 }}>
           Pague com PIX
         </h2>
-        <p style={{ color: T.priceColor, fontFamily: FONT_D, fontSize: 26, fontWeight: 800, marginTop: 4, marginBottom: 0 }}>
+        <p style={{ color: T.priceColor, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800, marginTop: 4, marginBottom: 0 }}>
           {fmt(amount)}
         </p>
       </div>
@@ -103,7 +104,7 @@ export default function PIXPaymentScreen({
       {/* QR Code */}
       <div style={{
         background: "#fff",
-        borderRadius: 16,
+        borderRadius: RADIUS.lg,
         padding: 16,
         boxShadow: T.cardShadow,
       }}>
@@ -119,25 +120,25 @@ export default function PIXPaymentScreen({
           <div style={{
             width: 260, height: 260,
             display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#999", fontSize: 13,
+            color: "#999", fontSize: FONT.body,
           }}>
             QR indisponível
           </div>
         )}
       </div>
 
-      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, margin: 0, textAlign: "center" }}>
+      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, margin: 0, textAlign: "center" }}>
         Aponte a câmera do seu celular para o QR Code
       </p>
 
       {/* Status + countdown */}
       <div style={{ textAlign: "center" }}>
-        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, margin: "0 0 6px" }}>
+        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, margin: "0 0 8px" }}>
           Aguardando pagamento…
         </p>
         <div style={{
           fontFamily: FONT_D,
-          fontSize: 28,
+          fontSize: FONT.title,
           fontWeight: 800,
           color: urgente ? T.errorText : T.text,
           letterSpacing: 2,
@@ -145,7 +146,7 @@ export default function PIXPaymentScreen({
           ⏳ {mm}:{ss}
         </div>
         {urgente && (
-          <p style={{ color: T.errorText, fontFamily: FONT_B, fontSize: 13, marginTop: 4 }}>
+          <p style={{ color: T.errorText, fontFamily: FONT_B, fontSize: FONT.body, marginTop: 4 }}>
             Tempo quase esgotado!
           </p>
         )}
@@ -160,10 +161,10 @@ export default function PIXPaymentScreen({
             minHeight: 52,
             background: "transparent",
             border: `1px solid ${T.borderNeutral}`,
-            borderRadius: 999,
+            borderRadius: RADIUS.pill,
             color: T.muted,
             fontFamily: FONT_D,
-            fontSize: 15,
+            fontSize: FONT.bodyLg,
             fontWeight: 600,
             cursor: "pointer",
           }}
@@ -174,14 +175,14 @@ export default function PIXPaymentScreen({
         <div style={{
           background: T.surface,
           border: `1px solid ${T.border}`,
-          borderRadius: 14,
+          borderRadius: RADIUS.lg,
           padding: "16px 24px",
           textAlign: "center",
         }}>
-          <p style={{ color: T.text, fontFamily: FONT_B, fontSize: 15, marginBottom: 14 }}>
+          <p style={{ color: T.text, fontFamily: FONT_B, fontSize: FONT.bodyLg, marginBottom: 16 }}>
             Deseja cancelar o pagamento?
           </p>
-          <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
             <button
               onClick={() => setCancelConfirm(false)}
               style={{
@@ -189,11 +190,11 @@ export default function PIXPaymentScreen({
                 minHeight: 48,
                 background: T.surface,
                 border: `1px solid ${T.borderNeutral}`,
-                borderRadius: 999,
+                borderRadius: RADIUS.pill,
                 color: T.muted,
                 fontFamily: FONT_D,
                 fontWeight: 700,
-                fontSize: 14,
+                fontSize: FONT.body,
                 cursor: "pointer",
               }}
             >
@@ -206,11 +207,11 @@ export default function PIXPaymentScreen({
                 minHeight: 48,
                 background: T.errorBg ?? "rgba(255,77,109,0.12)",
                 border: "none",
-                borderRadius: 999,
+                borderRadius: RADIUS.pill,
                 color: T.errorText,
                 fontFamily: FONT_D,
                 fontWeight: 700,
-                fontSize: 14,
+                fontSize: FONT.body,
                 cursor: "pointer",
               }}
             >
@@ -220,7 +221,7 @@ export default function PIXPaymentScreen({
         </div>
       )}
 
-      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 11, opacity: 0.4, textAlign: "center", margin: 0 }}>
+      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.label, opacity: 0.4, textAlign: "center", margin: 0 }}>
         Pedido: {orderRef}
       </p>
     </div>
