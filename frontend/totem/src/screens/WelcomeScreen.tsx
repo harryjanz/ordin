@@ -26,20 +26,10 @@ export default function WelcomeScreen({ T, companyName, onStart }: Props) {
         WebkitUserSelect: "none",
       }}
     >
-      {/* Marca */}
-      <div style={{ textAlign: "center", marginBottom: 72 }}>
-        <svg
-          width={80}
-          height={80}
-          viewBox="0 0 48 48"
-          fill="none"
-          style={{ display: "block", margin: "0 auto 24px" }}
-        >
-          <rect width="48" height="48" rx="14" fill={T.roxo} />
-          <circle cx="24" cy="22" r="10" stroke="white" strokeWidth="3.5" fill="none" />
-          <circle cx="24" cy="22" r="4" fill="white" />
-          <rect x="14" y="34" width="20" height="3" rx="1.5" fill="white" opacity="0.4" />
-        </svg>
+      {/* Marca — só a da empresa, de propósito (ORD-114): esta é a única
+          tela vista pelo cliente final antes de decidir tocar pra começar,
+          nenhuma identificação do fornecedor de software (Ordin) aqui. */}
+      <div style={{ textAlign: "center", marginBottom: 48 }}>
         <div style={{
           fontFamily: FONT_D,
           fontWeight: 900,

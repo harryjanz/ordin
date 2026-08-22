@@ -4,6 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Theme } from "../themes";
 import type { CompanyInfo, TerminalInfo } from "../types";
 import { RADIUS, FONT } from "../scale";
+import { OrdinSymbol } from "../assets/OrdinSymbol";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -90,12 +91,15 @@ export default function DevicePairingScreen({ T, onDone, onUsePIN }: Props) {
         padding: "40px 48px", maxWidth: 480, width: "100%",
         textAlign: "center", boxShadow: T.cardShadow,
       }}>
-        <svg width={48} height={48} viewBox="0 0 48 48" fill="none" style={{ marginBottom: 16 }}>
-          <rect width="48" height="48" rx="13" fill={T.roxo} />
-          <circle cx="24" cy="22" r="10" stroke="white" strokeWidth="3.5" fill="none" />
-          <circle cx="24" cy="22" r="4" fill="white" />
-          <rect x="14" y="34" width="20" height="3" rx="1.5" fill="white" opacity="0.4" />
-        </svg>
+        {/* Ícone + "ordin" em roxo fixo (não T.roxo) — telas de
+            autenticação/configuração identificam o sistema, ao contrário
+            da tela de boas-vindas (ORD-114). Mesmo padrão do SetupScreen. */}
+        <div style={{ marginBottom: 16, display: "flex", justifyContent: "center" }}>
+          <OrdinSymbol size={48} color="#9900ff" />
+        </div>
+        <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.title, color: "#9900ff", letterSpacing: "-0.5px", marginBottom: 8 }}>
+          ordin
+        </div>
 
         <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text, marginBottom: 8 }}>
           Parear totem

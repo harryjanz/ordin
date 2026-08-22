@@ -3,6 +3,7 @@ import axios from "axios";
 import type { Theme } from "../themes";
 import type { CompanyInfo, TerminalInfo, AvailableTerminal } from "../types";
 import { RADIUS, FONT } from "../scale";
+import { OrdinSymbol } from "../assets/OrdinSymbol";
 import DevicePairingScreen from "./DevicePairingScreen";
 
 const FONT_D = "'Lexend', sans-serif";
@@ -185,12 +186,9 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
     return (
       <div style={wrap}>
         <div style={{ marginBottom: 32, textAlign: "center" }}>
-          <svg width={56} height={56} viewBox="0 0 48 48" fill="none" style={{ display: "block", margin: "0 auto 16px" }}>
-            <rect width="48" height="48" rx="13" fill="#9900ff"/>
-            <circle cx="24" cy="22" r="10" stroke="white" strokeWidth="3.5" fill="none"/>
-            <circle cx="24" cy="22" r="4" fill="white"/>
-            <rect x="14" y="34" width="20" height="3" rx="1.5" fill="white" opacity="0.4"/>
-          </svg>
+          <div style={{ margin: "0 auto 16px", display: "flex", justifyContent: "center" }}>
+            <OrdinSymbol size={56} color="#9900ff" />
+          </div>
           <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.title, color: "#9900ff", letterSpacing: "-0.5px" }}>ordin</div>
           <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body, marginTop: 8 }}>Digite o PIN da empresa para começar</p>
         </div>
