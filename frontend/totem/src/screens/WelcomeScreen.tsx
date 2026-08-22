@@ -62,6 +62,12 @@ export default function WelcomeScreen({ T, companyName, companyId, onStart }: Pr
           autoPlay
           muted
           playsInline
+          // Com 1 só vídeo, `loop` nativo reinicia sem depender de troca de
+          // índice (index 0 -> 0 % 1 não muda estado, então onEnded sozinho
+          // nunca reiniciaria) — o browser não dispara "ended" quando loop
+          // está ligado. Com 2+, loop fica desligado e onEnded avança pro
+          // próximo, sempre um índice diferente do atual.
+          loop={videos.length === 1}
           onEnded={() => setIndex((i) => (i + 1) % videos.length)}
           style={{
             position: "absolute",
