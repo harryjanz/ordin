@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Hand } from "lucide-react";
 import type { Theme } from "../themes";
 import type { TotemVideo } from "../types";
@@ -33,6 +33,18 @@ export default function WelcomeScreen({ T, companyName, companyId, onStart }: Pr
   }, [companyId]);
 
   const current = videos[index] ?? null;
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // O atributo `autoPlay` sozinho não é confiável aqui — o React seta
+  // `muted` como propriedade JS, não como atributo HTML (`hasAttribute`
+  // fica false mesmo com `.muted === true`), e a política de autoplay do
+  // Chrome pode avaliar o elemento antes disso, bloqueando a reprodução em
+  // silêncio (sem erro nenhum, só fica pausado em 0). Chamar `.play()`
+  // explicitamente aqui é a forma confiável — vídeo mudo sempre pode ser
+  // tocado via JS, mesmo sob política de autoplay restrita.
+  useEffect(() => {
+    videoRef.current?.play().catch(() => {});
+  }, [current?.id]);
 
   return (
     <div
@@ -57,6 +69,7 @@ export default function WelcomeScreen({ T, companyName, companyId, onStart }: Pr
           "cancelar reprodução" é necessária. */}
       {current && (
         <video
+          ref={videoRef}
           key={current.id}
           src={current.video_url}
           autoPlay
