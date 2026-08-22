@@ -38,6 +38,17 @@ function Modal(_a) {
     // vida da instância do componente.
     var identifier = (0, react_1.useState)(function () { return (0, nanoid_1.nanoid)(5); })[0];
     var wrapperRef = (0, react_1.useRef)(null);
+    // PATCH 2 (ver vendor/design-system/README.md): este efeito rodava de
+    // novo toda vez que onOpen/onClose/onBackdropClick/onCloseButtonClick
+    // trocavam de referência — o normal quando o consumidor passa funções
+    // inline (`onClose={() => ...}`), que são recriadas a cada render do
+    // componente pai. Cada vez que o efeito rodava com `open` ainda true,
+    // chamava `wrapperRef.current.focus()` de novo, roubando o foco de
+    // volta pro modal mesmo com o usuário digitando num campo lá dentro
+    // (cada tecla causa um re-render do pai). `hasFocusedRef` garante que
+    // o foco automático só acontece uma vez por "sessão" de abertura do
+    // modal (reseta quando `open` vira false).
+    var hasFocusedRef = (0, react_1.useRef)(false);
     (0, react_1.useEffect)(function () {
         var closeOnEscPress = function (event) {
             if (hideCloseButton)
@@ -53,11 +64,14 @@ function Modal(_a) {
             }
         };
         if (open) {
-            if (onOpen) {
-                onOpen();
-            }
-            if (wrapperRef.current) {
-                wrapperRef.current.focus();
+            if (!hasFocusedRef.current) {
+                hasFocusedRef.current = true;
+                if (onOpen) {
+                    onOpen();
+                }
+                if (wrapperRef.current) {
+                    wrapperRef.current.focus();
+                }
             }
             var checkOverflow_1 = function () {
                 var _a;
@@ -73,6 +87,7 @@ function Modal(_a) {
                 window.removeEventListener('keydown', closeOnEscPress);
             };
         }
+        hasFocusedRef.current = false;
         window.removeEventListener('keydown', closeOnEscPress);
         return undefined;
     }, [

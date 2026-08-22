@@ -58,6 +58,21 @@ código vendorizado, faz parte do repo do `ordin`.
   Sintoma real: digitar num `InputBase` controlado dentro de um `Modal`
   perdia o foco a cada tecla (achado na ORD-115, editando nome de vídeo).
   Trocado pra `useState(() => nanoid(5))[0]` — mesmo identifier durante toda
-  a vida da instância do componente. **Reportar upstream** pro repositório
-  fonte (`/home/harry/repositorios/design-system`) — não fiz isso aqui, só
-  vendorizei o fix; sem isso o bug volta na próxima atualização do `dist/`.
+  a vida da instância do componente.
+
+  **Segundo bug, mesmo arquivo, achado logo em seguida (o primeiro patch
+  sozinho não resolvia por completo):** o `useEffect` que chama
+  `wrapperRef.current.focus()` tem `onOpen`/`onClose`/`onBackdropClick`/
+  `onCloseButtonClick` nas deps — funções que a maioria dos consumidores
+  passa inline (`onClose={() => ...}`), recriadas a cada render do pai. Cada
+  vez que o efeito rodava de novo com `open` ainda `true` (ex: a cada tecla
+  digitada, já que digitar re-renderiza o componente pai), ele chamava
+  `.focus()` de novo — roubando o foco de volta pro modal, mesmo com o
+  cursor já num campo de texto lá dentro. Corrigido com um `hasFocusedRef`
+  que só deixa o foco automático acontecer uma vez por "sessão" de abertura
+  (reseta quando `open` vira `false`).
+
+  **Reportar os dois upstream** pro repositório fonte
+  (`/home/harry/repositorios/design-system`) — não fiz isso aqui, só
+  vendorizei os fixes; sem isso os bugs voltam na próxima atualização do
+  `dist/`.
