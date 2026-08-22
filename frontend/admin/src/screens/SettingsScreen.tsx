@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type DragEvent } from "react";
+import { useState, useEffect, useCallback, useRef, type DragEvent } from "react";
 import {
   Button, Dropdown, InputBase, Modal, Tab, Tabs, Toggle, Upload, UploadListFiles, makeToast,
   type DropdownOptions, type UploadFile,
@@ -277,28 +277,33 @@ export default function SettingsScreen() {
     });
   }
 
-  // Renomear em modal específica, pedida pelo usuário.
+  // Renomear em modal específica, pedida pelo usuário. Input NÃO
+  // controlado (defaultValue + ref), mesmo padrão já usado no modal de
+  // terminal do CompanyScreen.tsx — um input controlado (value/onChange)
+  // re-renderiza o componente a cada tecla, e digitar dentro de um Modal
+  // do design-system enquanto o pai re-renderiza tem bugs conhecidos de
+  // perda de foco (ver patches em vendor/design-system/Modal.js). O resto
+  // do sistema evita esse problema inteiro não usando input controlado
+  // dentro de modal — seguindo o mesmo caminho aqui em vez de insistir em
+  // mais patch no vendor.
   const [renameVideo, setRenameVideo] = useState<TotemVideo | null>(null);
-  const [renameValue, setRenameValue] = useState("");
+  const [renameModalKey, setRenameModalKey] = useState(0);
   const [renaming, setRenaming] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
 
   function openRenameVideo(video: TotemVideo) {
     setRenameVideo(video);
-    setRenameValue(video.name);
+    setRenameModalKey((k) => k + 1);
   }
 
-  // Referência estável (não recriada a cada tecla) — o Modal do design
-  // system reagenda um efeito toda vez que essas props mudam de
-  // identidade; com uma arrow function inline isso rodava a cada
-  // keystroke. Ver patch em vendor/design-system/Modal.js pro bug de
-  // verdade (roubava o foco de volta), isso aqui é só reforço/boa prática.
   const closeRenameModal = useCallback(() => setRenameVideo(null), []);
 
   async function saveRenameVideo() {
-    if (!companyId || !renameVideo || !renameValue.trim()) return;
+    const value = renameInputRef.current?.value.trim() ?? "";
+    if (!companyId || !renameVideo || !value) return;
     setRenaming(true);
     try {
-      await api.patch(`/companies/${companyId}/totem-videos/${renameVideo.id}`, { name: renameValue.trim() });
+      await api.patch(`/companies/${companyId}/totem-videos/${renameVideo.id}`, { name: value });
       setRenameVideo(null);
       refreshVideos();
     } catch {
@@ -904,20 +909,23 @@ export default function SettingsScreen() {
         onBackdropClick={closeRenameModal}
         onCloseButtonClick={closeRenameModal}
       >
-        <div className={styles.cardTitle} style={{ marginBottom: 16 }}>Editar nome do vídeo</div>
-        <InputBase
-          aria-label="Novo nome do vídeo"
-          value={renameValue}
-          onChange={(e) => setRenameValue(e.target.value)}
-          maxLength={100}
-        />
-        <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
-          <Button onClick={saveRenameVideo} disabled={!renameValue.trim()} loading={renaming}>
-            Salvar
-          </Button>
-          <Button variant="secondary" onClick={() => setRenameVideo(null)}>
-            Cancelar
-          </Button>
+        <div key={renameModalKey}>
+          <div className={styles.cardTitle} style={{ marginBottom: 16 }}>Editar nome do vídeo</div>
+          <InputBase
+            aria-label="Novo nome do vídeo"
+            defaultValue={renameVideo?.name}
+            ref={renameInputRef}
+            maxLength={100}
+            autoFocus
+          />
+          <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+            <Button onClick={saveRenameVideo} loading={renaming}>
+              Salvar
+            </Button>
+            <Button variant="secondary" onClick={() => setRenameVideo(null)}>
+              Cancelar
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>
