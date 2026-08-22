@@ -237,6 +237,7 @@ class TotemVideo(Base):
     name       = Column(String(100), nullable=False)
     video_key  = Column(String(500), nullable=False)
     active     = Column(Boolean, nullable=False, default=True)
+    sort_order = Column(Integer, nullable=False, default=0)  # ordem de exibição na playlist — mesmo padrão de Product.sort_order (catalog-service)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -591,7 +592,12 @@ class TotemVideoListOut(BaseModel):
 
 
 class TotemVideoUpdateIn(BaseModel):
-    active: bool
+    name: Optional[str] = Field(None, max_length=100)
+    active: Optional[bool] = None
+
+
+class TotemVideoReorderIn(BaseModel):
+    video_ids: list[int]
 
 
 class MfaStatusOut(BaseModel):
@@ -1206,7 +1212,12 @@ async def upload_totem_video(
     if len(content) > _VIDEO_MAX_BYTES:
         raise HTTPException(413, detail=f"Arquivo maior que {_VIDEO_MAX_BYTES // (1024 * 1024)} MB")
 
-    v = TotemVideo(company_id=company_id, name=name, video_key="", active=True)
+    count_result = await db.execute(
+        select(func.count()).select_from(TotemVideo).filter_by(company_id=company_id)
+    )
+    next_sort_order = count_result.scalar_one()
+
+    v = TotemVideo(company_id=company_id, name=name, video_key="", active=True, sort_order=next_sort_order)
     db.add(v)
     await db.flush()  # gera v.id sem commitar, pra montar a key antes de subir o arquivo
 
@@ -1228,7 +1239,8 @@ async def list_totem_videos(
 ):
     _require_company_admin(current_user, company_id)
     result = await db.execute(
-        select(TotemVideo).filter_by(company_id=company_id).order_by(TotemVideo.created_at)
+        select(TotemVideo).filter_by(company_id=company_id)
+        .order_by(TotemVideo.sort_order.asc(), TotemVideo.id.asc())
     )
     videos = result.scalars().all()
     return TotemVideoListOut(videos=[await _serialize_totem_video(v) for v in videos])
@@ -1254,7 +1266,7 @@ async def list_active_totem_videos(
     result = await db.execute(
         select(TotemVideo)
         .filter_by(company_id=company_id, active=True)
-        .order_by(TotemVideo.created_at)
+        .order_by(TotemVideo.sort_order.asc(), TotemVideo.id.asc())
     )
     videos = result.scalars().all()
     return TotemVideoListOut(videos=[await _serialize_totem_video(v) for v in videos])
@@ -1264,7 +1276,7 @@ async def list_active_totem_videos(
     "/companies/{company_id}/totem-videos/{video_id}",
     response_model=TotemVideoOut,
     tags=["Empresas"],
-    summary="Ativar/desativar vídeo de modo espera do totem",
+    summary="Renomear e/ou ativar/desativar vídeo de modo espera do totem",
 )
 async def update_totem_video(
     company_id: int,
@@ -1277,9 +1289,38 @@ async def update_totem_video(
     result = await db.execute(select(TotemVideo).filter_by(id=video_id, company_id=company_id))
     v = result.scalars().first()
     if not v: raise HTTPException(404)
-    v.active = body.active
+    if body.name is not None:
+        v.name = body.name
+    if body.active is not None:
+        v.active = body.active
     await db.commit(); await db.refresh(v)
     return await _serialize_totem_video(v)
+
+
+@app.put(
+    "/companies/{company_id}/totem-videos/reorder",
+    status_code=204,
+    tags=["Empresas"],
+    summary="Reordenar vídeos de modo espera do totem",
+    responses={400: {"description": "algum video_id não pertence à empresa informada"}},
+)
+async def reorder_totem_videos(
+    company_id: int,
+    body: TotemVideoReorderIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """Rota registrada antes de /totem-videos/{video_id} de propósito: caso
+    contrário o path param capturaria "reorder" como video_id — mesmo
+    cuidado do /catalog/products/reorder no catalog-service."""
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(TotemVideo.id).filter_by(company_id=company_id))
+    valid_ids = set(result.scalars().all())
+    if set(body.video_ids) != valid_ids:
+        raise HTTPException(400, detail="video_ids não corresponde exatamente aos vídeos da empresa")
+    for index, video_id in enumerate(body.video_ids):
+        await db.execute(update(TotemVideo).where(TotemVideo.id == video_id).values(sort_order=index))
+    await db.commit()
 
 
 @app.delete(

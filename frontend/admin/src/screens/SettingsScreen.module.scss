@@ -296,3 +296,15 @@ $font-b: 'Inter', sans-serif;
   color: rgba(var(--a-text-rgb), 0.4);
   font-family: $font-b;
 }
+
+// Reordenar por arrastar (vídeos em modo espera, ORD-115) — mesmo padrão
+// visual de .item/.itemDragging/.dragHandle do CatalogScreen.module.scss.
+.itemDragging {
+  opacity: 0.4;
+}
+
+.dragHandle {
+  cursor: grab;
+  color: rgba(var(--a-text-rgb), 0.35);
+  user-select: none;
+}

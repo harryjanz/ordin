@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type DragEvent } from "react";
 import {
-  Button, Dropdown, InputBase, Tab, Tabs, Toggle, Upload, UploadListFiles, makeToast,
+  Button, Dropdown, InputBase, Modal, Tab, Tabs, Toggle, Upload, UploadListFiles, makeToast,
   type DropdownOptions, type UploadFile,
 } from "design-system";
 import { QRCodeSVG } from "qrcode.react";
@@ -250,6 +250,55 @@ export default function SettingsScreen() {
     await api.delete(`/companies/${companyId}/totem-videos/${confirmDeleteVideo.id}`);
     setConfirmDeleteVideo(null);
     refreshVideos();
+  }
+
+  // Reordenar por arrastar — mesmo padrão de produtos no catálogo
+  // (CatalogScreen.tsx handleProductDrop).
+  const [draggedVideoId, setDraggedVideoId] = useState<number | null>(null);
+
+  function handleVideoDragOver(e: DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+  }
+
+  async function handleVideoDrop(e: DragEvent<HTMLDivElement>, targetId: number) {
+    e.preventDefault();
+    const sourceId = draggedVideoId;
+    setDraggedVideoId(null);
+    if (sourceId === null || sourceId === targetId || !companyId) return;
+    const fromIndex = videos.findIndex((v) => v.id === sourceId);
+    const toIndex = videos.findIndex((v) => v.id === targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+    const reordered = [...videos];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+    setVideos(reordered);
+    await api.put(`/companies/${companyId}/totem-videos/reorder`, {
+      video_ids: reordered.map((v) => v.id),
+    });
+  }
+
+  // Renomear em modal específica, pedida pelo usuário.
+  const [renameVideo, setRenameVideo] = useState<TotemVideo | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
+
+  function openRenameVideo(video: TotemVideo) {
+    setRenameVideo(video);
+    setRenameValue(video.name);
+  }
+
+  async function saveRenameVideo() {
+    if (!companyId || !renameVideo || !renameValue.trim()) return;
+    setRenaming(true);
+    try {
+      await api.patch(`/companies/${companyId}/totem-videos/${renameVideo.id}`, { name: renameValue.trim() });
+      setRenameVideo(null);
+      refreshVideos();
+    } catch {
+      makeToast("error", "Erro ao renomear o vídeo. Tente novamente.");
+    } finally {
+      setRenaming(false);
+    }
   }
 
   const themes = Object.entries(THEME_REGISTRY) as [ThemeName, (typeof THEME_REGISTRY)[ThemeName]][];
@@ -743,10 +792,20 @@ export default function SettingsScreen() {
                 <div className={styles.cardDesc} style={{ marginBottom: 0 }}>Nenhum vídeo enviado ainda.</div>
               ) : (
                 videos.map((v) => (
-                  <div key={v.id} className={styles.trustedDeviceRow}>
-                    <div>
-                      <div className={styles.trustedDeviceLabel}>{v.name}</div>
-                      <div className={styles.trustedDeviceMeta}>{v.active ? "Ativo" : "Inativo"}</div>
+                  <div
+                    key={v.id}
+                    className={`${styles.trustedDeviceRow} ${draggedVideoId === v.id ? styles.itemDragging : ""}`}
+                    draggable
+                    onDragStart={() => setDraggedVideoId(v.id)}
+                    onDragOver={handleVideoDragOver}
+                    onDrop={(e) => handleVideoDrop(e, v.id)}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className={styles.dragHandle} title="Arraste para reordenar">⠿</span>
+                      <div>
+                        <div className={styles.trustedDeviceLabel}>{v.name}</div>
+                        <div className={styles.trustedDeviceMeta}>{v.active ? "Ativo" : "Inativo"}</div>
+                      </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                       <Toggle
@@ -754,6 +813,9 @@ export default function SettingsScreen() {
                         checked={v.active}
                         onChange={() => toggleVideo(v)}
                       />
+                      <Button size="small" variant="secondary" onClick={() => openRenameVideo(v)}>
+                        Editar nome
+                      </Button>
                       <Button size="small" variant="secondary" onClick={() => deleteVideo(v)}>
                         Excluir
                       </Button>
@@ -827,6 +889,30 @@ export default function SettingsScreen() {
         onConfirm={doDeleteVideo}
         onCancel={() => setConfirmDeleteVideo(null)}
       />
+
+      <Modal
+        open={!!renameVideo}
+        width={420}
+        onClose={() => setRenameVideo(null)}
+        onBackdropClick={() => setRenameVideo(null)}
+        onCloseButtonClick={() => setRenameVideo(null)}
+      >
+        <div className={styles.cardTitle} style={{ marginBottom: 16 }}>Editar nome do vídeo</div>
+        <InputBase
+          aria-label="Nome do vídeo"
+          value={renameValue}
+          onChange={(e) => setRenameValue(e.target.value)}
+          maxLength={100}
+        />
+        <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
+          <Button onClick={saveRenameVideo} disabled={!renameValue.trim()} loading={renaming}>
+            Salvar
+          </Button>
+          <Button variant="secondary" onClick={() => setRenameVideo(null)}>
+            Cancelar
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 }
