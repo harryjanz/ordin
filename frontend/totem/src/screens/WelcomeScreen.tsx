@@ -1,5 +1,6 @@
 import { Hand } from "lucide-react";
 import type { Theme } from "../themes";
+import { FONT } from "../scale";
 
 const FONT_D = "'Lexend', sans-serif";
 
@@ -32,7 +33,7 @@ export default function WelcomeScreen({ T, companyName, onStart }: Props) {
           height={80}
           viewBox="0 0 48 48"
           fill="none"
-          style={{ display: "block", margin: "0 auto 20px" }}
+          style={{ display: "block", margin: "0 auto 24px" }}
         >
           <rect width="48" height="48" rx="14" fill={T.roxo} />
           <circle cx="24" cy="22" r="10" stroke="white" strokeWidth="3.5" fill="none" />
@@ -42,18 +43,18 @@ export default function WelcomeScreen({ T, companyName, onStart }: Props) {
         <div style={{
           fontFamily: FONT_D,
           fontWeight: 900,
-          fontSize: 52,
+          fontSize: FONT.headlineLg,
           color: T.text,
           letterSpacing: "-1px",
           lineHeight: 1,
-          marginBottom: 10,
+          marginBottom: 8,
         }}>
           {companyName}
         </div>
         <div style={{
           fontFamily: FONT_D,
           color: T.roxo,
-          fontSize: 14,
+          fontSize: FONT.body,
           fontWeight: 700,
           letterSpacing: "4px",
           textTransform: "uppercase",
@@ -85,7 +86,7 @@ export default function WelcomeScreen({ T, companyName, onStart }: Props) {
         </div>
         <div style={{
           fontFamily: FONT_D,
-          fontSize: 42,
+          fontSize: FONT.headline,
           fontWeight: 800,
           color: T.text,
           letterSpacing: "-0.5px",
@@ -94,7 +95,7 @@ export default function WelcomeScreen({ T, companyName, onStart }: Props) {
         </div>
         <div style={{
           fontFamily: "'Inter', sans-serif",
-          fontSize: 16,
+          fontSize: FONT.bodyLg,
           color: T.muted,
           fontWeight: 400,
         }}>

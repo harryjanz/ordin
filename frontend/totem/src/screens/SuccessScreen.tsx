@@ -6,6 +6,7 @@ import type { CompletedOrder } from "../types";
 import { useStore } from "../store";
 import { silentPrint } from "../lib/printService";
 import type { PrintMethod } from "../lib/printService";
+import { RADIUS, FONT } from "../scale";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtMethod = (m: string) =>
@@ -23,6 +24,9 @@ function extractOrderNumber(ref: string): string {
   return Number.isNaN(num) ? ref : String(num);
 }
 
+// Template do ticket impresso (80mm térmica) — escala própria de impressora,
+// intencionalmente fora da escala de tela do ORD-113 (mídia física
+// diferente, não é UI de totem vista na tela).
 function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string[]): string {
   const now = new Date().toLocaleString("pt-BR");
 
@@ -195,16 +199,16 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
 
         {/* Ícone + título */}
         <CheckCircle2 size={88} color={T.successColor} strokeWidth={1.3} />
-        <h2 style={{ color: T.successColor, fontFamily: FONT_D, fontSize: 52, fontWeight: 800, margin: 0 }}>
+        <h2 style={{ color: T.successColor, fontFamily: FONT_D, fontSize: FONT.headlineLg, fontWeight: 800, margin: 0 }}>
           Pagamento aprovado!
         </h2>
 
         {/* Número do pedido */}
         <div style={{ lineHeight: 1 }}>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: "0 0 6px", letterSpacing: 2, textTransform: "uppercase" }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: "0 0 8px", letterSpacing: 2, textTransform: "uppercase" }}>
             Número do pedido
           </p>
-          <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: 100, lineHeight: 1, color: T.text, letterSpacing: "-2px" }}>
+          <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.hero, lineHeight: 1, color: T.text, letterSpacing: "-2px" }}>
             {orderNumber}
           </div>
         </div>
@@ -215,24 +219,24 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
           padding: "20px 28px",
           background: T.surface,
           border: `1px solid ${T.border}`,
-          borderRadius: 12,
+          borderRadius: RADIUS.sm,
         }}>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 16, margin: "0 0 4px", textTransform: "uppercase", letterSpacing: 1 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.bodyLg, margin: "0 0 4px", textTransform: "uppercase", letterSpacing: 1 }}>
             Valor pago
           </p>
-          <p style={{ color: T.priceColor, fontFamily: FONT_D, fontWeight: 900, fontSize: 52, margin: "0 0 12px", lineHeight: 1 }}>
+          <p style={{ color: T.priceColor, fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.headlineLg, margin: "0 0 12px", lineHeight: 1 }}>
             {fmt(order.total)}
           </p>
           <div style={{ display: "flex", justifyContent: "center", gap: 24, flexWrap: "wrap" }}>
-            <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: 20, fontWeight: 600 }}>
+            <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, fontWeight: 600 }}>
               {fmtMethod(order.method)}
             </span>
             {order.nsu && (
-              <span style={{ color: T.muted, fontFamily: FONT_D, fontSize: 20, fontWeight: 700 }}>
+              <span style={{ color: T.muted, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700 }}>
                 NSU {order.nsu}
               </span>
             )}
-            <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: 16, opacity: 0.6 }}>
+            <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.bodyLg, opacity: 0.6 }}>
               {order.order_ref}
             </span>
           </div>
@@ -244,7 +248,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
           padding: "20px 28px",
           background: T.surface,
           border: `1px solid ${T.border}`,
-          borderRadius: 12,
+          borderRadius: RADIUS.sm,
           textAlign: "center",
         }}>
           {printMethod === "pending" && (
@@ -256,14 +260,14 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
                 borderRadius: "50%", animation: "spin 0.8s linear infinite",
                 margin: "0 auto 12px",
               }} />
-              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>Enviando para impressora…</p>
+              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>Enviando para impressora…</p>
             </>
           )}
 
           {printMethod === "escpos" && (
             <>
-              <Printer size={36} color={T.successColor} strokeWidth={1.5} style={{ marginBottom: 10 }} />
-              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>
+              <Printer size={36} color={T.successColor} strokeWidth={1.5} style={{ marginBottom: 12 }} />
+              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
                 Ticket impresso!<br />Retire na impressora e apresente no balcão.
               </p>
             </>
@@ -271,14 +275,14 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
 
           {printMethod === "browser" && (
             <>
-              <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 10 }} />
+              <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 12 }} />
               {order.provider === "mock" ? (
-                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>
+                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
                   Preview aberto — modo mock.<br />
-                  <span style={{ fontSize: 14, opacity: 0.6 }}>Em produção, imprime diretamente na impressora.</span>
+                  <span style={{ fontSize: FONT.body, opacity: 0.6 }}>Em produção, imprime diretamente na impressora.</span>
                 </p>
               ) : (
-                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, margin: 0 }}>
+                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
                   Tickets enviados para impressão!<br />Retire na impressora e apresente no balcão.
                 </p>
               )}
@@ -288,7 +292,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
           {printMethod === "blocked" && (
             <>
               <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 12 }} />
-              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 18, marginBottom: 16 }}>
+              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, marginBottom: 16 }}>
                 A impressão foi bloqueada pelo navegador.<br />Toque para imprimir manualmente.
               </p>
               <button
@@ -300,8 +304,8 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
                 }}
                 style={{
                   padding: "0 40px", height: 72, background: T.btn, color: T.btnText,
-                  border: "none", borderRadius: 12, fontFamily: FONT_D,
-                  fontSize: 20, fontWeight: 800, cursor: "pointer", boxShadow: T.glow,
+                  border: "none", borderRadius: RADIUS.sm, fontFamily: FONT_D,
+                  fontSize: FONT.subtitle, fontWeight: 800, cursor: "pointer", boxShadow: T.glow,
                   textTransform: "uppercase", letterSpacing: 1,
                 }}
               >
@@ -317,8 +321,8 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
           style={{
             width: "100%", height: 88,
             background: T.btn, color: T.btnText,
-            border: "none", borderRadius: 12,
-            fontFamily: FONT_D, fontSize: 24, fontWeight: 800,
+            border: "none", borderRadius: RADIUS.sm,
+            fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800,
             cursor: "pointer", boxShadow: T.glow,
             textTransform: "uppercase", letterSpacing: 1,
           }}
@@ -326,7 +330,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
           Novo pedido
         </button>
 
-        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 14, opacity: 0.4, margin: 0 }}>
+        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.4, margin: 0 }}>
           Novo pedido em {countdown}s…
         </p>
 

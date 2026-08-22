@@ -1,5 +1,6 @@
 import type { Theme } from "../themes";
 import type { ConsumptionType } from "../types";
+import { RADIUS, FONT } from "../scale";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -31,13 +32,13 @@ export default function ConsumptionTypeScreen({ T, onSelect, onBack }: Props) {
       transition: "background 0.3s",
       padding: "32px 0 24px",
     }}>
-      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 26 }}>
+      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 28 }}>
 
         <div style={{ textAlign: "center" }}>
-          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: 38, fontWeight: 800, margin: "0 0 8px" }}>
+          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800, margin: "0 0 8px" }}>
             Como você vai consumir?
           </h2>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 20, margin: 0 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
             Escolha uma opção pra continuar
           </p>
         </div>
@@ -56,15 +57,15 @@ export default function ConsumptionTypeScreen({ T, onSelect, onBack }: Props) {
                 height: 220,
                 background: T.numBg,
                 border: `2px solid ${T.border}`,
-                borderRadius: 16,
+                borderRadius: RADIUS.lg,
                 cursor: "pointer",
                 transition: "border-color 0.15s, background 0.15s",
               }}
               onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.roxo; e.currentTarget.style.background = T.numHover; }}
               onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.numBg; }}
             >
-              <span style={{ fontSize: 56 }}>{o.icon}</span>
-              <span style={{ color: T.text, fontFamily: FONT_D, fontSize: 24, fontWeight: 800 }}>
+              <span style={{ fontSize: FONT.headlineLg }}>{o.icon}</span>
+              <span style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800 }}>
                 {o.label}
               </span>
             </button>
@@ -78,11 +79,11 @@ export default function ConsumptionTypeScreen({ T, onSelect, onBack }: Props) {
             height: 88,
             background: T.surface,
             border: `1.5px solid ${T.border}`,
-            borderRadius: 12,
+            borderRadius: RADIUS.sm,
             color: T.text,
             cursor: "pointer",
             fontFamily: FONT_D,
-            fontSize: 22,
+            fontSize: FONT.subtitle,
             textTransform: "uppercase",
             letterSpacing: 1,
             fontWeight: 700,

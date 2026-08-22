@@ -4,6 +4,7 @@ import { PixLogo } from "../assets/PixLogo";
 import api from "../api";
 import type { Theme } from "../themes";
 import type { CartItem, CompletedOrder } from "../types";
+import { RADIUS, FONT } from "../scale";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const FONT_D = "'Lexend', sans-serif";
@@ -22,7 +23,7 @@ function DebitCardIcon({ size, color }: { size: number; color: string }) {
 
 function DotsAnimation({ T }: { T: Theme }) {
   return (
-    <div style={{ display: "flex", gap: 14 }}>
+    <div style={{ display: "flex", gap: 16 }}>
       {[0, 1, 2].map((i) => (
         <div key={i} style={{
           width: 14, height: 14, borderRadius: "50%",
@@ -52,13 +53,13 @@ function CardProcessingView({ T, countdown, error, onRetry, onCancel }: {
         {error ? (
           <>
             <XCircle size={160} color={T.errorText} strokeWidth={1.2} />
-            <p style={{ color: T.text, fontFamily: FONT_D, fontSize: 26, fontWeight: 700, margin: 0 }}>
+            <p style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 700, margin: 0 }}>
               {error}
             </p>
             <button onClick={onRetry} style={{
               padding: "0 56px", height: 88,
               background: T.btn, color: T.btnText, border: "none",
-              borderRadius: 12, fontFamily: FONT_D, fontSize: 22,
+              borderRadius: RADIUS.sm, fontFamily: FONT_D, fontSize: FONT.subtitle,
               fontWeight: 800, cursor: "pointer", boxShadow: T.glow,
               textTransform: "uppercase", letterSpacing: 1,
             }}>
@@ -68,11 +69,11 @@ function CardProcessingView({ T, countdown, error, onRetry, onCancel }: {
         ) : (
           <>
             <CreditCard size={180} color={T.text} strokeWidth={1.2} />
-            <p style={{ color: T.text, fontFamily: FONT_D, fontSize: 28, fontWeight: 600, margin: 0 }}>
+            <p style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 600, margin: 0 }}>
               Insira ou aproxime o cartão
             </p>
             <DotsAnimation T={T} />
-            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 13, opacity: 0.3, margin: 0 }}>
+            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.3, margin: 0 }}>
               Aguardando terminal… {countdown}s
             </p>
           </>
@@ -84,8 +85,8 @@ function CardProcessingView({ T, countdown, error, onRetry, onCancel }: {
         <button onClick={onCancel} style={{
           padding: "0 28px", height: 88, flexShrink: 0,
           background: T.surface, border: `1.5px solid ${T.border}`,
-          borderRadius: 12, color: T.text, cursor: "pointer",
-          fontFamily: FONT_D, fontSize: 20, fontWeight: 700,
+          borderRadius: RADIUS.sm, color: T.text, cursor: "pointer",
+          fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700,
           textTransform: "uppercase", letterSpacing: 1,
         }}>
           ← Voltar
@@ -193,20 +194,20 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
       alignItems: "center", justifyContent: "center",
       transition: "background 0.3s", padding: "32px 0 24px",
     }}>
-      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 26 }}>
+      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 28 }}>
 
         {/* Título */}
         <div style={{ textAlign: "center" }}>
-          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: 38, fontWeight: 800, margin: "0 0 8px" }}>
+          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800, margin: "0 0 8px" }}>
             Formas de Pagamento
           </h2>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 20, margin: 0 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
             Selecione qual forma de pagamento deseja utilizar.
           </p>
         </div>
 
         {/* Grid de métodos — mesmo padrão visual do numpad do CPF */}
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ border: `1px solid ${T.border}`, borderRadius: RADIUS.sm, overflow: "hidden" }}>
 
           {/* Linha 1: Crédito | Débito */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
@@ -222,7 +223,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
               onMouseLeave={(e) => { e.currentTarget.style.background = isSelected("credit") ? T.btn : T.numBg; }}
             >
               <CreditCard size={64} color={isSelected("credit") ? T.btnText : T.roxo} strokeWidth={1.5} />
-              <span style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: 20, color: isSelected("credit") ? T.btnText : T.text }}>
+              <span style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.subtitle, color: isSelected("credit") ? T.btnText : T.text }}>
                 Cartão de Crédito
               </span>
             </button>
@@ -238,7 +239,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
               onMouseLeave={(e) => { e.currentTarget.style.background = isSelected("debit") ? T.btn : T.numBg; }}
             >
               <DebitCardIcon size={64} color={isSelected("debit") ? T.btnText : T.roxo} />
-              <span style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: 20, color: isSelected("debit") ? T.btnText : T.text }}>
+              <span style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.subtitle, color: isSelected("debit") ? T.btnText : T.text }}>
                 Cartão de Débito
               </span>
             </button>
@@ -255,7 +256,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
             onMouseLeave={(e) => { e.currentTarget.style.background = isSelected("pix") ? T.btn : T.numBg; }}
           >
             <PixLogo size={64} color={isSelected("pix") ? T.btnText : T.roxo} />
-            <span style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: 20, color: isSelected("pix") ? T.btnText : T.text }}>
+            <span style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.subtitle, color: isSelected("pix") ? T.btnText : T.text }}>
               PIX
             </span>
           </button>
@@ -266,15 +267,15 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
           padding: "20px 24px",
           background: T.numBg,
           border: `1px solid ${T.border}`,
-          borderRadius: 12,
+          borderRadius: RADIUS.sm,
         }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: 18 }}>Subtotal</span>
-            <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: 18 }}>{fmt(total)}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.subtitle }}>Subtotal</span>
+            <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.subtitle }}>{fmt(total)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ fontFamily: FONT_D, color: T.text, fontSize: 22, fontWeight: 800 }}>Total</span>
-            <span style={{ fontFamily: FONT_D, color: T.priceColor, fontSize: 22, fontWeight: 800 }}>{fmt(total)}</span>
+            <span style={{ fontFamily: FONT_D, color: T.text, fontSize: FONT.subtitle, fontWeight: 800 }}>Total</span>
+            <span style={{ fontFamily: FONT_D, color: T.priceColor, fontSize: FONT.subtitle, fontWeight: 800 }}>{fmt(total)}</span>
           </div>
         </div>
 
@@ -283,8 +284,8 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
           <button onClick={onBack} style={{
             padding: "0 28px", height: 88, flexShrink: 0,
             background: T.surface, border: `1.5px solid ${T.border}`,
-            borderRadius: 12, color: T.text, cursor: "pointer",
-            fontFamily: FONT_D, fontSize: 20, fontWeight: 700,
+            borderRadius: RADIUS.sm, color: T.text, cursor: "pointer",
+            fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700,
             textTransform: "uppercase", letterSpacing: 1, whiteSpace: "nowrap",
           }}>
             ← Voltar
@@ -294,7 +295,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
             background: method ? T.btn : T.surface,
             color: method ? T.btnText : T.muted,
             border: method ? "none" : `1.5px solid ${T.border}`,
-            borderRadius: 12, fontFamily: FONT_D, fontSize: 22,
+            borderRadius: RADIUS.sm, fontFamily: FONT_D, fontSize: FONT.subtitle,
             fontWeight: 800, cursor: method ? "pointer" : "default",
             boxShadow: method ? T.glow : "none",
             textTransform: "uppercase", letterSpacing: 1,
@@ -305,7 +306,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
         </div>
 
         {!processing && (
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: 13, textAlign: "center", opacity: 0.35, margin: 0 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, textAlign: "center", opacity: 0.35, margin: 0 }}>
             Voltando ao catálogo em {idleCountdown}s…
           </p>
         )}
