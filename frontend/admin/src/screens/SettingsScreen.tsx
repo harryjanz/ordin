@@ -826,7 +826,7 @@ export default function SettingsScreen() {
                         onChange={() => toggleVideo(v)}
                       />
                       <Button size="small" variant="secondary" onClick={() => openRenameVideo(v)}>
-                        Editar nome
+                        Editar
                       </Button>
                       <Button size="small" variant="secondary" onClick={() => deleteVideo(v)}>
                         Excluir
