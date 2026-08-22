@@ -28,7 +28,15 @@ function Modal(_a) {
     var children = _a.children, open = _a.open, _c = _a.size, size = _c === void 0 ? 'default' : _c, height = _a.height, width = _a.width, _d = _a.hideCloseButton, hideCloseButton = _d === void 0 ? false : _d, onOpen = _a.onOpen, onClose = _a.onClose, onCloseButtonClick = _a.onCloseButtonClick, onBackdropClick = _a.onBackdropClick, template = _a.template;
     var _e = (0, react_1.useState)(false), overflowing = _e[0], setOverflowing = _e[1];
     var theme = (0, react_1.useContext)(ThemeProvider_1.ThemeContext);
-    var identifier = (0, nanoid_1.nanoid)(5);
+    // PATCH (ver vendor/design-system/README.md): nanoid(5) direto no corpo
+    // do componente gerava um identifier NOVO a cada render, e o
+    // ModalPortal usa esse identifier pra montar/desmontar o container do
+    // portal (document.querySelector por id) — resultado: o portal inteiro
+    // recriava a cada render do pai (ex: digitar num input controlado
+    // dentro do modal), perdendo o foco a cada tecla. useState com
+    // inicializador preguiçoso mantém o mesmo identifier durante toda a
+    // vida da instância do componente.
+    var identifier = (0, react_1.useState)(function () { return (0, nanoid_1.nanoid)(5); })[0];
     var wrapperRef = (0, react_1.useRef)(null);
     (0, react_1.useEffect)(function () {
         var closeOnEscPress = function (event) {

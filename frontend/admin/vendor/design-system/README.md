@@ -49,3 +49,15 @@ código vendorizado, faz parte do repo do `ordin`.
   pra `src: local(...)` só, sem URL remota — se a fonte não estiver
   instalada no sistema do usuário, cai silenciosamente no próximo item do
   `font-family` stack (`Helvetica Neue`, etc.), sem tentar rede nenhuma.
+
+- **`components/Modal/Modal.js`** — `identifier` (usado pelo `ModalPortal`
+  pra montar/desmontar o container do portal via `document.querySelector`
+  por id) era gerado com `nanoid(5)` direto no corpo do componente, sem
+  memoização — um identifier novo a cada render, o que faz o `ModalPortal`
+  recriar o container inteiro (unmount + mount) a cada render do modal.
+  Sintoma real: digitar num `InputBase` controlado dentro de um `Modal`
+  perdia o foco a cada tecla (achado na ORD-115, editando nome de vídeo).
+  Trocado pra `useState(() => nanoid(5))[0]` — mesmo identifier durante toda
+  a vida da instância do componente. **Reportar upstream** pro repositório
+  fonte (`/home/harry/repositorios/design-system`) — não fiz isso aqui, só
+  vendorizei o fix; sem isso o bug volta na próxima atualização do `dist/`.

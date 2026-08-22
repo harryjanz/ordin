@@ -899,7 +899,7 @@ export default function SettingsScreen() {
       >
         <div className={styles.cardTitle} style={{ marginBottom: 16 }}>Editar nome do vídeo</div>
         <InputBase
-          aria-label="Nome do vídeo"
+          aria-label="Novo nome do vídeo"
           value={renameValue}
           onChange={(e) => setRenameValue(e.target.value)}
           maxLength={100}
