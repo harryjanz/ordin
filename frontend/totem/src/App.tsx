@@ -14,7 +14,7 @@ import PaymentScreen from "./screens/PaymentScreen";
 import PIXPaymentScreen from "./screens/PIXPaymentScreen";
 import SuccessScreen from "./screens/SuccessScreen";
 import { useState } from "react";
-import type { CompanyInfo, TerminalInfo, Product, CompletedOrder } from "./types";
+import type { CompanyInfo, TerminalInfo, Product, CompletedOrder, ConsumptionType } from "./types";
 
 class PixErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   constructor(props: { children: ReactNode }) {
@@ -107,14 +107,18 @@ export default function App() {
     setScreen("welcome");
   }
 
-  async function handleCpfDone(c: string | null) {
+  // `consumptionTypeOverride` existe porque, ao pular a tela de CPF direto da
+  // ConsumptionTypeScreen, o store ainda não re-renderizou com o valor recém
+  // selecionado (setConsumptionType é assíncrono) — sem o override, o pedido
+  // sairia com o consumption_type da renderização anterior (null).
+  async function handleCpfDone(c: string | null, consumptionTypeOverride?: ConsumptionType | null) {
     setCpf(c);
     try {
       const res = await api.post("/orders", {
         items: cart.map((i) => ({ product_id: i.id, name: i.name, qty: i.qty, unit_price: i.price })),
         discount: 0,
         cpf: c || null,
-        consumption_type: consumptionType,
+        consumption_type: consumptionTypeOverride !== undefined ? consumptionTypeOverride : consumptionType,
       });
       setOrderRef(res.data.order_ref);
       setScreen("payment");
@@ -238,7 +242,7 @@ export default function App() {
           cart={cart}
           onAdd={(p: Product) => addToCart({ ...p, qty: 1 })}
           onRemove={removeFromCart}
-          onCheckout={() => setScreen(company?.consumption_mode_enabled ? "consumption" : "cpf")}
+          onCheckout={() => company?.consumption_mode_enabled ? setScreen("consumption") : handleCpfDone(null)}
           onHome={goIdle}
         />
       )}
@@ -246,11 +250,15 @@ export default function App() {
       {screen === "consumption" && (
         <ConsumptionTypeScreen
           T={T}
-          onSelect={(type) => { setConsumptionType(type); setScreen("cpf"); }}
+          onSelect={(type) => { setConsumptionType(type); handleCpfDone(null, type); }}
           onBack={() => setScreen("catalog")}
         />
       )}
 
+      {/* Tela pulada por ora (nenhuma navegação leva a "cpf" hoje) — CPF na
+          nota só faz sentido junto da emissão de NFC-e, ainda não
+          implementada (ver estudo em docs/estudo-nfce.md). Componente
+          mantido de propósito pra reativar quando o módulo fiscal existir. */}
       {screen === "cpf" && (
         <CpfScreen
           T={T}
