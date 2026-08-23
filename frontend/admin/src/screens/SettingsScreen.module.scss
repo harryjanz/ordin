@@ -156,6 +156,8 @@ $font-b: 'Inter', sans-serif;
   font-size: 13px;
   color: rgba(var(--a-neutral-rgb), 0.5);
   font-family: $font-b;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .modeValueLabel {
