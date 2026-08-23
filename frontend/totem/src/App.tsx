@@ -231,6 +231,7 @@ export default function App() {
         <WelcomeScreen
           T={T}
           companyName={company?.name ?? "ordin"}
+          companyId={company?.id ?? null}
           onStart={() => setScreen("catalog")}
         />
       )}

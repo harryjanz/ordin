@@ -70,3 +70,11 @@ export type Screen =
 
 // ORD-108 — "local" (comer no local) ou "viagem" (para levar).
 export type ConsumptionType = "local" | "viagem";
+
+// ORD-115 — vídeo de modo espera (attract mode) da tela ociosa.
+export interface TotemVideo {
+  id: number;
+  name: string;
+  active: boolean;
+  video_url: string;
+}

@@ -44,6 +44,14 @@ export interface Company {
   consumption_mode_enabled?: boolean;
 }
 
+// ORD-115 — vídeo de modo espera (attract mode) do totem.
+export interface TotemVideo {
+  id: number;
+  name: string;
+  active: boolean;
+  video_url: string;
+}
+
 export type ContactType = "comercial" | "financeiro" | "tecnico";
 
 export interface Contact {
