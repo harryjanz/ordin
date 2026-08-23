@@ -1,0 +1,39 @@
+@use "sass:map";
+
+// ==========================================================
+// color($token, $theme)
+// Returns the color hex of the given color token on the provided theme. The prefix
+// "color-" is not mandatory.
+//
+// Required arguments:
+// `$token` String
+//
+// Optional arguments:
+// `$theme` String
+//
+// Example of use:
+// sample map with color token
+// $colors: (
+//  "brand-primary": #9900ff
+// );
+//
+// .foo { color: color('brand-primary'); }
+// @return "#9900ff";
+// ==========================================================
+@function color($token, $theme: 'default') {
+  $themes: (
+    'default': $colors,
+  );
+  $map: map.get($themes, $theme);
+
+  // Fallback to default if $theme is invalid
+  @if $map == null {
+    $map: $colors;
+  }
+
+  @if type-of($map) == map {
+    @return map.get($map, $token);
+  } @else {
+    @warn "The given $map is not a valid Map object: `#{$map}`";
+  }
+}

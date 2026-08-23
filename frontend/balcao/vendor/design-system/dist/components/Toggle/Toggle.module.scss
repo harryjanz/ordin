@@ -1,0 +1,88 @@
+@import '../../core/scss/styles.scss';
+
+.ds-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+.ds-toggle__label {
+  display: inline-block;
+  position: relative;
+  width: 46px;
+  height: 24px;
+  flex: 0 0 46px;
+  order: 0;
+
+  &--invert {
+    order: 1;
+  }
+}
+
+.ds-toggle__check {
+  opacity: 0;
+  width: 0;
+  height: 0;
+
+  &:checked + .ds-toggle__switch {
+    @include color('background-color', 'brand-primary');
+    @include box-shadow(0, 6, 12, 0, 'brand-primary', 0.6, false, '::before');
+
+    &::before {
+      transform: translateX(24px);
+    }
+  }
+
+  &:disabled + .ds-toggle__switch {
+    @include color('background-color', 'grey-300');
+    @include box-shadow(0, 6, 12, 0, 'dark', 0.1, false, '::before');
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  &[disabled]:checked + .ds-toggle__switch {
+    @include color('background-color', 'brand-secondary');
+    opacity: 1;
+  }
+}
+
+.ds-toggle__switch {
+  @include color('background-color', 'grey-400');
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 1px;
+  bottom: 0;
+
+  -webkit-transition: 0.2s;
+  transition: 0.2s;
+  border-radius: spacing('m');
+
+  @include box-shadow(0, 6, 12, 0, 'dark', 0.2, false, '::before');
+  &::before {
+    @include color('background-color', 'white');
+    position: absolute;
+    content: '';
+    height: spacing('l');
+    width: spacing('l');
+    left: 0;
+    bottom: 0;
+    -webkit-transition: 0.2s;
+    transition: 0.2s;
+    border-radius: 50%;
+  }
+}
+
+.ds-toggle__text {
+  @include font('sm');
+  @include color('color', 'dark');
+  @include margin('none', 's', 'none', 's');
+  cursor: pointer;
+
+  &--disabled {
+    @include color('color', 'grey-400');
+    cursor: not-allowed;
+  }
+}

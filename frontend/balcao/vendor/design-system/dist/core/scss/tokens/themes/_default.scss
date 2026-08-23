@@ -1,0 +1,172 @@
+// ==========================================================
+// Colors
+// ==========================================================
+
+$colors: (
+  'brand-primary': #9900ff,
+  'brand-secondary': #f6ebff,
+  'dark': #180a33,
+  'white': #ffffff,
+  'grey-600': #4a5365,
+  'grey-500': #85909a,
+  'grey-400': #acbec7,
+  'grey-300': #cfdae1,
+  'grey-200': #e0e7ec,
+  'grey-100': #f1f5f7,
+  'success-base': #058060,
+  'success-light': #e4fbf3,
+  'warning-base': #c63f06,
+  'warning-light': #fff5ed,
+  'error-base': #cf343f,
+  'error-light': #fff0f0,
+);
+
+$borders-radius: (
+  default: 4px,
+  button: 4px,
+  input: 4px,
+  card: 4px,
+  checkbox: 2px,
+);
+
+// ==========================================================
+// Fonts
+// ==========================================================
+
+// O pacote original aponta pra um domínio placeholder (static.example.com)
+// que nunca resolve — patch aplicado no vendor (ver
+// vendor/design-system/README.md) trocando pra fontes só locais: se
+// "Metropolis" não estiver instalada no sistema do usuário (o normal), a
+// regra falha silenciosamente e cai no próximo item do font-family stack,
+// sem tentar rede nenhuma.
+@font-face {
+  font-family: 'Metropolis';
+  src: local('Metropolis');
+  font-weight: 400;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'Metropolis';
+  src: local('Metropolis SemiBold'), local('Metropolis-SemiBold');
+  font-weight: 600;
+  font-style: normal;
+}
+
+$font-family-metropolis: Metropolis, Helvetica Neue, Helvetica, Arial,
+  sans-serif;
+
+$fonts: (
+  'xl-4': (
+    font-family: $font-family-metropolis,
+    font-weight: 600,
+    font-size: 60px,
+    letter-spacing: -1,
+    line-height: 64px,
+  ),
+  'xl-3': (
+    font-family: $font-family-metropolis,
+    font-weight: 600,
+    font-size: 52px,
+    letter-spacing: -0.7599999904632568,
+    line-height: 56px,
+  ),
+  'xl-2-emphasys': (
+    font-family: $font-family-metropolis,
+    font-weight: 600,
+    font-size: 38px,
+    letter-spacing: 0,
+    line-height: 44px,
+  ),
+  'xl-2': (
+    font-family: $font-family-metropolis,
+    font-weight: 400,
+    font-size: 38px,
+    letter-spacing: 0,
+    line-height: 44px,
+  ),
+  'xl-emphasys': (
+    font-family: $font-family-metropolis,
+    font-weight: 600,
+    font-size: 26px,
+    letter-spacing: 0,
+    line-height: 34px,
+  ),
+  'xl': (
+    font-family: $font-family-metropolis,
+    font-weight: 400,
+    font-size: 26px,
+    letter-spacing: 0,
+    line-height: 34px,
+  ),
+  'l-emphasys': (
+    font-family: $font-family-metropolis,
+    font-weight: 600,
+    font-size: 20px,
+    letter-spacing: 0,
+    line-height: 26px,
+  ),
+  'l': (
+    font-family: $font-family-metropolis,
+    font-weight: 400,
+    font-size: 20px,
+    letter-spacing: 0,
+    line-height: 26px,
+  ),
+  'base-emphasys': (
+    font-family: $font-family-metropolis,
+    font-weight: 600,
+    font-size: 16px,
+    letter-spacing: 0,
+    line-height: 22px,
+  ),
+  'base': (
+    font-family: $font-family-metropolis,
+    font-weight: 400,
+    font-size: 16px,
+    letter-spacing: 0,
+    line-height: 22px,
+  ),
+  'sm-emphasys': (
+    font-family: $font-family-metropolis,
+    font-weight: 600,
+    font-size: 14px,
+    letter-spacing: 0,
+    line-height: 18px,
+  ),
+  'sm': (
+    font-family: $font-family-metropolis,
+    font-weight: 400,
+    font-size: 14px,
+    letter-spacing: 0,
+    line-height: 18px,
+  ),
+  'xs-emphasys': (
+    font-family: $font-family-metropolis,
+    font-weight: 600,
+    font-size: 12px,
+    letter-spacing: 0,
+    line-height: 16px,
+  ),
+  'xs': (
+    font-family: $font-family-metropolis,
+    font-weight: 400,
+    font-size: 12px,
+    letter-spacing: 0,
+    line-height: 16px,
+  ),
+  'xs-2-emphasys': (
+    font-family: $font-family-metropolis,
+    font-weight: 600,
+    font-size: 10px,
+    letter-spacing: 0,
+    line-height: 12px,
+  ),
+  'xs-2': (
+    font-family: $font-family-metropolis,
+    font-weight: 400,
+    font-size: 10px,
+    letter-spacing: 0,
+    line-height: 12px,
+  ),
+);

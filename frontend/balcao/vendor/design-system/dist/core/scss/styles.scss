@@ -1,0 +1,47 @@
+// ==========================================================
+// TOKENS
+//
+// Maps of the Figma tokens used by the UI and Design team
+// and that will be used as variables.
+// ==========================================================
+
+@import 'tokens/spacing';
+@import 'tokens/breakpoints';
+@import 'tokens/themes/default';
+@import 'tokens/themes/index';
+
+// ==========================================================
+// HELPERS
+//
+// These are utilities and helper functions that will be
+// used among the mixins and styles. Thus, they shall
+// be declared first.
+// ==========================================================
+
+@import 'helpers/map-to-props';
+@import 'helpers/color';
+@import 'helpers/spacing';
+@import 'helpers/box-shadow';
+
+// ==========================================================
+// MIXINS
+//
+// Snippets of code injected within the selectors.
+// ==========================================================
+
+@import 'mixins/font';
+@import 'mixins/padding';
+@import 'mixins/media';
+@import 'mixins/margin';
+@import 'mixins/rounded';
+@import 'mixins/box-shadow';
+@import 'mixins/color';
+@import 'mixins/border';
+@import 'mixins/visually-hidden';
+@import 'mixins/outline';
+
+// ==========================================================
+// RESET CSS
+//
+// ==========================================================
+@import 'reset.scss';

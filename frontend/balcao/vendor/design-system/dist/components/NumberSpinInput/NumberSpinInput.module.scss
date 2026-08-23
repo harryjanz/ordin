@@ -1,0 +1,42 @@
+@import '../../core/scss/styles';
+
+.ds-number-spin-input {
+  &__button {
+    @include rounded('input');
+    border: none;
+    background-color: transparent;
+
+    & > i {
+      @include color('color', 'brand-primary');
+    }
+
+    &:hover {
+      transition: 300ms;
+      @include color('background-color', 'grey-100');
+      cursor: pointer;
+    }
+
+    &--active {
+      @include color('background-color', 'grey-100');
+    }
+
+    &--large {
+      width: spacing('xxl-3');
+      height: spacing('xxl-4') - 2px;
+    }
+
+    &--medium {
+      width: spacing('xxl-2');
+      height: spacing('xxl-2') - 2px;
+    }
+
+    &--disabled,
+    &--readonly {
+      cursor: not-allowed !important;
+
+      & > i {
+        @include color('color', 'grey-300');
+      }
+    }
+  }
+}

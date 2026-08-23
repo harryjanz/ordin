@@ -1,0 +1,63 @@
+// Camada de tema do balcão (ORD-121) — mesmos tokens e mesmos valores do
+// admin (frontend/admin/src/styles/theme.scss), portados 1:1: a paleta
+// hardcoded que o balcão já usava (roxo #9900ff, fundo #1d1434/#0e0b1a) era
+// exatamente a mesma do modo escuro do admin, então não há remapeamento de
+// cor nenhum aqui — só a mecânica de tema (--a-* + data-theme) que faltava.
+//
+// O design system (../vendor/design-system) só registra um tema
+// ("default", claro-primeiro) e não tem modo escuro pronto. Reexportamos os
+// tokens dele como CSS custom properties e construímos claro/escuro por
+// cima, aplicado via documentElement.dataset.theme (ver App.tsx).
+
+:root {
+  --brand-primary: #9900ff;
+  --brand-secondary: #f6ebff;
+  --success-base: #058060;
+  --success-light: #e4fbf3;
+  --warning-base: #c63f06;
+  --warning-light: #fff5ed;
+  --error-base: #cf343f;
+  --error-light: #fff0f0;
+
+  // Escuro é o padrão histórico do balcão — idêntico ao visual anterior à ORD-121.
+  --a-bg: #180a33;
+  --a-surface: #1d1434;
+  --a-surface-2: #0e0b1a;
+  --a-text: #ffffff;
+  --a-text-rgb: 255, 255, 255;
+  --a-border: rgba(153, 0, 255, 0.2);
+  --a-neutral-rgb: 255, 255, 255;
+}
+
+:root[data-theme="light"] {
+  --a-bg: #f1f5f7;
+  --a-surface: #ffffff;
+  --a-surface-2: #f1f5f7;
+  --a-text: #180a33;
+  --a-text-rgb: 24, 10, 51;
+  --a-border: #e0e7ec;
+  --a-neutral-rgb: 0, 0, 0;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+// Mesma correção do admin — ícones do design-system assumem content-box.
+i[class^="icon-"],
+i[class*=" icon-"] {
+  box-sizing: content-box;
+}
+
+div:has(> [data-testid="icon-linkButton"]) {
+  box-sizing: content-box;
+}
+
+body {
+  background: var(--a-bg);
+  color: var(--a-text);
+  font-family: Metropolis, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  transition: background-color 150ms ease, color 150ms ease;
+}

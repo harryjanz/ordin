@@ -1,0 +1,16 @@
+@import '../../core/scss/styles';
+
+.ds-calendar-month-selection__list {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+  padding: 0 spacing('s');
+  margin: 0;
+}
+
+.ds-calendar-month-selection__item {
+  width: 6.5rem;
+  height: 2.5rem;
+  box-sizing: border-box;
+  padding: 2px spacing('xs') 2px spacing('xs');
+}

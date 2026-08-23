@@ -1,0 +1,146 @@
+@import '../../core/scss/styles';
+
+.ds-textarea__wrapper {
+  display: flex;
+  flex-direction: column;
+
+  &:focus-within .ds-textarea__label_internal {
+    @include color('color', 'brand-primary');
+    transform: translate(0, -10px);
+    transform-origin: top left;
+    transition: all 200ms cubic-bezier(0, 0, 0.2, 1) 0ms;
+    @include font('xs');
+
+    &--error {
+      @include color('color', 'error-base');
+    }
+  }
+
+  &:not(:focus-within) .ds-textarea__label_internal {
+    transform-origin: top left;
+    transition: all 200ms cubic-bezier(0, 0, 0.2, 1) 0ms;
+  }
+
+  &:focus-within .ds-textarea__container {
+    @include border(1, 'solid', 'brand-primary');
+
+    &--error {
+      @include border(1, 'solid', 'error-base');
+    }
+  }
+}
+
+.ds-textarea__container {
+  display: flex;
+  flex-direction: column;
+  padding: 20px spacing('m') 20px spacing('m');
+  @include border(1, 'solid', 'grey-300');
+  @include rounded('input');
+  position: relative;
+  min-height: 109px;
+  min-width: 336px;
+
+  &--error {
+    @include border(1, 'solid', 'error-base');
+  }
+}
+
+.ds-textarea__field {
+  @include color('color', 'dark');
+  border: none;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  @include color('color', 'grey-600', '::placeholder');
+  padding: spacing('xs') 0px spacing('xs') 0px;
+
+  &--large {
+    @include font('base');
+    @include font('base', '::placeholder');
+  }
+
+  &--medium {
+    @include font('sm');
+    @include font('sm', '::placeholder');
+  }
+
+  &--resizeable {
+    resize: vertical;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    @include color('background-color', 'white');
+    @include color('color', 'grey-300');
+  }
+
+  &::placeholder {
+    transition: opacity 100ms cubic-bezier(0, 0, 0.2, 1) 0ms;
+    opacity: 0;
+  }
+
+  &--nolabel {
+    padding: 0px 0px spacing('xs') 0px !important;
+
+    &::placeholder {
+      opacity: 1 !important;
+    }
+  }
+
+  &:not(:placeholder-shown) ~ .ds-textarea__label_internal {
+    transform: translate(0, -10px);
+    transform-origin: top left;
+    @include font('xs');
+  }
+
+  &:focus {
+    &::placeholder {
+      opacity: 1;
+    }
+  }
+}
+
+.ds-textarea__label_internal {
+  @include color('color', 'grey-600');
+  position: absolute;
+  pointer-events: none;
+
+  &--large {
+    @include font('base');
+    @include font('base', '::placeholder');
+  }
+
+  &--medium {
+    @include font('sm');
+    @include font('sm', '::placeholder');
+  }
+
+  &--error {
+    @include color('color', 'error-base');
+  }
+}
+
+.ds-textarea__help_text {
+  @include font('xs');
+  @include color('color', 'grey-600');
+  margin-top: spacing('s');
+}
+
+.ds-textarea__error_message {
+  @include font('xs');
+  @include color('color', 'error-base');
+  display: inline-flex;
+  align-items: center;
+  margin-top: spacing('s');
+
+  & > i {
+    height: spacing('m');
+    width: spacing('m');
+    margin-right: spacing('s');
+  }
+
+  & > i::before {
+    font-size: spacing('m') !important;
+    line-height: spacing('m') !important;
+  }
+}

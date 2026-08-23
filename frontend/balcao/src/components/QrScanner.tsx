@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import jsQR from "jsqr";
+import { Button, InputBase } from "design-system";
+import styles from "./QrScanner.module.scss";
 
 interface Props {
   onScan: (data: string) => void;
@@ -64,69 +66,32 @@ export default function QrScanner({ onScan, active }: Props) {
 
   if (cameraError) {
     return (
-      <div style={{ textAlign: "center" }}>
-        <div style={{ color: "rgba(223,232,237,0.5)", fontSize: 13, marginBottom: 12 }}>
+      <div className={styles.manualFallback}>
+        <div className={styles.manualHint}>
           Câmera não disponível — insira o código manualmente
         </div>
         <form onSubmit={(e) => { e.preventDefault(); if (manualValue.trim()) { onScan(manualValue.trim()); setManualValue(""); } }}>
-          <input
-            value={manualValue}
-            onChange={(e) => setManualValue(e.target.value)}
-            placeholder="Código do ticket"
-            autoFocus
-            style={{
-              padding: "8px 12px",
-              background: "rgba(153,0,255,0.08)",
-              border: "1px solid rgba(153,0,255,0.3)",
-              borderRadius: 8,
-              color: "#DFE8ED",
-              fontSize: 15,
-              width: "100%",
-              outline: "none",
-              marginBottom: 8,
-            }}
-          />
-          <button
-            type="submit"
-            style={{
-              width: "100%",
-              padding: "8px",
-              background: "#9900ff",
-              color: "#fff",
-              border: "none",
-              borderRadius: 8,
-              cursor: "pointer",
-              fontSize: 14,
-              fontWeight: 600,
-            }}
-          >
-            Coletar
-          </button>
+          <div className={styles.manualField}>
+            <InputBase
+              aria-label="Código do ticket"
+              value={manualValue}
+              onChange={(e) => setManualValue(e.target.value)}
+              placeholder="Código do ticket"
+              autoFocus
+            />
+          </div>
+          <Button type="submit" fullWidth>Coletar</Button>
         </form>
       </div>
     );
   }
 
   return (
-    <div style={{ position: "relative", borderRadius: 12, overflow: "hidden", background: "#000" }}>
-      <video ref={videoRef} style={{ width: "100%", display: "block" }} muted playsInline />
-      <canvas ref={canvasRef} style={{ display: "none" }} />
-      {/* Viewfinder overlay */}
-      <div style={{
-        position: "absolute",
-        inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        pointerEvents: "none",
-      }}>
-        <div style={{
-          width: 200,
-          height: 200,
-          border: "3px solid #9900ff",
-          borderRadius: 16,
-          boxShadow: "0 0 0 2000px rgba(0,0,0,0.45)",
-        }} />
+    <div className={styles.frame}>
+      <video ref={videoRef} className={styles.video} muted playsInline />
+      <canvas ref={canvasRef} className={styles.hiddenCanvas} />
+      <div className={styles.overlay}>
+        <div className={styles.viewfinder} />
       </div>
     </div>
   );

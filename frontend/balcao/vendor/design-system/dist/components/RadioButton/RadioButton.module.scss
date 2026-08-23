@@ -1,0 +1,63 @@
+@import '../../core/scss/styles.scss';
+
+.ds-radio-button {
+  display: flex;
+  align-items: center;
+  gap: spacing('s');
+  position: relative;
+}
+
+.ds-radio-button__input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+
+  &:hover:not(:disabled) + .ds-radio-button__radio {
+    @include border(1.5, 'solid', 'brand-primary');
+  }
+
+  &:checked + .ds-radio-button__radio {
+    @include color('background-color', 'brand-primary');
+  }
+
+  &:disabled + .ds-radio-button__radio {
+    cursor: not-allowed;
+  }
+
+  &:disabled:checked + .ds-radio-button__radio {
+    @include color('background-color', 'grey-300');
+  }
+}
+
+.ds-radio-button__radio {
+  @include border(1.5, 'solid', 'grey-300');
+
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+
+  & i {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  & i[class*=' icon-']:before {
+    @include color('color', 'white');
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.ds-radio-button__text {
+  @include font('sm');
+  @include color('color', 'dark');
+  cursor: pointer;
+}

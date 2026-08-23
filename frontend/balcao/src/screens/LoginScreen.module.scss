@@ -1,0 +1,105 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  min-height: 100vh;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--a-bg);
+}
+
+.themeToggle {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+}
+
+.card {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  @include padding('xxl', 'xxl-2', 'xxl', 'xxl-2');
+  width: 380px;
+}
+
+.logoRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: color('brand-primary');
+  margin-bottom: 4px;
+}
+
+.logo {
+  @include font('xl-emphasys');
+  color: color('brand-primary');
+}
+
+.sub {
+  color: rgba(var(--a-text-rgb), 0.5);
+  @include font('sm');
+  margin-bottom: 32px;
+}
+
+.field {
+  margin-bottom: 16px;
+}
+
+.error {
+  margin-bottom: 16px;
+}
+
+.mfaHint {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.6);
+  margin-bottom: 16px;
+}
+
+.mfaQrRow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  margin-bottom: 16px;
+
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+.mfaSecretFallback {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  overflow-wrap: anywhere;
+  text-align: center;
+
+  code {
+    font-family: monospace;
+    background: var(--a-surface);
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+}
+
+.mfaBackupCodes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 16px;
+  margin-bottom: 16px;
+
+  code {
+    font-family: monospace;
+    font-size: 15px;
+    letter-spacing: 1px;
+    text-align: center;
+  }
+}

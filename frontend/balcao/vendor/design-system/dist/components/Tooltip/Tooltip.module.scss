@@ -1,0 +1,121 @@
+@import '../../core/scss/styles';
+
+$tooltipBorder: 1px solid color('grey-200');
+
+@keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@-moz-keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@-webkit-keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@-o-keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@-ms-keyframes fadeIn {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.ds-tooltip__wrapper {
+  @include rounded('card');
+  max-width: 240px;
+  padding: 15px spacing('m');
+  border: $tooltipBorder;
+  background-color: color('white');
+  z-index: 999;
+  box-shadow: 0px 4px 16px rgba(0, 0, 0, 0.15);
+  animation: fadeIn linear 200ms;
+  -webkit-animation: fadeIn linear 200ms;
+  -moz-animation: fadeIn linear 200ms;
+  -o-animation: fadeIn linear 200ms;
+  -ms-animation: fadeIn linear 200ms;
+}
+
+.ds-tooltip__content {
+  display: flex;
+  flex-flow: row nowrap;
+}
+
+.ds-tooltip__icon {
+  display: inline-flex;
+  align-self: center;
+  padding-right: spacing('m');
+
+  & > i {
+    @include color('color', 'brand-primary');
+  }
+}
+
+.ds-tooltip__text {
+  @include font('xs');
+  @include color('color', 'dark');
+  display: inline-flex;
+  align-self: center;
+  margin: 0px;
+}
+
+.ds-tooltip__children {
+  display: flex;
+  align-self: center;
+  margin: 0px;
+}
+
+.ds-tooltip__arrow {
+  position: absolute;
+  background: color('white');
+  width: spacing('m');
+  height: spacing('m');
+  box-sizing: border-box;
+  transform: rotate(45deg);
+}
+
+.ds-tooltip__arrow--left {
+  border-left: $tooltipBorder;
+  border-bottom: $tooltipBorder;
+}
+
+.ds-tooltip__arrow--top {
+  border-left: $tooltipBorder;
+  border-top: $tooltipBorder;
+}
+
+.ds-tooltip__arrow--right {
+  border-right: $tooltipBorder;
+  border-top: $tooltipBorder;
+}
+
+.ds-tooltip__arrow--bottom {
+  border-right: $tooltipBorder;
+  border-bottom: $tooltipBorder;
+}

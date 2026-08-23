@@ -1,0 +1,24 @@
+{
+  "name": "design-system",
+  "version": "2.8.0",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "license": "MIT",
+  "description": "Design system (vendorizado — ver vendor/design-system/README.md)",
+  "dependencies": {
+    "@floating-ui/react-dom": "0.4.3",
+    "classnames": "2.3.1",
+    "nanoid": "3.3.8",
+    "react-hot-toast": "2.2.0",
+    "react-loading-skeleton": "2.2.0",
+    "react-number-format": "4.6.3",
+    "react-select": "4.3.1"
+  },
+  "peerDependencies": {
+    "date-fns": "2.30.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "sass": "1.32.12"
+  }
+}

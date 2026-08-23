@@ -1,0 +1,20 @@
+@import '../../core/scss/styles.scss';
+
+.ds-tabs__wrapper {
+  width: 100%;
+}
+
+.ds-tabs__list {
+  display: flex;
+  flex-direction: row;
+  padding: 0px;
+  margin: 0px;
+  overflow-x: hidden;
+}
+
+.ds-tabs__indicator {
+  @include color('background-color', 'brand-primary');
+  position: absolute;
+  height: 2px;
+  transition: all 200ms ease-in-out;
+}

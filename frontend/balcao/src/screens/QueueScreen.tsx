@@ -1,9 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
+import { Button, InputBase, Tag } from "design-system";
 import api from "../api";
 import { useStore } from "../store";
 import { WsManager } from "../ws";
 import OrderDetailScreen from "./OrderDetailScreen";
+import ThemeModeSwitch from "../components/ThemeModeSwitch";
+import { OrdinSymbol } from "../assets/OrdinSymbol";
 import type { OrderSummary, WsEvent } from "../types";
+import styles from "./QueueScreen.module.scss";
 
 const URGENCY_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -16,6 +20,12 @@ function minutesAgo(createdAt: string) {
   if (mins < 1) return "agora";
   return `${mins} min atrás`;
 }
+
+const WS_LABEL: Record<string, string> = {
+  connected: "● ao vivo",
+  connecting: "⟳ reconectando…",
+  disconnected: "○ offline",
+};
 
 export default function QueueScreen() {
   const {
@@ -91,124 +101,43 @@ export default function QueueScreen() {
     );
   }
 
-  const S = {
-    page: { minHeight: "100vh", background: "#0e0b1a", display: "flex", flexDirection: "column" as const },
-    header: {
-      background: "#1d1434",
-      borderBottom: "1px solid rgba(153,0,255,0.2)",
-      padding: "14px 20px",
-      display: "flex",
-      alignItems: "center",
-      gap: 12,
-    } as React.CSSProperties,
-    logo: { fontWeight: 800, fontSize: 18, color: "#9900ff" } as React.CSSProperties,
-    wsChip: (s: string) => ({
-      fontSize: 11,
-      fontWeight: 600,
-      padding: "3px 10px",
-      borderRadius: 20,
-      background: s === "connected" ? "rgba(51,204,204,0.12)" : s === "connecting" ? "rgba(245,158,11,0.12)" : "rgba(255,77,109,0.12)",
-      color: s === "connected" ? "#33cccc" : s === "connecting" ? "#f59e0b" : "#ff4d6d",
-    } as React.CSSProperties),
-    turboBtn: (on: boolean) => ({
-      padding: "5px 14px",
-      borderRadius: 20,
-      border: `1px solid ${on ? "#9900ff" : "rgba(153,0,255,0.3)"}`,
-      background: on ? "rgba(153,0,255,0.2)" : "transparent",
-      color: on ? "#9900ff" : "rgba(223,232,237,0.5)",
-      fontSize: 12,
-      fontWeight: 700,
-      cursor: "pointer",
-    } as React.CSSProperties),
-    logoutBtn: {
-      marginLeft: "auto",
-      padding: "5px 14px",
-      background: "transparent",
-      border: "1px solid rgba(153,0,255,0.2)",
-      borderRadius: 8,
-      color: "rgba(223,232,237,0.5)",
-      fontSize: 12,
-      cursor: "pointer",
-    } as React.CSSProperties,
-    body: { flex: 1, padding: "16px 20px" } as React.CSSProperties,
-    search: {
-      width: "100%",
-      padding: "10px 14px",
-      background: "#1d1434",
-      border: "1px solid rgba(153,0,255,0.2)",
-      borderRadius: 10,
-      color: "#DFE8ED",
-      fontSize: 14,
-      outline: "none",
-      marginBottom: 16,
-    } as React.CSSProperties,
-    card: (urgent: boolean) => ({
-      background: "#1d1434",
-      border: `1px solid ${urgent ? "rgba(255,77,109,0.4)" : "rgba(153,0,255,0.15)"}`,
-      borderRadius: 12,
-      padding: "14px 16px",
-      marginBottom: 10,
-      cursor: "pointer",
-      transition: "border-color 0.15s",
-      display: "flex",
-      alignItems: "center",
-      gap: 12,
-    } as React.CSSProperties),
-    ref: { fontFamily: "monospace", fontWeight: 700, fontSize: 15, color: "#DFE8ED" } as React.CSSProperties,
-    meta: { fontSize: 12, color: "rgba(223,232,237,0.45)", marginTop: 3 } as React.CSSProperties,
-    progress: { fontSize: 13, color: "#33cccc", fontWeight: 600, marginLeft: "auto", flexShrink: 0 } as React.CSSProperties,
-    urgentBadge: {
-      padding: "2px 8px",
-      borderRadius: 4,
-      fontSize: 10,
-      fontWeight: 700,
-      background: "rgba(255,77,109,0.15)",
-      color: "#ff4d6d",
-      flexShrink: 0,
-    } as React.CSSProperties,
-    // Cor âmbar — distinta do vermelho de URGENTE, pra não confundir os
-    // dois avisos quando aparecem juntos no mesmo card (ORD-108).
-    takeawayBadge: {
-      padding: "2px 8px",
-      borderRadius: 4,
-      fontSize: 10,
-      fontWeight: 700,
-      background: "rgba(245,158,11,0.15)",
-      color: "#f59e0b",
-      flexShrink: 0,
-    } as React.CSSProperties,
-  };
-
   return (
-    <div style={S.page}>
-      <div style={S.header}>
-        <div style={S.logo}>ordin</div>
-        <div style={S.wsChip(wsStatus)}>
-          {wsStatus === "connected" ? "● ao vivo" : wsStatus === "connecting" ? "⟳ reconectando…" : "○ offline"}
+    <div className={styles.page}>
+      <div className={styles.header}>
+        <div className={styles.logoRow}>
+          <OrdinSymbol size={20} />
+          <span className={styles.logo}>ordin</span>
         </div>
-        <button style={S.turboBtn(turboMode)} onClick={toggleTurbo} title="Coleta sem confirmação">
-          ⚡ Turbo {turboMode ? "ON" : "OFF"}
-        </button>
-        <span style={{ fontSize: 13, color: "rgba(223,232,237,0.4)", marginLeft: 8 }}>
-          {userName ?? role}
-        </span>
-        <button style={S.logoutBtn} onClick={handleLogout}>Sair</button>
+        <div className={`${styles.wsChip} ${styles[`wsChip_${wsStatus}`]}`}>
+          {WS_LABEL[wsStatus]}
+        </div>
+        <Button
+          size="small"
+          variant={turboMode ? "primary" : "secondary"}
+          onClick={toggleTurbo}
+          title="Coleta sem confirmação"
+        >
+          {`⚡ Turbo ${turboMode ? "ON" : "OFF"}`}
+        </Button>
+        <span className={styles.userName}>{userName ?? role}</span>
+        <div className={styles.themeToggle}><ThemeModeSwitch /></div>
+        <Button size="small" variant="secondary" onClick={handleLogout}>Sair</Button>
       </div>
 
-      <div style={S.body}>
-        <input
-          style={S.search}
-          placeholder="Buscar por referência…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className={styles.body}>
+        <div className={styles.search}>
+          <InputBase
+            aria-label="Buscar por referência"
+            placeholder="Buscar por referência…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
 
         {loading ? (
-          <div style={{ color: "rgba(223,232,237,0.4)", fontSize: 14, textAlign: "center", padding: 32 }}>
-            Carregando pedidos…
-          </div>
+          <div className={styles.empty}>Carregando pedidos…</div>
         ) : filtered.length === 0 ? (
-          <div style={{ color: "rgba(223,232,237,0.35)", fontSize: 14, textAlign: "center", padding: 40 }}>
+          <div className={styles.empty}>
             {search ? "Nenhum pedido encontrado." : "Nenhum pedido pendente. Aguardando novos pedidos…"}
           </div>
         ) : filtered.map((o) => {
@@ -216,21 +145,19 @@ export default function QueueScreen() {
           return (
             <div
               key={o.order_ref}
-              style={S.card(urgent)}
+              className={`${styles.card} ${urgent ? styles.cardUrgent : ""}`}
               onClick={() => setSelectedOrder(o.order_ref)}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#9900ff")}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = urgent ? "rgba(255,77,109,0.4)" : "rgba(153,0,255,0.15)")}
             >
               <div>
-                <div style={S.ref}>{o.order_ref}</div>
-                <div style={S.meta}>
+                <div className={styles.ref}>{o.order_ref}</div>
+                <div className={styles.meta}>
                   Terminal {o.terminal_id} · {minutesAgo(o.created_at)} ·{" "}
                   {o.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
                 </div>
               </div>
-              {o.consumption_type === "viagem" && <div style={S.takeawayBadge}>PARA LEVAR</div>}
-              {urgent && <div style={S.urgentBadge}>URGENTE</div>}
-              <div style={S.progress}>{o.tickets_collected}/{o.tickets_total} tickets</div>
+              {o.consumption_type === "viagem" && <Tag variant="warning">PARA LEVAR</Tag>}
+              {urgent && <Tag variant="error">URGENTE</Tag>}
+              <div className={styles.progress}>{o.tickets_collected}/{o.tickets_total} tickets</div>
             </div>
           );
         })}
