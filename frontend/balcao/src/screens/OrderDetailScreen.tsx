@@ -42,17 +42,30 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
     setScanning(false);
     setPendingTicket(null);
 
+    // ORD-118 — QR de pedido inteiro (modelo de retirada única) começa com
+    // "ORDER|" e nunca colide com o formato de ticket (que começa com o
+    // ticket_code de 8 caracteres) — coleta o pedido inteiro numa
+    // chamada só, em vez de ticket por ticket.
+    const isOrderQr = qrData.startsWith("ORDER|");
     const isFullQr = qrData.includes("|");
     const ticketCode = isFullQr ? qrData.split("|")[0] : qrData;
 
     try {
-      await api.post(`/tickets/${ticketCode}/collect`, {
-        collected_by: "balcao",
-        collection_device: "balcao-web",
-        ...(isFullQr ? { qr_data: qrData } : {}),
-      });
+      if (isOrderQr) {
+        await api.post(`/orders/${orderRef}/collect`, {
+          collected_by: "balcao",
+          collection_device: "balcao-web",
+          qr_data: qrData,
+        });
+      } else {
+        await api.post(`/tickets/${ticketCode}/collect`, {
+          collected_by: "balcao",
+          collection_device: "balcao-web",
+          ...(isFullQr ? { qr_data: qrData } : {}),
+        });
+      }
       beepSuccess();
-      showFeedback("Ticket coletado com sucesso!", true);
+      showFeedback(isOrderQr ? "Pedido coletado com sucesso!" : "Ticket coletado com sucesso!", true);
       await loadTickets();
 
       const updated = await api.get(`/orders/${orderRef}/tickets`);
@@ -61,9 +74,9 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
       if (allCollected) setTimeout(onAllCollected, 1500);
     } catch (err: unknown) {
       beepError();
-      let msg = "Erro ao coletar ticket.";
+      let msg = isOrderQr ? "Erro ao coletar pedido." : "Erro ao coletar ticket.";
       if ((err as { response?: { status: number } }).response?.status === 409) {
-        msg = "Ticket já foi coletado.";
+        msg = isOrderQr ? "Pedido já foi coletado." : "Ticket já foi coletado.";
       } else if ((err as { response?: { status: number } }).response?.status === 400) {
         msg = "QR inválido ou de outro sistema.";
       }

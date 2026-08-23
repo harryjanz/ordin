@@ -140,7 +140,7 @@ export default function App() {
 
   async function handlePixSuccess() {
     if (!orderRef) return;
-    const ticketsRes = await api.get(`/orders/${orderRef}/tickets`).catch(() => ({ data: { tickets: [] } }));
+    const ticketsRes = await api.get(`/orders/${orderRef}/tickets`).catch(() => ({ data: { tickets: [], order_qr_data: null } }));
     const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
     handleSuccess({
       order_ref: orderRef,
@@ -149,6 +149,7 @@ export default function App() {
       nsu: null,
       provider: "mock",
       tickets: ticketsRes.data.tickets ?? [],
+      order_qr_data: ticketsRes.data.order_qr_data ?? null,
     });
   }
 

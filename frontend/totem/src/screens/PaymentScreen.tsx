@@ -160,7 +160,10 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
       const { status, nsu, transaction_id, qr_code, qr_code_base64 } = res.data;
       if (status === "approved") {
         const ticketsRes = await api.get(`/orders/${orderRef}/tickets`);
-        onSuccess({ order_ref: orderRef, total, method, nsu: nsu ?? null, provider: res.data.provider ?? "mock", tickets: ticketsRes.data.tickets ?? [] });
+        onSuccess({
+          order_ref: orderRef, total, method, nsu: nsu ?? null, provider: res.data.provider ?? "mock",
+          tickets: ticketsRes.data.tickets ?? [], order_qr_data: ticketsRes.data.order_qr_data ?? null,
+        });
       } else if (status === "processing" && method === "pix") {
         onPix({ transactionId: transaction_id, qrCode: qr_code ?? "", qrCodeBase64: qr_code_base64 ?? "" });
       } else {

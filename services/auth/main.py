@@ -102,6 +102,9 @@ class CompanyInfo(BaseModel):
     # ORD-116 — mesma armadilha, mesmo campo novo (menu de categorias
     # horizontal/vertical do totem).
     catalog_menu_layout: str = "horizontal"
+    # ORD-118 — mesma armadilha de novo: "por_item" (padrão) ou
+    # "retirada_unica" (QR único de pedido, ticket compacto).
+    fulfillment_mode: str = "por_item"
 
 class TerminalInfo(BaseModel):
     id: int
