@@ -150,6 +150,10 @@ class Company(Base):
     # ORD-108: quando True, o totem pergunta "Comer no local" ou "Para
     # levar" antes do checkout, e o pedido carrega essa escolha.
     consumption_mode_enabled  = Column(Boolean, nullable=False, default=False)
+    # ORD-117: empresa de demonstração da plataforma (hoje só a Burger
+    # House) — usado pra indicação visual interna (badge no superadmin),
+    # sem consumidor público ainda.
+    is_demo                   = Column(Boolean, nullable=False, default=False)
 
 
 class User(Base):
@@ -324,6 +328,7 @@ class CompanyOut(BaseModel):
     visual_theme: str = "ordin"
     visual_mode: str = "light"
     catalog_menu_layout: str = "horizontal"
+    is_demo: bool = False
     legal_name: Optional[str] = None
     state_registration: Optional[str] = None
     municipal_registration: Optional[str] = None

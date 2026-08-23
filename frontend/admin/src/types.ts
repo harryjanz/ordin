@@ -44,6 +44,8 @@ export interface Company {
   consumption_mode_enabled?: boolean;
   // ORD-116 — "horizontal" (padrão) ou "vertical" pro menu de categorias do totem.
   catalog_menu_layout?: string;
+  // ORD-117 — empresa de demonstração da plataforma (indicação interna, superadmin only).
+  is_demo?: boolean;
 }
 
 // ORD-115 — vídeo de modo espera (attract mode) do totem.
