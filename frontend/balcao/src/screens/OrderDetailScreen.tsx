@@ -2,7 +2,9 @@ import { useState, useEffect } from "react";
 import { Alert, Button, Modal, Tag } from "design-system";
 import api from "../api";
 import QrScanner from "../components/QrScanner";
+import ScanButton from "../components/ScanButton";
 import { beepSuccess, beepError } from "../components/AudioFeedback";
+import { collectByQr } from "../lib/collect";
 import type { Ticket } from "../types";
 import styles from "./OrderDetailScreen.module.scss";
 
@@ -44,28 +46,10 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
     setScanning(false);
     setPendingTicket(null);
 
-    // ORD-118 — QR de pedido inteiro (modelo de retirada única) começa com
-    // "ORDER|" e nunca colide com o formato de ticket (que começa com o
-    // ticket_code de 8 caracteres) — coleta o pedido inteiro numa
-    // chamada só, em vez de ticket por ticket.
     const isOrderQr = qrData.startsWith("ORDER|");
-    const isFullQr = qrData.includes("|");
-    const ticketCode = isFullQr ? qrData.split("|")[0] : qrData;
 
     try {
-      if (isOrderQr) {
-        await api.post(`/orders/${orderRef}/collect`, {
-          collected_by: "balcao",
-          collection_device: "balcao-web",
-          qr_data: qrData,
-        });
-      } else {
-        await api.post(`/tickets/${ticketCode}/collect`, {
-          collected_by: "balcao",
-          collection_device: "balcao-web",
-          ...(isFullQr ? { qr_data: qrData } : {}),
-        });
-      }
+      await collectByQr(qrData);
       beepSuccess();
       showFeedback(isOrderQr ? "Pedido coletado com sucesso!" : "Ticket coletado com sucesso!", true);
       await loadTickets();
@@ -116,7 +100,7 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
 
       <Modal open={!!pendingTicket} onBackdropClick={() => setPendingTicket(null)} width={340}>
         <div className={styles.confirmModal}>
-          <div className={styles.confirmIcon}>🎫</div>
+          <i className={`icon-package ${styles.confirmIcon}`} />
           <div className={styles.confirmTitle}>
             {pendingIsOrderQr ? "Confirmar coleta do pedido?" : "Confirmar coleta?"}
           </div>
@@ -137,9 +121,11 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
         </div>
       ) : (
         <div className={styles.scanBtnRow}>
-          <Button fullWidth disabled={collecting || loading} onClick={() => setScanning(true)}>
-            {`📷 ${collecting ? "Coletando…" : "Ler QR Code"}`}
-          </Button>
+          <ScanButton
+            label={collecting ? "Coletando…" : "Ler QR Code"}
+            disabled={collecting || loading}
+            onClick={() => setScanning(true)}
+          />
         </div>
       )}
 
@@ -148,7 +134,7 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
       ) : tickets.map((t) => (
         <div key={t.ticket_code} className={`${styles.ticket} ${t.status === "collected" ? styles.ticketCollected : ""}`}>
           <div className={styles.code}>
-            {t.status === "collected" ? "✅ " : "⬜ "}
+            <i className={t.status === "collected" ? "icon-check-circle" : "icon-clock"} />
             {t.ticket_code}
           </div>
           <div className={styles.units}>{t.unit_number}/{t.total_units}</div>

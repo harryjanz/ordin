@@ -43,6 +43,17 @@
   border-radius: 20px;
   flex-shrink: 0;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wsDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
 }
 
 // Button do design system não repassa className/style de fora (mesma
@@ -91,7 +102,60 @@
   margin: 0 auto;
 }
 
+.feedback {
+  margin-bottom: 16px;
+}
+
+.confirmModal {
+  padding: 8px;
+  text-align: center;
+
+  i {
+    font-size: 36px;
+    color: color('brand-primary');
+    display: block;
+    margin-bottom: 12px;
+  }
+}
+
+.confirmTitle {
+  color: var(--a-text);
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.confirmCode {
+  font-family: monospace;
+  color: color('brand-primary');
+  font-size: 13px;
+  margin-bottom: 24px;
+  word-break: break-all;
+}
+
+.confirmActions {
+  display: flex;
+  gap: 10px;
+}
+
+.scannerBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.scanBtnRow {
+  margin-bottom: 16px;
+}
+
+// Mesmo padrão do admin (CompanyListScreen .filterBar) — campo de busca
+// dentro de um card com superfície própria, não solto no fundo da página.
 .search {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  @include padding('m', 'l', 'm', 'l');
   margin-bottom: 16px;
 }
 

@@ -14,6 +14,7 @@ export default function QrScanner({ onScan, active }: Props) {
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number>(0);
   const [cameraError, setCameraError] = useState(false);
+  const [cameraErrorDetail, setCameraErrorDetail] = useState("");
   const [manualValue, setManualValue] = useState("");
 
   useEffect(() => {
@@ -30,7 +31,16 @@ export default function QrScanner({ onScan, active }: Props) {
           videoRef.current.play();
         }
         scan();
-      } catch {
+      } catch (err) {
+        // Achado ao vivo (ORD-121): "câmera não disponível" sem detalhe
+        // nenhum tornava impossível diferenciar permissão negada de câmera
+        // em uso por outro app/aba de câmera realmente ausente. Loga e
+        // mostra o nome real do erro (NotAllowedError/NotReadableError/
+        // NotFoundError/OverconstrainedError) — sem isso não dá pra
+        // diagnosticar à distância.
+        console.error("QrScanner: getUserMedia falhou", err);
+        const name = err instanceof DOMException ? err.name : "erro desconhecido";
+        setCameraErrorDetail(name);
         setCameraError(true);
       }
     }
@@ -61,14 +71,22 @@ export default function QrScanner({ onScan, active }: Props) {
     return () => {
       cancelAnimationFrame(rafRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     };
   }, [active]);
+
+  const ERROR_HINT: Record<string, string> = {
+    NotAllowedError: "Permissão de câmera negada — libere o acesso nas configurações do navegador.",
+    NotReadableError: "Câmera em uso por outro aplicativo ou aba — feche o que estiver usando e tente de novo.",
+    NotFoundError: "Nenhuma câmera encontrada neste dispositivo.",
+    OverconstrainedError: "Nenhuma câmera compatível com o modo traseiro foi encontrada.",
+  };
 
   if (cameraError) {
     return (
       <div className={styles.manualFallback}>
         <div className={styles.manualHint}>
-          Câmera não disponível — insira o código manualmente
+          {ERROR_HINT[cameraErrorDetail] ?? "Câmera não disponível — insira o código manualmente"}
         </div>
         <form onSubmit={(e) => { e.preventDefault(); if (manualValue.trim()) { onScan(manualValue.trim()); setManualValue(""); } }}>
           <div className={styles.manualField}>
