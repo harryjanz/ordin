@@ -26,6 +26,15 @@ const FONT_B = "'Inter', sans-serif";
 // realidade. Mantido como uma réplica manual simplificada (não o
 // componente de verdade) — é branding/preview do totem, fora do escopo da
 // reconstrução visual do admin com o design system.
+//
+// Os tamanhos abaixo são a escala real de WelcomeScreen.tsx (FONT.headlineLg
+// 52 / FONT.body 14 / FONT.headline 38 / FONT.bodyLg 16, círculo 88 com
+// ícone 44) multiplicada por um único fator (0.5) — não valores "parecidos"
+// escolhidos à mão — pra que as proporções entre nome/subtítulo/CTA/subtexto
+// no preview batam com as da tela real. O ícone é o mesmo path do lucide-react
+// `Hand` usado no totem (inline aqui pra não adicionar a dependência só por
+// causa deste preview), colorido com stroke igual ao do totem — antes era um
+// emoji, que não herda cor nenhuma do tema.
 function TotemPreview({ name, mode }: { name: string; mode: string }) {
   const T = resolveTheme(name, mode);
   return (
@@ -39,30 +48,34 @@ function TotemPreview({ name, mode }: { name: string; mode: string }) {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      gap: 20,
+      gap: 24,
     }}>
       <div style={{ textAlign: "center" }}>
-        <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: 20, color: T.text, letterSpacing: "-0.5px" }}>
+        <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: 26, color: T.text, letterSpacing: "-0.5px", lineHeight: 1 }}>
           Sua empresa
         </div>
-        <div style={{ fontFamily: FONT_D, color: T.roxo, fontSize: 10, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", marginTop: 2 }}>
+        <div style={{ fontFamily: FONT_D, color: T.roxo, fontSize: 7, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", marginTop: 2 }}>
           Autoatendimento
         </div>
       </div>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
         <div style={{
-          width: 36, height: 36, borderRadius: "50%",
+          width: 44, height: 44, borderRadius: "50%",
           background: T.roxoSubtle,
           border: `2px solid ${T.roxo}`,
           display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 16,
         }}>
-          👆
+          <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke={T.roxo} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+            <path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2" />
+            <path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8" />
+            <path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+          </svg>
         </div>
-        <div style={{ fontFamily: FONT_D, fontSize: 14, fontWeight: 800, color: T.text }}>
+        <div style={{ fontFamily: FONT_D, fontSize: 19, fontWeight: 800, color: T.text, letterSpacing: "-0.25px" }}>
           Toque para começar
         </div>
-        <div style={{ fontFamily: FONT_B, fontSize: 11, color: T.muted }}>
+        <div style={{ fontFamily: FONT_B, fontSize: 8, color: T.muted }}>
           Faça seu pedido em minutos
         </div>
       </div>
