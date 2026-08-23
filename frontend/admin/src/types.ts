@@ -42,6 +42,8 @@ export interface Company {
   contract_document_url?: string | null;
   // ORD-108 — quando true, o totem pergunta "Comer no local"/"Para levar".
   consumption_mode_enabled?: boolean;
+  // ORD-116 — "horizontal" (padrão) ou "vertical" pro menu de categorias do totem.
+  catalog_menu_layout?: string;
 }
 
 // ORD-115 — vídeo de modo espera (attract mode) do totem.
