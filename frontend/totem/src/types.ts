@@ -7,6 +7,8 @@ export interface CompanyInfo {
   // ORD-108 — quando true, mostra a tela "Comer no local"/"Para levar"
   // depois de fechar o carrinho, antes do CPF.
   consumption_mode_enabled: boolean;
+  // ORD-116 — "horizontal" (padrão) ou "vertical" pro menu de categorias do catálogo.
+  catalog_menu_layout: "horizontal" | "vertical";
 }
 
 export interface TerminalInfo {

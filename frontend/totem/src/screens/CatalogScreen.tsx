@@ -11,6 +11,9 @@ const FONT_B = "'Inter', sans-serif";
 interface Props {
   T: Theme;
   companyName: string;
+  // ORD-116 — "horizontal" (padrão, faixa de pills no topo) ou "vertical"
+  // (sidebar), útil pra empresas com muitas categorias.
+  menuLayout: "horizontal" | "vertical";
   cart: CartItem[];
   onAdd: (p: Product) => void;
   onRemove: (id: number) => void;
@@ -19,7 +22,7 @@ interface Props {
 }
 
 export default function CatalogScreen({
-  T, companyName, cart, onAdd, onRemove, onCheckout, onHome,
+  T, companyName, menuLayout, cart, onAdd, onRemove, onCheckout, onHome,
 }: Props) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -27,6 +30,8 @@ export default function CatalogScreen({
   const [cartOpen, setCartOpen] = useState(false);
   const [loadingCat, setLoadingCat] = useState(true);
   const [loadingProds, setLoadingProds] = useState(false);
+
+  const isVertical = menuLayout === "vertical";
 
   useEffect(() => {
     api.get("/catalog/categories").then((r) => {
@@ -47,6 +52,49 @@ export default function CatalogScreen({
   const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const count = cart.reduce((s, i) => s + i.qty, 0);
   const getQty = useCallback((id: number) => cart.find((i) => i.id === id)?.qty ?? 0, [cart]);
+
+  // Categorias — mesmo conteúdo nos dois modos, só o container/botão mudam
+  // de faixa horizontal pra coluna lateral.
+  const categoriesContent = loadingCat ? (
+    <div style={{ color: T.muted, fontSize: FONT.bodyLg, fontFamily: FONT_B }}>Carregando categorias…</div>
+  ) : categories.map((cat) => (
+    <button
+      key={cat.id}
+      onClick={() => setActiveCat(cat)}
+      style={isVertical ? {
+        padding: "14px 20px",
+        borderRadius: RADIUS.sm,
+        border: `1px solid ${activeCat?.id === cat.id ? T.btn : T.borderNeutral}`,
+        background: activeCat?.id === cat.id ? T.catActive : "transparent",
+        color: activeCat?.id === cat.id ? T.catText : T.muted,
+        fontFamily: FONT_D,
+        fontWeight: 700,
+        cursor: "pointer",
+        transition: "all 0.15s",
+        fontSize: FONT.body,
+        minHeight: 48,
+        textAlign: "left",
+        width: "100%",
+        boxShadow: activeCat?.id === cat.id ? "0 0 12px rgba(153,0,255,0.3)" : "none",
+      } : {
+        padding: "12px 24px",
+        borderRadius: RADIUS.pill,
+        border: `1px solid ${activeCat?.id === cat.id ? T.btn : T.borderNeutral}`,
+        background: activeCat?.id === cat.id ? T.catActive : "transparent",
+        color: activeCat?.id === cat.id ? T.catText : T.muted,
+        fontFamily: FONT_D,
+        fontWeight: 700,
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        transition: "all 0.15s",
+        fontSize: FONT.body,
+        minHeight: 48,
+        boxShadow: activeCat?.id === cat.id ? "0 0 12px rgba(153,0,255,0.3)" : "none",
+      }}
+    >
+      {cat.name}
+    </button>
+  ));
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>
@@ -86,181 +134,179 @@ export default function CatalogScreen({
         </button>
       </div>
 
-      {/* Zona 2 — Categorias */}
-      <div style={{
-        display: "flex",
-        gap: 12,
-        padding: "16px 28px",
-        overflowX: "auto",
-        borderBottom: `1px solid ${T.borderNeutral}`,
-        background: T.header,
-        flexShrink: 0,
-        alignItems: "center",
-        minHeight: 68,
-      }}>
-        {loadingCat ? (
-          <div style={{ color: T.muted, fontSize: FONT.bodyLg, fontFamily: FONT_B }}>Carregando categorias…</div>
-        ) : categories.map((cat) => (
-          <button
-            key={cat.id}
-            onClick={() => setActiveCat(cat)}
-            style={{
-              padding: "12px 24px",
-              borderRadius: RADIUS.pill,
-              border: `1px solid ${activeCat?.id === cat.id ? T.btn : T.borderNeutral}`,
-              background: activeCat?.id === cat.id ? T.catActive : "transparent",
-              color: activeCat?.id === cat.id ? T.catText : T.muted,
-              fontFamily: FONT_D,
-              fontWeight: 700,
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-              transition: "all 0.15s",
-              fontSize: FONT.body,
-              minHeight: 48,
-              boxShadow: activeCat?.id === cat.id ? "0 0 12px rgba(153,0,255,0.3)" : "none",
-            }}
-          >
-            {cat.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Zona 3 — Grid 2 colunas fixas */}
+      {/* Zona 2 (categorias) + Zona 3 (grade) — lado a lado no modo
+          vertical, empilhadas no horizontal (padrão, comportamento
+          inalterado). */}
       <div style={{
         flex: 1,
-        padding: "24px 28px",
-        paddingBottom: 136,
-        display: "grid",
-        gridTemplateColumns: "repeat(3, 1fr)",
-        gap: 20,
-        alignContent: "start",
-        overflowY: "auto",
+        display: "flex",
+        flexDirection: isVertical ? "row" : "column",
+        overflow: "hidden",
+        minHeight: 0,
       }}>
-        {loadingProds ? (
-          <div style={{ color: T.muted, gridColumn: "1/-1", fontSize: FONT.bodyLg, padding: "48px 0", textAlign: "center", fontFamily: FONT_B }}>
-            Carregando produtos…
-          </div>
-        ) : products.length === 0 ? (
-          <div style={{ color: T.muted, gridColumn: "1/-1", fontSize: FONT.bodyLg, padding: "48px 0", textAlign: "center", fontFamily: FONT_B }}>
-            Nenhum produto disponível.
-          </div>
-        ) : products.map((p, i) => {
-          const qty = getQty(p.id);
-          const gradient = i % 2 === 0 ? T.placeholderA : T.placeholderB;
-          return (
-            <div
-              key={p.id}
-              style={{
-                background: T.surface,
-                border: `1px solid ${T.borderNeutral}`,
-                borderRadius: RADIUS.lg,
-                display: "flex",
-                flexDirection: "column",
-                overflow: "hidden",
-                boxShadow: T.cardShadow,
-                transition: "transform 0.15s, box-shadow 0.15s",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = T.glow; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = T.cardShadow; }}
-            >
-              {/* Imagem — 60% da altura do card */}
-              {p.image_url ? (
-                <img src={p.image_url} alt={p.name} style={{ width: "100%", height: 180, objectFit: "cover" }} />
-              ) : (
-                <div style={{
-                  width: "100%",
-                  height: 180,
-                  background: gradient,
+        {/* Zona 2 — Categorias */}
+        <div style={isVertical ? {
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          padding: "20px 16px",
+          overflowY: "auto",
+          borderRight: `1px solid ${T.borderNeutral}`,
+          background: T.header,
+          flexShrink: 0,
+          width: 240,
+        } : {
+          display: "flex",
+          gap: 12,
+          padding: "16px 28px",
+          overflowX: "auto",
+          borderBottom: `1px solid ${T.borderNeutral}`,
+          background: T.header,
+          flexShrink: 0,
+          alignItems: "center",
+          minHeight: 68,
+        }}>
+          {categoriesContent}
+        </div>
+
+        {/* Zona 3 — Grade de produtos (3 colunas no modo horizontal, 2 no
+            vertical — menos espaço com a coluna de categorias ao lado) */}
+        <div style={{
+          flex: 1,
+          padding: "24px 28px",
+          paddingBottom: 136,
+          display: "grid",
+          gridTemplateColumns: isVertical ? "repeat(2, 1fr)" : "repeat(3, 1fr)",
+          gap: 20,
+          alignContent: "start",
+          overflowY: "auto",
+        }}>
+          {loadingProds ? (
+            <div style={{ color: T.muted, gridColumn: "1/-1", fontSize: FONT.bodyLg, padding: "48px 0", textAlign: "center", fontFamily: FONT_B }}>
+              Carregando produtos…
+            </div>
+          ) : products.length === 0 ? (
+            <div style={{ color: T.muted, gridColumn: "1/-1", fontSize: FONT.bodyLg, padding: "48px 0", textAlign: "center", fontFamily: FONT_B }}>
+              Nenhum produto disponível.
+            </div>
+          ) : products.map((p, i) => {
+            const qty = getQty(p.id);
+            const gradient = i % 2 === 0 ? T.placeholderA : T.placeholderB;
+            return (
+              <div
+                key={p.id}
+                style={{
+                  background: T.surface,
+                  border: `1px solid ${T.borderNeutral}`,
+                  borderRadius: RADIUS.lg,
                   display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: FONT.headlineLg,
-                }}>
-                  🍽️
-                </div>
-              )}
-
-              {/* Info do produto */}
-              <div style={{ padding: "16px 16px 0", display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: FONT.bodyLg, lineHeight: 1.2 }}>
-                  {p.name}
-                </div>
-                {p.description && (
-                  <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body, lineHeight: 1.4 }}>
-                    {p.description}
-                  </div>
-                )}
-                <div style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.subtitle, marginTop: 4 }}>
-                  {fmt(p.price)}
-                </div>
-              </div>
-
-              {/* Controle de quantidade */}
-              <div style={{ padding: "12px 16px 16px" }}>
-                {qty > 0 ? (
-                  /* Stepper pill */
+                  flexDirection: "column",
+                  overflow: "hidden",
+                  boxShadow: T.cardShadow,
+                  transition: "transform 0.15s, box-shadow 0.15s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = T.glow; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = T.cardShadow; }}
+              >
+                {/* Imagem — 60% da altura do card */}
+                {p.image_url ? (
+                  <img src={p.image_url} alt={p.name} style={{ width: "100%", height: 180, objectFit: "cover" }} />
+                ) : (
                   <div style={{
+                    width: "100%",
+                    height: 180,
+                    background: gradient,
                     display: "flex",
                     alignItems: "center",
-                    background: T.numBg,
-                    border: `1px solid ${T.border}`,
-                    borderRadius: RADIUS.pill,
-                    overflow: "hidden",
+                    justifyContent: "center",
+                    fontSize: FONT.headlineLg,
                   }}>
-                    <button
-                      onClick={() => onRemove(p.id)}
-                      style={{
-                        width: 52, height: 52,
-                        background: "none", border: "none",
-                        color: T.roxo, fontSize: FONT.title, fontWeight: 700,
-                        cursor: "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}
-                    >
-                      −
-                    </button>
-                    <span style={{
-                      flex: 1, textAlign: "center",
-                      fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text,
-                    }}>
-                      {qty}
-                    </span>
-                    <button
-                      onClick={() => onAdd(p)}
-                      style={{
-                        width: 52, height: 52,
-                        background: "none", border: "none",
-                        color: T.roxo, fontSize: FONT.title, fontWeight: 700,
-                        cursor: "pointer",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}
-                    >
-                      +
-                    </button>
-                  </div>
-                ) : (
-                  /* Botão "+" circular */
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontFamily: FONT_B, fontSize: FONT.body, color: T.muted }}>Toque para adicionar</span>
-                    <button
-                      onClick={() => onAdd(p)}
-                      style={{
-                        width: 52, height: 52, borderRadius: "50%",
-                        background: T.btn, color: T.btnText,
-                        border: "none", fontSize: FONT.title, fontWeight: 700,
-                        cursor: "pointer", boxShadow: T.glow,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        flexShrink: 0,
-                      }}
-                    >
-                      +
-                    </button>
+                    🍽️
                   </div>
                 )}
+
+                {/* Info do produto */}
+                <div style={{ padding: "16px 16px 0", display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: FONT.bodyLg, lineHeight: 1.2 }}>
+                    {p.name}
+                  </div>
+                  {p.description && (
+                    <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body, lineHeight: 1.4 }}>
+                      {p.description}
+                    </div>
+                  )}
+                  <div style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.subtitle, marginTop: 4 }}>
+                    {fmt(p.price)}
+                  </div>
+                </div>
+
+                {/* Controle de quantidade */}
+                <div style={{ padding: "12px 16px 16px" }}>
+                  {qty > 0 ? (
+                    /* Stepper pill */
+                    <div style={{
+                      display: "flex",
+                      alignItems: "center",
+                      background: T.numBg,
+                      border: `1px solid ${T.border}`,
+                      borderRadius: RADIUS.pill,
+                      overflow: "hidden",
+                    }}>
+                      <button
+                        onClick={() => onRemove(p.id)}
+                        style={{
+                          width: 52, height: 52,
+                          background: "none", border: "none",
+                          color: T.roxo, fontSize: FONT.title, fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}
+                      >
+                        −
+                      </button>
+                      <span style={{
+                        flex: 1, textAlign: "center",
+                        fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text,
+                      }}>
+                        {qty}
+                      </span>
+                      <button
+                        onClick={() => onAdd(p)}
+                        style={{
+                          width: 52, height: 52,
+                          background: "none", border: "none",
+                          color: T.roxo, fontSize: FONT.title, fontWeight: 700,
+                          cursor: "pointer",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  ) : (
+                    /* Botão "+" circular */
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontFamily: FONT_B, fontSize: FONT.body, color: T.muted }}>Toque para adicionar</span>
+                      <button
+                        onClick={() => onAdd(p)}
+                        style={{
+                          width: 52, height: 52, borderRadius: "50%",
+                          background: T.btn, color: T.btnText,
+                          border: "none", fontSize: FONT.title, fontWeight: 700,
+                          cursor: "pointer", boxShadow: T.glow,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          flexShrink: 0,
+                        }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
       {/* Zona 4 — Carrinho fixo */}

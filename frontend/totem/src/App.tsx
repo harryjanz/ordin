@@ -240,6 +240,7 @@ export default function App() {
         <CatalogScreen
           T={T}
           companyName={company?.name ?? ""}
+          menuLayout={company?.catalog_menu_layout ?? "horizontal"}
           cart={cart}
           onAdd={(p: Product) => addToCart({ ...p, qty: 1 })}
           onRemove={removeFromCart}

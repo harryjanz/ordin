@@ -137,6 +137,10 @@ export default function SettingsScreen() {
   // ── Aparência ─────────────────────────────────────────────────────────────
   const [localTheme, setLocalTheme] = useState<string>("ordin");
   const [localMode,  setLocalMode]  = useState<string>("light");
+  // ORD-116 — menu de categorias do totem: "horizontal" (faixa de pills,
+  // padrão) ou "vertical" (sidebar, melhor pra empresas com muitas
+  // categorias).
+  const [localMenuLayout, setLocalMenuLayout] = useState<string>("horizontal");
   const [saving,     setSaving]     = useState(false);
   const [saveMsg,    setSaveMsg]    = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -145,6 +149,7 @@ export default function SettingsScreen() {
     api.get(`/companies/${companyId}`).then((r) => {
       setLocalTheme(r.data.visual_theme ?? "ordin");
       setLocalMode(r.data.visual_mode  ?? "light");
+      setLocalMenuLayout(r.data.catalog_menu_layout ?? "horizontal");
       setConsumptionModeEnabled(r.data.consumption_mode_enabled ?? false);
     }).catch(() => null);
   }, [companyId]);
@@ -154,7 +159,7 @@ export default function SettingsScreen() {
     setSaving(true);
     setSaveMsg(null);
     try {
-      await api.patch(`/companies/${companyId}/appearance`, { theme: localTheme, mode: localMode });
+      await api.patch(`/companies/${companyId}/appearance`, { theme: localTheme, mode: localMode, menu_layout: localMenuLayout });
       setSaveMsg({ ok: true, text: "Aparência salva com sucesso!" });
     } catch {
       setSaveMsg({ ok: false, text: "Erro ao salvar. Tente novamente." });
@@ -738,6 +743,17 @@ export default function SettingsScreen() {
                 onChange={() => setLocalMode(localMode === "dark" ? "light" : "dark")}
               />
               <span className={styles.modeValueLabel}>{localMode === "dark" ? "Escuro" : "Claro"}</span>
+            </div>
+
+            {/* Menu de categorias (ORD-116) — útil pra empresas com muitas categorias */}
+            <div className={styles.modeRow}>
+              <span className={styles.modeLabel}>Menu de categorias:</span>
+              <Toggle
+                name="totem-catalog-menu-layout"
+                checked={localMenuLayout === "vertical"}
+                onChange={() => setLocalMenuLayout(localMenuLayout === "vertical" ? "horizontal" : "vertical")}
+              />
+              <span className={styles.modeValueLabel}>{localMenuLayout === "vertical" ? "Vertical" : "Horizontal"}</span>
             </div>
 
             {/* Preview ao vivo */}

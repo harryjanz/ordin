@@ -99,6 +99,9 @@ class CompanyInfo(BaseModel):
     # company-service já mande: response_model filtra o dict solto que os
     # handlers de pin-login/validate-pin/device-status retornam.
     consumption_mode_enabled: bool = False
+    # ORD-116 — mesma armadilha, mesmo campo novo (menu de categorias
+    # horizontal/vertical do totem).
+    catalog_menu_layout: str = "horizontal"
 
 class TerminalInfo(BaseModel):
     id: int

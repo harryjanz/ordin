@@ -119,6 +119,10 @@ class Company(Base):
     created_at              = Column(DateTime, default=datetime.utcnow)
     visual_theme            = Column(String(32), nullable=False, default="ordin")
     visual_mode             = Column(String(8),  nullable=False, default="light")
+    # ORD-116 — "horizontal" (padrão, faixa de pills no topo) ou "vertical"
+    # (sidebar) pro menu de categorias do totem, útil pra empresas com
+    # muitas categorias.
+    catalog_menu_layout     = Column(String(10), nullable=False, default="horizontal")
     legal_name              = Column(String(160), nullable=True)
     state_registration      = Column(String(20), nullable=True)
     municipal_registration  = Column(String(20), nullable=True)
@@ -319,6 +323,7 @@ class CompanyOut(BaseModel):
     created_at: Optional[datetime] = None
     visual_theme: str = "ordin"
     visual_mode: str = "light"
+    catalog_menu_layout: str = "horizontal"
     legal_name: Optional[str] = None
     state_registration: Optional[str] = None
     municipal_registration: Optional[str] = None
@@ -564,12 +569,17 @@ class RegeneratePinOut(BaseModel):
 
 VALID_THEMES = {"ordin", "mc", "bk"}
 VALID_MODES  = {"light", "dark"}
+VALID_MENU_LAYOUTS = {"horizontal", "vertical"}
 VALID_MFA_POLICIES = {"disabled", "optional", "required"}
 
 
 class AppearanceIn(BaseModel):
     theme: str
     mode: str
+    # ORD-116 — opcional com default pra não quebrar chamadas antigas do
+    # frontend durante o deploy (rollout do admin pode ficar um pouco
+    # defasado do company-service).
+    menu_layout: str = "horizontal"
 
 
 class BehaviorIn(BaseModel):
@@ -794,6 +804,7 @@ async def validate_pin(
             "id": co.id, "name": co.name, "plan": co.plan,
             "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
             "consumption_mode_enabled": co.consumption_mode_enabled,
+            "catalog_menu_layout": co.catalog_menu_layout,
         },
         "terminals": [
             {"id": t.id, "label": t.label, "terminal_code": t.terminal_code, "tef_number": t.tef_number}
@@ -824,6 +835,7 @@ async def verify_pin(
             "id": co.id, "name": co.name, "plan": co.plan,
             "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
             "consumption_mode_enabled": co.consumption_mode_enabled,
+            "catalog_menu_layout": co.catalog_menu_layout,
         },
         "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
     }
@@ -1140,6 +1152,8 @@ async def update_appearance(
         raise HTTPException(422, f"Tema inválido. Disponíveis: {sorted(VALID_THEMES)}")
     if body.mode not in VALID_MODES:
         raise HTTPException(422, "Modo inválido. Use 'light' ou 'dark'.")
+    if body.menu_layout not in VALID_MENU_LAYOUTS:
+        raise HTTPException(422, f"Menu inválido. Disponíveis: {sorted(VALID_MENU_LAYOUTS)}")
     if current_user.company_id != company_id and current_user.role != "superadmin":
         raise HTTPException(403, "Acesso negado")
     co = await db.get(Company, company_id)
@@ -1147,8 +1161,9 @@ async def update_appearance(
         raise HTTPException(404, "Empresa não encontrada")
     co.visual_theme = body.theme
     co.visual_mode  = body.mode
+    co.catalog_menu_layout = body.menu_layout
     await db.commit()
-    return {"ok": True, "theme": body.theme, "mode": body.mode}
+    return {"ok": True, "theme": body.theme, "mode": body.mode, "menu_layout": body.menu_layout}
 
 
 @app.patch(
@@ -2928,7 +2943,8 @@ async def approve_device(
         "status": "approved",
         "company":  {"id": co.id, "name": co.name, "plan": co.plan or "free",
                      "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
-                     "consumption_mode_enabled": co.consumption_mode_enabled},
+                     "consumption_mode_enabled": co.consumption_mode_enabled,
+                     "catalog_menu_layout": co.catalog_menu_layout},
         "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
     }), ex=60)
 
