@@ -146,7 +146,13 @@ export default function CompanyListScreen() {
     {
       key: "name", header: "Cliente", render: (c) => (
         <>
-          <div className={styles.rowName}>{c.name}</div>
+          <div className={styles.rowName}>
+            {c.name}
+            {/* ORD-117 — indicação interna (só superadmin vê esta tela), sem consumidor
+                público. Tag do design-system não repassa `style`/`className` (mesma
+                lacuna já documentada pro Button) — o espaçamento vem do span em volta. */}
+            {c.is_demo && <span style={{ marginLeft: 8 }}><Tag variant="neutral">Demo</Tag></span>}
+          </div>
           {c.legal_name && <div className={styles.rowSub}>{c.legal_name}</div>}
         </>
       ),

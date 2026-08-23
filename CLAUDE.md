@@ -27,6 +27,12 @@ alembic upgrade head
 alembic downgrade -1
 alembic revision --autogenerate -m "desc"   # convenção: YYYYMMDD_HHMM_descricao.py
 
+# Fotos do catálogo de demonstração da Burger House (ORD-117) — passo manual,
+# opcional, roda depois da migration de seed (que só cria as linhas sem
+# imagem). Migrations não fazem I/O de rede neste projeto.
+cd services/catalog
+python -m scripts.seed_demo_images
+
 # Lint e type check
 ruff check services/
 mypy services/<nome>/
