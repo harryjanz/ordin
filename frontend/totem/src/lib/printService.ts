@@ -62,7 +62,9 @@ function buildEscPosBase64Compact(order: CompletedOrder, companyName: string): s
   raw(0x1B, 0x61, 0x01); // Center
   text("- - - - - - - - - - - - - - - - -"); nl();
   raw(0x1B, 0x61, 0x00); // Left
-  for (const tk of order.tickets) {
+  // order.tickets tem 1 linha por unidade (qty=2 -> 2 tickets) — só a
+  // unidade 1 de cada item representa a linha, senão duplica no impresso.
+  for (const tk of order.tickets.filter((t) => t.unit_number === 1)) {
     const parts = tk.qr_data.split("|");
     const productName = parts[1] ?? "";
     text(`${tk.total_units}x ${norm(productName)}`); nl();

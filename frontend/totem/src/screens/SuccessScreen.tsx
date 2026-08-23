@@ -129,7 +129,10 @@ ${ticketsHtml}
 // bloco por unidade, um único QR do pedido inteiro no fim.
 function buildCompactPrintHtml(order: CompletedOrder, companyName: string, orderQrSvg: string): string {
   const now = new Date().toLocaleString("pt-BR");
+  // order.tickets tem 1 linha por unidade (qty=2 -> 2 tickets) — só a
+  // unidade 1 de cada item representa a linha, senão duplica no impresso.
   const itemsHtml = order.tickets
+    .filter((tk) => tk.unit_number === 1)
     .map((tk) => {
       const productName = (tk.qr_data.split("|")[1] ?? "");
       return `<div class="item-row"><span class="item-qty">${tk.total_units}x</span> ${productName}</div>`;
