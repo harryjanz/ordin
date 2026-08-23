@@ -14,6 +14,12 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  // Balcão roda em dispositivo de contador (às vezes tablet estreito) — em
+  // vez de deixar texto/botão quebrar linha de forma feia (achado ao vivo
+  // pelo usuário), cada item do cabeçalho não encolhe/quebra e, se não
+  // couber tudo, rola horizontalmente.
+  flex-wrap: nowrap;
+  overflow-x: auto;
 }
 
 .logoRow {
@@ -21,6 +27,8 @@
   align-items: center;
   gap: 8px;
   color: color('brand-primary');
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .logo {
@@ -33,6 +41,17 @@
   font-weight: 600;
   padding: 3px 10px;
   border-radius: 20px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+// Button do design system não repassa className/style de fora (mesma
+// lacuna já documentada pro admin) — o span em volta garante que o botão
+// não encolha nem quebre texto dentro do header.
+.turboBtnWrap,
+.logoutBtnWrap {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .wsChip_connected {
@@ -54,11 +73,14 @@
   font-size: 13px;
   color: rgba(var(--a-text-rgb), 0.4);
   margin-left: 8px;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .themeToggle {
   margin-left: auto;
   width: 110px;
+  flex-shrink: 0;
 }
 
 .body {
