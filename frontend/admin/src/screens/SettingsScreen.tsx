@@ -16,9 +16,16 @@ import styles from "./SettingsScreen.module.scss";
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
 
-// Mini-preview da WelcomeScreen do totem (~220px altura)
-// Mantido como está — é branding/preview do totem, não do admin (fora do
-// escopo da reconstrução visual do admin com o design system).
+// Mini-preview da tela de boas-vindas do totem (~220px altura) — espelha a
+// estrutura real de WelcomeScreen.tsx (totem), não uma composição própria.
+// Precisou ser corrigido (2026-08) porque tinha ficado defasado de mudanças
+// reais da WelcomeScreen: o ícone/logo foi removido de propósito na ORD-114
+// (tela de boas-vindas não deve ter identificação do fornecedor de
+// software, só da empresa) e o botão "Ver cardápio" nunca existiu na tela
+// de verdade — os dois eram invenção deste preview, não refletiam a
+// realidade. Mantido como uma réplica manual simplificada (não o
+// componente de verdade) — é branding/preview do totem, fora do escopo da
+// reconstrução visual do admin com o design system.
 function TotemPreview({ name, mode }: { name: string; mode: string }) {
   const T = resolveTheme(name, mode);
   return (
@@ -32,27 +39,19 @@ function TotemPreview({ name, mode }: { name: string; mode: string }) {
       flexDirection: "column",
       alignItems: "center",
       justifyContent: "center",
-      gap: 12,
-      position: "relative",
+      gap: 20,
     }}>
-      {/* Logo */}
-      <svg width={36} height={36} viewBox="0 0 48 48" fill="none">
-        <rect width="48" height="48" rx="12" fill={T.roxo} />
-        <circle cx="24" cy="22" r="10" stroke="white" strokeWidth="3.5" fill="none" />
-        <circle cx="24" cy="22" r="4" fill="white" />
-        <rect x="14" y="34" width="20" height="3" rx="1.5" fill="white" opacity="0.4" />
-      </svg>
-      <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: 18, color: T.text, letterSpacing: "-0.5px" }}>
-        Sua empresa
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: 20, color: T.text, letterSpacing: "-0.5px" }}>
+          Sua empresa
+        </div>
+        <div style={{ fontFamily: FONT_D, color: T.roxo, fontSize: 10, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", marginTop: 2 }}>
+          Autoatendimento
+        </div>
       </div>
-      <div style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 6,
-      }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
         <div style={{
-          width: 32, height: 32, borderRadius: "50%",
+          width: 36, height: 36, borderRadius: "50%",
           background: T.roxoSubtle,
           border: `2px solid ${T.roxo}`,
           display: "flex", alignItems: "center", justifyContent: "center",
@@ -60,23 +59,12 @@ function TotemPreview({ name, mode }: { name: string; mode: string }) {
         }}>
           👆
         </div>
-        <div style={{ fontFamily: FONT_D, fontSize: 14, fontWeight: 700, color: T.text }}>
+        <div style={{ fontFamily: FONT_D, fontSize: 14, fontWeight: 800, color: T.text }}>
           Toque para começar
         </div>
         <div style={{ fontFamily: FONT_B, fontSize: 11, color: T.muted }}>
           Faça seu pedido em minutos
         </div>
-      </div>
-      {/* Pill de botão de exemplo */}
-      <div style={{
-        position: "absolute", bottom: 12, left: 12, right: 12,
-        background: T.btn, color: T.btnText,
-        borderRadius: 999, padding: "6px 0",
-        textAlign: "center",
-        fontFamily: FONT_D, fontWeight: 800, fontSize: 11,
-        boxShadow: T.glow,
-      }}>
-        Ver cardápio →
       </div>
     </div>
   );
