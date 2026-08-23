@@ -111,17 +111,21 @@ export default function QueueScreen() {
         <div className={`${styles.wsChip} ${styles[`wsChip_${wsStatus}`]}`}>
           {WS_LABEL[wsStatus]}
         </div>
-        <Button
-          size="small"
-          variant={turboMode ? "primary" : "secondary"}
-          onClick={toggleTurbo}
-          title="Coleta sem confirmação"
-        >
-          {`⚡ Turbo ${turboMode ? "ON" : "OFF"}`}
-        </Button>
+        <span className={styles.turboBtnWrap}>
+          <Button
+            size="small"
+            variant={turboMode ? "primary" : "secondary"}
+            onClick={toggleTurbo}
+            title="Coleta sem confirmação"
+          >
+            {`⚡ Turbo ${turboMode ? "ON" : "OFF"}`}
+          </Button>
+        </span>
         <span className={styles.userName}>{userName ?? role}</span>
         <div className={styles.themeToggle}><ThemeModeSwitch /></div>
-        <Button size="small" variant="secondary" onClick={handleLogout}>Sair</Button>
+        <span className={styles.logoutBtnWrap}>
+          <Button size="small" variant="secondary" onClick={handleLogout}>Sair</Button>
+        </span>
       </div>
 
       <div className={styles.body}>
