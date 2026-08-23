@@ -39,6 +39,8 @@
 .confirmIcon {
   font-size: 36px;
   margin-bottom: 12px;
+  color: color('brand-primary');
+  display: block;
 }
 
 .confirmTitle {
@@ -102,6 +104,18 @@
   font-weight: 700;
   color: var(--a-text);
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  i {
+    font-size: 16px;
+    color: rgba(var(--a-text-rgb), 0.4);
+  }
+}
+
+.ticketCollected .code i {
+  color: color('success-base');
 }
 
 .units {
