@@ -1,0 +1,43 @@
+@use "sass:map";
+
+// ==========================================================
+// font
+// Gets all the font settings (on all themes) of a given variation (token)
+//
+// Required arguments:
+// `$variation` String
+//
+// Example of use:
+// .foo { @include font('xs-2') }
+//
+// @return
+// .foo {
+//   font-weight: 400;
+//   font-size: 10px;
+//   letter-spacing: 0;
+//   line-height: 12px;
+// }
+// ==========================================================
+$fontsMap: ();
+
+@mixin font($variation, $pseudoelement: null) {
+  @if $pseudoelement != null {
+    #{$pseudoelement} {
+      @include map-to-props(map.get($fonts, $variation));
+    }
+    @each $theme, $fontMap in $fontsMap {
+      &.#{$theme} {
+        #{$pseudoelement} {
+          @include map-to-props(map.get($fontMap, $variation));
+        }
+      }
+    }
+  } @else {
+    @include map-to-props(map.get($fonts, $variation));
+    @each $theme, $fontMap in $fontsMap {
+      &.#{$theme} {
+        @include map-to-props(map.get($fontMap, $variation));
+      }
+    }
+  }
+}

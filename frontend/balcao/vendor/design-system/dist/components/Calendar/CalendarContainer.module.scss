@@ -1,0 +1,68 @@
+@import '../../core/scss/styles';
+
+.ds-calendar-container__wrapper {
+  @include rounded('card');
+  @include color('background-color', 'white');
+  width: 20.5rem;
+  min-height: 32.25rem;
+  z-index: 3;
+}
+
+.ds-calendar-container__header {
+  @include padding('l', 'l', 'l', 'l');
+  @include color('background-color', 'grey-200');
+  @include rounded('card');
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  display: flex;
+}
+
+.ds-calendar-container__header-button {
+  @include font('xl-emphasys');
+  box-sizing: border-box;
+  background-color: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.ds-calendar-container__content {
+  min-height: 19.125rem;
+  padding-bottom: spacing('l');
+}
+
+.ds-calendar-container__content-header {
+  @include padding('l', 'l', 'l', 'l');
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ds-calendar-container__content-button {
+  @include font('l-emphasys');
+  display: flex;
+  align-items: center;
+  background-color: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+
+  & i {
+    @include color('color', 'brand-primary');
+    margin-left: spacing('xs');
+  }
+
+  &:disabled {
+    @include color('color', 'grey-400');
+
+    & i {
+      @include color('color', 'grey-400');
+    }
+  }
+}
+
+.ds-calendar-container__footer {
+  @include padding('l', 'l', 'l', 'l');
+  display: flex;
+  justify-content: flex-end;
+  gap: spacing('m');
+}

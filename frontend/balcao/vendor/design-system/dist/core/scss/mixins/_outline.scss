@@ -1,0 +1,93 @@
+@use "sass:map";
+
+// ==========================================================
+// outline
+// Gets a outline according to the sent properties and available themes
+//
+//  Arguments:
+// `$width` Number
+// `$style` String
+// `$token` String
+// `$offset` Number
+// `$pseudoelement` String
+//
+// Examples of use:
+// .foo { @include outline(2, 'solid', 'brand-primary', 2) }
+//
+// @return
+// .foo {
+//    &:focus-visible {
+//      outline-width: 2px;
+//      outline-color: #9900ff;
+//      outline-style: 'solid';
+//      outline-offset: 2px;
+//    }
+// }
+//
+// .foo { @include outline(2, 'solid', 'brand-primary', 2, ':has(:focus-visible)') }
+//
+// @return
+// .foo {
+//    &:has(:focus-visible) {
+//      outline-width: 2px;
+//      outline-color: #9900ff;
+//      outline-style: 'solid';
+//      outline-offset: 2px;
+//    }
+// }
+//
+// ==========================================================
+@mixin outline(
+  $width: 2,
+  $style: 'solid',
+  $token: 'brand-primary',
+  $offset: 2,
+  $pseudoelement: null
+) {
+  @if $pseudoelement == null {
+    &:focus-visible {
+      outline-width: #{$width}px;
+      outline-color: map.get($colors, $token);
+      outline-style: #{$style};
+
+      @if $offset != null {
+        outline-offset: #{$offset}px;
+      }
+    }
+  } @else {
+    &#{$pseudoelement} {
+      outline-width: #{$width}px;
+      outline-color: map.get($colors, $token);
+      outline-style: #{$style};
+
+      @if $offset != null {
+        outline-offset: #{$offset}px;
+      }
+    }
+  }
+  @each $theme, $color in $color-themes {
+    &.#{$theme} {
+      @if $pseudoelement == null {
+        &:focus-visible {
+          outline-width: #{$width}px;
+          outline-color: map.get($color, $token);
+          outline-style: #{$style};
+
+          @if $offset != null {
+            outline-offset: #{$offset}px;
+          }
+        }
+      } @else {
+        &#{$pseudoelement} {
+          outline-width: #{$width}px;
+          outline-color: map.get($color, $token);
+          outline-style: #{$style};
+
+          @if $offset != null {
+            outline-offset: #{$offset}px;
+          }
+        }
+      }
+    }
+  }
+}

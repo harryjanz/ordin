@@ -1,0 +1,92 @@
+@import '../../core/scss/styles';
+
+.ds-checkbox__wrapper {
+  cursor: pointer;
+  display: inline-flex;
+  flex-flow: row;
+  align-content: center;
+
+  & > input {
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  &:not(.ds-checkbox__wrapper--disabled):hover {
+    .ds-checkbox__check {
+      @include border(1.5, 'solid', 'brand-primary');
+      transition: all 200ms ease-in-out;
+    }
+  }
+
+  &--disabled {
+    cursor: not-allowed;
+
+    & > input,
+    j.ds-checkbox__label,
+    .ds-checkbox__check {
+      cursor: not-allowed;
+    }
+
+    & > .ds-checkbox__check {
+      @include border(1.5, 'solid', 'grey-100');
+    }
+
+    & > .ds-checkbox__label {
+      @include color('color', 'grey-300');
+    }
+  }
+
+  &--error {
+    & > .ds-checkbox__check {
+      @include border(1.5, 'solid', 'error-base');
+    }
+  }
+}
+
+.ds-checkbox__label {
+  @include color('color', 'dark');
+  margin-left: spacing('s');
+  align-self: flex-end;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &--large {
+    @include font('base');
+  }
+
+  &--medium {
+    @include font('sm');
+  }
+}
+
+.ds-checkbox__check {
+  display: inline-block;
+  box-sizing: border-box;
+  min-width: 20px;
+  min-height: 20px;
+  @include border(1.5, 'solid', 'grey-300');
+  @include rounded('checkbox');
+
+  margin-left: -20px;
+  cursor: pointer;
+
+  &--checked {
+    @include color('background-color', 'brand-primary');
+    @include border(1.5, 'solid', 'brand-primary');
+
+    & > svg {
+      margin-left: 4px;
+      margin-top: 5px;
+      display: block;
+    }
+  }
+}
+
+.ds-checkbox__error-message {
+  @include font('xs');
+  @include color('color', 'error-base');
+
+  display: block;
+  margin-top: spacing('s');
+}

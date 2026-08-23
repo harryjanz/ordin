@@ -1,0 +1,123 @@
+@import '../../core/scss/styles.scss';
+
+/*------------------------------------*\
+ #Modal
+\*------------------------------------*/
+
+.ds-modal__portal {
+  position: relative;
+  z-index: 9999;
+}
+
+.ds-modal__backdrop {
+  background-color: rgba(color('grey-600'), 0.75);
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
+  z-index: 1;
+  overflow-y: auto;
+}
+
+.ds-modal__wrapper {
+  @include rounded(null, 'xs');
+  @include color('background-color', 'white');
+  border: 1px solid color('grey-100');
+  padding: spacing('xxl-4');
+  position: relative;
+  box-sizing: border-box;
+  transform: translate(-50%, -50%);
+  top: 50%;
+  left: 50%;
+  width: 412px;
+  z-index: 9;
+  overflow-y: auto;
+
+  &--large {
+    width: 602px;
+  }
+
+  &--overflowing {
+    top: spacing('xl');
+    margin-bottom: spacing('xxl-4');
+    transform: translateX(-50%);
+  }
+
+  @media screen and (max-width: 768px) {
+    padding: spacing('xxl-3') spacing('l');
+    width: 100% !important;
+    height: 100vh !important;
+    border-radius: 0;
+    top: 0;
+    left: auto;
+    transform: none;
+  }
+}
+
+.ds-modal__close-button {
+  @include color('color', 'brand-primary');
+  padding: spacing('0');
+  top: spacing('m');
+  right: spacing('m');
+  position: absolute;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+
+.ds-modal__title {
+  @include font('l-emphasys');
+  @include color('color', 'dark');
+  margin-bottom: spacing('m');
+  margin-top: 0px;
+  width: 100%;
+
+  &--centered {
+    text-align: center;
+  }
+}
+
+.ds-modal__icon {
+  margin-bottom: spacing('l');
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.ds-modal__text {
+  @include font('base');
+  @include color('color', 'dark');
+  margin-bottom: spacing('l');
+  width: 100%;
+  margin-top: 0px;
+
+  &--centered {
+    text-align: center;
+  }
+
+  &--scrollable {
+    max-height: 264px;
+    overflow-y: auto;
+  }
+}
+
+.ds-modal__button_wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+
+  &--composite {
+    align-items: center;
+
+    & > button {
+      width: 100% !important;
+
+      &:first-child {
+        margin-bottom: spacing('m');
+      }
+    }
+  }
+}

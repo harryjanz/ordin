@@ -1,16 +1,16 @@
 import { useState, FormEvent } from "react";
 import axios from "axios";
+import { Alert, Button, Checkbox, InputBase } from "design-system";
 import { QRCodeSVG } from "qrcode.react";
 import { useStore } from "../store";
 import { getDeviceTrustToken, setDeviceTrustToken } from "../deviceTrust";
+import { OrdinSymbol } from "../assets/OrdinSymbol";
+import ThemeModeSwitch from "../components/ThemeModeSwitch";
+import styles from "./LoginScreen.module.scss";
 
-// ORD-120 — duplo fator (ORD-088/092) nunca tinha sido portado pro app de
-// balcão: /auth/login pode responder com mfa_required em vez dos tokens
-// finais (usuário com TOTP ativo, ou empresa com política "required" e
-// usuário ainda sem TOTP configurado). Sem esse passo, login falhava
-// silenciosamente pra qualquer empresa com MFA ativo — mesma lógica já
-// existente e testada em frontend/admin/src/screens/LoginScreen.tsx, só
-// portada pro estilo visual do balcão (inline, sem design-system).
+// ORD-120: duplo fator (ORD-088/092) — /auth/login pode responder com
+// mfa_required em vez dos tokens finais. ORD-121: mesma lógica, migrada pros
+// componentes do design system (era HTML nu com estilo inline).
 type Step = "credentials" | "setup-qr" | "backup-codes" | "code";
 
 export default function LoginScreen() {
@@ -103,121 +103,112 @@ export default function LoginScreen() {
     }
   }
 
-  const fieldLabel: React.CSSProperties = { display: "block", color: "rgba(223,232,237,0.6)", fontSize: 12, marginBottom: 6 };
-  const fieldInput: React.CSSProperties = {
-    width: "100%", padding: "10px 14px", background: "rgba(153,0,255,0.08)",
-    border: "1px solid rgba(153,0,255,0.25)", borderRadius: 8, color: "#DFE8ED",
-    fontSize: 15, outline: "none", marginBottom: 14,
-  };
-  const primaryBtn: React.CSSProperties = {
-    width: "100%", padding: "12px", background: loading ? "rgba(153,0,255,0.4)" : "#9900ff",
-    color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700,
-    cursor: loading ? "default" : "pointer", boxShadow: "0 4px 20px rgba(153,0,255,0.35)",
-  };
-  const hint: React.CSSProperties = { color: "rgba(223,232,237,0.6)", fontSize: 13, marginBottom: 16, lineHeight: 1.5 };
-
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: "radial-gradient(ellipse at 60% 0%,rgba(153,0,255,0.18) 0%,transparent 60%),#0e0b1a",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-    }}>
-      <div style={{
-        background: "#1d1434",
-        border: "1px solid rgba(153,0,255,0.22)",
-        borderRadius: 20,
-        padding: "40px 48px",
-        width: 380,
-        boxShadow: "0 8px 40px rgba(153,0,255,0.12)",
-      }}>
-        <div style={{ marginBottom: 28, textAlign: "center" }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color: "#9900ff", letterSpacing: "-0.5px" }}>ordin</div>
-          <div style={{ color: "rgba(223,232,237,0.45)", fontSize: 13, marginTop: 4 }}>App de balcão</div>
+    <div className={styles.page}>
+      <div className={styles.themeToggle}>
+        <ThemeModeSwitch />
+      </div>
+      <div className={styles.card}>
+        <div className={styles.logoRow}>
+          <OrdinSymbol size={28} />
+          <span className={styles.logo}>ordin</span>
         </div>
-
-        {error && (
-          <div style={{
-            color: "#ff4d6d", background: "rgba(255,77,109,0.1)", borderRadius: 8,
-            padding: "8px 12px", fontSize: 13, marginBottom: 16,
-          }}>
-            {error}
-          </div>
-        )}
+        <div className={styles.sub}>App de balcão</div>
+        {error && <div className={styles.error}><Alert variant="error" text={error} fullWidth /></div>}
 
         {step === "credentials" && (
           <form onSubmit={handleSubmit}>
-            <label style={fieldLabel}>E-mail</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus style={fieldInput} />
-            <label style={fieldLabel}>Senha</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ ...fieldInput, marginBottom: 20 }} />
-            <button type="submit" disabled={loading} style={primaryBtn}>
-              {loading ? "Entrando…" : "Entrar"}
-            </button>
+            <div className={styles.field}>
+              <InputBase
+                label="E-mail"
+                aria-label="E-mail"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus
+                required
+              />
+            </div>
+            <div className={styles.field}>
+              <InputBase
+                label="Senha"
+                aria-label="Senha"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            <Button type="submit" fullWidth loading={loading}>Entrar</Button>
           </form>
         )}
 
         {step === "setup-qr" && (
           <form onSubmit={handleConfirmSetup}>
-            <div style={hint}>
+            <div className={styles.mfaHint}>
               Sua empresa exige duplo fator. Escaneie o QR code com um app autenticador
               (Google Authenticator, Authy, 1Password…) e digite o código gerado para continuar.
             </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, marginBottom: 20 }}>
-              <div style={{ background: "#fff", padding: 12, borderRadius: 8 }}>
-                <QRCodeSVG value={mfaUri} size={180} />
-              </div>
-              <div style={{ color: "rgba(223,232,237,0.5)", fontSize: 12, textAlign: "center", wordBreak: "break-all" }}>
-                Não consegue escanear? Digite manualmente: <code style={{ color: "#DFE8ED" }}>{mfaSecret}</code>
+            <div className={styles.mfaQrRow}>
+              <QRCodeSVG value={mfaUri} size={180} />
+              <div className={styles.mfaSecretFallback}>
+                Não consegue escanear? Digite manualmente: <code>{mfaSecret}</code>
               </div>
             </div>
-            <label style={fieldLabel}>Código de 6 dígitos</label>
-            <input
-              value={mfaCode} onChange={(e) => setMfaCode(e.target.value)}
-              autoFocus required maxLength={6} style={{ ...fieldInput, marginBottom: 20 }}
-            />
-            <button type="submit" disabled={loading || mfaCode.length !== 6} style={primaryBtn}>
+            <div className={styles.field}>
+              <InputBase
+                label="Código de 6 dígitos"
+                aria-label="Código de 6 dígitos"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                autoFocus
+                required
+                maxLength={6}
+              />
+            </div>
+            <Button type="submit" fullWidth loading={loading} disabled={mfaCode.length !== 6}>
               Confirmar ativação
-            </button>
+            </Button>
           </form>
         )}
 
         {step === "backup-codes" && (
           <div>
-            <div style={hint}>
+            <div className={styles.mfaHint}>
               Duplo fator ativado! Guarde estes 10 códigos de backup — cada um funciona uma única vez e serve
               para entrar caso você perca o acesso ao app autenticador. <strong>Eles não serão mostrados de novo.</strong>
             </div>
-            <div style={{
-              display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8,
-              background: "rgba(153,0,255,0.08)", border: "1px solid rgba(153,0,255,0.2)",
-              borderRadius: 8, padding: 16, marginBottom: 20,
-            }}>
-              {mfaBackupCodes.map((c) => (
-                <code key={c} style={{ color: "#DFE8ED", fontSize: 13, textAlign: "center" }}>{c}</code>
-              ))}
+            <div className={styles.mfaBackupCodes}>
+              {mfaBackupCodes.map((c) => <code key={c}>{c}</code>)}
             </div>
-            <button onClick={() => setStep("code")} style={primaryBtn}>
-              Já salvei meus códigos — continuar
-            </button>
+            <Button fullWidth onClick={() => setStep("code")}>Já salvei meus códigos — continuar</Button>
           </div>
         )}
 
         {step === "code" && (
           <form onSubmit={handleVerifyCode}>
-            <div style={hint}>
+            <div className={styles.mfaHint}>
               Digite o código de 6 dígitos do seu app autenticador (ou um código de backup).
             </div>
-            <label style={fieldLabel}>Código</label>
-            <input value={mfaCode} onChange={(e) => setMfaCode(e.target.value)} autoFocus required style={fieldInput} />
-            <label style={{ display: "flex", alignItems: "center", gap: 8, color: "rgba(223,232,237,0.6)", fontSize: 13, marginBottom: 20, cursor: "pointer" }}>
-              <input type="checkbox" checked={trustDevice} onChange={(e) => setTrustDevice(e.target.checked)} />
-              Confiar neste dispositivo por 7 dias
-            </label>
-            <button type="submit" disabled={loading} style={primaryBtn}>
-              {loading ? "Entrando…" : "Entrar"}
-            </button>
+            <div className={styles.field}>
+              <InputBase
+                label="Código"
+                aria-label="Código"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value)}
+                autoFocus
+                required
+              />
+            </div>
+            <div className={styles.field}>
+              <Checkbox
+                id="trust-device"
+                checked={trustDevice}
+                onChange={setTrustDevice}
+                label="Confiar neste dispositivo por 7 dias"
+              />
+            </div>
+            <Button type="submit" fullWidth loading={loading}>Entrar</Button>
           </form>
         )}
       </div>

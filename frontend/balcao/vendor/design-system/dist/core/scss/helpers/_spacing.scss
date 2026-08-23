@@ -1,0 +1,26 @@
+@use "sass:map";
+
+// ==========================================================
+// spacing($token)
+// Returns the spacing unit of the given spacing token. The prefix
+// "spacing-" is not necessary.
+//
+// Required arguments:
+// `$token` String
+//
+// Example of use:
+// sample map with spacing token
+// $spacing: (
+//  "xxl": "40px"
+// );
+//
+// .foo { padding-top: spacing('xxl'); }
+// @return "40px";
+// ==========================================================
+@function spacing($token, $map: $spacing) {
+  @if type-of($map) == map {
+    @return map.get($map, $token);
+  } @else {
+    @warn "The given $map is not a valid Map object: `#{$map}`";
+  }
+}

@@ -1,0 +1,125 @@
+@import '../../core/scss/styles.scss';
+
+.ds-alert__wrapper {
+  position: relative;
+  min-width: 240px;
+  box-sizing: border-box;
+  padding: spacing('m');
+  border-radius: spacing('xs');
+
+  &--info {
+    @include color('background-color', 'brand-secondary');
+    @include color('background-color', 'brand-secondary', '::before');
+    @include color('background-color', 'brand-secondary', '::after');
+    @include color('color', 'brand-primary');
+  }
+
+  &--success {
+    @include color('background-color', 'success-light');
+    @include color('background-color', 'success-light', '::before');
+    @include color('background-color', 'success-light', '::after');
+    @include color('color', 'success-base');
+  }
+
+  &--error {
+    @include color('background-color', 'error-light');
+    @include color('background-color', 'error-light', '::before');
+    @include color('background-color', 'error-light', '::after');
+    @include color('color', 'error-base');
+  }
+
+  &--warning {
+    @include color('background-color', 'warning-light');
+    @include color('background-color', 'warning-light', '::before');
+    @include color('background-color', 'warning-light', '::after');
+    @include color('color', 'warning-base');
+  }
+
+  &--neutral {
+    @include color('background-color', 'grey-100');
+    @include color('background-color', 'grey-100', '::before');
+    @include color('background-color', 'grey-100', '::after');
+    @include color('color', 'grey-500');
+  }
+
+  @mixin arrow-styles {
+    content: '';
+    position: absolute;
+    width: spacing('xs') + spacing('s');
+    height: spacing('xs') + spacing('s');
+    box-sizing: border-box;
+    transform: rotate(45deg);
+  }
+
+  &--arrow-top-start {
+    &::before {
+      @include arrow-styles();
+      margin-top: -22px;
+    }
+  }
+
+  &--arrow-top {
+    &::before {
+      @include arrow-styles();
+      margin-top: -22px;
+      margin-left: calc(50% - 20px);
+    }
+  }
+
+  &--arrow-top-end {
+    &::before {
+      @include arrow-styles();
+      margin-top: -22px;
+      margin-left: calc(100% - 48px);
+    }
+  }
+
+  &--arrow-bottom-start {
+    &::after {
+      @include arrow-styles();
+      margin-top: 10px;
+    }
+  }
+
+  &--arrow-bottom {
+    &::after {
+      @include arrow-styles();
+      margin-top: 10px;
+      margin-left: calc(50% - 20px);
+    }
+  }
+
+  &--arrow-bottom-end {
+    &::after {
+      @include arrow-styles();
+      margin-top: 10px;
+      margin-left: calc(100% - 48px);
+    }
+  }
+}
+
+.ds-alert__content {
+  display: flex;
+  flex-flow: row nowrap;
+}
+
+.ds-alert__icon {
+  display: inline-flex;
+  align-self: center;
+  padding-right: spacing('xs') + spacing('s');
+}
+
+.ds-alert__text {
+  @include font('xs-emphasys');
+  display: flow-root;
+  margin: 0px;
+  align-self: center;
+
+  & button {
+    padding-right: 3px;
+
+    & > span {
+      text-decoration: underline;
+    }
+  }
+}
