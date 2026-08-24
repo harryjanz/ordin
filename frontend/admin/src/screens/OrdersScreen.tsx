@@ -388,6 +388,7 @@ export default function OrdersScreen() {
                         <table className={styles.ticketTable}>
                           <thead>
                             <tr>
+                              <th className={styles.ticketTh}>Produto</th>
                               <th className={styles.ticketTh}>Código</th>
                               <th className={styles.ticketTh}>Unidade</th>
                               <th className={styles.ticketTh}>Status</th>
@@ -398,6 +399,7 @@ export default function OrdersScreen() {
                           <tbody>
                             {tickets.map((t) => (
                               <tr key={t.ticket_code}>
+                                <td className={styles.ticketTd}>{t.qr_data.split("|")[1] ?? "Item"}</td>
                                 <td className={`${styles.ticketTd} ${styles.detailMono}`}>{t.ticket_code}</td>
                                 <td className={styles.ticketTd}>{t.unit_number}/{t.total_units}</td>
                                 <td className={styles.ticketTd}>
