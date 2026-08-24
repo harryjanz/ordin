@@ -55,9 +55,12 @@ export async function listOrderTickets(orderRef: string): Promise<Ticket[]> {
 
 // ORD-119 (item 3, análise de concorrentes 2026-08-24) — tempo médio de
 // preparo / gargalo por hora, últimas 24h por padrão (sem date_from).
-export async function getPrepStats(companyId?: number): Promise<PrepStats> {
-  const r = await api.get<PrepStats>("/orders/prep-stats", {
-    params: companyId ? { company_id: companyId } : {},
-  });
+// dateFrom (ISO) permite janelas menores — usado pelos indicadores de
+// saúde da operação (últimos 30min/60min, melhorias de UX 2026-08-24).
+export async function getPrepStats(companyId?: number, dateFrom?: string): Promise<PrepStats> {
+  const params: Record<string, string | number> = {};
+  if (companyId) params.company_id = companyId;
+  if (dateFrom) params.date_from = dateFrom;
+  const r = await api.get<PrepStats>("/orders/prep-stats", { params });
   return r.data;
 }

@@ -23,9 +23,12 @@ function PrepTrendTag({ pct }: { pct: number | null }) {
   );
 }
 
+type DragSource = "preparing" | "ready";
+
 interface DragState {
   ref: string;
   label: string;
+  source: DragSource;
   startX: number;
   startY: number;
   x: number;
@@ -34,6 +37,9 @@ interface DragState {
 }
 
 const DRAG_THRESHOLD = 6;
+// Melhorias de UX 2026-08-24 — quanto tempo um card fica visível na coluna
+// "Coletado" antes de sumir sozinho (pedido direto do usuário).
+const COLLECTED_VISIBLE_MS = 60_000;
 
 function label(o: Order) {
   return o.pickup_name || `#${o.order_ref.slice(-4)}`;
@@ -57,6 +63,27 @@ function minutesAgo(createdAt: string) {
   const mins = Math.floor((Date.now() - new Date(createdAt).getTime()) / 60_000);
   if (mins < 1) return "agora";
   return `${mins} min`;
+}
+
+// Melhorias de UX 2026-08-24 — indicadores de saúde da operação (últimos
+// 30min/60min), aprovados com o usuário: verde até o limite de urgência
+// configurado pela empresa, laranja de 100% a 125% do limite, vermelho
+// acima de 125%. Sem pedido nenhum na janela é "sem dado", não "ok" —
+// mostrar verde por ausência de dado mascararia silêncio operacional.
+type HealthLevel = "ok" | "warning" | "critical" | "empty";
+
+const HEALTH_LABEL: Record<HealthLevel, string> = {
+  ok: "Dentro do esperado",
+  warning: "Atenção",
+  critical: "Crítico",
+  empty: "Sem pedidos",
+};
+
+function healthLevel(avgMinutes: number | null, count: number, urgencyMinutes: number): HealthLevel {
+  if (count === 0 || avgMinutes === null) return "empty";
+  if (avgMinutes > urgencyMinutes * 1.25) return "critical";
+  if (avgMinutes > urgencyMinutes) return "warning";
+  return "ok";
 }
 
 interface ItemSummary { name: string; qty: number; }
@@ -92,16 +119,35 @@ export default function FulfillmentScreen() {
   const [itemsModal, setItemsModal] = useState<{ order: Order; items: ItemSummary[] } | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
   const [prepStats, setPrepStats] = useState<PrepStats | null>(null);
+  const [prepStats30, setPrepStats30] = useState<PrepStats | null>(null);
+  const [prepStats60, setPrepStats60] = useState<PrepStats | null>(null);
 
   // Melhorias de UX 2026-08-24 — arrastar card de "Em preparo" pra "Pronto
-  // para retirada" marca pronto. Pointer Events (não HTML5 Drag and Drop,
-  // que tem suporte ruim a touch) — mesmo evento cobre mouse (laptop) e
-  // toque (tablet).
+  // para retirada" marca pronto, e de "Pronto para retirada" pra "Coletado"
+  // marca coletado. Pointer Events (não HTML5 Drag and Drop, que tem
+  // suporte ruim a touch) — mesmo evento cobre mouse (laptop) e toque
+  // (tablet).
   const [drag, setDrag] = useState<DragState | null>(null);
-  const [overReady, setOverReady] = useState(false);
+  const [overTarget, setOverTarget] = useState(false);
   const dragRef = useRef<DragState | null>(null);
   const readyColRef = useRef<HTMLDivElement>(null);
+  const collectedColRef = useRef<HTMLDivElement>(null);
   const suppressClickRef = useRef(false);
+  const ordersRef = useRef<Order[]>([]);
+  useEffect(() => { ordersRef.current = orders; }, [orders]);
+
+  // Coluna "Coletado" — buffer local (não vem do backend) de pedidos
+  // marcados como coletados nos últimos 60s, só pra dar feedback visual
+  // antes de sumir sozinho da tela (pedido direto do usuário).
+  const [collectedRecently, setCollectedRecently] = useState<{ order: Order; collectedAt: number }[]>([]);
+  const collectTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  useEffect(() => {
+    setCollectedRecently([]);
+    return () => {
+      collectTimers.current.forEach(clearTimeout);
+      collectTimers.current.clear();
+    };
+  }, [companyId]);
 
   // Força re-render periódico só pro "X min" e "URGENTE" avançarem sozinhos
   // na tela — sem isso, só mudam quando algum evento de WS ou ação do
@@ -146,6 +192,24 @@ export default function FulfillmentScreen() {
 
   useEffect(() => { loadPrepStats(); }, [loadPrepStats]);
 
+  // Melhorias de UX 2026-08-24 — indicadores de saúde (30min/60min).
+  // Recarrega nos mesmos gatilhos do prepStats de 24h, mais um polling
+  // próprio de 60s — diferente do de 24h, a janela desliza mesmo sem
+  // pedido novo (um pedido antigo pode "sair" da janela sozinho).
+  const loadHealthStats = useCallback(() => {
+    if (!companyId) return;
+    const now = Date.now();
+    getPrepStats(companyId, new Date(now - 30 * 60_000).toISOString()).then(setPrepStats30).catch(() => null);
+    getPrepStats(companyId, new Date(now - 60 * 60_000).toISOString()).then(setPrepStats60).catch(() => null);
+  }, [companyId]);
+
+  useEffect(() => { loadHealthStats(); }, [loadHealthStats]);
+
+  useEffect(() => {
+    const iv = setInterval(loadHealthStats, 60_000);
+    return () => clearInterval(iv);
+  }, [loadHealthStats]);
+
   const handleWsEvent = useCallback((event: WsEvent) => {
     // Mesmo racional do painel público — order.paid não carrega pickup_name
     // no evento, recarrega via REST pra não mostrar dado incompleto.
@@ -154,11 +218,13 @@ export default function FulfillmentScreen() {
     }
     if (event.event === "order.ready") {
       loadPrepStats();
+      loadHealthStats();
     }
     if (event.event === "order.completed" && event.order_ref) {
-      setOrders((prev) => prev.filter((o) => o.order_ref !== event.order_ref));
+      const found = ordersRef.current.find((o) => o.order_ref === event.order_ref);
+      if (found) collectOrderLocally(found);
     }
-  }, [loadOrders, loadPrepStats]);
+  }, [loadOrders, loadPrepStats, loadHealthStats]);
 
   useEffect(() => {
     if (!companyId || fulfillmentMode !== "retirada_unica") return;
@@ -202,12 +268,29 @@ export default function FulfillmentScreen() {
     }
   }
 
-  async function markCollected(ref: string) {
-    setBusy(ref);
+  // Adiciona o pedido na coluna "Coletado" por um tempo limitado, depois
+  // some sozinho — chamado tanto pela ação local (botão/drag) quanto por
+  // um evento de WS de outro operador coletando o mesmo pedido.
+  function collectOrderLocally(o: Order) {
+    setCollectedRecently((prev) => {
+      if (prev.some((c) => c.order.order_ref === o.order_ref)) return prev;
+      return [{ order: o, collectedAt: Date.now() }, ...prev];
+    });
+    setOrders((prev) => prev.filter((x) => x.order_ref !== o.order_ref));
+    const existing = collectTimers.current.get(o.order_ref);
+    if (existing) clearTimeout(existing);
+    collectTimers.current.set(o.order_ref, setTimeout(() => {
+      setCollectedRecently((prev) => prev.filter((c) => c.order.order_ref !== o.order_ref));
+      collectTimers.current.delete(o.order_ref);
+    }, COLLECTED_VISIBLE_MS));
+  }
+
+  async function markCollected(o: Order) {
+    setBusy(o.order_ref);
     try {
-      await api.post(`/orders/${ref}/collect`, {});
+      await api.post(`/orders/${o.order_ref}/collect`, {});
       showFeedback("Pedido marcado como coletado.", true);
-      setOrders((prev) => prev.filter((o) => o.order_ref !== ref));
+      collectOrderLocally(o);
     } catch {
       showFeedback("Erro ao marcar coletado.", false);
     } finally {
@@ -215,16 +298,17 @@ export default function FulfillmentScreen() {
     }
   }
 
-  function startDrag(e: React.PointerEvent<HTMLDivElement>, ref: string, cardLabel: string) {
+  function startDrag(e: React.PointerEvent<HTMLDivElement>, order: Order, source: DragSource) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    if (busy === ref) return;
+    if (busy === order.order_ref) return;
+    const targetColRef = source === "preparing" ? readyColRef : collectedColRef;
     const startX = e.clientX;
     const startY = e.clientY;
-    const initial: DragState = { ref, label: cardLabel, startX, startY, x: startX, y: startY, moved: false };
+    const initial: DragState = { ref: order.order_ref, label: label(order), source, startX, startY, x: startX, y: startY, moved: false };
     dragRef.current = initial;
 
-    function pointInReadyCol(x: number, y: number) {
-      const box = readyColRef.current?.getBoundingClientRect();
+    function pointInTargetCol(x: number, y: number) {
+      const box = targetColRef.current?.getBoundingClientRect();
       return !!box && x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
     }
 
@@ -237,7 +321,7 @@ export default function FulfillmentScreen() {
       setDrag(next);
       if (moved) {
         ev.preventDefault();
-        setOverReady(pointInReadyCol(ev.clientX, ev.clientY));
+        setOverTarget(pointInTargetCol(ev.clientX, ev.clientY));
       }
     }
 
@@ -252,10 +336,13 @@ export default function FulfillmentScreen() {
       const final = dragRef.current;
       dragRef.current = null;
       setDrag(null);
-      setOverReady(false);
+      setOverTarget(false);
       if (final?.moved) {
         suppressClickRef.current = true;
-        if (pointInReadyCol(ev.clientX, ev.clientY)) markReady(final.ref);
+        if (pointInTargetCol(ev.clientX, ev.clientY)) {
+          if (source === "preparing") markReady(order.order_ref);
+          else markCollected(order);
+        }
       }
     }
 
@@ -263,7 +350,7 @@ export default function FulfillmentScreen() {
       cleanup();
       dragRef.current = null;
       setDrag(null);
-      setOverReady(false);
+      setOverTarget(false);
     }
 
     window.addEventListener("pointermove", onMove, { passive: false });
@@ -309,6 +396,8 @@ export default function FulfillmentScreen() {
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   const preparing = orders.filter((o) => o.status === "paid").sort(byOldestFirst);
   const ready = orders.filter((o) => o.status === "ready").sort(byOldestFirst);
+  const level30 = healthLevel(prepStats30?.avg_prep_minutes ?? null, prepStats30?.count ?? 0, prepUrgencyMinutes);
+  const level60 = healthLevel(prepStats60?.avg_prep_minutes ?? null, prepStats60?.count ?? 0, prepUrgencyMinutes);
 
   return (
     <div className={styles.page}>
@@ -322,6 +411,26 @@ export default function FulfillmentScreen() {
 
       {prepStats && prepStats.count > 0 && (
         <div className={styles.statsBar}>
+          {prepStats30 && (
+            <div className={`${styles.statCard} ${styles.statCardHealth} ${styles[`health_${level30}`]}`}>
+              <div className={styles.statLabel}>Últimos 30 min</div>
+              <div className={styles.statValue}>
+                {prepStats30.avg_prep_minutes !== null ? `${prepStats30.avg_prep_minutes} min` : "—"}
+              </div>
+              <div className={styles.statSub}>{prepStats30.count} pedido{prepStats30.count === 1 ? "" : "s"}</div>
+              <div className={`${styles.healthLabel} ${styles[`health_${level30}`]}`}>{HEALTH_LABEL[level30]}</div>
+            </div>
+          )}
+          {prepStats60 && (
+            <div className={`${styles.statCard} ${styles.statCardHealth} ${styles[`health_${level60}`]}`}>
+              <div className={styles.statLabel}>Última hora</div>
+              <div className={styles.statValue}>
+                {prepStats60.avg_prep_minutes !== null ? `${prepStats60.avg_prep_minutes} min` : "—"}
+              </div>
+              <div className={styles.statSub}>{prepStats60.count} pedido{prepStats60.count === 1 ? "" : "s"}</div>
+              <div className={`${styles.healthLabel} ${styles[`health_${level60}`]}`}>{HEALTH_LABEL[level60]}</div>
+            </div>
+          )}
           <div className={styles.statCard}>
             <div className={styles.statLabel}>Tempo médio de preparo (24h)</div>
             <div className={styles.statValue}>{prepStats.avg_prep_minutes} min</div>
@@ -386,7 +495,7 @@ export default function FulfillmentScreen() {
                         isDragging ? styles.cardDragging : "",
                       ].filter(Boolean).join(" ")}
                       onClick={() => handleCardClick(o)}
-                      onPointerDown={(e) => startDrag(e, o.order_ref, label(o))}
+                      onPointerDown={(e) => startDrag(e, o, "preparing")}
                     >
                       <div className={styles.cardLabel}>{label(o)}</div>
                       <div className={styles.cardMeta}>
@@ -411,13 +520,13 @@ export default function FulfillmentScreen() {
               </div>
             )}
           </div>
-          <div ref={readyColRef} className={`${styles.column} ${drag && overReady ? styles.columnDropActive : ""}`}>
+          <div ref={readyColRef} className={`${styles.column} ${drag?.source === "preparing" && overTarget ? styles.columnDropActive : ""}`}>
             <div className={styles.columnTitle}>
               Pronto para retirada
               {ready.length > 0 && <span className={styles.columnCount}>{ready.length}</span>}
             </div>
-            {drag && (
-              <div className={`${styles.dropHint} ${overReady ? styles.dropHintActive : ""}`}>
+            {drag?.source === "preparing" && (
+              <div className={`${styles.dropHint} ${overTarget ? styles.dropHintActive : ""}`}>
                 Solte aqui para marcar pronto
               </div>
             )}
@@ -425,22 +534,56 @@ export default function FulfillmentScreen() {
               <div className={styles.emptyCol}>Nenhum pedido pronto.</div>
             ) : (
               <div className={styles.cardGrid}>
-                {ready.map((o) => (
-                  <div key={o.order_ref} className={styles.card} onClick={() => handleCardClick(o)}>
+                {ready.map((o) => {
+                  const isDragging = drag?.ref === o.order_ref && drag.moved;
+                  return (
+                    <div
+                      key={o.order_ref}
+                      className={`${styles.card} ${styles.draggable} ${isDragging ? styles.cardDragging : ""}`}
+                      onClick={() => handleCardClick(o)}
+                      onPointerDown={(e) => startDrag(e, o, "ready")}
+                    >
+                      <div className={styles.cardLabel}>{label(o)}</div>
+                      <div className={styles.cardMeta}>
+                        <Tag variant="success">{o.order_ref}</Tag>
+                        <span className={styles.time}>{minutesAgo(o.created_at)}</span>
+                      </div>
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        fullWidth
+                        disabled={busy === o.order_ref}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); markCollected(o); }}
+                      >
+                        Marcar coletado
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div ref={collectedColRef} className={`${styles.column} ${drag?.source === "ready" && overTarget ? styles.columnDropActive : ""}`}>
+            <div className={styles.columnTitle}>
+              Coletado
+              {collectedRecently.length > 0 && <span className={styles.columnCount}>{collectedRecently.length}</span>}
+            </div>
+            {drag?.source === "ready" && (
+              <div className={`${styles.dropHint} ${overTarget ? styles.dropHintActive : ""}`}>
+                Solte aqui para marcar coletado
+              </div>
+            )}
+            {collectedRecently.length === 0 ? (
+              <div className={styles.emptyCol}>Nenhum pedido coletado recentemente.</div>
+            ) : (
+              <div className={styles.cardGrid}>
+                {collectedRecently.map(({ order: o }) => (
+                  <div key={o.order_ref} className={`${styles.card} ${styles.cardCollected}`} onClick={() => handleCardClick(o)}>
                     <div className={styles.cardLabel}>{label(o)}</div>
                     <div className={styles.cardMeta}>
                       <Tag variant="success">{o.order_ref}</Tag>
-                      <span className={styles.time}>{minutesAgo(o.created_at)}</span>
                     </div>
-                    <Button
-                      size="small"
-                      variant="secondary"
-                      fullWidth
-                      disabled={busy === o.order_ref}
-                      onClick={(e) => { e.stopPropagation(); markCollected(o.order_ref); }}
-                    >
-                      Marcar coletado
-                    </Button>
                   </div>
                 ))}
               </div>
