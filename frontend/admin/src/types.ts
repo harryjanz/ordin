@@ -205,6 +205,9 @@ export interface WsEvent {
 
 export interface Ticket {
   ticket_code: string;
+  // ORD-119 — nome do produto vem embutido no qr_data (mesmo formato usado
+  // no app de balcão: "{code}|{product_name}|{order_ref}|{ts}|{hmac}").
+  qr_data: string;
   status: string;
   unit_number: number;
   total_units: number;

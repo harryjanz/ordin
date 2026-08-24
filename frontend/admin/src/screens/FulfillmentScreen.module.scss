@@ -101,9 +101,71 @@
   @include rounded('default');
   padding: 14px 16px;
   margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+
+  &:hover {
+    border-color: color('brand-primary');
+  }
+}
+
+.cardUrgent {
+  border-color: rgba(color('error-base'), 0.5);
 }
 
 .cardLabel {
   @include font('sm-emphasys');
   color: var(--a-text);
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.time {
+  font-size: 12px;
+  color: rgba(var(--a-text-rgb), 0.45);
+}
+
+.timeUrgent {
+  font-size: 12px;
+  font-weight: 700;
+  color: color('error-base');
+}
+
+.itemsModal {
+  padding: 8px;
+}
+
+.itemsModalTitle {
+  @include font('base-emphasys');
+  color: var(--a-text);
+  margin-bottom: 4px;
+}
+
+.itemsModalRef {
+  font-family: monospace;
+  font-size: 12px;
+  color: rgba(var(--a-text-rgb), 0.45);
+  margin-bottom: 20px;
+}
+
+.itemsList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+
+  li {
+    @include font('sm');
+    color: var(--a-text);
+    padding: 8px 0;
+    border-bottom: 1px solid var(--a-border);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
 }

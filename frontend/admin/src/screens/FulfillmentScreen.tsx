@@ -1,14 +1,45 @@
 import { useState, useEffect, useCallback } from "react";
-import { Alert, Button, Tag } from "design-system";
+import { Alert, Button, Modal, Tag } from "design-system";
 import api from "../api";
 import { useStore } from "../store";
-import { listOrders } from "../api/orders";
+import { listOrders, listOrderTickets } from "../api/orders";
 import { WsManager } from "../ws";
-import type { Order, WsEvent } from "../types";
+import type { Order, Ticket, WsEvent } from "../types";
 import styles from "./FulfillmentScreen.module.scss";
 
 function label(o: Order) {
   return o.pickup_name || `#${o.order_ref.slice(-4)}`;
+}
+
+// Mesmo limiar já usado pra "URGENTE" na fila do app de balcão
+// (frontend/balcao/QueueScreen.tsx) — reaproveitado aqui de propósito pra
+// manter o mesmo critério de urgência em toda a operação, não um número
+// novo inventado só pra essa tela.
+const URGENCY_THRESHOLD_MS = 10 * 60 * 1000;
+
+function isUrgent(createdAt: string) {
+  return Date.now() - new Date(createdAt).getTime() > URGENCY_THRESHOLD_MS;
+}
+
+function minutesAgo(createdAt: string) {
+  const mins = Math.floor((Date.now() - new Date(createdAt).getTime()) / 60_000);
+  if (mins < 1) return "agora";
+  return `${mins} min`;
+}
+
+interface ItemSummary { name: string; qty: number; }
+
+function summarizeItems(tickets: Ticket[]): ItemSummary[] {
+  // Mesmo padrão de lib/orderItems.ts do app de balcão: 1 ticket por
+  // unidade, filtra unit_number===1 pra não contar em dobro, nome do
+  // produto vem do próprio qr_data.
+  const byName = new Map<string, number>();
+  for (const t of tickets) {
+    if (t.unit_number !== 1) continue;
+    const name = t.qr_data.split("|")[1] ?? "Item";
+    byName.set(name, (byName.get(name) ?? 0) + t.total_units);
+  }
+  return Array.from(byName, ([name, qty]) => ({ name, qty }));
 }
 
 // ORD-119 — fila de trabalho pro modelo de atendimento "retirada única"
@@ -25,6 +56,18 @@ export default function FulfillmentScreen() {
   const [wsStatus, setWsStatus] = useState<"connected" | "connecting" | "disconnected">("connecting");
   const [busy, setBusy] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [itemsModal, setItemsModal] = useState<{ order: Order; items: ItemSummary[] } | null>(null);
+  const [loadingItems, setLoadingItems] = useState(false);
+
+  // Força re-render periódico só pro "X min" e "URGENTE" avançarem sozinhos
+  // na tela — sem isso, só mudam quando algum evento de WS ou ação do
+  // usuário disparasse um novo render, podendo ficar minutos desatualizados
+  // numa fila parada.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(iv);
+  }, []);
 
   useEffect(() => {
     if (!companyId) return;
@@ -70,6 +113,20 @@ export default function FulfillmentScreen() {
   function showFeedback(msg: string, ok: boolean) {
     setFeedback({ msg, ok });
     setTimeout(() => setFeedback(null), 3000);
+  }
+
+  async function openItems(order: Order) {
+    setLoadingItems(true);
+    setItemsModal({ order, items: [] });
+    try {
+      const tickets = await listOrderTickets(order.order_ref);
+      setItemsModal({ order, items: summarizeItems(tickets) });
+    } catch {
+      setItemsModal(null);
+      showFeedback("Erro ao carregar itens do pedido.", false);
+    } finally {
+      setLoadingItems(false);
+    }
   }
 
   async function markReady(ref: string) {
@@ -153,25 +210,50 @@ export default function FulfillmentScreen() {
             <div className={styles.columnTitle}>Em preparo</div>
             {preparing.length === 0 ? (
               <div className={styles.emptyCol}>Nenhum pedido em preparo.</div>
-            ) : preparing.map((o) => (
-              <div key={o.order_ref} className={styles.card}>
-                <div className={styles.cardLabel}>{label(o)}</div>
-                <Tag variant="neutral">{o.order_ref}</Tag>
-                <Button size="small" fullWidth disabled={busy === o.order_ref} onClick={() => markReady(o.order_ref)}>
-                  Marcar pronto
-                </Button>
-              </div>
-            ))}
+            ) : preparing.map((o) => {
+              const urgent = isUrgent(o.created_at);
+              return (
+                <div
+                  key={o.order_ref}
+                  className={`${styles.card} ${urgent ? styles.cardUrgent : ""}`}
+                  onClick={() => openItems(o)}
+                >
+                  <div className={styles.cardLabel}>{label(o)}</div>
+                  <div className={styles.cardMeta}>
+                    <Tag variant="neutral">{o.order_ref}</Tag>
+                    <span className={urgent ? styles.timeUrgent : styles.time}>{minutesAgo(o.created_at)}</span>
+                    {urgent && <Tag variant="error">URGENTE</Tag>}
+                  </div>
+                  <Button
+                    size="small"
+                    fullWidth
+                    disabled={busy === o.order_ref}
+                    onClick={(e) => { e.stopPropagation(); markReady(o.order_ref); }}
+                  >
+                    Marcar pronto
+                  </Button>
+                </div>
+              );
+            })}
           </div>
           <div className={styles.column}>
             <div className={styles.columnTitle}>Pronto para retirada</div>
             {ready.length === 0 ? (
               <div className={styles.emptyCol}>Nenhum pedido pronto.</div>
             ) : ready.map((o) => (
-              <div key={o.order_ref} className={styles.card}>
+              <div key={o.order_ref} className={styles.card} onClick={() => openItems(o)}>
                 <div className={styles.cardLabel}>{label(o)}</div>
-                <Tag variant="success">{o.order_ref}</Tag>
-                <Button size="small" variant="secondary" fullWidth disabled={busy === o.order_ref} onClick={() => markCollected(o.order_ref)}>
+                <div className={styles.cardMeta}>
+                  <Tag variant="success">{o.order_ref}</Tag>
+                  <span className={styles.time}>{minutesAgo(o.created_at)}</span>
+                </div>
+                <Button
+                  size="small"
+                  variant="secondary"
+                  fullWidth
+                  disabled={busy === o.order_ref}
+                  onClick={(e) => { e.stopPropagation(); markCollected(o.order_ref); }}
+                >
                   Marcar coletado
                 </Button>
               </div>
@@ -179,6 +261,32 @@ export default function FulfillmentScreen() {
           </div>
         </div>
       )}
+
+      <Modal
+        open={!!itemsModal}
+        width={420}
+        onClose={() => setItemsModal(null)}
+        onBackdropClick={() => setItemsModal(null)}
+        onCloseButtonClick={() => setItemsModal(null)}
+      >
+        {itemsModal && (
+          <div className={styles.itemsModal}>
+            <div className={styles.itemsModalTitle}>{label(itemsModal.order)}</div>
+            <div className={styles.itemsModalRef}>{itemsModal.order.order_ref}</div>
+            {loadingItems ? (
+              <div className={styles.emptyCol}>Carregando itens…</div>
+            ) : itemsModal.items.length === 0 ? (
+              <div className={styles.emptyCol}>Nenhum item encontrado.</div>
+            ) : (
+              <ul className={styles.itemsList}>
+                {itemsModal.items.map((it) => (
+                  <li key={it.name}>{it.qty}x {it.name}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
