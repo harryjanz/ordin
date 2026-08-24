@@ -65,6 +65,27 @@ function minutesAgo(createdAt: string) {
   return `${mins} min`;
 }
 
+// Melhorias de UX 2026-08-24 — indicadores de saúde da operação (últimos
+// 30min/60min), aprovados com o usuário: verde até o limite de urgência
+// configurado pela empresa, laranja de 100% a 125% do limite, vermelho
+// acima de 125%. Sem pedido nenhum na janela é "sem dado", não "ok" —
+// mostrar verde por ausência de dado mascararia silêncio operacional.
+type HealthLevel = "ok" | "warning" | "critical" | "empty";
+
+const HEALTH_LABEL: Record<HealthLevel, string> = {
+  ok: "Dentro do esperado",
+  warning: "Atenção",
+  critical: "Crítico",
+  empty: "Sem pedidos",
+};
+
+function healthLevel(avgMinutes: number | null, count: number, urgencyMinutes: number): HealthLevel {
+  if (count === 0 || avgMinutes === null) return "empty";
+  if (avgMinutes > urgencyMinutes * 1.25) return "critical";
+  if (avgMinutes > urgencyMinutes) return "warning";
+  return "ok";
+}
+
 interface ItemSummary { name: string; qty: number; }
 
 function summarizeItems(tickets: Ticket[]): ItemSummary[] {
@@ -98,6 +119,8 @@ export default function FulfillmentScreen() {
   const [itemsModal, setItemsModal] = useState<{ order: Order; items: ItemSummary[] } | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
   const [prepStats, setPrepStats] = useState<PrepStats | null>(null);
+  const [prepStats30, setPrepStats30] = useState<PrepStats | null>(null);
+  const [prepStats60, setPrepStats60] = useState<PrepStats | null>(null);
 
   // Melhorias de UX 2026-08-24 — arrastar card de "Em preparo" pra "Pronto
   // para retirada" marca pronto, e de "Pronto para retirada" pra "Coletado"
@@ -169,6 +192,24 @@ export default function FulfillmentScreen() {
 
   useEffect(() => { loadPrepStats(); }, [loadPrepStats]);
 
+  // Melhorias de UX 2026-08-24 — indicadores de saúde (30min/60min).
+  // Recarrega nos mesmos gatilhos do prepStats de 24h, mais um polling
+  // próprio de 60s — diferente do de 24h, a janela desliza mesmo sem
+  // pedido novo (um pedido antigo pode "sair" da janela sozinho).
+  const loadHealthStats = useCallback(() => {
+    if (!companyId) return;
+    const now = Date.now();
+    getPrepStats(companyId, new Date(now - 30 * 60_000).toISOString()).then(setPrepStats30).catch(() => null);
+    getPrepStats(companyId, new Date(now - 60 * 60_000).toISOString()).then(setPrepStats60).catch(() => null);
+  }, [companyId]);
+
+  useEffect(() => { loadHealthStats(); }, [loadHealthStats]);
+
+  useEffect(() => {
+    const iv = setInterval(loadHealthStats, 60_000);
+    return () => clearInterval(iv);
+  }, [loadHealthStats]);
+
   const handleWsEvent = useCallback((event: WsEvent) => {
     // Mesmo racional do painel público — order.paid não carrega pickup_name
     // no evento, recarrega via REST pra não mostrar dado incompleto.
@@ -177,12 +218,13 @@ export default function FulfillmentScreen() {
     }
     if (event.event === "order.ready") {
       loadPrepStats();
+      loadHealthStats();
     }
     if (event.event === "order.completed" && event.order_ref) {
       const found = ordersRef.current.find((o) => o.order_ref === event.order_ref);
       if (found) collectOrderLocally(found);
     }
-  }, [loadOrders, loadPrepStats]);
+  }, [loadOrders, loadPrepStats, loadHealthStats]);
 
   useEffect(() => {
     if (!companyId || fulfillmentMode !== "retirada_unica") return;
@@ -354,6 +396,8 @@ export default function FulfillmentScreen() {
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
   const preparing = orders.filter((o) => o.status === "paid").sort(byOldestFirst);
   const ready = orders.filter((o) => o.status === "ready").sort(byOldestFirst);
+  const level30 = healthLevel(prepStats30?.avg_prep_minutes ?? null, prepStats30?.count ?? 0, prepUrgencyMinutes);
+  const level60 = healthLevel(prepStats60?.avg_prep_minutes ?? null, prepStats60?.count ?? 0, prepUrgencyMinutes);
 
   return (
     <div className={styles.page}>
@@ -367,6 +411,26 @@ export default function FulfillmentScreen() {
 
       {prepStats && prepStats.count > 0 && (
         <div className={styles.statsBar}>
+          {prepStats30 && (
+            <div className={`${styles.statCard} ${styles.statCardHealth} ${styles[`health_${level30}`]}`}>
+              <div className={styles.statLabel}>Últimos 30 min</div>
+              <div className={styles.statValue}>
+                {prepStats30.avg_prep_minutes !== null ? `${prepStats30.avg_prep_minutes} min` : "—"}
+              </div>
+              <div className={styles.statSub}>{prepStats30.count} pedido{prepStats30.count === 1 ? "" : "s"}</div>
+              <div className={`${styles.healthLabel} ${styles[`health_${level30}`]}`}>{HEALTH_LABEL[level30]}</div>
+            </div>
+          )}
+          {prepStats60 && (
+            <div className={`${styles.statCard} ${styles.statCardHealth} ${styles[`health_${level60}`]}`}>
+              <div className={styles.statLabel}>Última hora</div>
+              <div className={styles.statValue}>
+                {prepStats60.avg_prep_minutes !== null ? `${prepStats60.avg_prep_minutes} min` : "—"}
+              </div>
+              <div className={styles.statSub}>{prepStats60.count} pedido{prepStats60.count === 1 ? "" : "s"}</div>
+              <div className={`${styles.healthLabel} ${styles[`health_${level60}`]}`}>{HEALTH_LABEL[level60]}</div>
+            </div>
+          )}
           <div className={styles.statCard}>
             <div className={styles.statLabel}>Tempo médio de preparo (24h)</div>
             <div className={styles.statValue}>{prepStats.avg_prep_minutes} min</div>

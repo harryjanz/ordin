@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import DeclarativeBase, relationship
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random, string, secrets, hmac as hmaclib, hashlib
 from config import require_env, get_cors_origins
 from auth import get_current_user, TokenPayload
@@ -568,8 +568,20 @@ async def prep_stats(
     else:
         base_filters = [Order.company_id == current_user.company_id]
 
-    window_end = datetime.fromisoformat(date_to) if date_to else datetime.utcnow()
-    window_start = datetime.fromisoformat(date_from) if date_from else window_end - timedelta(hours=24)
+    # Order.created_at/ready_at são naive UTC (padrão do resto do serviço) —
+    # normaliza qualquer date_from/date_to com timezone (ex.: o
+    # toISOString() do JS, que sempre manda "Z") de volta pra naive, senão
+    # a subtração abaixo quebra com "can't subtract offset-naive and
+    # offset-aware datetimes" (achado ao vivo 2026-08-24, indicadores de
+    # saúde 30min/60min).
+    def _parse_naive_utc(s: str) -> datetime:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+
+    window_end = _parse_naive_utc(date_to) if date_to else datetime.utcnow()
+    window_start = _parse_naive_utc(date_from) if date_from else window_end - timedelta(hours=24)
     duration = window_end - window_start
     prev_start = window_start - duration
     prev_end = window_start

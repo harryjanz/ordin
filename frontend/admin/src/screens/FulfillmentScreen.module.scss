@@ -88,6 +88,45 @@
   margin-top: 2px;
 }
 
+// Melhorias de UX 2026-08-24 — indicadores de saúde da operação (últimos
+// 30min/60min), aprovados com o usuário: cor de fundo/borda sinaliza o
+// nível (mesma linguagem visual já usada nos cards de pedido urgente:
+// cardOrange/cardRed), com rótulo textual junto — não só cor, pra não
+// depender só de percepção de cor (tablet com brilho ruim, daltonismo).
+.statCardHealth {
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+.healthLabel {
+  @include font('xs-emphasys');
+  margin-top: 8px;
+}
+
+.health_ok {
+  border-color: rgba(34, 197, 94, 0.35);
+  background: rgba(34, 197, 94, 0.06);
+
+  &.healthLabel { background: none; color: color('success-base'); }
+}
+
+.health_warning {
+  border-color: rgba(#f2994a, 0.6);
+  background: rgba(#f2994a, 0.06);
+
+  &.healthLabel { background: none; color: #f2994a; }
+}
+
+.health_critical {
+  border-color: rgba(#ff4d4d, 0.6);
+  background: rgba(#ff4d4d, 0.06);
+
+  &.healthLabel { background: none; color: #ff4d4d; }
+}
+
+.health_empty {
+  &.healthLabel { color: rgba(var(--a-text-rgb), 0.4); }
+}
+
 // Melhorias de UX 2026-08-24 — dado do período anterior, mas discreto de
 // propósito (pedido explícito: "não tão marcante, somente informativa"),
 // separado por um traço fino do resto do card.
