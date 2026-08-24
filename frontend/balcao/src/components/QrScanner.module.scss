@@ -2,12 +2,46 @@
 
 .manualFallback {
   text-align: center;
+  padding: 8px;
+
+  > i {
+    font-size: 32px;
+    color: color('warning-base');
+    display: block;
+    margin-bottom: 8px;
+  }
 }
 
 .manualHint {
-  color: rgba(var(--a-text-rgb), 0.5);
+  color: var(--a-text);
+  font-weight: 600;
   @include font('sm');
   margin-bottom: 12px;
+}
+
+.manualSteps {
+  text-align: left;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  padding: 12px 12px 12px 32px;
+  margin-bottom: 16px;
+
+  li {
+    color: rgba(var(--a-text-rgb), 0.6);
+    @include font('xs');
+    margin-bottom: 6px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+}
+
+.manualDivider {
+  color: rgba(var(--a-text-rgb), 0.4);
+  @include font('xs');
+  margin: 16px 0 8px;
 }
 
 .manualField {
