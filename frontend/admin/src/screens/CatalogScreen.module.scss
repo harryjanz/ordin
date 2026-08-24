@@ -15,89 +15,77 @@
   margin-bottom: 20px;
 }
 
-// Cadastro em abas (2026-08-24) — categorias e produtos deixaram de ser
-// colunas lado a lado (.row/.col antigos) e viraram abas, cada uma
-// ocupando a largura toda.
+// Cadastro em abas + padrão Empresa (2026-08-24) — Categorias e Produtos
+// viraram abas com filterBar + Table + Modal, mesmo modelo de
+// Usuários/Terminais/Pagamento em CompanyScreen (classes abaixo espelham
+// as de CompanyScreen.module.scss de propósito, pra ficar visualmente
+// idêntico, não só estruturalmente parecido).
 .tabs {
   margin-bottom: 24px;
 }
 
-.col {
-  max-width: 720px;
-}
-
-.categoryPicker {
-  max-width: 320px;
-  margin-bottom: 20px;
-}
-
-.rowChevron {
-  color: rgba(var(--a-text-rgb), 0.3);
-  margin-left: 4px;
-}
-
-.sectionTitle {
-  @include font('base-emphasys');
-  color: rgba(var(--a-text-rgb), 0.8);
-  margin-bottom: 12px;
-}
-
-.item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--a-surface);
-  border: 1px solid var(--a-border);
-  @include rounded('card');
-  padding: 10px 14px;
-  margin-bottom: 8px;
+.muted {
+  color: rgba(var(--a-text-rgb), 0.4);
   @include font('sm');
 }
 
-.itemSelected {
-  border: 1px solid color('brand-primary');
-  cursor: pointer;
-}
-
-.itemClickable {
-  cursor: pointer;
-}
-
-.itemDragging {
-  opacity: 0.4;
-}
-
-.dragHandle {
-  cursor: grab;
-  color: rgba(var(--a-text-rgb), 0.35);
-  user-select: none;
-}
-
-.itemName {
+.errorRow {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-bottom: 12px;
 }
 
-.itemPrice {
-  color: color('success-base');
-  @include font('sm-emphasys');
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-}
-
-.form {
+.filterBar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
   background: var(--a-surface);
   border: 1px solid var(--a-border);
-  @include rounded('card');
-  padding: 16px 20px;
-  margin-bottom: 20px;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.reorderHint {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.4);
+  margin-bottom: 8px;
+}
+
+.reorderArrows {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  line-height: 0.7;
+
+  i {
+    cursor: pointer;
+    color: rgba(var(--a-text-rgb), 0.4);
+    font-size: 14px;
+
+    &:hover {
+      color: color('brand-primary');
+    }
+  }
+}
+
+.empty {
+  color: rgba(var(--a-text-rgb), 0.35);
+  @include font('sm');
+}
+
+// Conteúdo do Modal (categoria/produto) — sem o "cartão" (fundo/borda/
+// padding) do .form antigo, o próprio Modal já fornece isso.
+.modalForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.formTitle {
+  @include font('sm-emphasys');
+  margin-bottom: 4px;
 }
 
 .formRow {
@@ -121,11 +109,6 @@
 .formActions {
   display: flex;
   gap: 8px;
-}
-
-.empty {
-  color: rgba(var(--a-text-rgb), 0.35);
-  @include font('sm');
 }
 
 .formHint {
