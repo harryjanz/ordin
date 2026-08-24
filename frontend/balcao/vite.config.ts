@@ -7,6 +7,7 @@ export default defineConfig({
     port: 5175,
     proxy: {
       "/auth":    "http://localhost:8000",
+      "/users":   "http://localhost:8000",
       "/orders":  "http://localhost:8000",
       "/tickets": "http://localhost:8000",
       "/ws": {
