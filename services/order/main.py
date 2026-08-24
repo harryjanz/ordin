@@ -49,6 +49,11 @@ class Order(Base):
     # pedido anterior à feature). Só o totem grava; sem enum rígido no
     # banco, mesmo nível de confiança já dado ao resto do payload do kiosk.
     consumption_type = Column(String(10), nullable=True)
+    # ORD-118 — QR único do pedido inteiro (formato "ORDER|...", distinto do
+    # formato de Ticket.qr_data), gerado sempre na criação — quem decide se
+    # usa (imprimir/coletar por pedido) é o frontend, com base no
+    # fulfillment_mode da empresa; order-service não precisa saber disso.
+    qr_data     = Column(String(500), nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, onupdate=datetime.utcnow)
     items       = relationship("OrderItem", back_populates="order", cascade="all, delete")
@@ -145,6 +150,9 @@ class TicketListOut(BaseModel):
     order_ref: str
     progress: str
     tickets: list[TicketOut]
+    # ORD-118 — QR do pedido inteiro, sempre presente; quem decide se
+    # imprime/usa é o frontend, com base no fulfillment_mode da empresa.
+    order_qr_data: Optional[str] = None
 
 class CollectOut(BaseModel):
     ok: bool
@@ -153,6 +161,13 @@ class CollectOut(BaseModel):
     collected_at: str
     collected_by: Optional[str] = None
     order_completed: bool
+    progress: str
+
+class OrderCollectOut(BaseModel):
+    ok: bool
+    order_ref: str
+    collected_at: str
+    collected_by: Optional[str] = None
     progress: str
 
 class OrderStatusOut(BaseModel):
@@ -223,6 +238,23 @@ def _verify_qr(qr_data: str) -> bool:
     expected = hmaclib.new(QR_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return hmaclib.compare_digest(expected, received_sig)
 
+# ORD-118 — QR de pedido inteiro (retirada única). Prefixo literal "ORDER"
+# distingue do formato de ticket (que começa com o ticket_code de 8
+# caracteres) — nunca ambíguo pra quem escaneia (app de balcão).
+def _make_order_qr_data(ref: str, ts: str) -> str:
+    payload = f"ORDER|{ref}|{ts}"
+    sig = hmaclib.new(QR_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}|{sig}"
+
+def _verify_order_qr(qr_data: str, ref: str) -> bool:
+    parts = qr_data.split("|")
+    if len(parts) != 4 or parts[0] != "ORDER" or parts[1] != ref:
+        return False
+    *data_parts, received_sig = parts
+    payload = "|".join(data_parts)
+    expected = hmaclib.new(QR_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return hmaclib.compare_digest(expected, received_sig)
+
 @app.post(
     "/orders",
     status_code=201,
@@ -242,11 +274,13 @@ async def create_order(
     ref         = _gen_ref()
     total       = sum(i.unit_price*i.qty for i in body.items) - body.discount
     terminal_id = current_user.terminal_id or 0
+    order_ts = datetime.utcnow().isoformat()
     order = Order(
         company_id=current_user.company_id,
         terminal_id=terminal_id,
         order_ref=ref, total=total, discount=body.discount, cpf=body.cpf,
         consumption_type=body.consumption_type,
+        qr_data=_make_order_qr_data(ref, order_ts),
     )
     db.add(order); await db.flush()
     for item in body.items:
@@ -340,6 +374,63 @@ async def collect_ticket(
             "collected_by":ticket.collected_by,
             "order_completed":order_done,
             "progress":progress_str}
+
+@app.post(
+    "/orders/{order_ref}/collect",
+    response_model=OrderCollectOut,
+    tags=["Tickets"],
+    summary="Coletar pedido inteiro via QR único (modelo de retirada única, ORD-118)",
+    responses={
+        400: {"description": "QR Code inválido ou assinatura HMAC incorreta"},
+        404: {"description": "Pedido não encontrado"},
+        409: {"description": "Pedido já coletado"},
+    },
+)
+async def collect_order(
+    order_ref: str,
+    body: CollectIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+    x_device_id: Optional[str] = Header(default=None),
+):
+    """
+    Coleta todos os tickets de um pedido numa única operação — pro modelo de atendimento
+    `fulfillment_mode = "retirada_unica"` (ORD-118). Duas vias de entrada: scan do QR único do
+    pedido pelo app de balcão (`qr_data` verificado por HMAC), ou coleta manual pela tela
+    operacional do admin (sem `qr_data`, staff autenticado). Mesmo padrão de lock
+    (`SELECT FOR UPDATE`) e fechamento automático já usado em `collect_ticket`.
+    """
+    if body.qr_data is not None and not _verify_order_qr(body.qr_data, order_ref):
+        raise HTTPException(400, detail="QR inválido")
+    result = await db.execute(
+        select(Order)
+        .where(Order.order_ref == order_ref, Order.company_id == current_user.company_id)
+        .with_for_update()
+    )
+    order = result.scalars().first()
+    if not order: raise HTTPException(404, "Pedido não encontrado")
+    if order.status == "completed": raise HTTPException(409, "Pedido já coletado")
+    collected_at = datetime.utcnow()
+    collected_by = body.collected_by
+    collection_device = x_device_id or body.collection_device
+    tickets_result = await db.execute(
+        select(Ticket)
+        .join(OrderItem, OrderItem.id == Ticket.order_item_id)
+        .where(OrderItem.order_id == order.id)
+        .with_for_update()
+    )
+    tickets = tickets_result.scalars().all()
+    for ticket in tickets:
+        ticket.status = "collected"
+        ticket.collected_at = collected_at
+        ticket.collected_by = collected_by
+        ticket.collection_device = collection_device
+    order.status = "completed"
+    await db.commit()
+    progress_str = f"{len(tickets)}/{len(tickets)}"
+    await broadcast_order_completed(current_user.company_id, order_ref)
+    return {"ok": True, "order_ref": order_ref, "collected_at": collected_at.isoformat(),
+            "collected_by": collected_by, "progress": progress_str}
 
 @app.get(
     "/orders",
@@ -487,14 +578,16 @@ async def list_order_tickets(
     if current_user.role not in ("superadmin", "admin"):
         filters.append(Order.company_id == current_user.company_id)
     result = await db.execute(
-        select(Ticket)
+        select(Ticket, Order.qr_data)
         .join(Order, Order.order_ref == Ticket.order_ref)
         .where(*filters)
     )
-    tickets = result.scalars().all()
-    if not tickets: raise HTTPException(404)
+    rows = result.all()
+    if not rows: raise HTTPException(404)
+    tickets = [row[0] for row in rows]
+    order_qr_data = rows[0][1]
     col = sum(1 for t in tickets if t.status=="collected")
-    return {"order_ref":order_ref,"progress":f"{col}/{len(tickets)}",
+    return {"order_ref":order_ref,"progress":f"{col}/{len(tickets)}","order_qr_data":order_qr_data,
             "tickets":[{"ticket_code":t.ticket_code,"qr_data":t.qr_data,"status":t.status,
                         "unit_number":t.unit_number,"total_units":t.total_units,
                         "collected_at":t.collected_at.isoformat() if t.collected_at else None,

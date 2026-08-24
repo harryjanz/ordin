@@ -152,6 +152,7 @@ export default function SettingsScreen() {
       setLocalMode(r.data.visual_mode  ?? "light");
       setLocalMenuLayout(r.data.catalog_menu_layout ?? "horizontal");
       setConsumptionModeEnabled(r.data.consumption_mode_enabled ?? false);
+      setFulfillmentMode(r.data.fulfillment_mode ?? "por_item");
     }).catch(() => null);
   }, [companyId]);
 
@@ -172,15 +173,26 @@ export default function SettingsScreen() {
 
   // ── Comportamento (ORD-108) ─────────────────────────────────────────────
   const [consumptionModeEnabled, setConsumptionModeEnabled] = useState(false);
+  // ORD-118 — "por_item" (padrão, ticket unitário por item) ou
+  // "retirada_unica" (produção centralizada, QR único por pedido).
+  const [fulfillmentMode, setFulfillmentMode] = useState<string>("por_item");
   const [savingBehavior, setSavingBehavior] = useState(false);
   const [saveBehaviorMsg, setSaveBehaviorMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const FULFILLMENT_MODE_OPTIONS: DropdownOptions[] = [
+    { value: "por_item", label: "Por item — ticket individual, retirada por unidade" },
+    { value: "retirada_unica", label: "Retirada única — QR único, pedido inteiro de uma vez" },
+  ];
 
   async function saveBehavior() {
     if (!companyId) return;
     setSavingBehavior(true);
     setSaveBehaviorMsg(null);
     try {
-      await api.patch(`/companies/${companyId}/behavior`, { consumption_mode_enabled: consumptionModeEnabled });
+      await api.patch(`/companies/${companyId}/behavior`, {
+        consumption_mode_enabled: consumptionModeEnabled,
+        fulfillment_mode: fulfillmentMode,
+      });
       setSaveBehaviorMsg({ ok: true, text: "Comportamento salvo com sucesso!" });
     } catch {
       setSaveBehaviorMsg({ ok: false, text: "Erro ao salvar. Tente novamente." });
@@ -880,7 +892,23 @@ export default function SettingsScreen() {
               </span>
             </div>
 
-            <div className={styles.saveRow}>
+            <div className={styles.cardTitle} style={{ marginTop: 24 }}>Modelo de atendimento</div>
+            <div className={styles.cardDesc}>
+              "Por item" é o padrão hoje: cada unidade de cada item vira um ticket com QR
+              próprio, retirado individualmente. "Retirada única" é pra quem tem produção
+              centralizada (cozinha prepara tudo e entrega o pedido inteiro de uma vez, modelo
+              McDonald's/Burger King) — o ticket impresso vira uma lista compacta com um único
+              QR pro pedido inteiro.
+            </div>
+            <Dropdown
+              label="Modelo de atendimento"
+              value={FULFILLMENT_MODE_OPTIONS.find((o) => o.value === fulfillmentMode) ?? null}
+              onValueSelected={(opt) => setFulfillmentMode(String(opt.value))}
+              options={FULFILLMENT_MODE_OPTIONS}
+              disabled={savingBehavior}
+            />
+
+            <div className={styles.saveRow} style={{ marginTop: 24 }}>
               <Button
                 onClick={saveBehavior}
                 disabled={!companyId}

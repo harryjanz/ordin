@@ -125,6 +125,65 @@ ${ticketsHtml}
 </html>`;
 }
 
+// ORD-118 — modelo "retirada_unica": ticket compacto, lista de itens sem
+// bloco por unidade, um único QR do pedido inteiro no fim.
+function buildCompactPrintHtml(order: CompletedOrder, companyName: string, orderQrSvg: string): string {
+  const now = new Date().toLocaleString("pt-BR");
+  // order.tickets tem 1 linha por unidade (qty=2 -> 2 tickets) — só a
+  // unidade 1 de cada item representa a linha, senão duplica no impresso.
+  const itemsHtml = order.tickets
+    .filter((tk) => tk.unit_number === 1)
+    .map((tk) => {
+      const productName = (tk.qr_data.split("|")[1] ?? "");
+      return `<div class="item-row"><span class="item-qty">${tk.total_units}x</span> ${productName}</div>`;
+    })
+    .join("");
+  const svgEl = orderQrSvg.replace(/width="[^"]*"/, 'width="150"').replace(/height="[^"]*"/, 'height="150"');
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<title>Pedido ${order.order_ref}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:'Courier New',Courier,monospace;font-size:12px;width:80mm;max-width:80mm;background:#fff;color:#000;padding:4mm 3mm;}
+  .header{text-align:center;padding-bottom:8px;border-bottom:1px dashed #000;margin-bottom:8px;}
+  .company{font-size:15px;font-weight:bold;letter-spacing:1px;margin-bottom:2px;}
+  .brand{font-size:10px;color:#555;margin-bottom:6px;}
+  .hrow{font-size:11px;margin:2px 0;}
+  .items{margin:10px 0;border-bottom:1px dashed #000;padding-bottom:8px;}
+  .item-row{font-size:12px;margin:3px 0;}
+  .item-qty{font-weight:bold;}
+  .total{font-size:15px;font-weight:bold;text-align:center;margin:8px 0;}
+  .qr{text-align:center;margin:10px 0;}
+  .qr svg{width:150px;height:150px;}
+  .footer{text-align:center;margin-top:10px;padding-top:8px;border-top:1px dashed #000;font-size:10px;color:#555;line-height:1.6;}
+  @media print{ @page{size:80mm auto;margin:3mm 2mm;} body{width:100%;padding:0;} }
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="company">${companyName.toUpperCase()}</div>
+  <div class="brand">ordin · autoatendimento</div>
+  <div class="hrow">${now}</div>
+  <div class="hrow">Pedido: <strong>${order.order_ref}</strong></div>
+  <div class="hrow">${fmtMethod(order.method)}${order.nsu ? ` · NSU ${order.nsu}` : ""}</div>
+</div>
+<div class="items">${itemsHtml}</div>
+<div class="total">${fmt(order.total)}</div>
+<div class="qr">${svgEl}</div>
+<div class="footer">
+  Retire seu pedido completo no balcão<br/>
+  Obrigado pela sua visita!
+</div>
+<script>
+  window.onload = function(){ window.print(); }
+</script>
+</body>
+</html>`;
+}
+
 interface Props {
   T: Theme;
   order: CompletedOrder;
@@ -134,11 +193,21 @@ interface Props {
 
 export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
   const newOrder = useStore((s) => s.newOrder);
+  // ORD-118 — "por_item" (padrão) ou "retirada_unica" (ticket compacto, QR único).
+  const fulfillmentMode = useStore((s) => s.company?.fulfillment_mode ?? "por_item");
+  const compactPrint = fulfillmentMode === "retirada_unica" && !!order.order_qr_data;
   const [countdown, setCountdown] = useState(30);
   const [printMethod, setPrintMethod] = useState<PrintMethod | "pending">("pending");
   const qrContainerRef = useRef<HTMLDivElement>(null);
+  const orderQrRef = useRef<HTMLDivElement>(null);
 
   const orderNumber = extractOrderNumber(order.order_ref);
+
+  function buildHtmlForMode(svgs: string[], orderQrSvg: string): string {
+    return compactPrint
+      ? buildCompactPrintHtml(order, companyName, orderQrSvg)
+      : buildPrintHtml(order, companyName, svgs);
+  }
 
   useEffect(() => {
     const timer = setTimeout(async () => {
@@ -149,10 +218,11 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
         el.setAttribute("height", "130");
         return el.outerHTML;
       });
+      const orderQrSvg = orderQrRef.current?.querySelector("svg")?.outerHTML ?? "";
 
       if (order.provider === "mock") {
         // Em modo mock: abre preview HTML direto, sem tentar QZ Tray
-        const html = buildPrintHtml(order, companyName, svgs);
+        const html = buildHtmlForMode(svgs, orderQrSvg);
         const w = window.open("", "_blank");
         if (w) { w.document.write(html); w.document.close(); setPrintMethod("browser"); }
         else setPrintMethod("blocked");
@@ -160,9 +230,9 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       }
 
       const result = await silentPrint(order, companyName, {
-        buildHtml: (s) => buildPrintHtml(order, companyName, s),
+        buildHtml: (s) => buildHtmlForMode(s, orderQrSvg),
         svgs,
-      });
+      }, fulfillmentMode);
       setPrintMethod(result);
     }, 300);
     return () => clearTimeout(timer);
@@ -194,6 +264,11 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
           <QRCodeSVG key={tk.ticket_code} value={tk.qr_data} size={130} bgColor="#ffffff" fgColor="#000000" level="M" />
         ))}
       </div>
+      {order.order_qr_data && (
+        <div ref={orderQrRef} style={{ position: "fixed", left: -9999, top: 0, opacity: 0, pointerEvents: "none" }} aria-hidden="true">
+          <QRCodeSVG value={order.order_qr_data} size={150} bgColor="#ffffff" fgColor="#000000" level="M" />
+        </div>
+      )}
 
       <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
 
@@ -298,7 +373,8 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
               <button
                 onClick={async () => {
                   const svgs = Array.from(qrContainerRef.current?.querySelectorAll("svg") ?? []).map((el) => el.outerHTML);
-                  const html = buildPrintHtml(order, companyName, svgs);
+                  const orderQrSvg = orderQrRef.current?.querySelector("svg")?.outerHTML ?? "";
+                  const html = buildHtmlForMode(svgs, orderQrSvg);
                   const w = window.open("", "_blank");
                   if (w) { w.document.write(html); w.document.close(); setPrintMethod("browser"); }
                 }}

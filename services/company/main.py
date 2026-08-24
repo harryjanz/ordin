@@ -154,6 +154,12 @@ class Company(Base):
     # House) — usado pra indicação visual interna (badge no superadmin),
     # sem consumidor público ainda.
     is_demo                   = Column(Boolean, nullable=False, default=False)
+    # ORD-118: "por_item" (padrão, ticket unitário por item, retirada
+    # individual) ou "retirada_unica" (produção centralizada, QR único por
+    # pedido — modelo McDonald's/Burger King). String livre validada em
+    # Python (VALID_FULFILLMENT_MODES), não Enum de banco — mesmo padrão do
+    # catalog_menu_layout, deixa espaço pra outros modelos no futuro.
+    fulfillment_mode          = Column(String(20), nullable=False, default="por_item")
 
 
 class User(Base):
@@ -350,6 +356,7 @@ class CompanyOut(BaseModel):
     contract_document_url: Optional[str] = None
     mfa_policy: str = "disabled"
     consumption_mode_enabled: bool = False
+    fulfillment_mode: str = "por_item"
     model_config = {"from_attributes": True}
 
 
@@ -576,6 +583,7 @@ VALID_THEMES = {"ordin", "mc", "bk"}
 VALID_MODES  = {"light", "dark"}
 VALID_MENU_LAYOUTS = {"horizontal", "vertical"}
 VALID_MFA_POLICIES = {"disabled", "optional", "required"}
+VALID_FULFILLMENT_MODES = {"por_item", "retirada_unica"}
 
 
 class AppearanceIn(BaseModel):
@@ -589,6 +597,9 @@ class AppearanceIn(BaseModel):
 
 class BehaviorIn(BaseModel):
     consumption_mode_enabled: bool
+    # ORD-118 — opcional com default pra não quebrar chamadas antigas do
+    # frontend durante o deploy (mesmo motivo do menu_layout no ORD-116).
+    fulfillment_mode: str = "por_item"
 
 
 class SecurityIn(BaseModel):
@@ -810,6 +821,7 @@ async def validate_pin(
             "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
             "consumption_mode_enabled": co.consumption_mode_enabled,
             "catalog_menu_layout": co.catalog_menu_layout,
+            "fulfillment_mode": co.fulfillment_mode,
         },
         "terminals": [
             {"id": t.id, "label": t.label, "terminal_code": t.terminal_code, "tef_number": t.tef_number}
@@ -841,6 +853,7 @@ async def verify_pin(
             "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
             "consumption_mode_enabled": co.consumption_mode_enabled,
             "catalog_menu_layout": co.catalog_menu_layout,
+            "fulfillment_mode": co.fulfillment_mode,
         },
         "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
     }
@@ -1184,12 +1197,19 @@ async def update_behavior(
 ):
     if current_user.company_id != company_id and current_user.role != "superadmin":
         raise HTTPException(403, "Acesso negado")
+    if body.fulfillment_mode not in VALID_FULFILLMENT_MODES:
+        raise HTTPException(422, f"Modelo de atendimento inválido. Disponíveis: {sorted(VALID_FULFILLMENT_MODES)}")
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
     co.consumption_mode_enabled = body.consumption_mode_enabled
+    co.fulfillment_mode = body.fulfillment_mode
     await db.commit()
-    return {"ok": True, "consumption_mode_enabled": body.consumption_mode_enabled}
+    return {
+        "ok": True,
+        "consumption_mode_enabled": body.consumption_mode_enabled,
+        "fulfillment_mode": body.fulfillment_mode,
+    }
 
 
 _VIDEO_CONTENT_TYPES = {"video/mp4": "mp4"}
@@ -2949,7 +2969,8 @@ async def approve_device(
         "company":  {"id": co.id, "name": co.name, "plan": co.plan or "free",
                      "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
                      "consumption_mode_enabled": co.consumption_mode_enabled,
-                     "catalog_menu_layout": co.catalog_menu_layout},
+                     "catalog_menu_layout": co.catalog_menu_layout,
+                     "fulfillment_mode": co.fulfillment_mode},
         "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
     }), ex=60)
 

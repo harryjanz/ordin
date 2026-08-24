@@ -9,6 +9,9 @@ export interface CompanyInfo {
   consumption_mode_enabled: boolean;
   // ORD-116 — "horizontal" (padrão) ou "vertical" pro menu de categorias do catálogo.
   catalog_menu_layout: "horizontal" | "vertical";
+  // ORD-118 — "por_item" (padrão, ticket unitário) ou "retirada_unica"
+  // (produção centralizada, ticket compacto com QR único do pedido).
+  fulfillment_mode: "por_item" | "retirada_unica";
 }
 
 export interface TerminalInfo {
@@ -56,6 +59,10 @@ export interface CompletedOrder {
   nsu: string | null;
   provider: string;
   tickets: Ticket[];
+  // ORD-118 — QR do pedido inteiro, usado no modelo "retirada_unica" (o
+  // impresso vira um ticket compacto com este QR só, em vez de um bloco
+  // por unidade em `tickets`).
+  order_qr_data: string | null;
 }
 
 export type Screen =

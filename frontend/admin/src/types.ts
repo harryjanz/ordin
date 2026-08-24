@@ -46,6 +46,8 @@ export interface Company {
   catalog_menu_layout?: string;
   // ORD-117 — empresa de demonstração da plataforma (indicação interna, superadmin only).
   is_demo?: boolean;
+  // ORD-118 — "por_item" (padrão) ou "retirada_unica" (QR único de pedido).
+  fulfillment_mode?: string;
 }
 
 // ORD-115 — vídeo de modo espera (attract mode) do totem.

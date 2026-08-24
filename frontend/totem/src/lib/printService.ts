@@ -14,6 +14,85 @@ const fmtMoney = (v: number) => v.toLocaleString("pt-BR", { style: "currency", c
 // ---------------------------------------------------------------------------
 // ESC/POS builder
 // ---------------------------------------------------------------------------
+// ORD-118 — modelo "retirada_unica": produção centralizada, pedido inteiro
+// entregue de uma vez. Ticket vira uma lista compacta de itens (sem bloco
+// por unidade, sem corte parcial entre itens) com um único QR do pedido.
+function buildEscPosBase64Compact(order: CompletedOrder, companyName: string): string {
+  const bytes: number[] = [];
+  function raw(...bs: number[]): void { bytes.push(...bs); }
+  function text(s: string): void {
+    const clean = norm(s);
+    for (let i = 0; i < clean.length; i++) {
+      const c = clean.charCodeAt(i);
+      bytes.push(c < 128 ? c : 0x3F);
+    }
+  }
+  function nl(n = 1): void { for (let i = 0; i < n; i++) bytes.push(0x0A); }
+  function qrCode(data: string): void {
+    const encoded = new TextEncoder().encode(data);
+    const storeLen = encoded.length + 3;
+    const pL = storeLen & 0xFF;
+    const pH = (storeLen >> 8) & 0xFF;
+    raw(0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00);
+    raw(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x05);
+    raw(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x31);
+    raw(0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30);
+    encoded.forEach((b) => bytes.push(b));
+    raw(0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30);
+  }
+
+  raw(0x1B, 0x40); // Init
+
+  raw(0x1B, 0x61, 0x01); // Center
+  raw(0x1B, 0x45, 0x01); // Bold
+  raw(0x1D, 0x21, 0x11); // Double
+  text(norm(companyName).toUpperCase()); nl();
+  raw(0x1D, 0x21, 0x00);
+  raw(0x1B, 0x45, 0x00);
+
+  text("ordin - autoatendimento"); nl();
+  text(new Date().toLocaleString("pt-BR")); nl();
+
+  raw(0x1B, 0x61, 0x00); // Left
+  text(`Pedido: ${order.order_ref}`); nl();
+  text(`${fmtMethod(order.method)}${order.nsu ? ` - NSU ${order.nsu}` : ""}`); nl(2);
+
+  // Lista compacta de itens — sem bloco por unidade, retirada é do pedido
+  // inteiro de uma vez.
+  raw(0x1B, 0x61, 0x01); // Center
+  text("- - - - - - - - - - - - - - - - -"); nl();
+  raw(0x1B, 0x61, 0x00); // Left
+  // order.tickets tem 1 linha por unidade (qty=2 -> 2 tickets) — só a
+  // unidade 1 de cada item representa a linha, senão duplica no impresso.
+  for (const tk of order.tickets.filter((t) => t.unit_number === 1)) {
+    const parts = tk.qr_data.split("|");
+    const productName = parts[1] ?? "";
+    text(`${tk.total_units}x ${norm(productName)}`); nl();
+  }
+  nl();
+
+  raw(0x1B, 0x61, 0x01); // Center
+  raw(0x1B, 0x45, 0x01);
+  raw(0x1D, 0x21, 0x01); // Double height
+  text(norm(fmtMoney(order.total))); nl();
+  raw(0x1D, 0x21, 0x00);
+  raw(0x1B, 0x45, 0x00);
+  nl();
+
+  if (order.order_qr_data) qrCode(order.order_qr_data);
+  nl(2);
+
+  text("Retire seu pedido completo no balcao"); nl(2);
+
+  raw(0x1B, 0x64, 0x04); // Feed
+  raw(0x1D, 0x56, 0x01); // Cut — único, no fim
+
+  const arr = new Uint8Array(bytes);
+  let binary = "";
+  arr.forEach((b) => { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+
 function buildEscPosBase64(order: CompletedOrder, companyName: string): string {
   const bytes: number[] = [];
 
@@ -123,7 +202,10 @@ export async function silentPrint(
   order: CompletedOrder,
   companyName: string,
   fallback: BrowserFallbackArgs,
+  fulfillmentMode: "por_item" | "retirada_unica" = "por_item",
 ): Promise<PrintMethod> {
+  const compact = fulfillmentMode === "retirada_unica" && !!order.order_qr_data;
+
   // --- Tentativa 1: QZ Tray (impressão silenciosa via ESC/POS) ---
   try {
     const qzModule = await import("qz-tray");
@@ -148,7 +230,7 @@ export async function silentPrint(
     await qz.print(config, [{
       type: "raw",
       format: "base64",
-      data: buildEscPosBase64(order, companyName),
+      data: compact ? buildEscPosBase64Compact(order, companyName) : buildEscPosBase64(order, companyName),
       options: { language: "ESCPOS" },
     }]);
 
