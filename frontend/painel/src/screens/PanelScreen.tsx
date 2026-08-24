@@ -17,7 +17,7 @@ interface Props {
 }
 
 function label(o: OrderSummary) {
-  return o.pickup_name || `Pedido #${o.order_ref.slice(-4)}`;
+  return o.pickup_name || `#${o.order_ref.slice(-4)}`;
 }
 
 // ORD-119 — tela passiva (só leitura, sem toque), pensada pra rodar numa

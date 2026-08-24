@@ -1,9 +1,11 @@
 import { useState } from "react";
 import type { Theme } from "../themes";
 import { RADIUS, FONT } from "../scale";
+import TextKeyboard from "../components/TextKeyboard";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
+const MAX_LEN = 20;
 
 interface Props {
   T: Theme;
@@ -13,9 +15,11 @@ interface Props {
 
 // ORD-119 — só aparece quando fulfillment_mode="retirada_unica" (App.tsx
 // decide se mostra essa tela). Nome opcional pra identificar o pedido no
-// painel de retirada em vez de só o número. Input nativo (não numpad como
-// CpfScreen) — kiosks touch mostram teclado do sistema automaticamente ao
-// focar um <input>, sem precisar de teclado virtual próprio.
+// painel de retirada em vez de só o número. Achado ao vivo: totem roda em
+// kiosk mode, não abre teclado nativo do SO ao focar <input> — usa
+// TextKeyboard (teclado virtual próprio, maiúsculas, apagar
+// última/apagar tudo), mesmo motivo pelo qual CpfScreen já usa numpad
+// customizado em vez de input nativo.
 export default function PickupNameScreen({ T, onNext, onBack }: Props) {
   const [name, setName] = useState("");
   const trimmed = name.trim();
@@ -31,7 +35,7 @@ export default function PickupNameScreen({ T, onNext, onBack }: Props) {
       transition: "background 0.3s",
       padding: "32px 0 24px",
     }}>
-      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 28 }}>
+      <div style={{ width: "min(820px, 94vw)", display: "flex", flexDirection: "column", gap: 28 }}>
 
         <div style={{ textAlign: "center" }}>
           <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800, margin: "0 0 8px" }}>
@@ -42,24 +46,28 @@ export default function PickupNameScreen({ T, onNext, onBack }: Props) {
           </p>
         </div>
 
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value.slice(0, 40))}
-          placeholder="Seu nome"
-          autoFocus
-          style={{
-            padding: "24px 28px",
-            border: `2px solid ${T.border}`,
-            borderRadius: RADIUS.sm,
-            background: T.numBg,
-            color: T.text,
-            fontFamily: FONT_D,
-            fontSize: FONT.headline,
-            fontWeight: 700,
-            textAlign: "center",
-            outline: "none",
-          }}
+        {/* Display — só leitura, entrada é sempre pelo TextKeyboard abaixo */}
+        <div style={{
+          padding: "24px 28px",
+          border: `2px solid ${T.border}`,
+          borderRadius: RADIUS.sm,
+          background: T.numBg,
+          color: name.length > 0 ? T.text : T.muted,
+          fontFamily: FONT_D,
+          fontSize: FONT.headline,
+          fontWeight: 700,
+          textAlign: "center",
+          minHeight: 32,
+          letterSpacing: 1,
+        }}>
+          {name.length > 0 ? name : "SEU NOME"}
+        </div>
+
+        <TextKeyboard
+          T={T}
+          onKey={(ch) => setName((n) => (n.length < MAX_LEN ? (n + ch).toUpperCase() : n))}
+          onBackspace={() => setName((n) => n.slice(0, -1))}
+          onClear={() => setName("")}
         />
 
         <button

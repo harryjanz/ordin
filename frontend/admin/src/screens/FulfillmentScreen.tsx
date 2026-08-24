@@ -8,7 +8,7 @@ import type { Order, WsEvent } from "../types";
 import styles from "./FulfillmentScreen.module.scss";
 
 function label(o: Order) {
-  return o.pickup_name || `Pedido #${o.order_ref.slice(-4)}`;
+  return o.pickup_name || `#${o.order_ref.slice(-4)}`;
 }
 
 // ORD-119 — fila de trabalho pro modelo de atendimento "retirada única"
