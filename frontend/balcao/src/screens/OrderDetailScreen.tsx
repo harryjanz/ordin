@@ -4,7 +4,7 @@ import api from "../api";
 import QrScanner from "../components/QrScanner";
 import ScanButton from "../components/ScanButton";
 import { beepSuccess, beepError } from "../components/AudioFeedback";
-import { collectByQr } from "../lib/collect";
+import { collectByQr, collectManual } from "../lib/collect";
 import { summarizeItems } from "../lib/orderItems";
 import type { Ticket } from "../types";
 import styles from "./OrderDetailScreen.module.scss";
@@ -23,6 +23,10 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
   const [pendingTicket, setPendingTicket] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
   const [collecting, setCollecting] = useState(false);
+  // ORD-123 — baixa manual (sem QR): fallback pra quando o código está
+  // danificado/ilegível. Confirmação separada da de QR porque o aviso de
+  // auditoria precisa ficar claro, não é o mesmo texto do fluxo normal.
+  const [manualTarget, setManualTarget] = useState<{ kind: "order" | "ticket"; ref: string } | null>(null);
 
   useEffect(() => { loadTickets(); }, [orderRef]);
 
@@ -41,16 +45,15 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
     setTimeout(() => setFeedback(null), 3000);
   }
 
-  async function collectTicket(qrData: string) {
+  async function runCollect(isOrderQr: boolean, action: () => Promise<unknown>) {
     if (collecting) return;
     setCollecting(true);
     setScanning(false);
     setPendingTicket(null);
-
-    const isOrderQr = qrData.startsWith("ORDER|");
+    setManualTarget(null);
 
     try {
-      await collectByQr(qrData);
+      await action();
       beepSuccess();
       showFeedback(isOrderQr ? "Pedido coletado com sucesso!" : "Ticket coletado com sucesso!", true);
       await loadTickets();
@@ -71,6 +74,16 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
     } finally {
       setCollecting(false);
     }
+  }
+
+  function collectTicket(qrData: string) {
+    runCollect(qrData.startsWith("ORDER|"), () => collectByQr(qrData));
+  }
+
+  function confirmManualCollect() {
+    if (!manualTarget) return;
+    const { kind, ref } = manualTarget;
+    runCollect(kind === "order", () => collectManual(kind, ref));
   }
 
   function handleScan(data: string) {
@@ -123,6 +136,25 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
         </div>
       </Modal>
 
+      <Modal open={!!manualTarget} onBackdropClick={() => setManualTarget(null)} width={340}>
+        <div className={styles.confirmModal}>
+          <i className={`icon-alert-triangle ${styles.confirmIconWarning}`} />
+          <div className={styles.confirmTitle}>Confirmar baixa manual?</div>
+          <div className={styles.confirmCode}>
+            {manualTarget?.kind === "order"
+              ? `Pedido ${orderRef} inteiro`
+              : (tickets.find((t) => t.ticket_code === manualTarget?.ref)?.qr_data.split("|")[1] ?? manualTarget?.ref)}
+          </div>
+          <div className={styles.manualWarning}>
+            Isso não usa o QR Code e fica registrado para auditoria.
+          </div>
+          <div className={styles.confirmActions}>
+            <Button variant="secondary" fullWidth onClick={() => setManualTarget(null)}>Cancelar</Button>
+            <Button fullWidth onClick={confirmManualCollect}>Confirmar</Button>
+          </div>
+        </div>
+      </Modal>
+
       {scanning ? (
         <div className={styles.scannerBlock}>
           <QrScanner onScan={handleScan} active={scanning} />
@@ -135,6 +167,14 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
             disabled={collecting || loading}
             onClick={() => setScanning(true)}
           />
+          <Button
+            variant="secondary"
+            fullWidth
+            disabled={collecting || loading || tickets.length === 0}
+            onClick={() => setManualTarget({ kind: "order", ref: orderRef })}
+          >
+            Baixa manual do pedido
+          </Button>
         </div>
       )}
 
@@ -151,6 +191,17 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
                 <div className={styles.itemMeta}>{t.ticket_code} · {t.unit_number}/{t.total_units}</div>
               </div>
             </div>
+            {t.status !== "collected" && (
+              <button
+                type="button"
+                className={styles.manualAction}
+                aria-label="Baixa manual deste ticket"
+                disabled={collecting}
+                onClick={() => setManualTarget({ kind: "ticket", ref: t.ticket_code })}
+              >
+                <i className="icon-alert-triangle" />
+              </button>
+            )}
             <Tag variant={t.status === "collected" ? "success" : "neutral"}>
               {t.status === "collected" ? "coletado" : "pendente"}
             </Tag>

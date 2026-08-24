@@ -29,6 +29,7 @@ export interface Ticket {
   total_units: number;
   collected_at: string | null;
   collected_by: string | null;
+  collection_method?: string | null;
 }
 
 export interface WsEvent {

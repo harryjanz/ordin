@@ -43,6 +43,23 @@
   display: block;
 }
 
+.confirmIconWarning {
+  font-size: 36px;
+  margin-bottom: 12px;
+  color: color('warning-base');
+  display: block;
+}
+
+.manualWarning {
+  @include font('sm');
+  color: color('warning-base');
+  background: rgba(color('warning-base'), 0.1);
+  border: 1px solid rgba(color('warning-base'), 0.3);
+  @include rounded('default');
+  padding: 10px 12px;
+  margin-bottom: 24px;
+}
+
 .confirmTitle {
   color: var(--a-text);
   font-weight: 700;
@@ -87,7 +104,26 @@
 }
 
 .scanBtnRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin-bottom: 16px;
+}
+
+.manualAction {
+  background: none;
+  border: none;
+  padding: 4px;
+  margin-right: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+
+  i {
+    font-size: 16px;
+    color: color('warning-base');
+  }
 }
 
 .empty {

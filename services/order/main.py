@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -9,6 +9,7 @@ from datetime import datetime
 import random, string, secrets, hmac as hmaclib, hashlib
 from config import require_env, get_cors_origins
 from auth import get_current_user, TokenPayload
+from audit import emit_audit
 from websocket import ws_router, broadcast_order_created, broadcast_ticket_collected, broadcast_order_completed, broadcast_order_paid
 
 DB_URL          = require_env("DB_URL")
@@ -84,6 +85,9 @@ class Ticket(Base):
     collected_at      = Column(DateTime, nullable=True)
     collected_by      = Column(String(80), nullable=True)
     collection_device = Column(String(64), nullable=True)
+    # ORD-123 — "qr" (padrão) ou "manual" (operador deu baixa sem QR, pula a
+    # verificação HMAC). Distingue as duas vias pra quem revisar depois.
+    collection_method = Column(String(10), nullable=False, default="qr")
     item              = relationship("OrderItem", back_populates="tickets")
 
 async def get_db():
@@ -105,7 +109,9 @@ class OrderIn(BaseModel):
     consumption_type: Optional[str] = None
 
 class CollectIn(BaseModel):
-    collected_by: Optional[str] = "balcao"
+    # ORD-123 — collected_by deixou de vir do cliente: era uma string livre
+    # sem validação, inútil pra auditoria. Passa a ser sempre derivado de
+    # current_user.sub (JWT) direto no handler.
     collection_device: Optional[str] = None
     qr_data: Optional[str] = None  # opcional durante grace period (Sprint 4 remove a exceção)
 
@@ -145,6 +151,7 @@ class TicketOut(BaseModel):
     total_units: int
     collected_at: Optional[str] = None
     collected_by: Optional[str] = None
+    collection_method: Optional[str] = None
 
 class TicketListOut(BaseModel):
     order_ref: str
@@ -319,13 +326,20 @@ async def collect_ticket(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
     x_device_id: Optional[str] = Header(default=None),
+    # Optional + no fim: mantém compatível com as chamadas diretas dos testes
+    # existentes (test_coverage.py chama collect_ticket posicionalmente sem
+    # request). Só é usado no ramo de baixa manual, ver emit_audit abaixo.
+    request: Optional[Request] = None,
 ):
     """
     Registra a coleta de um ticket. Valida o HMAC do QR Code antes de acessar o banco.
     Usa `SELECT FOR UPDATE` para evitar dupla coleta em ambientes multi-device.
     Quando o último ticket de um pedido é coletado, o pedido é marcado como `completed` automaticamente.
     Requer `role: cashier` ou `admin`.
+    Sem `qr_data` no body, a coleta é manual (ORD-123) — pula a verificação HMAC,
+    fica marcada com `collection_method="manual"` e gera evento de auditoria.
     """
+    collection_method = "qr" if body.qr_data is not None else "manual"
     if body.qr_data is not None:
         if not _verify_qr(body.qr_data) or body.qr_data.split("|")[0] != ticket_code:
             raise HTTPException(400, detail="QR inválido")
@@ -342,10 +356,12 @@ async def collect_ticket(
     ticket, product_name = row
     if ticket.status=="collected": raise HTTPException(409, "Ticket já coletado")
     if ticket.status=="expired":  raise HTTPException(410, "Ticket expirado")
+    collected_by = current_user.sub
     ticket.status            = "collected"
     ticket.collected_at      = datetime.utcnow()
-    ticket.collected_by      = body.collected_by
+    ticket.collected_by      = collected_by
     ticket.collection_device = x_device_id or body.collection_device
+    ticket.collection_method = collection_method
     await db.flush()
     total_t = (await db.execute(
         select(func.count(Ticket.id)).where(Ticket.order_ref == ticket.order_ref)
@@ -365,10 +381,16 @@ async def collect_ticket(
     progress_str = f"{collected_t}/{total_t}"
     await broadcast_ticket_collected(
         current_user.company_id, ticket_code, ticket.order_ref,
-        product_name, progress_str, body.collected_by,
+        product_name, progress_str, collected_by,
     )
     if order_done:
         await broadcast_order_completed(current_user.company_id, ticket.order_ref)
+    if collection_method == "manual" and request is not None:
+        emit_audit("ticket.collected", request,
+                   actor=collected_by, actor_id=int(collected_by),
+                   company_id=current_user.company_id, result="success",
+                   detail={"method": "manual", "ticket_code": ticket_code,
+                           "order_ref": ticket.order_ref, "progress": progress_str})
     return {"ok":True,"ticket_code":ticket_code,"order_ref":ticket.order_ref,
             "collected_at":ticket.collected_at.isoformat(),
             "collected_by":ticket.collected_by,
@@ -392,14 +414,17 @@ async def collect_order(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
     x_device_id: Optional[str] = Header(default=None),
+    request: Optional[Request] = None,
 ):
     """
     Coleta todos os tickets de um pedido numa única operação — pro modelo de atendimento
     `fulfillment_mode = "retirada_unica"` (ORD-118). Duas vias de entrada: scan do QR único do
     pedido pelo app de balcão (`qr_data` verificado por HMAC), ou coleta manual pela tela
-    operacional do admin (sem `qr_data`, staff autenticado). Mesmo padrão de lock
+    operacional do balcão/admin (sem `qr_data`, staff autenticado — ORD-123, gera evento de
+    auditoria e fica marcada com `collection_method="manual"`). Mesmo padrão de lock
     (`SELECT FOR UPDATE`) e fechamento automático já usado em `collect_ticket`.
     """
+    collection_method = "qr" if body.qr_data is not None else "manual"
     if body.qr_data is not None and not _verify_order_qr(body.qr_data, order_ref):
         raise HTTPException(400, detail="QR inválido")
     result = await db.execute(
@@ -411,7 +436,7 @@ async def collect_order(
     if not order: raise HTTPException(404, "Pedido não encontrado")
     if order.status == "completed": raise HTTPException(409, "Pedido já coletado")
     collected_at = datetime.utcnow()
-    collected_by = body.collected_by
+    collected_by = current_user.sub
     collection_device = x_device_id or body.collection_device
     tickets_result = await db.execute(
         select(Ticket)
@@ -425,10 +450,16 @@ async def collect_order(
         ticket.collected_at = collected_at
         ticket.collected_by = collected_by
         ticket.collection_device = collection_device
+        ticket.collection_method = collection_method
     order.status = "completed"
     await db.commit()
     progress_str = f"{len(tickets)}/{len(tickets)}"
     await broadcast_order_completed(current_user.company_id, order_ref)
+    if collection_method == "manual" and request is not None:
+        emit_audit("order.collected", request,
+                   actor=collected_by, actor_id=int(collected_by),
+                   company_id=current_user.company_id, result="success",
+                   detail={"method": "manual", "order_ref": order_ref, "progress": progress_str})
     return {"ok": True, "order_ref": order_ref, "collected_at": collected_at.isoformat(),
             "collected_by": collected_by, "progress": progress_str}
 
@@ -591,7 +622,8 @@ async def list_order_tickets(
             "tickets":[{"ticket_code":t.ticket_code,"qr_data":t.qr_data,"status":t.status,
                         "unit_number":t.unit_number,"total_units":t.total_units,
                         "collected_at":t.collected_at.isoformat() if t.collected_at else None,
-                        "collected_by":t.collected_by} for t in tickets]}
+                        "collected_by":t.collected_by,
+                        "collection_method":t.collection_method} for t in tickets]}
 
 @app.patch("/internal/orders/{order_ref}/status", include_in_schema=False)
 async def internal_update_status(
