@@ -201,7 +201,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
   const [printMethod, setPrintMethod] = useState<PrintMethod | "pending">("pending");
   // ORD-119 (item 4, análise de concorrentes 2026-08-24) — estimativa de
   // tempo de espera baseada em dado real (GET /orders/prep-stats, últimas
-  // 24h), não em config — só mostra quando já existe histórico suficiente
+  // 7 dias), não em config — só mostra quando já existe histórico suficiente
   // (count > 0); sem "achismo" quando a empresa ainda não tem dado nenhum.
   const [prepEstimateMin, setPrepEstimateMin] = useState<number | null>(null);
   const qrContainerRef = useRef<HTMLDivElement>(null);

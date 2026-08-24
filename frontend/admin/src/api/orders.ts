@@ -54,7 +54,7 @@ export async function listOrderTickets(orderRef: string): Promise<Ticket[]> {
 }
 
 // ORD-119 (item 3, análise de concorrentes 2026-08-24) — tempo médio de
-// preparo / gargalo por hora, últimas 24h por padrão (sem date_from).
+// preparo / gargalo por hora, últimos 7 dias por padrão (sem date_from).
 export async function getPrepStats(companyId?: number): Promise<PrepStats> {
   const r = await api.get<PrepStats>("/orders/prep-stats", {
     params: companyId ? { company_id: companyId } : {},
