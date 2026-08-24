@@ -15,14 +15,25 @@
   margin-bottom: 20px;
 }
 
-.row {
-  display: flex;
-  gap: 24px;
+// Cadastro em abas (2026-08-24) — categorias e produtos deixaram de ser
+// colunas lado a lado (.row/.col antigos) e viraram abas, cada uma
+// ocupando a largura toda.
+.tabs {
+  margin-bottom: 24px;
 }
 
 .col {
-  flex: 1;
-  min-width: 0;
+  max-width: 720px;
+}
+
+.categoryPicker {
+  max-width: 320px;
+  margin-bottom: 20px;
+}
+
+.rowChevron {
+  color: rgba(var(--a-text-rgb), 0.3);
+  margin-left: 4px;
 }
 
 .sectionTitle {

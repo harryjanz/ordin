@@ -7,6 +7,8 @@ import {
   InputBase,
   Modal,
   NumberInput,
+  Tab,
+  Tabs,
   Tag,
   TagInput,
   TextArea,
@@ -108,6 +110,10 @@ export default function CatalogScreen() {
       },
     };
   }
+
+  // Cadastro em abas (2026-08-24) — passo inicial pra dar espaço a mais
+  // complexidade futura (cardápio por horário, pizza) sem lotar uma tela só.
+  const [activeTab, setActiveTab] = useState<"categories" | "products">("categories");
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -354,6 +360,19 @@ export default function CatalogScreen() {
     .filter((c) => c.active)
     .map((c) => ({ value: String(c.id), label: c.name }));
 
+  // Abas (2026-08-24) — diferente do categoryOptions acima (que é só pra
+  // mover um produto de categoria), este inclui inativas: continua dando
+  // pra abrir os produtos de uma categoria desativada pra revisar antes de
+  // reativar ou excluir definitivamente, mesmo comportamento de antes das
+  // abas (a coluna de categorias sempre mostrou as inativas também).
+  const browseCategoryOptions: DropdownOptions[] = categories
+    .map((c) => ({ value: String(c.id), label: c.active ? c.name : `${c.name} (inativa)` }));
+
+  function selectCategoryAndBrowse(id: number) {
+    setSelectedCat(id);
+    setActiveTab("products");
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.title}>Catálogo</div>
@@ -373,9 +392,16 @@ export default function CatalogScreen() {
       {!hasCompanyContext ? (
         <div className={styles.empty}>Selecione uma empresa para gerenciar o catálogo.</div>
       ) : (
-      <div className={styles.row}>
+      <>
+      <div className={styles.tabs}>
+        <Tabs activeTab={activeTab} onSelectTab={(v) => setActiveTab(v as typeof activeTab)}>
+          <Tab value="categories" label="Categorias" totalizer={categories.length} />
+          <Tab value="products" label="Produtos" totalizer={selectedCat ? products.length : null} />
+        </Tabs>
+      </div>
+
+      {activeTab === "categories" && (
         <div className={styles.col}>
-          <div className={styles.sectionTitle}>Categorias</div>
           {!editCat && (
             <form className={`${styles.form} ${styles.formRow}`} onSubmit={addCategory}>
               <div className={styles.formRowField}>
@@ -413,7 +439,8 @@ export default function CatalogScreen() {
             <div
               key={c.id}
               className={`${styles.item} ${selectedCat === c.id ? styles.itemSelected : styles.itemClickable}`}
-              onClick={() => setSelectedCat(c.id)}
+              onClick={() => selectCategoryAndBrowse(c.id)}
+              title="Ver produtos desta categoria"
             >
               <span className={styles.itemName}>
                 {c.name}
@@ -429,14 +456,34 @@ export default function CatalogScreen() {
                 <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deleteCategoryPermanently(c.id, c.name)}>
                   Excluir
                 </Button>
+                <i className={`icon-chevron-right ${styles.rowChevron}`} />
               </div>
             </div>
           ))}
+          {categories.length === 0 && (
+            <div className={styles.empty}>Nenhuma categoria cadastrada ainda.</div>
+          )}
         </div>
+      )}
 
+      {activeTab === "products" && (
         <div className={styles.col}>
+          <div className={styles.categoryPicker}>
+            <Dropdown
+              label="Categoria"
+              placeholder="Selecionar categoria…"
+              value={browseCategoryOptions.find((o) => o.value === String(selectedCat ?? "")) ?? null}
+              onValueSelected={(opt) => setSelectedCat(opt.value ? Number(opt.value) : null)}
+              options={browseCategoryOptions}
+            />
+          </div>
+
+          {!selectedCat ? (
+            <div className={styles.empty}>Selecione uma categoria para ver os produtos.</div>
+          ) : (
+          <>
           <div className={styles.sectionTitle}>
-            Produtos {selectedCat ? `— ${categories.find((c) => c.id === selectedCat)?.name ?? ""}` : "(selecione uma categoria)"}
+            Produtos — {categories.find((c) => c.id === selectedCat)?.name ?? ""}
           </div>
 
           {selectedCat && !editProd && (
@@ -636,11 +683,14 @@ export default function CatalogScreen() {
             </div>
           ))}
 
-          {selectedCat && products.length === 0 && (
+          {products.length === 0 && (
             <div className={styles.empty}>Nenhum produto nesta categoria.</div>
           )}
+          </>
+          )}
         </div>
-      </div>
+      )}
+      </>
       )}
 
       <ConfirmDialog
