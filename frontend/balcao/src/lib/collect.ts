@@ -16,7 +16,6 @@ export async function collectByQr(qrData: string): Promise<CollectResult> {
   if (isOrderQr) {
     const orderRef = qrData.split("|")[1];
     await api.post(`/orders/${orderRef}/collect`, {
-      collected_by: "balcao",
       collection_device: "balcao-web",
       qr_data: qrData,
     });
@@ -26,9 +25,21 @@ export async function collectByQr(qrData: string): Promise<CollectResult> {
   const isFullQr = qrData.includes("|");
   const ticketCode = isFullQr ? qrData.split("|")[0] : qrData;
   const r = await api.post(`/tickets/${ticketCode}/collect`, {
-    collected_by: "balcao",
     collection_device: "balcao-web",
     ...(isFullQr ? { qr_data: qrData } : {}),
   });
+  return { isOrderQr: false, orderRef: r.data.order_ref };
+}
+
+// ORD-123 — baixa manual, sem QR nenhum: usada quando o QR está
+// danificado/ilegível ou a câmera não é opção. O backend não recebe
+// qr_data, então trata como collection_method="manual" e emite evento de
+// auditoria (services/order/main.py).
+export async function collectManual(kind: "order" | "ticket", ref: string): Promise<CollectResult> {
+  if (kind === "order") {
+    await api.post(`/orders/${ref}/collect`, { collection_device: "balcao-web" });
+    return { isOrderQr: true, orderRef: ref };
+  }
+  const r = await api.post(`/tickets/${ref}/collect`, { collection_device: "balcao-web" });
   return { isOrderQr: false, orderRef: r.data.order_ref };
 }
