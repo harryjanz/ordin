@@ -326,10 +326,13 @@ async def collect_ticket(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
     x_device_id: Optional[str] = Header(default=None),
-    # Optional + no fim: mantém compatível com as chamadas diretas dos testes
+    # Tipo precisa ficar "Request" puro (não Optional[Request]) pro FastAPI
+    # reconhecer e injetar automaticamente — Optional[] faz cair na validação
+    # normal de campo Pydantic, que não sabe lidar com o tipo do Starlette.
+    # Default None só existe pra não quebrar as chamadas diretas dos testes
     # existentes (test_coverage.py chama collect_ticket posicionalmente sem
-    # request). Só é usado no ramo de baixa manual, ver emit_audit abaixo.
-    request: Optional[Request] = None,
+    # request); só é usado no ramo de baixa manual, ver emit_audit abaixo.
+    request: Request = None,
 ):
     """
     Registra a coleta de um ticket. Valida o HMAC do QR Code antes de acessar o banco.
@@ -414,7 +417,7 @@ async def collect_order(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
     x_device_id: Optional[str] = Header(default=None),
-    request: Optional[Request] = None,
+    request: Request = None,
 ):
     """
     Coleta todos os tickets de um pedido numa única operação — pro modelo de atendimento
