@@ -48,6 +48,8 @@ export interface Company {
   is_demo?: boolean;
   // ORD-118 — "por_item" (padrão) ou "retirada_unica" (QR único de pedido).
   fulfillment_mode?: string;
+  // ORD-119 — só usado com fulfillment_mode="retirada_unica".
+  prep_urgency_minutes?: number;
 }
 
 // ORD-115 — vídeo de modo espera (attract mode) do totem.

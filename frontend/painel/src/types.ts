@@ -7,6 +7,9 @@ export interface CompanyInfo {
   consumption_mode_enabled: boolean;
   catalog_menu_layout: string;
   fulfillment_mode: string;
+  // ORD-119 — minutos até um pedido em preparo virar urgente (laranja na
+  // metade do tempo, vermelho ao passar), configurável por empresa.
+  prep_urgency_minutes: number;
 }
 
 export interface OrderSummary {

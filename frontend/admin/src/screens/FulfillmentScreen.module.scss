@@ -109,8 +109,16 @@
   }
 }
 
-.cardUrgent {
-  border-color: rgba(color('error-base'), 0.5);
+// ORD-119 — laranja na metade do tempo de urgência configurado pela
+// empresa, vermelho ao passar (mesmo critério do painel público).
+.cardOrange {
+  border-color: rgba(#f2994a, 0.6);
+  background: rgba(#f2994a, 0.06);
+}
+
+.cardRed {
+  border-color: rgba(#ff4d4d, 0.6);
+  background: rgba(#ff4d4d, 0.06);
 }
 
 .cardLabel {
@@ -130,10 +138,16 @@
   color: rgba(var(--a-text-rgb), 0.45);
 }
 
-.timeUrgent {
+.timeOrange {
   font-size: 12px;
   font-weight: 700;
-  color: color('error-base');
+  color: #f2994a;
+}
+
+.timeRed {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ff4d4d;
 }
 
 .itemsModal {

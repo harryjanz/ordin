@@ -20,5 +20,12 @@ export default function App() {
     return <PairScreen T={T} onDone={handlePaired} />;
   }
 
-  return <PanelScreen T={T} companyId={company.id} companyName={company.name} />;
+  return (
+    <PanelScreen
+      T={T}
+      companyId={company.id}
+      companyName={company.name}
+      prepUrgencyMinutes={company.prep_urgency_minutes}
+    />
+  );
 }

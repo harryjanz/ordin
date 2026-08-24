@@ -14,18 +14,40 @@ interface Props {
   T: Theme;
   companyId: number;
   companyName: string;
+  prepUrgencyMinutes: number;
 }
 
 function label(o: OrderSummary) {
   return o.pickup_name || `#${o.order_ref.slice(-4)}`;
 }
 
+type UrgencyLevel = "none" | "orange" | "red";
+
+// Laranja na metade do tempo configurado, vermelho ao passar — pedido do
+// usuário (2026-08-24): dá pra equipe (e pro cliente vendo a TV) a sensação
+// de que a demora é percebida, não ignorada.
+function urgencyLevel(createdAt: string, prepUrgencyMinutes: number): UrgencyLevel {
+  const elapsedMin = (Date.now() - new Date(createdAt).getTime()) / 60_000;
+  if (elapsedMin >= prepUrgencyMinutes) return "red";
+  if (elapsedMin >= prepUrgencyMinutes / 2) return "orange";
+  return "none";
+}
+
 // ORD-119 — tela passiva (só leitura, sem toque), pensada pra rodar numa
 // TV/tela grande visível pro salão. Fonte grande e alto contraste — vista a
 // distância, não de perto como o resto do totem.
-export default function PanelScreen({ T, companyId, companyName }: Props) {
+export default function PanelScreen({ T, companyId, companyName, prepUrgencyMinutes }: Props) {
   const { orders, setOrders, removeOrder, updateOrderStatus } = useStore();
   const [wsStatus, setWsStatus] = useState<"connected" | "connecting" | "disconnected">("connecting");
+
+  // Força re-render periódico só pra cor de urgência avançar sozinha na
+  // tela — TV roda sem interação nenhuma, sem isso a cor só mudaria quando
+  // chegasse um evento de WS novo.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick((t) => t + 1), 30_000);
+    return () => clearInterval(iv);
+  }, []);
 
   const loadOrders = useCallback(() => {
     api.get("/orders", { params: { status: "paid,ready", limit: 100 } })
@@ -96,7 +118,7 @@ export default function PanelScreen({ T, companyId, companyName }: Props) {
       </div>
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
-        <Column title="Em preparo" items={preparing} T={T} accent={T.muted} />
+        <Column title="Em preparo" items={preparing} T={T} accent={T.muted} prepUrgencyMinutes={prepUrgencyMinutes} />
         <div style={{ width: 1, background: T.borderNeutral }} />
         <Column title="Pronto para retirada" items={ready} T={T} accent={T.successColor} highlight />
       </div>
@@ -104,8 +126,14 @@ export default function PanelScreen({ T, companyId, companyName }: Props) {
   );
 }
 
-function Column({ title, items, T, accent, highlight }: {
-  title: string; items: OrderSummary[]; T: Theme; accent: string; highlight?: boolean;
+const URGENCY_COLOR: Record<UrgencyLevel, string | null> = {
+  none: null,
+  orange: "#f2994a",
+  red: "#ff4d4d",
+};
+
+function Column({ title, items, T, accent, highlight, prepUrgencyMinutes }: {
+  title: string; items: OrderSummary[]; T: Theme; accent: string; highlight?: boolean; prepUrgencyMinutes?: number;
 }) {
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "32px 28px", overflowY: "auto" }}>
@@ -124,27 +152,31 @@ function Column({ title, items, T, accent, highlight }: {
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 20 }}>
-          {items.map((o) => (
-            <div
-              key={o.order_ref}
-              style={{
-                background: highlight ? T.roxoSubtle : T.surface,
-                border: `2px solid ${highlight ? T.roxo : T.borderNeutral}`,
-                borderRadius: RADIUS.lg,
-                padding: "24px 16px",
-                textAlign: "center",
-                fontFamily: FONT_D,
-                fontWeight: 800,
-                fontSize: FONT.title,
-                color: T.text,
-                boxShadow: T.cardShadow,
-                animation: "fadeIn 0.3s ease",
-                wordBreak: "break-word",
-              }}
-            >
-              {label(o)}
-            </div>
-          ))}
+          {items.map((o) => {
+            const level = prepUrgencyMinutes ? urgencyLevel(o.created_at, prepUrgencyMinutes) : "none";
+            const urgencyColor = URGENCY_COLOR[level];
+            return (
+              <div
+                key={o.order_ref}
+                style={{
+                  background: urgencyColor ? `${urgencyColor}22` : highlight ? T.roxoSubtle : T.surface,
+                  border: `2px solid ${urgencyColor ?? (highlight ? T.roxo : T.borderNeutral)}`,
+                  borderRadius: RADIUS.lg,
+                  padding: "24px 16px",
+                  textAlign: "center",
+                  fontFamily: FONT_D,
+                  fontWeight: 800,
+                  fontSize: FONT.title,
+                  color: T.text,
+                  boxShadow: T.cardShadow,
+                  animation: "fadeIn 0.3s ease",
+                  wordBreak: "break-word",
+                }}
+              >
+                {label(o)}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

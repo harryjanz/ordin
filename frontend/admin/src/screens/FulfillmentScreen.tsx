@@ -11,14 +11,18 @@ function label(o: Order) {
   return o.pickup_name || `#${o.order_ref.slice(-4)}`;
 }
 
-// Mesmo limiar já usado pra "URGENTE" na fila do app de balcão
-// (frontend/balcao/QueueScreen.tsx) — reaproveitado aqui de propósito pra
-// manter o mesmo critério de urgência em toda a operação, não um número
-// novo inventado só pra essa tela.
-const URGENCY_THRESHOLD_MS = 10 * 60 * 1000;
+type UrgencyLevel = "none" | "orange" | "red";
 
-function isUrgent(createdAt: string) {
-  return Date.now() - new Date(createdAt).getTime() > URGENCY_THRESHOLD_MS;
+// ORD-119 — limiar configurável por empresa (company.prep_urgency_minutes,
+// default 10 min, mesmo default já usado antes como valor fixo). Laranja na
+// metade do tempo, vermelho ao passar — mesmo critério do painel público
+// (frontend/painel/PanelScreen.tsx), pra não ter dois sinais diferentes pra
+// mesma demora.
+function urgencyLevel(createdAt: string, prepUrgencyMinutes: number): UrgencyLevel {
+  const elapsedMin = (Date.now() - new Date(createdAt).getTime()) / 60_000;
+  if (elapsedMin >= prepUrgencyMinutes) return "red";
+  if (elapsedMin >= prepUrgencyMinutes / 2) return "orange";
+  return "none";
 }
 
 function minutesAgo(createdAt: string) {
@@ -50,6 +54,7 @@ export default function FulfillmentScreen() {
   const companyId = useStore((s) => s.selectedCompanyId ?? s.companyId);
 
   const [fulfillmentMode, setFulfillmentMode] = useState<string | null>(null);
+  const [prepUrgencyMinutes, setPrepUrgencyMinutes] = useState(10);
   const [loadingCompany, setLoadingCompany] = useState(true);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +78,10 @@ export default function FulfillmentScreen() {
     if (!companyId) return;
     setLoadingCompany(true);
     api.get(`/companies/${companyId}`)
-      .then((r) => setFulfillmentMode(r.data.fulfillment_mode ?? "por_item"))
+      .then((r) => {
+        setFulfillmentMode(r.data.fulfillment_mode ?? "por_item");
+        setPrepUrgencyMinutes(r.data.prep_urgency_minutes ?? 10);
+      })
       .catch(() => setFulfillmentMode(null))
       .finally(() => setLoadingCompany(false));
   }, [companyId]);
@@ -211,18 +219,20 @@ export default function FulfillmentScreen() {
             {preparing.length === 0 ? (
               <div className={styles.emptyCol}>Nenhum pedido em preparo.</div>
             ) : preparing.map((o) => {
-              const urgent = isUrgent(o.created_at);
+              const level = urgencyLevel(o.created_at, prepUrgencyMinutes);
               return (
                 <div
                   key={o.order_ref}
-                  className={`${styles.card} ${urgent ? styles.cardUrgent : ""}`}
+                  className={`${styles.card} ${level === "red" ? styles.cardRed : level === "orange" ? styles.cardOrange : ""}`}
                   onClick={() => openItems(o)}
                 >
                   <div className={styles.cardLabel}>{label(o)}</div>
                   <div className={styles.cardMeta}>
                     <Tag variant="neutral">{o.order_ref}</Tag>
-                    <span className={urgent ? styles.timeUrgent : styles.time}>{minutesAgo(o.created_at)}</span>
-                    {urgent && <Tag variant="error">URGENTE</Tag>}
+                    <span className={level === "red" ? styles.timeRed : level === "orange" ? styles.timeOrange : styles.time}>
+                      {minutesAgo(o.created_at)}
+                    </span>
+                    {level === "red" && <Tag variant="error">URGENTE</Tag>}
                   </div>
                   <Button
                     size="small"

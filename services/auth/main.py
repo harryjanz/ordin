@@ -105,6 +105,9 @@ class CompanyInfo(BaseModel):
     # ORD-118 — mesma armadilha de novo: "por_item" (padrão) ou
     # "retirada_unica" (QR único de pedido, ticket compacto).
     fulfillment_mode: str = "por_item"
+    # ORD-119 — mesma armadilha de novo: minutos até urgência no preparo,
+    # configurável por empresa.
+    prep_urgency_minutes: int = 10
 
 class TerminalInfo(BaseModel):
     id: int
