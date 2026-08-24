@@ -2,11 +2,7 @@
 
 .page {
   padding: 32px;
-  // Melhorias de UX 2026-08-24 — 1100px sobrava tela em laptop/tablet
-  // largo sem deixar as colunas usarem grid interno de múltiplas colunas
-  // por card; alargado pra aproveitar melhor o espaço disponível.
-  max-width: 1600px;
-  margin: 0 auto;
+  color: var(--a-text);
 }
 
 .header {
