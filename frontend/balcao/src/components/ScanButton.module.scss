@@ -1,0 +1,36 @@
+@import 'design-system/dist/core/scss/styles';
+
+// Mesma aparência do Button primary/large do design system (ver
+// Button.module.scss) — replicada aqui porque o componente não tem slot
+// pra ícone.
+.btn {
+  @include rounded('button');
+  @include box-shadow(0, 12, 26, -4, 'brand-primary', 0.5);
+  @include color('background-color', 'brand-primary');
+  @include color('color', 'white');
+  @include font('base-emphasys');
+  border: 0;
+  cursor: pointer;
+  width: 100%;
+  height: spacing('xxl-4');
+  padding: 0 spacing('xl');
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: spacing('s');
+  transition: box-shadow 0.2s;
+
+  &:hover:not(:disabled) {
+    box-shadow: none;
+  }
+
+  &:disabled {
+    opacity: 0.2;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+
+  i {
+    font-size: 18px;
+  }
+}

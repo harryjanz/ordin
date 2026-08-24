@@ -1,0 +1,28 @@
+@use "sass:map";
+
+// ==========================================================
+// border
+// Gets a border according to the sent properties and available themes
+//
+//  Arguments:
+// `$width` Number
+// `$style` String
+// `$token` String
+//
+// Examples of use:
+// .foo { @include border(1, 'solid', brand-primary) }
+//
+// @return
+// .foo {
+//    border: 1px solid #9900ff;
+// }
+//
+// ==========================================================
+@mixin border($width, $style, $token) {
+  border: #{$width}px #{$style} map.get($colors, $token);
+  @each $theme, $color in $color-themes {
+    &.#{$theme} {
+      border: #{$width}px #{$style} map.get($color, $token);
+    }
+  }
+}

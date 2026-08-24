@@ -6,10 +6,16 @@ function decodeJwt(token: string): Record<string, unknown> {
   try { return JSON.parse(atob(token.split(".")[1])); } catch { return {}; }
 }
 
+// ORD-121 — "dark" é o padrão (não "light", diferente do admin) porque era
+// o único modo que o balcão já tinha antes da migração pro design system —
+// não muda a experiência de quem já usa o app hoje.
+export type ThemeMode = "light" | "dark" | "system";
+
 interface Store extends AuthState {
   orders: OrderSummary[];
   turboMode: boolean;
   lastActivity: number;
+  themeMode: ThemeMode;
 
   login: (access: string, refresh: string) => void;
   logout: () => void;
@@ -20,6 +26,7 @@ interface Store extends AuthState {
   updateOrderProgress: (ref: string, collected: number, total: number) => void;
   toggleTurbo: () => void;
   touch: () => void;
+  setThemeMode: (mode: ThemeMode) => void;
 }
 
 export const useStore = create<Store>()(
@@ -33,6 +40,7 @@ export const useStore = create<Store>()(
       orders: [],
       turboMode: false,
       lastActivity: Date.now(),
+      themeMode: "dark",
 
       login(access, refresh) {
         const p = decodeJwt(access);
@@ -85,6 +93,7 @@ export const useStore = create<Store>()(
 
       toggleTurbo() { set((s) => ({ turboMode: !s.turboMode })); },
       touch() { set({ lastActivity: Date.now() }); },
+      setThemeMode(mode) { set({ themeMode: mode }); },
     }),
     {
       name: "ordin-balcao-auth",
@@ -95,6 +104,7 @@ export const useStore = create<Store>()(
         role: s.role,
         userName: s.userName,
         turboMode: s.turboMode,
+        themeMode: s.themeMode,
       }),
     }
   )

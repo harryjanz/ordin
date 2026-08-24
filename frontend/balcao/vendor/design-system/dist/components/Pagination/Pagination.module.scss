@@ -1,0 +1,69 @@
+@import '../../core/scss/styles.scss';
+
+.ds-pagination__wrapper {
+  display: block;
+  width: 100%;
+}
+
+.ds-pagination__List {
+  display: flex;
+  align-items: center;
+  padding: 0px;
+  border: none;
+  margin: 0px;
+}
+
+.ds-pagination__page-item {
+  box-sizing: border-box;
+  display: inline-block;
+  margin: 0px;
+
+  & > button {
+    @include font('base-emphasys');
+    @include color('color', 'dark');
+    height: spacing('xxl-2');
+    width: spacing('xxl-2');
+    text-align: center;
+    cursor: pointer;
+    border: none;
+    background-color: transparent;
+    padding: 0px;
+    border-bottom: 2px solid color('white');
+
+    & > i {
+      @include color('color', 'brand-primary');
+    }
+  }
+
+  &--active {
+    & > button {
+      @include color('color', 'brand-primary');
+      @include border(2, solid, 'brand-primary');
+      border-top: none !important;
+      border-left: none !important;
+      border-right: none !important;
+      transition: 200ms ease-in-out;
+    }
+  }
+
+  &--ellipsis {
+    & > button {
+      pointer-events: none !important;
+    }
+  }
+
+  &:not(.ds-pagination__page-item--ellipsis):hover {
+    & > button {
+      @include color('color', 'brand-primary');
+      transition: 200ms ease-in-out;
+    }
+  }
+}
+
+@media screen and (max-width: 576px) {
+  .ds-pagination__page-item {
+    & > button {
+      width: spacing('xxl') + spacing('xs');
+    }
+  }
+}

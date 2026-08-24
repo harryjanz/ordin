@@ -1,0 +1,200 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  min-height: 100vh;
+  background: var(--a-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  background: var(--a-surface);
+  border-bottom: 1px solid var(--a-border);
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  // ORD-122 — cabeçalho reduzido a logo + status + menu (Turbo/tema/
+  // usuário/Sair viraram HeaderMenu) — 3 itens sempre cabem numa linha só
+  // em qualquer largura de celular, sem precisar rolar horizontalmente
+  // (rolagem era o fix anterior, ORD-121, agora desnecessário).
+}
+
+.logoRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: color('brand-primary');
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.logo {
+  @include font('base-emphasys');
+  color: color('brand-primary');
+}
+
+.wsChip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wsDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.wsChip_connected {
+  background: color('success-light');
+  color: color('success-base');
+}
+
+.wsChip_connecting {
+  background: color('warning-light');
+  color: color('warning-base');
+}
+
+.wsChip_disconnected {
+  background: color('error-light');
+  color: color('error-base');
+}
+
+.body {
+  flex: 1;
+  padding: 16px 20px;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.feedback {
+  margin-bottom: 16px;
+}
+
+.confirmModal {
+  padding: 8px;
+  text-align: center;
+
+  i {
+    font-size: 36px;
+    color: color('brand-primary');
+    display: block;
+    margin-bottom: 12px;
+  }
+}
+
+.confirmTitle {
+  color: var(--a-text);
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.confirmCode {
+  font-family: monospace;
+  color: color('brand-primary');
+  font-size: 13px;
+  margin-bottom: 24px;
+  word-break: break-all;
+}
+
+.confirmItems {
+  list-style: none;
+  text-align: left;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  padding: 12px 16px;
+  margin-bottom: 24px;
+
+  li {
+    color: var(--a-text);
+    @include font('sm-emphasys');
+    padding: 4px 0;
+  }
+}
+
+.confirmActions {
+  display: flex;
+  gap: 10px;
+}
+
+.scannerBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.scanBtnRow {
+  margin-bottom: 16px;
+}
+
+// Mesmo padrão do admin (CompanyListScreen .filterBar) — campo de busca
+// dentro de um card com superfície própria, não solto no fundo da página.
+.search {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  @include padding('m', 'l', 'm', 'l');
+  margin-bottom: 16px;
+}
+
+.empty {
+  color: rgba(var(--a-text-rgb), 0.4);
+  @include font('sm');
+  text-align: center;
+  padding: 32px;
+}
+
+.card {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  &:hover {
+    border-color: color('brand-primary');
+  }
+}
+
+.cardUrgent {
+  border-color: rgba(color('error-base'), 0.4);
+}
+
+.ref {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--a-text);
+}
+
+.meta {
+  font-size: 12px;
+  color: rgba(var(--a-text-rgb), 0.45);
+  margin-top: 3px;
+}
+
+.progress {
+  font-size: 13px;
+  color: color('success-base');
+  font-weight: 600;
+  margin-left: auto;
+  flex-shrink: 0;
+}

@@ -1,0 +1,84 @@
+@import 'design-system/dist/core/scss/styles';
+
+.manualFallback {
+  text-align: center;
+  padding: 8px;
+
+  > i {
+    font-size: 32px;
+    color: color('warning-base');
+    display: block;
+    margin-bottom: 8px;
+  }
+}
+
+.manualHint {
+  color: var(--a-text);
+  font-weight: 600;
+  @include font('sm');
+  margin-bottom: 12px;
+}
+
+.manualSteps {
+  text-align: left;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  padding: 12px 12px 12px 32px;
+  margin-bottom: 16px;
+
+  li {
+    color: rgba(var(--a-text-rgb), 0.6);
+    @include font('xs');
+    margin-bottom: 6px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+}
+
+.manualDivider {
+  color: rgba(var(--a-text-rgb), 0.4);
+  @include font('xs');
+  margin: 16px 0 8px;
+}
+
+.manualField {
+  margin-bottom: 8px;
+}
+
+// Câmera ao vivo — fundo preto e moldura roxa independem do tema (claro ou
+// escuro), a imagem da câmera domina o contraste, não os tokens de UI.
+.frame {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+}
+
+.video {
+  width: 100%;
+  display: block;
+}
+
+.hiddenCanvas {
+  display: none;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.viewfinder {
+  width: 200px;
+  height: 200px;
+  border: 3px solid color('brand-primary');
+  border-radius: 16px;
+  box-shadow: 0 0 0 2000px rgba(0, 0, 0, 0.45);
+}

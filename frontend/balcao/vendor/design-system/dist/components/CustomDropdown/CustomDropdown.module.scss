@@ -1,0 +1,50 @@
+@import '../../core/scss/styles.scss';
+
+.ds-custom-dropdown__wrapper {
+  width: 100%;
+  min-height: spacing('xxl-2');
+  position: relative;
+
+  & > div:first-child {
+    cursor: pointer;
+  }
+
+  div > div > i {
+    transition: 200ms;
+  }
+
+  &--focused:not(.ds-custom-dropdown__wrapper--loading) {
+    & div > div > i {
+      transform: rotate(180deg);
+    }
+  }
+}
+
+.ds-custom-dropdown__content {
+  display: none;
+  position: absolute;
+  width: 100%;
+  max-height: calc(6 * spacing('xxl'));
+  overflow-y: auto;
+  margin: 0;
+  padding: spacing('m');
+  @include color('background-color', 'white');
+  @include border(1, 'solid', 'grey-300');
+  border-top: none;
+  box-sizing: border-box;
+  box-shadow: 0px 8px 16px rgba(100, 100, 100, 0.16);
+  @include rounded('card');
+  z-index: 2;
+
+  &--visible {
+    display: block;
+  }
+
+  &--large {
+    top: spacing('xxl-4');
+  }
+
+  &--medium {
+    top: spacing('xxl-2');
+  }
+}

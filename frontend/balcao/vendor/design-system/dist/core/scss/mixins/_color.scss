@@ -1,0 +1,60 @@
+@use "sass:map";
+
+// ==========================================================
+// color
+// Gets the color according to the token sent for all available themes
+//
+//  Arguments:
+// `$property` String
+// `$token` String
+//
+//  Optional Arguments
+// `$pseudoelement` String
+//
+//
+// Examples of use:
+// .foo { @include color('background-color', 'brand-primary) }
+//
+// @return
+// .foo {
+//    background-color: #9900ff;
+// }
+//
+// .bar { @include color('color', 'brand-primary); }
+//
+// @return
+// .bar {
+//    color: #9900ff;
+// }
+//
+// .zaz { @include color('color', 'brand-primary', '::after'); }
+//
+// @return
+// .zaz {
+//    &::after {
+//      color: #9900ff;
+//    }
+// }
+//
+// ==========================================================
+@mixin color($property, $token, $pseudoelement: null) {
+  @if $pseudoelement != null {
+    &#{$pseudoelement} {
+      #{$property}: map.get($colors, $token);
+    }
+    @each $theme, $color in $color-themes {
+      &.#{$theme} {
+        &#{$pseudoelement} {
+          #{$property}: map.get($color, $token);
+        }
+      }
+    }
+  } @else {
+    #{$property}: map.get($colors, $token);
+    @each $theme, $color in $color-themes {
+      &.#{$theme} {
+        #{$property}: map.get($color, $token);
+      }
+    }
+  }
+}
