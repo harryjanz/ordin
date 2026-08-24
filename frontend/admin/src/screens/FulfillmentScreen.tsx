@@ -2,9 +2,9 @@ import { useState, useEffect, useCallback } from "react";
 import { Alert, Button, Modal, Tag } from "design-system";
 import api from "../api";
 import { useStore } from "../store";
-import { listOrders, listOrderTickets } from "../api/orders";
+import { listOrders, listOrderTickets, getPrepStats } from "../api/orders";
 import { WsManager } from "../ws";
-import type { Order, Ticket, WsEvent } from "../types";
+import type { Order, PrepStats, Ticket, WsEvent } from "../types";
 import styles from "./FulfillmentScreen.module.scss";
 
 function label(o: Order) {
@@ -63,6 +63,7 @@ export default function FulfillmentScreen() {
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
   const [itemsModal, setItemsModal] = useState<{ order: Order; items: ItemSummary[] } | null>(null);
   const [loadingItems, setLoadingItems] = useState(false);
+  const [prepStats, setPrepStats] = useState<PrepStats | null>(null);
 
   // Força re-render periódico só pro "X min" e "URGENTE" avançarem sozinhos
   // na tela — sem isso, só mudam quando algum evento de WS ou ação do
@@ -97,16 +98,29 @@ export default function FulfillmentScreen() {
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
+  // ORD-119 (item 3, análise de concorrentes 2026-08-24) — tempo médio de
+  // preparo/gargalo das últimas 24h. Recarrega quando um pedido novo fica
+  // pronto (é o único evento que muda o cálculo).
+  const loadPrepStats = useCallback(() => {
+    if (!companyId) return;
+    getPrepStats(companyId).then(setPrepStats).catch(() => null);
+  }, [companyId]);
+
+  useEffect(() => { loadPrepStats(); }, [loadPrepStats]);
+
   const handleWsEvent = useCallback((event: WsEvent) => {
     // Mesmo racional do painel público — order.paid não carrega pickup_name
     // no evento, recarrega via REST pra não mostrar dado incompleto.
     if (event.event === "order.paid" || event.event === "order.ready") {
       loadOrders();
     }
+    if (event.event === "order.ready") {
+      loadPrepStats();
+    }
     if (event.event === "order.completed" && event.order_ref) {
       setOrders((prev) => prev.filter((o) => o.order_ref !== event.order_ref));
     }
-  }, [loadOrders]);
+  }, [loadOrders, loadPrepStats]);
 
   useEffect(() => {
     if (!companyId || fulfillmentMode !== "retirada_unica") return;
@@ -204,6 +218,30 @@ export default function FulfillmentScreen() {
         </div>
       </div>
 
+      {prepStats && prepStats.count > 0 && (
+        <div className={styles.statsBar}>
+          <div className={styles.statCard}>
+            <div className={styles.statLabel}>Tempo médio de preparo (24h)</div>
+            <div className={styles.statValue}>{prepStats.avg_prep_minutes} min</div>
+            <div className={styles.statSub}>{prepStats.count} pedido{prepStats.count === 1 ? "" : "s"}</div>
+          </div>
+          {prepStats.by_hour.length > 0 && (
+            <div className={styles.statCard}>
+              <div className={styles.statLabel}>Horário de maior movimento</div>
+              {(() => {
+                const peak = [...prepStats.by_hour].sort((a, b) => b.count - a.count)[0];
+                return (
+                  <>
+                    <div className={styles.statValue}>{String(peak.hour).padStart(2, "0")}h</div>
+                    <div className={styles.statSub}>{peak.count} pedido{peak.count === 1 ? "" : "s"} · média {peak.avg_minutes} min</div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
       {feedback && (
         <div className={styles.feedback}>
           <Alert variant={feedback.ok ? "success" : "error"} text={feedback.msg} fullWidth />
@@ -274,7 +312,7 @@ export default function FulfillmentScreen() {
 
       <Modal
         open={!!itemsModal}
-        width={420}
+        width={560}
         onClose={() => setItemsModal(null)}
         onBackdropClick={() => setItemsModal(null)}
         onCloseButtonClick={() => setItemsModal(null)}
@@ -290,7 +328,10 @@ export default function FulfillmentScreen() {
             ) : (
               <ul className={styles.itemsList}>
                 {itemsModal.items.map((it) => (
-                  <li key={it.name}>{it.qty}x {it.name}</li>
+                  <li key={it.name}>
+                    <span className={styles.itemQty}>{it.qty}x</span>
+                    <span className={styles.itemName}>{it.name}</span>
+                  </li>
                 ))}
               </ul>
             )}

@@ -52,6 +52,43 @@
   color: color('error-base');
 }
 
+// ORD-119 (item 3, análise de concorrentes 2026-08-24) — tempo médio de
+// preparo / horário de pico, mesmo relatório de gargalo documentado por
+// Zig/Cplug na pesquisa de concorrentes.
+.statsBar {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.statCard {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 14px 20px;
+  flex: 1;
+  max-width: 260px;
+}
+
+.statLabel {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.statValue {
+  @include font('xl-emphasys');
+  color: color('brand-primary');
+}
+
+.statSub {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-top: 2px;
+}
+
 .feedback {
   margin-bottom: 16px;
 }
@@ -155,31 +192,47 @@
 }
 
 .itemsModalTitle {
-  @include font('base-emphasys');
+  @include font('xl-emphasys');
   color: var(--a-text);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .itemsModalRef {
   font-family: monospace;
-  font-size: 12px;
+  font-size: 13px;
   color: rgba(var(--a-text-rgb), 0.45);
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
+// Achado ao vivo (2026-08-24): itens pequenos demais pra ler de relance na
+// operação — aumentado bem além do padrão de lista comum do resto do
+// admin, de propósito (tela vista rápido, não lida com calma).
 .itemsList {
   list-style: none;
   padding: 0;
   margin: 0;
 
   li {
-    @include font('sm');
-    color: var(--a-text);
-    padding: 8px 0;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 14px 0;
     border-bottom: 1px solid var(--a-border);
 
     &:last-child {
       border-bottom: none;
     }
   }
+}
+
+.itemQty {
+  @include font('l-emphasys');
+  color: color('brand-primary');
+  flex-shrink: 0;
+  min-width: 40px;
+}
+
+.itemName {
+  @include font('l-emphasys');
+  color: var(--a-text);
 }

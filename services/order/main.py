@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import DeclarativeBase, relationship
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import random, string, secrets, hmac as hmaclib, hashlib
 from config import require_env, get_cors_origins
 from auth import get_current_user, TokenPayload
@@ -60,6 +60,11 @@ class Order(Base):
     # unicidade, ambiguidade aceitável (mesmo comportamento de fast-food
     # físico). Só usado em fulfillment_mode="retirada_unica".
     pickup_name = Column(String(80), nullable=True)
+    # ORD-119 (análise de concorrentes 2026-08-24) — momento em que virou
+    # "ready" (paid→ready), separado de created_at. Sem isso não dá pra
+    # medir tempo de preparo de verdade — só teria o tempo até a coleta
+    # final, que mistura preparo com cliente parado esperando.
+    ready_at    = Column(DateTime, nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, onupdate=datetime.utcnow)
     items       = relationship("OrderItem", back_populates="order", cascade="all, delete")
@@ -192,6 +197,16 @@ class OrderReadyOut(BaseModel):
     ok: bool
     order_ref: str
     status: str
+
+class PrepStatsHourItem(BaseModel):
+    hour: int
+    count: int
+    avg_minutes: float
+
+class PrepStatsOut(BaseModel):
+    count: int
+    avg_prep_minutes: Optional[float] = None
+    by_hour: List[PrepStatsHourItem]
 
 class HealthOut(BaseModel):
     service: str
@@ -509,9 +524,65 @@ async def mark_order_ready(
     if not order: raise HTTPException(404, "Pedido não encontrado")
     if order.status != "paid": raise HTTPException(409, "Pedido não está aguardando preparo")
     order.status = "ready"
+    order.ready_at = datetime.utcnow()
     await db.commit()
     await broadcast_order_ready(current_user.company_id, order_ref, order.pickup_name)
     return {"ok": True, "order_ref": order_ref, "status": "ready"}
+
+@app.get(
+    "/orders/prep-stats",
+    response_model=PrepStatsOut,
+    tags=["Pedidos"],
+    summary="Tempo médio de preparo e relatório de gargalo por hora (ORD-119)",
+)
+async def prep_stats(
+    company_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """
+    Só considera pedidos que já passaram por 'ready' (ready_at preenchido) —
+    modelo retirada_unica. Sem date_from, usa as últimas 24h por padrão
+    (mesma janela já usada como convenção no app de balcão, ORD-122).
+    Agrupa por hora do dia (hora de criação do pedido) pra identificar
+    horário de maior pressão, mesmo relatório documentado pela Zig/Cplug
+    na análise de concorrentes (2026-08-24).
+    Mesmo padrão de escopo de list_orders: superadmin/admin podem filtrar
+    por company_id; qualquer outro role fica restrito à própria empresa.
+    """
+    if current_user.role in ("superadmin", "admin"):
+        filters = [Order.company_id == company_id] if company_id else []
+    else:
+        filters = [Order.company_id == current_user.company_id]
+    filters.append(Order.ready_at.isnot(None))
+    filters.append(Order.created_at >= date_from if date_from else Order.created_at >= datetime.utcnow() - timedelta(hours=24))
+    if date_to:
+        filters.append(Order.created_at <= date_to)
+
+    result = await db.execute(select(Order.created_at, Order.ready_at).where(*filters))
+    rows = result.all()
+
+    if not rows:
+        return {"count": 0, "avg_prep_minutes": None, "by_hour": []}
+
+    by_hour_acc: dict[int, list[float]] = {}
+    all_minutes: list[float] = []
+    for created, ready in rows:
+        minutes = (ready - created).total_seconds() / 60
+        all_minutes.append(minutes)
+        by_hour_acc.setdefault(created.hour, []).append(minutes)
+
+    by_hour = [
+        {"hour": h, "count": len(v), "avg_minutes": round(sum(v) / len(v), 1)}
+        for h, v in sorted(by_hour_acc.items())
+    ]
+    return {
+        "count": len(rows),
+        "avg_prep_minutes": round(sum(all_minutes) / len(all_minutes), 1),
+        "by_hour": by_hour,
+    }
 
 @app.get(
     "/orders",

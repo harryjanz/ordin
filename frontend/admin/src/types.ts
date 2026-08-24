@@ -306,3 +306,17 @@ export interface TrustedDevice {
   last_used_at: string | null;
   expires_at: string;
 }
+
+// ORD-119 (item 3, análise de concorrentes 2026-08-24) — relatório de
+// tempo médio de preparo / gargalo, GET /orders/prep-stats.
+export interface PrepStatsHourItem {
+  hour: number;
+  count: number;
+  avg_minutes: number;
+}
+
+export interface PrepStats {
+  count: number;
+  avg_prep_minutes: number | null;
+  by_hour: PrepStatsHourItem[];
+}

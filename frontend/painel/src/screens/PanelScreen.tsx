@@ -5,6 +5,7 @@ import { OrdinSymbol } from "../assets/OrdinSymbol";
 import api from "../api";
 import { useStore } from "../store";
 import { WsManager } from "../ws";
+import { unlockAudio, chimeReady } from "../components/AudioFeedback";
 import type { WsEvent, OrderSummary } from "../types";
 
 const FONT_D = "'Lexend', sans-serif";
@@ -49,6 +50,21 @@ export default function PanelScreen({ T, companyId, companyName, prepUrgencyMinu
     return () => clearInterval(iv);
   }, []);
 
+  // Item 1 da análise de concorrentes (2026-08-24) — alerta sonoro ao ficar
+  // pronto, achado de mercado só na Mogo. Navegador bloqueia áudio sem
+  // gesto prévio do usuário; numa TV isso pode nunca acontecer sozinho, daí
+  // destravar no primeiro toque/clique que a tela receber (ex: durante a
+  // instalação/teste do dispositivo).
+  useEffect(() => {
+    const unlock = () => unlockAudio();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, []);
+
   const loadOrders = useCallback(() => {
     api.get("/orders", { params: { status: "paid,ready", limit: 100 } })
       .then((r) => setOrders(r.data.orders ?? []))
@@ -67,6 +83,7 @@ export default function PanelScreen({ T, companyId, companyName, prepUrgencyMinu
     }
     if (event.event === "order.ready" && event.order_ref) {
       updateOrderStatus(event.order_ref, "ready");
+      chimeReady();
     }
     if (event.event === "order.completed" && event.order_ref) {
       removeOrder(event.order_ref);
