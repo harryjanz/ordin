@@ -544,9 +544,8 @@ async def prep_stats(
 ):
     """
     Só considera pedidos que já passaram por 'ready' (ready_at preenchido) —
-    modelo retirada_unica. Sem date_from, usa os últimos 7 dias por padrão
-    (pedido direto do usuário, 2026-08-24 — 24h dava amostra pequena
-    demais/instável pra uma média confiável).
+    modelo retirada_unica. Sem date_from, usa as últimas 24h por padrão
+    (mesma janela já usada como convenção no app de balcão, ORD-122).
     Agrupa por hora do dia (hora de criação do pedido) pra identificar
     horário de maior pressão, mesmo relatório documentado pela Zig/Cplug
     na análise de concorrentes (2026-08-24).
@@ -558,7 +557,7 @@ async def prep_stats(
     else:
         filters = [Order.company_id == current_user.company_id]
     filters.append(Order.ready_at.isnot(None))
-    filters.append(Order.created_at >= date_from if date_from else Order.created_at >= datetime.utcnow() - timedelta(days=7))
+    filters.append(Order.created_at >= date_from if date_from else Order.created_at >= datetime.utcnow() - timedelta(hours=24))
     if date_to:
         filters.append(Order.created_at <= date_to)
 

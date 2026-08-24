@@ -99,7 +99,7 @@ export default function FulfillmentScreen() {
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
   // ORD-119 (item 3, análise de concorrentes 2026-08-24) — tempo médio de
-  // preparo/gargalo dos últimos 7 dias. Recarrega quando um pedido novo fica
+  // preparo/gargalo das últimas 24h. Recarrega quando um pedido novo fica
   // pronto (é o único evento que muda o cálculo).
   const loadPrepStats = useCallback(() => {
     if (!companyId) return;
@@ -221,7 +221,7 @@ export default function FulfillmentScreen() {
       {prepStats && prepStats.count > 0 && (
         <div className={styles.statsBar}>
           <div className={styles.statCard}>
-            <div className={styles.statLabel}>Tempo médio de preparo (7 dias)</div>
+            <div className={styles.statLabel}>Tempo médio de preparo (24h)</div>
             <div className={styles.statValue}>{prepStats.avg_prep_minutes} min</div>
             <div className={styles.statSub}>{prepStats.count} pedido{prepStats.count === 1 ? "" : "s"}</div>
           </div>
