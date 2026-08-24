@@ -149,12 +149,12 @@ export default function CatalogScreen({
           display: "flex",
           flexDirection: "column",
           gap: 8,
-          padding: "20px 16px",
+          padding: "20px 12px",
           overflowY: "auto",
           borderRight: `1px solid ${T.borderNeutral}`,
           background: T.header,
           flexShrink: 0,
-          width: 240,
+          width: 190,
         } : {
           display: "flex",
           gap: 12,
@@ -169,14 +169,16 @@ export default function CatalogScreen({
           {categoriesContent}
         </div>
 
-        {/* Zona 3 — Grade de produtos (3 colunas no modo horizontal, 2 no
-            vertical — menos espaço com a coluna de categorias ao lado) */}
+        {/* Zona 3 — Grade de produtos, sempre 3 colunas (vertical ou
+            horizontal) — telas de totem são grandes (21-27"), 2 colunas no
+            modo vertical desperdiçava espaço mesmo com a coluna de
+            categorias ao lado. */}
         <div style={{
           flex: 1,
           padding: "24px 28px",
           paddingBottom: 136,
           display: "grid",
-          gridTemplateColumns: isVertical ? "repeat(2, 1fr)" : "repeat(3, 1fr)",
+          gridTemplateColumns: "repeat(3, 1fr)",
           gap: 20,
           alignContent: "start",
           overflowY: "auto",
@@ -208,34 +210,69 @@ export default function CatalogScreen({
                 onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = T.glow; }}
                 onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = T.cardShadow; }}
               >
-                {/* Imagem — 60% da altura do card */}
-                {p.image_url ? (
-                  <img src={p.image_url} alt={p.name} style={{ width: "100%", height: 180, objectFit: "cover" }} />
-                ) : (
-                  <div style={{
-                    width: "100%",
-                    height: 180,
-                    background: gradient,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: FONT.headlineLg,
-                  }}>
-                    🍽️
-                  </div>
-                )}
+                {/* Imagem — 60% da altura do card. Tags (no máx. 2) viram
+                    badges sobrepostos no rodapé da imagem, com gradiente
+                    escuro embaixo pra garantir contraste em foto clara —
+                    economiza a linha extra que ocupavam no bloco de texto. */}
+                <div style={{ position: "relative", width: "100%", height: 180, flexShrink: 0 }}>
+                  {p.image_url ? (
+                    <img src={p.image_url} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  ) : (
+                    <div style={{
+                      width: "100%",
+                      height: "100%",
+                      background: gradient,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: FONT.headlineLg,
+                    }}>
+                      🍽️
+                    </div>
+                  )}
+                  {p.tags && p.tags.length > 0 && (
+                    <div style={{
+                      position: "absolute", left: 0, right: 0, bottom: 0,
+                      display: "flex", flexWrap: "wrap", gap: 4,
+                      padding: "20px 10px 8px",
+                      background: "linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0))",
+                    }}>
+                      {p.tags.slice(0, 2).map((tag) => (
+                        <span
+                          key={tag}
+                          style={{
+                            fontFamily: FONT_B,
+                            fontSize: FONT.caption,
+                            fontWeight: 700,
+                            color: "#fff",
+                            background: T.roxo,
+                            borderRadius: RADIUS.pill,
+                            padding: "2px 8px",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.3px",
+                          }}
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-                {/* Info do produto */}
-                <div style={{ padding: "16px 16px 0", display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: FONT.bodyLg, lineHeight: 1.2 }}>
+                {/* Info do produto — flex:1 empurra o bloco de quantidade
+                    (abaixo) sempre pro rodapé do card, alinhado entre os
+                    cards da mesma linha mesmo quando a descrição varia de
+                    tamanho. */}
+                <div style={{ flex: 1, padding: "16px 16px 0", display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: FONT.body, lineHeight: 1.2 }}>
                     {p.name}
                   </div>
                   {p.description && (
-                    <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body, lineHeight: 1.4 }}>
+                    <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, lineHeight: 1.4 }}>
                       {p.description}
                     </div>
                   )}
-                  <div style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.subtitle, marginTop: 4 }}>
+                  <div style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.bodyLg, marginTop: 4 }}>
                     {fmt(p.price)}
                   </div>
                 </div>
@@ -286,7 +323,7 @@ export default function CatalogScreen({
                   ) : (
                     /* Botão "+" circular */
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontFamily: FONT_B, fontSize: FONT.body, color: T.muted }}>Toque para adicionar</span>
+                      <span style={{ fontFamily: FONT_B, fontSize: FONT.label, color: T.muted }}>Toque para adicionar</span>
                       <button
                         onClick={() => onAdd(p)}
                         style={{
