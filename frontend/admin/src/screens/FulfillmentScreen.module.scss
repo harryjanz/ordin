@@ -1,0 +1,109 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  padding: 32px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.title {
+  @include font('xl-emphasys');
+  color: var(--a-text);
+  margin: 0;
+}
+
+.wsChip {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wsDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.wsChip_connected {
+  background: color('success-light');
+  color: color('success-base');
+}
+
+.wsChip_connecting {
+  background: color('warning-light');
+  color: color('warning-base');
+}
+
+.wsChip_disconnected {
+  background: color('error-light');
+  color: color('error-base');
+}
+
+.feedback {
+  margin-bottom: 16px;
+}
+
+.empty {
+  color: rgba(var(--a-text-rgb), 0.45);
+  @include font('sm');
+  text-align: center;
+  padding: 48px 24px;
+  max-width: 480px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.column {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 20px;
+}
+
+.columnTitle {
+  @include font('base-emphasys');
+  color: var(--a-text);
+  margin-bottom: 16px;
+}
+
+.emptyCol {
+  color: rgba(var(--a-text-rgb), 0.4);
+  @include font('sm');
+  text-align: center;
+  padding: 24px 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+.cardLabel {
+  @include font('sm-emphasys');
+  color: var(--a-text);
+}

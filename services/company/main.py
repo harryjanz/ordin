@@ -2977,6 +2977,57 @@ async def approve_device(
     return {"ok": True}
 
 
+class PanelApproveIn(BaseModel):
+    code: str
+
+
+@app.post(
+    "/companies/{company_id}/panels/approve",
+    tags=["Terminais"],
+    summary="Aprovar pareamento de painel de retirada por código (ORD-119)",
+)
+async def approve_panel(
+    company_id: int,
+    body: PanelApproveIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """
+    Mesmo mecanismo de código do pareamento de totem (approve_device acima),
+    reaproveitando o /auth/device/challenge e /auth/device/status genéricos —
+    só sem terminal (o painel não é um ponto de venda). O campo "kind":"panel"
+    no payload do Redis é o que diferencia os dois fluxos pro auth-service na
+    hora de emitir o JWT (role "painel" em vez de "kiosk", sem claim de
+    terminal).
+    """
+    if current_user.role != "superadmin" and current_user.company_id != company_id:
+        raise HTTPException(403, "Acesso negado")
+
+    key = f"device_challenge:{body.code.upper()}"
+    raw = redis_client.get(key)
+    if not raw:
+        raise HTTPException(404, "Código inválido ou expirado")
+    data = json.loads(raw)
+    if data["status"] != "pending":
+        raise HTTPException(422, "Código já utilizado")
+
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    redis_client.set(key, json.dumps({
+        "status": "approved",
+        "kind": "panel",
+        "company":  {"id": co.id, "name": co.name, "plan": co.plan or "free",
+                     "visual_theme": co.visual_theme, "visual_mode": co.visual_mode,
+                     "consumption_mode_enabled": co.consumption_mode_enabled,
+                     "catalog_menu_layout": co.catalog_menu_layout,
+                     "fulfillment_mode": co.fulfillment_mode},
+    }), ex=60)
+
+    return {"ok": True}
+
+
 # ── Health ────────────────────────────────────────────────────────────────────
 
 @app.get("/health", response_model=HealthOut, tags=["Empresas"], summary="Healthcheck")

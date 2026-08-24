@@ -20,6 +20,9 @@ export default function PairScreen() {
     api.get(`/companies/${companyId}`).then((r) => setCompanyName(r.data.name ?? null)).catch(() => null);
   }, [isPlatformAdmin, companyId]);
 
+  // ORD-119 — mesma tela de pareamento ganha um segundo modo, sem
+  // terminal, pro painel de retirada (novo frontend, "TV do salão").
+  const [mode,      setMode]      = useState<"totem" | "painel">("totem");
   const [code,      setCode]      = useState(() => searchParams.get("code") ?? "");
   const [terminal,  setTerminal]  = useState("");
   const [terminals, setTerminals] = useState<{ id: number; label: string }[]>([]);
@@ -43,15 +46,22 @@ export default function PairScreen() {
   }, [companyId]);
 
   async function approve() {
-    if (!companyId || !code.trim() || !terminal) return;
+    if (!companyId || !code.trim() || (mode === "totem" && !terminal)) return;
     setLoading(true);
     setMsg(null);
     try {
-      await api.post(`/companies/${companyId}/devices/approve`, {
-        code: code.trim().toUpperCase(),
-        terminal_id: Number(terminal),
-      });
-      setMsg({ ok: true, text: "Totem pareado com sucesso!" });
+      if (mode === "totem") {
+        await api.post(`/companies/${companyId}/devices/approve`, {
+          code: code.trim().toUpperCase(),
+          terminal_id: Number(terminal),
+        });
+        setMsg({ ok: true, text: "Totem pareado com sucesso!" });
+      } else {
+        await api.post(`/companies/${companyId}/panels/approve`, {
+          code: code.trim().toUpperCase(),
+        });
+        setMsg({ ok: true, text: "Painel pareado com sucesso!" });
+      }
       setCode("");
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -62,7 +72,7 @@ export default function PairScreen() {
     }
   }
 
-  const canApprove = !!code.trim() && !!terminal && !!companyId && !loading;
+  const canApprove = !!code.trim() && !!companyId && !loading && (mode === "painel" || !!terminal);
 
   const terminalOptions: DropdownOptions[] = terminals.map((t) => ({ value: String(t.id), label: t.label }));
 
@@ -83,14 +93,34 @@ export default function PairScreen() {
         <div className={styles.header}>
           <div className={styles.headerRow}>
             <span className={styles.headerIcon}>⊞</span>
-            <h1 className={styles.headerTitle}>Parear totem</h1>
+            <h1 className={styles.headerTitle}>{mode === "totem" ? "Parear totem" : "Parear painel"}</h1>
           </div>
           {isPlatformAdmin && companyName && (
             <p className={styles.headerCompany}>{companyName}</p>
           )}
           <p className={styles.headerSub}>
-            Digite o código exibido no totem ou escaneie o QR com a câmera do celular para autenticar o dispositivo.
+            {mode === "totem"
+              ? "Digite o código exibido no totem ou escaneie o QR com a câmera do celular para autenticar o dispositivo."
+              : "Digite o código exibido no painel de retirada (TV do salão) ou escaneie o QR para autenticar o dispositivo."}
           </p>
+        </div>
+
+        {/* Modo: totem ou painel */}
+        <div className={styles.modeRow}>
+          <Button
+            size="small"
+            variant={mode === "totem" ? "primary" : "secondary"}
+            onClick={() => { setMode("totem"); setMsg(null); }}
+          >
+            Totem
+          </Button>
+          <Button
+            size="small"
+            variant={mode === "painel" ? "primary" : "secondary"}
+            onClick={() => { setMode("painel"); setMsg(null); }}
+          >
+            Painel de retirada
+          </Button>
         </div>
 
         {/* Campo de código */}
@@ -107,16 +137,21 @@ export default function PairScreen() {
           inputMode="text"
         />
 
-        {/* Select de terminal */}
-        <label className={styles.fieldLabel}>Terminal</label>
-        <div className={styles.terminalField}>
-          <Dropdown
-            value={terminalOptions.find((o) => o.value === terminal) ?? null}
-            onValueSelected={(opt) => setTerminal(opt.value)}
-            options={terminalOptions}
-            placeholder={terminals.length === 0 ? "Nenhum terminal encontrado" : undefined}
-          />
-        </div>
+        {/* Select de terminal — só faz sentido pareando totem; painel não é
+            um ponto de venda. */}
+        {mode === "totem" && (
+          <>
+            <label className={styles.fieldLabel}>Terminal</label>
+            <div className={styles.terminalField}>
+              <Dropdown
+                value={terminalOptions.find((o) => o.value === terminal) ?? null}
+                onValueSelected={(opt) => setTerminal(opt.value)}
+                options={terminalOptions}
+                placeholder={terminals.length === 0 ? "Nenhum terminal encontrado" : undefined}
+              />
+            </div>
+          </>
+        )}
 
         {/* Botão de aprovar */}
         <Button
@@ -125,7 +160,7 @@ export default function PairScreen() {
           disabled={!canApprove}
           loading={loading}
         >
-          Aprovar pareamento
+          {mode === "totem" ? "Aprovar pareamento" : "Aprovar painel"}
         </Button>
 
         {/* Feedback */}

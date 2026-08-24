@@ -178,6 +178,7 @@ export interface Order {
   company_id: number;
   terminal_id: number;
   cpf: string | null;
+  pickup_name?: string | null;
   created_at: string;
   tickets_total: number;
   tickets_collected: number;
@@ -191,6 +192,16 @@ export interface OrderStatusSummaryItem {
 // Sempre com os 4 status reais (pending/paid/completed/cancelled)
 // presentes, mesmo zerados — ver ORD-081, mesmo padrão do PaymentStatusSummary.
 export type OrderStatusSummary = Record<string, OrderStatusSummaryItem>;
+
+// ORD-119 — primeiro consumidor de WebSocket no admin (FulfillmentScreen),
+// mesmo formato de evento já usado no app de balcão.
+export interface WsEvent {
+  event: string;
+  order_ref?: string;
+  pickup_name?: string | null;
+  total?: number;
+  terminal_id?: number;
+}
 
 export interface Ticket {
   ticket_code: string;

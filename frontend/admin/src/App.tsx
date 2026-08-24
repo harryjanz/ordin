@@ -19,6 +19,7 @@ import NewCompanyScreen from "./screens/NewCompanyScreen";
 import CompanyContractScreen from "./screens/CompanyContractScreen";
 import CompanyListScreen from "./screens/CompanyListScreen";
 import PlatformUsersScreen from "./screens/PlatformUsersScreen";
+import FulfillmentScreen from "./screens/FulfillmentScreen";
 
 const ROLE_ROUTES: Record<string, string[]> = {
   // "/company" liberado pra superadmin/admin — precisam acessar Usuários/
@@ -26,14 +27,17 @@ const ROLE_ROUTES: Record<string, string[]> = {
   // de seleção de empresa já usado em /settings (ORD-082). "/platform-users"
   // (ORD-093) é o CRUD separado pra usuários da própria Ordin — não confundir
   // com "/company", que é sobre a equipe de uma empresa cliente.
-  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users"],
-  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users"],
-  owner:      ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
-  manager:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings"],
+  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment"],
+  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment"],
+  owner:      ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings", "/fulfillment"],
+  manager:    ["/dashboard", "/catalog", "/orders", "/payments", "/company", "/pair", "/settings", "/fulfillment"],
   // ORD-088: cashier ganha acesso a /settings só pra seção "Minha segurança"
   // (2FA pessoal) — SettingsScreen esconde PIN/Aparência/política de MFA
   // pra quem não é owner/manager/superadmin/admin (ver canManageCompany).
-  cashier:  ["/dashboard", "/settings"],
+  // ORD-119: cashier ganha /fulfillment também — é a primeira tela de
+  // pedidos que o cashier passa a acessar no admin, faz sentido porque já é
+  // quem opera a coleta hoje via balcão.
+  cashier:  ["/dashboard", "/settings", "/fulfillment"],
 };
 
 function ProtectedRoute({ path, element }: { path: string; element: JSX.Element }) {
@@ -108,6 +112,7 @@ export default function App() {
             <Route path="/dashboard" element={<ProtectedRoute path="/dashboard" element={<DashboardScreen />} />} />
             <Route path="/catalog"   element={<ProtectedRoute path="/catalog"   element={<CatalogScreen />} />} />
             <Route path="/orders"    element={<ProtectedRoute path="/orders"    element={<OrdersScreen />} />} />
+            <Route path="/fulfillment" element={<ProtectedRoute path="/fulfillment" element={<FulfillmentScreen />} />} />
             <Route path="/payments"  element={<ProtectedRoute path="/payments"  element={<PaymentsScreen />} />} />
             <Route path="/company"   element={<ProtectedRoute path="/company"   element={<CompanyScreen />} />} />
             <Route path="/settings"  element={<ProtectedRoute path="/settings"  element={<SettingsScreen />} />} />

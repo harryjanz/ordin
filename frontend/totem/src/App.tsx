@@ -10,6 +10,7 @@ import WelcomeScreen from "./screens/WelcomeScreen";
 import CatalogScreen from "./screens/CatalogScreen";
 import ConsumptionTypeScreen from "./screens/ConsumptionTypeScreen";
 import CpfScreen from "./screens/CpfScreen";
+import PickupNameScreen from "./screens/PickupNameScreen";
 import PaymentScreen from "./screens/PaymentScreen";
 import PIXPaymentScreen from "./screens/PIXPaymentScreen";
 import SuccessScreen from "./screens/SuccessScreen";
@@ -60,6 +61,10 @@ export default function App() {
 
   const savedTerminalId = getStoredTerminalId();
   const [orderRef, setOrderRef] = useState<string | null>(null);
+  // ORD-119 — mesmo motivo do consumptionTypeOverride acima: guarda o tipo
+  // escolhido antes de passar pela tela de nome de retirada, pra não perder
+  // o valor entre a navegação e a chamada de handleCpfDone.
+  const [pendingConsumptionType, setPendingConsumptionType] = useState<ConsumptionType | null>(null);
   const [pixData, setPixData] = useState<{
     transactionId: number; qrCodeBase64: string;
   } | null>(null);
@@ -111,7 +116,7 @@ export default function App() {
   // ConsumptionTypeScreen, o store ainda não re-renderizou com o valor recém
   // selecionado (setConsumptionType é assíncrono) — sem o override, o pedido
   // sairia com o consumption_type da renderização anterior (null).
-  async function handleCpfDone(c: string | null, consumptionTypeOverride?: ConsumptionType | null) {
+  async function handleCpfDone(c: string | null, consumptionTypeOverride?: ConsumptionType | null, pickupName?: string | null) {
     setCpf(c);
     try {
       const res = await api.post("/orders", {
@@ -119,6 +124,7 @@ export default function App() {
         discount: 0,
         cpf: c || null,
         consumption_type: consumptionTypeOverride !== undefined ? consumptionTypeOverride : consumptionType,
+        pickup_name: pickupName || null,
       });
       setOrderRef(res.data.order_ref);
       setScreen("payment");
@@ -245,7 +251,11 @@ export default function App() {
           cart={cart}
           onAdd={(p: Product) => addToCart({ ...p, qty: 1 })}
           onRemove={removeFromCart}
-          onCheckout={() => company?.consumption_mode_enabled ? setScreen("consumption") : handleCpfDone(null)}
+          onCheckout={() => {
+            if (company?.consumption_mode_enabled) setScreen("consumption");
+            else if (company?.fulfillment_mode === "retirada_unica") setScreen("pickup");
+            else handleCpfDone(null);
+          }}
           onHome={goIdle}
         />
       )}
@@ -253,8 +263,26 @@ export default function App() {
       {screen === "consumption" && (
         <ConsumptionTypeScreen
           T={T}
-          onSelect={(type) => { setConsumptionType(type); handleCpfDone(null, type); }}
+          onSelect={(type) => {
+            setConsumptionType(type);
+            if (company?.fulfillment_mode === "retirada_unica") {
+              setPendingConsumptionType(type);
+              setScreen("pickup");
+            } else {
+              handleCpfDone(null, type);
+            }
+          }}
           onBack={() => setScreen("catalog")}
+        />
+      )}
+
+      {/* ORD-119 — só no modelo de retirada única; nome opcional pra
+          identificar o pedido no painel de retirada. */}
+      {screen === "pickup" && (
+        <PickupNameScreen
+          T={T}
+          onNext={(name) => handleCpfDone(null, pendingConsumptionType ?? undefined, name)}
+          onBack={() => setScreen(company?.consumption_mode_enabled ? "consumption" : "catalog")}
         />
       )}
 
