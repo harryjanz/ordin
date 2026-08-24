@@ -38,6 +38,8 @@ export interface Product {
   description: string | null;
   price: number;
   image_url: string | null;
+  // ORD-075 — lista livre (sem enum fixo), ex: "vegano", "picante", "mais vendido".
+  tags?: string[] | null;
 }
 
 export interface CartItem extends Product {
