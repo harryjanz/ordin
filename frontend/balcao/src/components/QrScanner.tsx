@@ -25,6 +25,18 @@ export default function QrScanner({ onScan, active }: Props) {
     let cancelled = false;
     let permissionStatus: PermissionStatus | null = null;
 
+    // Achado ao vivo (ORD-122): no celular, acessando por IP da rede local
+    // (não https/localhost), o Chrome nem chega a perguntar permissão —
+    // getUserMedia (às vezes nem window.navigator.mediaDevices) simplesmente
+    // não existe em contexto inseguro. Isso é regra do navegador, não dá pra
+    // contornar no código do app — mas dá pra detectar e explicar direito em
+    // vez de cair num erro genérico/errado.
+    if (!window.isSecureContext) {
+      setCameraErrorDetail("InsecureContext");
+      setCameraError(true);
+      return;
+    }
+
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -110,7 +122,16 @@ export default function QrScanner({ onScan, active }: Props) {
     };
   }, [active, retryKey]);
 
-  const ERROR_HINT: Record<string, { text: string; steps?: string[] }> = {
+  const ERROR_HINT: Record<string, { text: string; steps?: string[]; hideRetry?: boolean }> = {
+    InsecureContext: {
+      text: "Este endereço não é seguro (HTTPS) — o navegador bloqueia o acesso à câmera nesse caso.",
+      steps: [
+        "Câmera só funciona em endereços https:// ou localhost — não em IP da rede local (http://192.168...).",
+        "Peça um link de acesso seguro (ex: túnel ngrok) pra quem está configurando o sistema.",
+        "Ou insira o código do ticket manualmente abaixo, sem precisar da câmera.",
+      ],
+      hideRetry: true,
+    },
     NotAllowedError: {
       text: "Permissão de câmera bloqueada para este site.",
       steps: [
@@ -144,9 +165,11 @@ export default function QrScanner({ onScan, active }: Props) {
             {hint.steps.map((s, i) => <li key={i}>{s}</li>)}
           </ol>
         )}
-        <Button variant="secondary" fullWidth onClick={() => setRetryKey((k) => k + 1)}>
-          Tentar novamente
-        </Button>
+        {!hint?.hideRetry && (
+          <Button variant="secondary" fullWidth onClick={() => setRetryKey((k) => k + 1)}>
+            Tentar novamente
+          </Button>
+        )}
         <div className={styles.manualDivider}>ou insira o código manualmente</div>
         <form onSubmit={(e) => { e.preventDefault(); if (manualValue.trim()) { onScan(manualValue.trim()); setManualValue(""); } }}>
           <div className={styles.manualField}>
