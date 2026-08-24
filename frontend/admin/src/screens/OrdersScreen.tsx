@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { Button, DateInput, Dropdown, InputBase, Pagination, Skeleton, Tag, type DropdownOptions, type TagProps } from "design-system";
 import { listOrders, listOrderTickets } from "../api/orders";
-import { listCompanies, listTerminals } from "../api/companies";
+import { listCompanies, listTerminals, listUsers } from "../api/companies";
 import { useStore } from "../store";
 import Table, { type TableColumn } from "../components/Table";
-import type { Company, Order, OrderStatusSummary, Terminal, Ticket } from "../types";
+import type { Company, Order, OrderStatusSummary, Terminal, Ticket, User } from "../types";
 import styles from "./OrdersScreen.module.scss";
 
 const STATUS_VARIANT: Record<string, TagProps["variant"]> = {
@@ -113,6 +113,10 @@ export default function OrdersScreen() {
   const fetchingCompanies = useRef<Set<number>>(new Set());
   const [ticketsByOrder, setTicketsByOrder] = useState<Record<string, Ticket[]>>({});
   const fetchingTickets = useRef<Set<string>>(new Set());
+  // Resolve Ticket.collected_by (id de usuário) pro nome real, em vez do id
+  // puro — mesmo racional de terminalsByCompany acima.
+  const [usersByCompany, setUsersByCompany] = useState<Record<number, User[]>>({});
+  const fetchingUsers = useRef<Set<number>>(new Set());
 
   // Referência/CPF são texto livre — debounce pra não disparar uma
   // requisição por tecla, mesmo padrão do CompanyListScreen (única outra
@@ -211,6 +215,13 @@ export default function OrdersScreen() {
         .catch(() => null)
         .finally(() => fetchingCompanies.current.delete(o.company_id));
     }
+    if (!usersByCompany[o.company_id] && !fetchingUsers.current.has(o.company_id)) {
+      fetchingUsers.current.add(o.company_id);
+      listUsers(o.company_id)
+        .then((users) => setUsersByCompany((prev) => ({ ...prev, [o.company_id]: users })))
+        .catch(() => null)
+        .finally(() => fetchingUsers.current.delete(o.company_id));
+    }
     if (!ticketsByOrder[o.order_ref] && !fetchingTickets.current.has(o.order_ref)) {
       fetchingTickets.current.add(o.order_ref);
       listOrderTickets(o.order_ref)
@@ -223,6 +234,16 @@ export default function OrdersScreen() {
   function terminalLabel(o: Order): string {
     const terminal = terminalsByCompany[o.company_id]?.find((term) => term.id === o.terminal_id);
     return terminal?.label ?? `Terminal ${o.terminal_id}`;
+  }
+
+  // collected_by guarda o id do usuário que autenticou a coleta (ORD-123);
+  // antes disso era string livre, então dado antigo pode não ser numérico
+  // (ex.: "balcao") — nesse caso mostra como veio, sem tentar resolver.
+  function collectedByLabel(collectedBy: string | null, companyId: number): string {
+    if (!collectedBy) return "—";
+    if (!/^\d+$/.test(collectedBy)) return collectedBy;
+    const user = usersByCompany[companyId]?.find((u) => u.id === Number(collectedBy));
+    return user?.name ?? `Usuário #${collectedBy}`;
   }
 
   const hasFilter = Boolean(companyId || orderRef || cpf || dateFrom || dateTo || hourFrom || hourTo || status);
@@ -405,7 +426,7 @@ export default function OrdersScreen() {
                                 <td className={styles.ticketTd}>
                                   <Tag variant={t.status === "collected" ? "success" : "neutral"}>{t.status}</Tag>
                                 </td>
-                                <td className={styles.ticketTd}>{t.collected_by ?? "—"}</td>
+                                <td className={styles.ticketTd}>{collectedByLabel(t.collected_by, o.company_id)}</td>
                                 <td className={styles.ticketTd}>
                                   {t.collected_at ? new Date(t.collected_at).toLocaleString("pt-BR") : "—"}
                                 </td>

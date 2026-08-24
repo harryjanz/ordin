@@ -1,5 +1,5 @@
 import api from "../api";
-import type { CepLookupResult, CnpjLookupResult, Company, CompanyStatusSummary, Contact, ContactType, LegalRepresentative, Terminal } from "../types";
+import type { CepLookupResult, CnpjLookupResult, Company, CompanyStatusSummary, Contact, ContactType, LegalRepresentative, Terminal, User } from "../types";
 import { normalizeCnpj } from "../lib/validators";
 
 export async function lookupCnpj(cnpj: string): Promise<CnpjLookupResult> {
@@ -20,6 +20,16 @@ export async function listTerminals(companyId: number): Promise<Terminal[]> {
     params: { limit: 200 },
   });
   return r.data.terminals;
+}
+
+// Mesmo racional do listTerminals acima — usado pra resolver "coletado por"
+// (Order/Ticket.collected_by, um id de usuário) pro nome real na tela de
+// Pedidos, em vez do id puro.
+export async function listUsers(companyId: number): Promise<User[]> {
+  const r = await api.get<{ users: User[]; total: number }>(`/companies/${companyId}/users`, {
+    params: { limit: 200, status: "all" },
+  });
+  return r.data.users;
 }
 
 export type ContractStatusFilter = "pendente" | "enviado" | "assinado" | "";
