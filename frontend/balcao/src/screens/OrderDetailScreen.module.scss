@@ -58,6 +58,22 @@
   word-break: break-all;
 }
 
+.confirmItems {
+  list-style: none;
+  text-align: left;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  padding: 12px 16px;
+  margin-bottom: 24px;
+
+  li {
+    color: var(--a-text);
+    @include font('sm-emphasys');
+    padding: 4px 0;
+  }
+}
+
 .confirmActions {
   display: flex;
   gap: 10px;
@@ -99,18 +115,16 @@
 }
 
 .code {
-  font-family: monospace;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--a-text);
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
 
   i {
-    font-size: 16px;
+    font-size: 18px;
     color: rgba(var(--a-text-rgb), 0.4);
+    flex-shrink: 0;
   }
 }
 
@@ -118,7 +132,15 @@
   color: color('success-base');
 }
 
-.units {
+.itemName {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--a-text);
+}
+
+.itemMeta {
+  font-family: monospace;
+  font-size: 11px;
   color: rgba(var(--a-text-rgb), 0.4);
-  font-size: 12px;
+  margin-top: 2px;
 }

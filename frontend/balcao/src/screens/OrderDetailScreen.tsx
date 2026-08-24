@@ -5,6 +5,7 @@ import QrScanner from "../components/QrScanner";
 import ScanButton from "../components/ScanButton";
 import { beepSuccess, beepError } from "../components/AudioFeedback";
 import { collectByQr } from "../lib/collect";
+import { summarizeItems } from "../lib/orderItems";
 import type { Ticket } from "../types";
 import styles from "./OrderDetailScreen.module.scss";
 
@@ -83,6 +84,8 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
 
   const collected = tickets.filter((t) => t.status === "collected").length;
   const pendingIsOrderQr = pendingTicket?.startsWith("ORDER|") ?? false;
+  const pendingItemName = pendingTicket && !pendingIsOrderQr ? pendingTicket.split("|")[1] : null;
+  const pendingOrderItems = pendingIsOrderQr ? summarizeItems(tickets) : [];
 
   return (
     <div className={styles.container}>
@@ -104,9 +107,15 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
           <div className={styles.confirmTitle}>
             {pendingIsOrderQr ? "Confirmar coleta do pedido?" : "Confirmar coleta?"}
           </div>
-          <div className={styles.confirmCode}>
-            {pendingTicket?.split("|")[pendingIsOrderQr ? 1 : 0]}
-          </div>
+          {pendingIsOrderQr ? (
+            <ul className={styles.confirmItems}>
+              {pendingOrderItems.map((it) => (
+                <li key={it.name}>{it.qty}x {it.name}</li>
+              ))}
+            </ul>
+          ) : (
+            <div className={styles.confirmCode}>{pendingItemName}</div>
+          )}
           <div className={styles.confirmActions}>
             <Button variant="secondary" fullWidth onClick={() => setPendingTicket(null)}>Cancelar</Button>
             <Button fullWidth onClick={() => pendingTicket && collectTicket(pendingTicket)}>Confirmar</Button>
@@ -131,18 +140,23 @@ export default function OrderDetailScreen({ orderRef, turboMode, onBack, onAllCo
 
       {loading ? (
         <div className={styles.empty}>Carregando tickets…</div>
-      ) : tickets.map((t) => (
-        <div key={t.ticket_code} className={`${styles.ticket} ${t.status === "collected" ? styles.ticketCollected : ""}`}>
-          <div className={styles.code}>
-            <i className={t.status === "collected" ? "icon-check-circle" : "icon-clock"} />
-            {t.ticket_code}
+      ) : tickets.map((t) => {
+        const productName = t.qr_data.split("|")[1] ?? t.ticket_code;
+        return (
+          <div key={t.ticket_code} className={`${styles.ticket} ${t.status === "collected" ? styles.ticketCollected : ""}`}>
+            <div className={styles.code}>
+              <i className={t.status === "collected" ? "icon-check-circle" : "icon-clock"} />
+              <div>
+                <div className={styles.itemName}>{productName}</div>
+                <div className={styles.itemMeta}>{t.ticket_code} · {t.unit_number}/{t.total_units}</div>
+              </div>
+            </div>
+            <Tag variant={t.status === "collected" ? "success" : "neutral"}>
+              {t.status === "collected" ? "coletado" : "pendente"}
+            </Tag>
           </div>
-          <div className={styles.units}>{t.unit_number}/{t.total_units}</div>
-          <Tag variant={t.status === "collected" ? "success" : "neutral"}>
-            {t.status === "collected" ? "coletado" : "pendente"}
-          </Tag>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

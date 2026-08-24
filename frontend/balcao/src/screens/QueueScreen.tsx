@@ -4,14 +4,23 @@ import api from "../api";
 import { useStore } from "../store";
 import { WsManager } from "../ws";
 import OrderDetailScreen from "./OrderDetailScreen";
-import ThemeModeSwitch from "../components/ThemeModeSwitch";
+import HeaderMenu from "../components/HeaderMenu";
 import ScanButton from "../components/ScanButton";
 import QrScanner from "../components/QrScanner";
 import { OrdinSymbol } from "../assets/OrdinSymbol";
 import { beepSuccess, beepError } from "../components/AudioFeedback";
 import { collectByQr } from "../lib/collect";
-import type { OrderSummary, WsEvent } from "../types";
+import { fetchOrderItems, type OrderItemSummary } from "../lib/orderItems";
+import type { WsEvent } from "../types";
 import styles from "./QueueScreen.module.scss";
+
+// ORD-122 — fila carrega só as últimas 24h por padrão (operação de balcão
+// não precisa do histórico inteiro); busca por referência ignora essa
+// janela de propósito, pra achar pedido de qualquer data.
+const QUEUE_WINDOW_MS = 24 * 60 * 60 * 1000;
+function windowStartIso() {
+  return new Date(Date.now() - QUEUE_WINDOW_MS).toISOString();
+}
 
 const URGENCY_THRESHOLD_MS = 10 * 60 * 1000;
 
@@ -33,8 +42,8 @@ const WS_LABEL: Record<string, string> = {
 
 export default function QueueScreen() {
   const {
-    companyId, role, userName, turboMode, orders,
-    setOrders, upsertOrder, removeOrder, updateOrderProgress, toggleTurbo, logout,
+    companyId, turboMode, orders,
+    setOrders, upsertOrder, removeOrder, updateOrderProgress, logout,
   } = useStore();
 
   const [wsStatus, setWsStatus] = useState<"connected" | "connecting" | "disconnected">("connecting");
@@ -48,16 +57,31 @@ export default function QueueScreen() {
   // resolvem sozinhos a partir do próprio QR (ver lib/collect.ts).
   const [scanning, setScanning] = useState(false);
   const [pendingQr, setPendingQr] = useState<string | null>(null);
+  const [pendingOrderItems, setPendingOrderItems] = useState<OrderItemSummary[]>([]);
   const [collecting, setCollecting] = useState(false);
   const [feedback, setFeedback] = useState<{ msg: string; ok: boolean } | null>(null);
 
-  // Carrega fila inicial
-  useEffect(() => {
-    api.get("/orders?status=paid&limit=50")
+  // Sem busca: só as últimas 24h. Com busca: qualquer data, filtrado por
+  // referência no servidor (order_ref já é LIKE %...% no backend).
+  const loadQueue = useCallback((term: string) => {
+    setLoading(true);
+    const params: Record<string, string | number> = { status: "paid", limit: 50 };
+    if (term.trim()) params.order_ref = term.trim();
+    else params.date_from = windowStartIso();
+    api.get("/orders", { params })
       .then((r) => setOrders(r.data.orders ?? []))
       .catch(() => null)
       .finally(() => setLoading(false));
   }, []);
+
+  // Carrega fila inicial
+  useEffect(() => { loadQueue(""); }, []);
+
+  // Busca com debounce — não bate no servidor a cada tecla.
+  useEffect(() => {
+    const t = setTimeout(() => loadQueue(search), 350);
+    return () => clearTimeout(t);
+  }, [search]);
 
   // WebSocket
   useEffect(() => {
@@ -74,9 +98,7 @@ export default function QueueScreen() {
 
   const handleWsEvent = useCallback((event: WsEvent) => {
     if (event.event === "order.paid" && event.order_ref) {
-      api.get(`/orders?status=paid&limit=50`)
-        .then((r) => setOrders(r.data.orders ?? []))
-        .catch(() => null);
+      loadQueue(search);
     }
     if (event.event === "ticket.collected" && event.order_ref && event.progress) {
       const [col, total] = event.progress.split("/").map(Number);
@@ -85,7 +107,16 @@ export default function QueueScreen() {
     if (event.event === "order.completed" && event.order_ref) {
       removeOrder(event.order_ref);
     }
-  }, []);
+  }, [search]);
+
+  // Busca a lista de itens do pedido pra exibir na confirmação de coleta
+  // via QR de pedido inteiro — informação operacional (o que está sendo
+  // entregue), não só a referência.
+  useEffect(() => {
+    if (!pendingQr?.startsWith("ORDER|")) { setPendingOrderItems([]); return; }
+    const orderRef = pendingQr.split("|")[1];
+    fetchOrderItems(orderRef).then(setPendingOrderItems).catch(() => setPendingOrderItems([]));
+  }, [pendingQr]);
 
   async function handleLogout() {
     const { refreshToken } = useStore.getState();
@@ -145,9 +176,10 @@ export default function QueueScreen() {
     }
   }
 
+  // A filtragem por referência já acontece no servidor (loadQueue) — aqui só
+  // ordena o que já veio filtrado/dentro da janela de 24h.
   const filtered = orders
     .filter((o) => o.status === "paid")
-    .filter((o) => !search || o.order_ref.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => {
       const ua = isUrgent(a.created_at) ? 1 : 0;
       const ub = isUrgent(b.created_at) ? 1 : 0;
@@ -177,21 +209,7 @@ export default function QueueScreen() {
           <span className={styles.wsDot} />
           {WS_LABEL[wsStatus]}
         </div>
-        <span className={styles.turboBtnWrap}>
-          <Button
-            size="small"
-            variant={turboMode ? "primary" : "secondary"}
-            onClick={toggleTurbo}
-            title="Coleta sem confirmação"
-          >
-            {`Turbo ${turboMode ? "ON" : "OFF"}`}
-          </Button>
-        </span>
-        <span className={styles.userName}>{userName ?? role}</span>
-        <div className={styles.themeToggle}><ThemeModeSwitch /></div>
-        <span className={styles.logoutBtnWrap}>
-          <Button size="small" variant="secondary" onClick={handleLogout}>Sair</Button>
-        </span>
+        <HeaderMenu onLogout={handleLogout} />
       </div>
 
       <div className={styles.body}>
@@ -207,9 +225,15 @@ export default function QueueScreen() {
             <div className={styles.confirmTitle}>
               {pendingQr?.startsWith("ORDER|") ? "Confirmar coleta do pedido?" : "Confirmar coleta?"}
             </div>
-            <div className={styles.confirmCode}>
-              {pendingQr?.split("|")[pendingQr?.startsWith("ORDER|") ? 1 : 0]}
-            </div>
+            {pendingQr?.startsWith("ORDER|") ? (
+              <ul className={styles.confirmItems}>
+                {pendingOrderItems.map((it) => (
+                  <li key={it.name}>{it.qty}x {it.name}</li>
+                ))}
+              </ul>
+            ) : (
+              <div className={styles.confirmCode}>{pendingQr?.split("|")[1]}</div>
+            )}
             <div className={styles.confirmActions}>
               <Button variant="secondary" fullWidth onClick={() => setPendingQr(null)}>Cancelar</Button>
               <Button fullWidth onClick={() => pendingQr && collectGlobal(pendingQr)}>Confirmar</Button>

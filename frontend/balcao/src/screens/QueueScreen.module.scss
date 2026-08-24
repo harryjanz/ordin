@@ -14,12 +14,10 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  // Balcão roda em dispositivo de contador (às vezes tablet estreito) — em
-  // vez de deixar texto/botão quebrar linha de forma feia (achado ao vivo
-  // pelo usuário), cada item do cabeçalho não encolhe/quebra e, se não
-  // couber tudo, rola horizontalmente.
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  // ORD-122 — cabeçalho reduzido a logo + status + menu (Turbo/tema/
+  // usuário/Sair viraram HeaderMenu) — 3 itens sempre cabem numa linha só
+  // em qualquer largura de celular, sem precisar rolar horizontalmente
+  // (rolagem era o fix anterior, ORD-121, agora desnecessário).
 }
 
 .logoRow {
@@ -56,15 +54,6 @@
   flex-shrink: 0;
 }
 
-// Button do design system não repassa className/style de fora (mesma
-// lacuna já documentada pro admin) — o span em volta garante que o botão
-// não encolha nem quebre texto dentro do header.
-.turboBtnWrap,
-.logoutBtnWrap {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
 .wsChip_connected {
   background: color('success-light');
   color: color('success-base');
@@ -78,20 +67,6 @@
 .wsChip_disconnected {
   background: color('error-light');
   color: color('error-base');
-}
-
-.userName {
-  font-size: 13px;
-  color: rgba(var(--a-text-rgb), 0.4);
-  margin-left: 8px;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.themeToggle {
-  margin-left: auto;
-  width: 110px;
-  flex-shrink: 0;
 }
 
 .body {
@@ -131,6 +106,22 @@
   font-size: 13px;
   margin-bottom: 24px;
   word-break: break-all;
+}
+
+.confirmItems {
+  list-style: none;
+  text-align: left;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  padding: 12px 16px;
+  margin-bottom: 24px;
+
+  li {
+    color: var(--a-text);
+    @include font('sm-emphasys');
+    padding: 4px 0;
+  }
 }
 
 .confirmActions {
