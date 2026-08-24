@@ -23,9 +23,12 @@ function PrepTrendTag({ pct }: { pct: number | null }) {
   );
 }
 
+type DragSource = "preparing" | "ready";
+
 interface DragState {
   ref: string;
   label: string;
+  source: DragSource;
   startX: number;
   startY: number;
   x: number;
@@ -34,6 +37,9 @@ interface DragState {
 }
 
 const DRAG_THRESHOLD = 6;
+// Melhorias de UX 2026-08-24 — quanto tempo um card fica visível na coluna
+// "Coletado" antes de sumir sozinho (pedido direto do usuário).
+const COLLECTED_VISIBLE_MS = 60_000;
 
 function label(o: Order) {
   return o.pickup_name || `#${o.order_ref.slice(-4)}`;
@@ -94,14 +100,31 @@ export default function FulfillmentScreen() {
   const [prepStats, setPrepStats] = useState<PrepStats | null>(null);
 
   // Melhorias de UX 2026-08-24 — arrastar card de "Em preparo" pra "Pronto
-  // para retirada" marca pronto. Pointer Events (não HTML5 Drag and Drop,
-  // que tem suporte ruim a touch) — mesmo evento cobre mouse (laptop) e
-  // toque (tablet).
+  // para retirada" marca pronto, e de "Pronto para retirada" pra "Coletado"
+  // marca coletado. Pointer Events (não HTML5 Drag and Drop, que tem
+  // suporte ruim a touch) — mesmo evento cobre mouse (laptop) e toque
+  // (tablet).
   const [drag, setDrag] = useState<DragState | null>(null);
-  const [overReady, setOverReady] = useState(false);
+  const [overTarget, setOverTarget] = useState(false);
   const dragRef = useRef<DragState | null>(null);
   const readyColRef = useRef<HTMLDivElement>(null);
+  const collectedColRef = useRef<HTMLDivElement>(null);
   const suppressClickRef = useRef(false);
+  const ordersRef = useRef<Order[]>([]);
+  useEffect(() => { ordersRef.current = orders; }, [orders]);
+
+  // Coluna "Coletado" — buffer local (não vem do backend) de pedidos
+  // marcados como coletados nos últimos 60s, só pra dar feedback visual
+  // antes de sumir sozinho da tela (pedido direto do usuário).
+  const [collectedRecently, setCollectedRecently] = useState<{ order: Order; collectedAt: number }[]>([]);
+  const collectTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  useEffect(() => {
+    setCollectedRecently([]);
+    return () => {
+      collectTimers.current.forEach(clearTimeout);
+      collectTimers.current.clear();
+    };
+  }, [companyId]);
 
   // Força re-render periódico só pro "X min" e "URGENTE" avançarem sozinhos
   // na tela — sem isso, só mudam quando algum evento de WS ou ação do
@@ -156,7 +179,8 @@ export default function FulfillmentScreen() {
       loadPrepStats();
     }
     if (event.event === "order.completed" && event.order_ref) {
-      setOrders((prev) => prev.filter((o) => o.order_ref !== event.order_ref));
+      const found = ordersRef.current.find((o) => o.order_ref === event.order_ref);
+      if (found) collectOrderLocally(found);
     }
   }, [loadOrders, loadPrepStats]);
 
@@ -202,12 +226,29 @@ export default function FulfillmentScreen() {
     }
   }
 
-  async function markCollected(ref: string) {
-    setBusy(ref);
+  // Adiciona o pedido na coluna "Coletado" por um tempo limitado, depois
+  // some sozinho — chamado tanto pela ação local (botão/drag) quanto por
+  // um evento de WS de outro operador coletando o mesmo pedido.
+  function collectOrderLocally(o: Order) {
+    setCollectedRecently((prev) => {
+      if (prev.some((c) => c.order.order_ref === o.order_ref)) return prev;
+      return [{ order: o, collectedAt: Date.now() }, ...prev];
+    });
+    setOrders((prev) => prev.filter((x) => x.order_ref !== o.order_ref));
+    const existing = collectTimers.current.get(o.order_ref);
+    if (existing) clearTimeout(existing);
+    collectTimers.current.set(o.order_ref, setTimeout(() => {
+      setCollectedRecently((prev) => prev.filter((c) => c.order.order_ref !== o.order_ref));
+      collectTimers.current.delete(o.order_ref);
+    }, COLLECTED_VISIBLE_MS));
+  }
+
+  async function markCollected(o: Order) {
+    setBusy(o.order_ref);
     try {
-      await api.post(`/orders/${ref}/collect`, {});
+      await api.post(`/orders/${o.order_ref}/collect`, {});
       showFeedback("Pedido marcado como coletado.", true);
-      setOrders((prev) => prev.filter((o) => o.order_ref !== ref));
+      collectOrderLocally(o);
     } catch {
       showFeedback("Erro ao marcar coletado.", false);
     } finally {
@@ -215,16 +256,17 @@ export default function FulfillmentScreen() {
     }
   }
 
-  function startDrag(e: React.PointerEvent<HTMLDivElement>, ref: string, cardLabel: string) {
+  function startDrag(e: React.PointerEvent<HTMLDivElement>, order: Order, source: DragSource) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    if (busy === ref) return;
+    if (busy === order.order_ref) return;
+    const targetColRef = source === "preparing" ? readyColRef : collectedColRef;
     const startX = e.clientX;
     const startY = e.clientY;
-    const initial: DragState = { ref, label: cardLabel, startX, startY, x: startX, y: startY, moved: false };
+    const initial: DragState = { ref: order.order_ref, label: label(order), source, startX, startY, x: startX, y: startY, moved: false };
     dragRef.current = initial;
 
-    function pointInReadyCol(x: number, y: number) {
-      const box = readyColRef.current?.getBoundingClientRect();
+    function pointInTargetCol(x: number, y: number) {
+      const box = targetColRef.current?.getBoundingClientRect();
       return !!box && x >= box.left && x <= box.right && y >= box.top && y <= box.bottom;
     }
 
@@ -237,7 +279,7 @@ export default function FulfillmentScreen() {
       setDrag(next);
       if (moved) {
         ev.preventDefault();
-        setOverReady(pointInReadyCol(ev.clientX, ev.clientY));
+        setOverTarget(pointInTargetCol(ev.clientX, ev.clientY));
       }
     }
 
@@ -252,10 +294,13 @@ export default function FulfillmentScreen() {
       const final = dragRef.current;
       dragRef.current = null;
       setDrag(null);
-      setOverReady(false);
+      setOverTarget(false);
       if (final?.moved) {
         suppressClickRef.current = true;
-        if (pointInReadyCol(ev.clientX, ev.clientY)) markReady(final.ref);
+        if (pointInTargetCol(ev.clientX, ev.clientY)) {
+          if (source === "preparing") markReady(order.order_ref);
+          else markCollected(order);
+        }
       }
     }
 
@@ -263,7 +308,7 @@ export default function FulfillmentScreen() {
       cleanup();
       dragRef.current = null;
       setDrag(null);
-      setOverReady(false);
+      setOverTarget(false);
     }
 
     window.addEventListener("pointermove", onMove, { passive: false });
@@ -386,7 +431,7 @@ export default function FulfillmentScreen() {
                         isDragging ? styles.cardDragging : "",
                       ].filter(Boolean).join(" ")}
                       onClick={() => handleCardClick(o)}
-                      onPointerDown={(e) => startDrag(e, o.order_ref, label(o))}
+                      onPointerDown={(e) => startDrag(e, o, "preparing")}
                     >
                       <div className={styles.cardLabel}>{label(o)}</div>
                       <div className={styles.cardMeta}>
@@ -411,13 +456,13 @@ export default function FulfillmentScreen() {
               </div>
             )}
           </div>
-          <div ref={readyColRef} className={`${styles.column} ${drag && overReady ? styles.columnDropActive : ""}`}>
+          <div ref={readyColRef} className={`${styles.column} ${drag?.source === "preparing" && overTarget ? styles.columnDropActive : ""}`}>
             <div className={styles.columnTitle}>
               Pronto para retirada
               {ready.length > 0 && <span className={styles.columnCount}>{ready.length}</span>}
             </div>
-            {drag && (
-              <div className={`${styles.dropHint} ${overReady ? styles.dropHintActive : ""}`}>
+            {drag?.source === "preparing" && (
+              <div className={`${styles.dropHint} ${overTarget ? styles.dropHintActive : ""}`}>
                 Solte aqui para marcar pronto
               </div>
             )}
@@ -425,22 +470,56 @@ export default function FulfillmentScreen() {
               <div className={styles.emptyCol}>Nenhum pedido pronto.</div>
             ) : (
               <div className={styles.cardGrid}>
-                {ready.map((o) => (
-                  <div key={o.order_ref} className={styles.card} onClick={() => handleCardClick(o)}>
+                {ready.map((o) => {
+                  const isDragging = drag?.ref === o.order_ref && drag.moved;
+                  return (
+                    <div
+                      key={o.order_ref}
+                      className={`${styles.card} ${styles.draggable} ${isDragging ? styles.cardDragging : ""}`}
+                      onClick={() => handleCardClick(o)}
+                      onPointerDown={(e) => startDrag(e, o, "ready")}
+                    >
+                      <div className={styles.cardLabel}>{label(o)}</div>
+                      <div className={styles.cardMeta}>
+                        <Tag variant="success">{o.order_ref}</Tag>
+                        <span className={styles.time}>{minutesAgo(o.created_at)}</span>
+                      </div>
+                      <Button
+                        size="small"
+                        variant="secondary"
+                        fullWidth
+                        disabled={busy === o.order_ref}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => { e.stopPropagation(); markCollected(o); }}
+                      >
+                        Marcar coletado
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <div ref={collectedColRef} className={`${styles.column} ${drag?.source === "ready" && overTarget ? styles.columnDropActive : ""}`}>
+            <div className={styles.columnTitle}>
+              Coletado
+              {collectedRecently.length > 0 && <span className={styles.columnCount}>{collectedRecently.length}</span>}
+            </div>
+            {drag?.source === "ready" && (
+              <div className={`${styles.dropHint} ${overTarget ? styles.dropHintActive : ""}`}>
+                Solte aqui para marcar coletado
+              </div>
+            )}
+            {collectedRecently.length === 0 ? (
+              <div className={styles.emptyCol}>Nenhum pedido coletado recentemente.</div>
+            ) : (
+              <div className={styles.cardGrid}>
+                {collectedRecently.map(({ order: o }) => (
+                  <div key={o.order_ref} className={`${styles.card} ${styles.cardCollected}`} onClick={() => handleCardClick(o)}>
                     <div className={styles.cardLabel}>{label(o)}</div>
                     <div className={styles.cardMeta}>
                       <Tag variant="success">{o.order_ref}</Tag>
-                      <span className={styles.time}>{minutesAgo(o.created_at)}</span>
                     </div>
-                    <Button
-                      size="small"
-                      variant="secondary"
-                      fullWidth
-                      disabled={busy === o.order_ref}
-                      onClick={(e) => { e.stopPropagation(); markCollected(o.order_ref); }}
-                    >
-                      Marcar coletado
-                    </Button>
                   </div>
                 ))}
               </div>

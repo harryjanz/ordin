@@ -154,8 +154,15 @@
 
 .columns {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  // Melhorias de UX 2026-08-24 — 3ª coluna "Coletado" (pedido direto do
+  // usuário). Empilha em telas estreitas pra não espremer demais em
+  // tablet retrato.
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 24px;
+
+  @media (max-width: 900px) {
+    grid-template-columns: 1fr;
+  }
 }
 
 .column {
@@ -245,13 +252,28 @@
   cursor: grab;
   // Evita seleção de texto/gesto de rolagem nativo do navegador competindo
   // com o arraste via Pointer Events, principalmente em touch — só nos
-  // cards realmente arrastáveis (coluna "Em preparo").
+  // cards realmente arrastáveis ("Em preparo" e "Pronto para retirada",
+  // não "Coletado", que não tem mais destino).
   touch-action: none;
   user-select: none;
 }
 
 .cardDragging {
   opacity: 0.35;
+}
+
+// Melhorias de UX 2026-08-24 — coluna "Coletado": card não é mais
+// acionável (sem botão, sem drag), estilo visualmente "encerrado" pra
+// diferenciar das outras duas colunas antes de sumir sozinho em 60s.
+.cardCollected {
+  cursor: default;
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.05);
+  opacity: 0.8;
+
+  &:hover {
+    border-color: rgba(34, 197, 94, 0.3);
+  }
 }
 
 // ORD-119 — laranja na metade do tempo de urgência configurado pela
