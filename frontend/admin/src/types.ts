@@ -319,4 +319,9 @@ export interface PrepStats {
   count: number;
   avg_prep_minutes: number | null;
   by_hour: PrepStatsHourItem[];
+  // Melhorias de UX 2026-08-24 — comparação com a janela anterior de mesma
+  // duração (24h antes das 24h atuais), mesmo padrão do Dashboard.
+  avg_prep_minutes_prev: number | null;
+  change_pct: number | null;
+  peak_hour_prev: PrepStatsHourItem | null;
 }

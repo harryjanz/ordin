@@ -2,8 +2,7 @@
 
 .page {
   padding: 32px;
-  max-width: 1100px;
-  margin: 0 auto;
+  color: var(--a-text);
 }
 
 .header {
@@ -89,6 +88,56 @@
   margin-top: 2px;
 }
 
+// Melhorias de UX 2026-08-24 — dado do período anterior, mas discreto de
+// propósito (pedido explícito: "não tão marcante, somente informativa"),
+// separado por um traço fino do resto do card.
+.statSubFaint {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.35);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--a-border);
+}
+
+// Mesmo badge visual do Dashboard (trendRow/trendBadge), replicado aqui
+// porque TrendTag não é exportado — colocação por tela é o padrão já usado
+// no resto do design de admin.
+.trendRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  min-height: 22px;
+  flex-wrap: wrap;
+}
+
+.muted {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  white-space: nowrap;
+}
+
+.trendBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  @include font('sm-emphasys');
+
+  i {
+    font-size: 15px;
+  }
+}
+
+// Cores invertidas em relação ao Dashboard: aqui é o preparo FICAR MAIS
+// RÁPIDO (queda) que é a notícia boa.
+.trendGood {
+  color: color('success-base');
+}
+
+.trendBad {
+  color: color('error-base');
+}
+
 .feedback {
   margin-bottom: 16px;
 }
@@ -114,12 +163,50 @@
   border: 1px solid var(--a-border);
   @include rounded('card');
   padding: 20px;
+  // Transição suave quando o drop-target liga/desliga ao arrastar por cima.
+  transition: border-color 0.15s, background-color 0.15s;
+}
+
+// Melhorias de UX 2026-08-24 — destaque visual de "solte aqui" enquanto um
+// card está sendo arrastado por cima desta coluna (mouse ou toque).
+.columnDropActive {
+  border-color: color('success-base');
+  background: rgba(#22c55e, 0.05);
 }
 
 .columnTitle {
   @include font('base-emphasys');
   color: var(--a-text);
   margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.columnCount {
+  @include font('xs-emphasys');
+  color: rgba(var(--a-text-rgb), 0.5);
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  border-radius: 20px;
+  padding: 1px 9px;
+}
+
+.dropHint {
+  @include font('xs');
+  text-align: center;
+  color: rgba(var(--a-text-rgb), 0.35);
+  border: 1px dashed var(--a-border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 12px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.dropHintActive {
+  color: color('success-base');
+  border-color: color('success-base');
+  font-weight: 600;
 }
 
 .emptyCol {
@@ -127,6 +214,15 @@
   @include font('sm');
   text-align: center;
   padding: 24px 0;
+}
+
+// Melhorias de UX 2026-08-24 — grid em vez de pilha única, pra usar o
+// espaço horizontal em laptop/tablet largo em vez de forçar rolagem
+// vertical com uma única coluna de cards.
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
 }
 
 .card {
@@ -137,13 +233,25 @@
   border: 1px solid var(--a-border);
   @include rounded('default');
   padding: 14px 16px;
-  margin-bottom: 10px;
   cursor: pointer;
   transition: border-color 0.15s;
 
   &:hover {
     border-color: color('brand-primary');
   }
+}
+
+.draggable {
+  cursor: grab;
+  // Evita seleção de texto/gesto de rolagem nativo do navegador competindo
+  // com o arraste via Pointer Events, principalmente em touch — só nos
+  // cards realmente arrastáveis (coluna "Em preparo").
+  touch-action: none;
+  user-select: none;
+}
+
+.cardDragging {
+  opacity: 0.35;
 }
 
 // ORD-119 — laranja na metade do tempo de urgência configurado pela
@@ -185,6 +293,23 @@
   font-size: 12px;
   font-weight: 700;
   color: #ff4d4d;
+}
+
+// Melhorias de UX 2026-08-24 — "fantasma" que segue o ponteiro/dedo durante
+// o arraste (o card original só fica esmaecido via .cardDragging, não se
+// move de verdade dentro do grid, pra evitar reflow complexo).
+.dragGhost {
+  position: fixed;
+  z-index: 1000;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  background: var(--a-surface);
+  border: 2px solid color('brand-primary');
+  @include rounded('default');
+  @include font('sm-emphasys');
+  color: var(--a-text);
+  padding: 10px 18px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
 }
 
 .itemsModal {
