@@ -207,6 +207,12 @@ class PrepStatsOut(BaseModel):
     count: int
     avg_prep_minutes: Optional[float] = None
     by_hour: List[PrepStatsHourItem]
+    # ORD-119 (melhorias de UX 2026-08-24) — mesmo padrão de comparação de
+    # período já usado em payments_analytics (services/payment/main.py):
+    # janela anterior de mesma duração, imediatamente antes da atual.
+    avg_prep_minutes_prev: Optional[float] = None
+    change_pct: Optional[float] = None
+    peak_hour_prev: Optional[PrepStatsHourItem] = None
 
 class HealthOut(BaseModel):
     service: str
@@ -551,37 +557,60 @@ async def prep_stats(
     na análise de concorrentes (2026-08-24).
     Mesmo padrão de escopo de list_orders: superadmin/admin podem filtrar
     por company_id; qualquer outro role fica restrito à própria empresa.
+
+    Também calcula a janela anterior de mesma duração, imediatamente antes
+    da atual — mesmo padrão já usado em payments_analytics
+    (services/payment/main.py: duration/prev_start/prev_end) — pra
+    alimentar a seta de tendência (melhorias de UX, 2026-08-24).
     """
     if current_user.role in ("superadmin", "admin"):
-        filters = [Order.company_id == company_id] if company_id else []
+        base_filters = [Order.company_id == company_id] if company_id else []
     else:
-        filters = [Order.company_id == current_user.company_id]
-    filters.append(Order.ready_at.isnot(None))
-    filters.append(Order.created_at >= date_from if date_from else Order.created_at >= datetime.utcnow() - timedelta(hours=24))
-    if date_to:
-        filters.append(Order.created_at <= date_to)
+        base_filters = [Order.company_id == current_user.company_id]
 
-    result = await db.execute(select(Order.created_at, Order.ready_at).where(*filters))
-    rows = result.all()
+    window_end = datetime.fromisoformat(date_to) if date_to else datetime.utcnow()
+    window_start = datetime.fromisoformat(date_from) if date_from else window_end - timedelta(hours=24)
+    duration = window_end - window_start
+    prev_start = window_start - duration
+    prev_end = window_start
 
-    if not rows:
-        return {"count": 0, "avg_prep_minutes": None, "by_hour": []}
+    async def period_stats(start: datetime, end: datetime):
+        filters = [*base_filters, Order.ready_at.isnot(None), Order.created_at >= start, Order.created_at < end]
+        result = await db.execute(select(Order.created_at, Order.ready_at).where(*filters))
+        rows = result.all()
+        if not rows:
+            return None, []
+        by_hour_acc: dict[int, list[float]] = {}
+        all_minutes: list[float] = []
+        for created, ready in rows:
+            minutes = (ready - created).total_seconds() / 60
+            all_minutes.append(minutes)
+            by_hour_acc.setdefault(created.hour, []).append(minutes)
+        by_hour = [
+            {"hour": h, "count": len(v), "avg_minutes": round(sum(v) / len(v), 1)}
+            for h, v in sorted(by_hour_acc.items())
+        ]
+        avg = round(sum(all_minutes) / len(all_minutes), 1)
+        return {"count": len(rows), "avg_prep_minutes": avg, "by_hour": by_hour}, by_hour
 
-    by_hour_acc: dict[int, list[float]] = {}
-    all_minutes: list[float] = []
-    for created, ready in rows:
-        minutes = (ready - created).total_seconds() / 60
-        all_minutes.append(minutes)
-        by_hour_acc.setdefault(created.hour, []).append(minutes)
+    current, current_by_hour = await period_stats(window_start, window_end)
+    previous, previous_by_hour = await period_stats(prev_start, prev_end)
 
-    by_hour = [
-        {"hour": h, "count": len(v), "avg_minutes": round(sum(v) / len(v), 1)}
-        for h, v in sorted(by_hour_acc.items())
-    ]
+    if current is None:
+        return {"count": 0, "avg_prep_minutes": None, "by_hour": [],
+                "avg_prep_minutes_prev": None, "change_pct": None, "peak_hour_prev": None}
+
+    avg_prev = previous["avg_prep_minutes"] if previous else None
+    change_pct = round((current["avg_prep_minutes"] - avg_prev) / avg_prev * 100, 1) if avg_prev else None
+    peak_hour_prev = max(previous_by_hour, key=lambda h: h["count"]) if previous_by_hour else None
+
     return {
-        "count": len(rows),
-        "avg_prep_minutes": round(sum(all_minutes) / len(all_minutes), 1),
-        "by_hour": by_hour,
+        "count": current["count"],
+        "avg_prep_minutes": current["avg_prep_minutes"],
+        "by_hour": current_by_hour,
+        "avg_prep_minutes_prev": avg_prev,
+        "change_pct": change_pct,
+        "peak_hour_prev": peak_hour_prev,
     }
 
 @app.get(
