@@ -16,16 +16,23 @@ export default function QrScanner({ onScan, active }: Props) {
   const [cameraError, setCameraError] = useState(false);
   const [cameraErrorDetail, setCameraErrorDetail] = useState("");
   const [manualValue, setManualValue] = useState("");
+  // Incrementado pelo botão "Tentar novamente" — força o efeito de baixo a
+  // rodar de novo sem precisar desmontar/remontar o componente inteiro.
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     if (!active) return;
+    let cancelled = false;
+    let permissionStatus: PermissionStatus | null = null;
 
     async function startCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "environment" },
         });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = stream;
+        setCameraError(false);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           videoRef.current.play();
@@ -66,28 +73,81 @@ export default function QrScanner({ onScan, active }: Props) {
       rafRef.current = requestAnimationFrame(scan);
     }
 
-    startCamera();
+    // Checa a Permissions API antes de tentar (Chrome/Edge; navegadores sem
+    // suporte a "camera" nessa API, ex. Safari, caem direto no getUserMedia
+    // — o catch acima já cobre esse caso). Duas vantagens sobre só tentar
+    // direto: (1) não gasta uma chamada de getUserMedia fadada a falhar
+    // quando já sabemos que está bloqueado, (2) dá pra escutar `onchange` e
+    // reconectar sozinho assim que o usuário libera nas configurações do
+    // navegador, sem precisar de reload nem clicar em nada.
+    async function checkPermissionThenStart() {
+      if (!navigator.permissions?.query) { startCamera(); return; }
+      try {
+        permissionStatus = await navigator.permissions.query({ name: "camera" as PermissionName });
+        if (cancelled) return;
+        if (permissionStatus.state === "denied") {
+          setCameraErrorDetail("NotAllowedError");
+          setCameraError(true);
+        } else {
+          startCamera();
+        }
+        permissionStatus.onchange = () => {
+          if (permissionStatus?.state === "granted") setRetryKey((k) => k + 1);
+        };
+      } catch {
+        startCamera();
+      }
+    }
+
+    checkPermissionThenStart();
 
     return () => {
+      cancelled = true;
+      if (permissionStatus) permissionStatus.onchange = null;
       cancelAnimationFrame(rafRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     };
-  }, [active]);
+  }, [active, retryKey]);
 
-  const ERROR_HINT: Record<string, string> = {
-    NotAllowedError: "Permissão de câmera negada — libere o acesso nas configurações do navegador.",
-    NotReadableError: "Câmera em uso por outro aplicativo ou aba — feche o que estiver usando e tente de novo.",
-    NotFoundError: "Nenhuma câmera encontrada neste dispositivo.",
-    OverconstrainedError: "Nenhuma câmera compatível com o modo traseiro foi encontrada.",
+  const ERROR_HINT: Record<string, { text: string; steps?: string[] }> = {
+    NotAllowedError: {
+      text: "Permissão de câmera bloqueada para este site.",
+      steps: [
+        "Clique no ícone de cadeado (ou \"ⓘ\") ao lado do endereço, no navegador.",
+        "Abra \"Configurações do site\" (ou \"Permissões\").",
+        "Mude \"Câmera\" de Bloquear para Perguntar ou Permitir.",
+        "Volte aqui e toque em \"Tentar novamente\" — não precisa recarregar a página.",
+      ],
+    },
+    NotReadableError: {
+      text: "Câmera em uso por outro aplicativo ou aba — feche o que estiver usando e toque em \"Tentar novamente\".",
+    },
+    NotFoundError: {
+      text: "Nenhuma câmera encontrada neste dispositivo.",
+    },
+    OverconstrainedError: {
+      text: "Nenhuma câmera compatível com o modo traseiro foi encontrada.",
+    },
   };
 
   if (cameraError) {
+    const hint = ERROR_HINT[cameraErrorDetail];
     return (
       <div className={styles.manualFallback}>
+        <i className="icon-alert-triangle" />
         <div className={styles.manualHint}>
-          {ERROR_HINT[cameraErrorDetail] ?? "Câmera não disponível — insira o código manualmente"}
+          {hint?.text ?? "Câmera não disponível — insira o código manualmente"}
         </div>
+        {hint?.steps && (
+          <ol className={styles.manualSteps}>
+            {hint.steps.map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+        )}
+        <Button variant="secondary" fullWidth onClick={() => setRetryKey((k) => k + 1)}>
+          Tentar novamente
+        </Button>
+        <div className={styles.manualDivider}>ou insira o código manualmente</div>
         <form onSubmit={(e) => { e.preventDefault(); if (manualValue.trim()) { onScan(manualValue.trim()); setManualValue(""); } }}>
           <div className={styles.manualField}>
             <InputBase
