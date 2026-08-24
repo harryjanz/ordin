@@ -5,12 +5,12 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import DeclarativeBase, relationship
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import random, string, secrets, hmac as hmaclib, hashlib
 from config import require_env, get_cors_origins
 from auth import get_current_user, TokenPayload
 from audit import emit_audit
-from websocket import ws_router, broadcast_order_created, broadcast_ticket_collected, broadcast_order_completed, broadcast_order_paid
+from websocket import ws_router, broadcast_order_created, broadcast_ticket_collected, broadcast_order_completed, broadcast_order_paid, broadcast_order_ready
 
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
@@ -21,7 +21,7 @@ def require_internal(x_internal_secret: str = Header(default="")) -> None:
         raise HTTPException(403, detail="Acesso interno não autorizado")
 
 
-ORDER_STATUSES = ["pending", "paid", "completed", "cancelled"]
+ORDER_STATUSES = ["pending", "paid", "ready", "completed", "cancelled"]
 
 
 def _normalize_cpf(value: str) -> str:
@@ -55,6 +55,16 @@ class Order(Base):
     # usa (imprimir/coletar por pedido) é o frontend, com base no
     # fulfillment_mode da empresa; order-service não precisa saber disso.
     qr_data     = Column(String(500), nullable=True)
+    # ORD-119 — nome opcional informado no totem pra identificação no painel
+    # de retirada ("Maria" em vez de só "Pedido #42"); sem validação de
+    # unicidade, ambiguidade aceitável (mesmo comportamento de fast-food
+    # físico). Só usado em fulfillment_mode="retirada_unica".
+    pickup_name = Column(String(80), nullable=True)
+    # ORD-119 (análise de concorrentes 2026-08-24) — momento em que virou
+    # "ready" (paid→ready), separado de created_at. Sem isso não dá pra
+    # medir tempo de preparo de verdade — só teria o tempo até a coleta
+    # final, que mistura preparo com cliente parado esperando.
+    ready_at    = Column(DateTime, nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, onupdate=datetime.utcnow)
     items       = relationship("OrderItem", back_populates="order", cascade="all, delete")
@@ -107,6 +117,7 @@ class OrderIn(BaseModel):
     cpf: Optional[str] = None
     discount: float = 0
     consumption_type: Optional[str] = None
+    pickup_name: Optional[str] = None
 
 class CollectIn(BaseModel):
     # ORD-123 — collected_by deixou de vir do cliente: era uma string livre
@@ -130,6 +141,7 @@ class OrderListItem(BaseModel):
     terminal_id: int
     cpf: Optional[str] = None
     consumption_type: Optional[str] = None
+    pickup_name: Optional[str] = None
     created_at: str
     tickets_total: int
     tickets_collected: int
@@ -180,6 +192,21 @@ class OrderCollectOut(BaseModel):
 class OrderStatusOut(BaseModel):
     order_ref: str
     status: str
+
+class OrderReadyOut(BaseModel):
+    ok: bool
+    order_ref: str
+    status: str
+
+class PrepStatsHourItem(BaseModel):
+    hour: int
+    count: int
+    avg_minutes: float
+
+class PrepStatsOut(BaseModel):
+    count: int
+    avg_prep_minutes: Optional[float] = None
+    by_hour: List[PrepStatsHourItem]
 
 class HealthOut(BaseModel):
     service: str
@@ -288,6 +315,7 @@ async def create_order(
         order_ref=ref, total=total, discount=body.discount, cpf=body.cpf,
         consumption_type=body.consumption_type,
         qr_data=_make_order_qr_data(ref, order_ts),
+        pickup_name=body.pickup_name,
     )
     db.add(order); await db.flush()
     for item in body.items:
@@ -466,6 +494,96 @@ async def collect_order(
     return {"ok": True, "order_ref": order_ref, "collected_at": collected_at.isoformat(),
             "collected_by": collected_by, "progress": progress_str}
 
+@app.post(
+    "/orders/{order_ref}/ready",
+    response_model=OrderReadyOut,
+    tags=["Pedidos"],
+    summary="Marcar pedido como pronto para retirada (ORD-119)",
+    responses={
+        404: {"description": "Pedido não encontrado"},
+        409: {"description": "Pedido não está pago (já pronto, já coletado, ou ainda não pago)"},
+    },
+)
+async def mark_order_ready(
+    order_ref: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """
+    Transição paid → ready, usada pela tela operacional do admin no modelo de
+    atendimento retirada_unica (ORD-118). Sem checagem de fulfillment_mode
+    aqui — order-service é deliberadamente agnóstico a esse campo (é do
+    company-service); quem decide exibir a ação é o frontend.
+    """
+    result = await db.execute(
+        select(Order)
+        .where(Order.order_ref == order_ref, Order.company_id == current_user.company_id)
+        .with_for_update()
+    )
+    order = result.scalars().first()
+    if not order: raise HTTPException(404, "Pedido não encontrado")
+    if order.status != "paid": raise HTTPException(409, "Pedido não está aguardando preparo")
+    order.status = "ready"
+    order.ready_at = datetime.utcnow()
+    await db.commit()
+    await broadcast_order_ready(current_user.company_id, order_ref, order.pickup_name)
+    return {"ok": True, "order_ref": order_ref, "status": "ready"}
+
+@app.get(
+    "/orders/prep-stats",
+    response_model=PrepStatsOut,
+    tags=["Pedidos"],
+    summary="Tempo médio de preparo e relatório de gargalo por hora (ORD-119)",
+)
+async def prep_stats(
+    company_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """
+    Só considera pedidos que já passaram por 'ready' (ready_at preenchido) —
+    modelo retirada_unica. Sem date_from, usa as últimas 24h por padrão
+    (mesma janela já usada como convenção no app de balcão, ORD-122).
+    Agrupa por hora do dia (hora de criação do pedido) pra identificar
+    horário de maior pressão, mesmo relatório documentado pela Zig/Cplug
+    na análise de concorrentes (2026-08-24).
+    Mesmo padrão de escopo de list_orders: superadmin/admin podem filtrar
+    por company_id; qualquer outro role fica restrito à própria empresa.
+    """
+    if current_user.role in ("superadmin", "admin"):
+        filters = [Order.company_id == company_id] if company_id else []
+    else:
+        filters = [Order.company_id == current_user.company_id]
+    filters.append(Order.ready_at.isnot(None))
+    filters.append(Order.created_at >= date_from if date_from else Order.created_at >= datetime.utcnow() - timedelta(hours=24))
+    if date_to:
+        filters.append(Order.created_at <= date_to)
+
+    result = await db.execute(select(Order.created_at, Order.ready_at).where(*filters))
+    rows = result.all()
+
+    if not rows:
+        return {"count": 0, "avg_prep_minutes": None, "by_hour": []}
+
+    by_hour_acc: dict[int, list[float]] = {}
+    all_minutes: list[float] = []
+    for created, ready in rows:
+        minutes = (ready - created).total_seconds() / 60
+        all_minutes.append(minutes)
+        by_hour_acc.setdefault(created.hour, []).append(minutes)
+
+    by_hour = [
+        {"hour": h, "count": len(v), "avg_minutes": round(sum(v) / len(v), 1)}
+        for h, v in sorted(by_hour_acc.items())
+    ]
+    return {
+        "count": len(rows),
+        "avg_prep_minutes": round(sum(all_minutes) / len(all_minutes), 1),
+        "by_hour": by_hour,
+    }
+
 @app.get(
     "/orders",
     response_model=OrderListOut,
@@ -527,7 +645,11 @@ async def list_orders(
     # tabela filtrada por um status só.
     filters = list(base_filters)
     if status and status != "all":
-        filters.append(Order.status == status)
+        # ORD-119 — painel/tela operacional precisam de paid+ready juntos
+        # numa fetch só (ex: "paid,ready"); mantém igualdade simples pro
+        # caso comum de status único.
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        filters.append(Order.status.in_(statuses) if len(statuses) > 1 else Order.status == statuses[0])
 
     total = (
         await db.execute(select(func.count()).select_from(Order).where(*filters))
@@ -564,6 +686,7 @@ async def list_orders(
             "terminal_id": o.terminal_id,
             "cpf": o.cpf,
             "consumption_type": o.consumption_type,
+            "pickup_name": o.pickup_name,
             "created_at": o.created_at.isoformat() if o.created_at else "",
             "tickets_total": len(tix_rows),
             "tickets_collected": sum(1 for t in tix_rows if t.status == "collected"),

@@ -13,6 +13,9 @@ const MENU = [
   { to: "/companies/new", label: "Novo cliente", icon: "user-plus",   roles: ["superadmin", "admin"] },
   { to: "/catalog",       label: "Catálogo",     icon: "package",     roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/orders",        label: "Pedidos",      icon: "shopping-cart", roles: ["superadmin", "admin", "owner", "manager"] },
+  // ORD-119 — fila de preparo/pronto do modelo de retirada única; cashier
+  // também tem acesso (é quem já opera coleta hoje via balcão).
+  { to: "/fulfillment",   label: "Preparo",      icon: "clock",       roles: ["superadmin", "admin", "owner", "manager", "cashier"] },
   { to: "/payments",      label: "Transações",   icon: "credit-card", roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/company",       label: "Empresa",      icon: "briefcase",   roles: ["superadmin", "admin", "owner", "manager"] },
   { to: "/pair",          label: "Dispositivos", icon: "monitor",     roles: ["superadmin", "admin", "owner", "manager"] },

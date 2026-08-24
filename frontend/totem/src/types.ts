@@ -74,6 +74,7 @@ export type Screen =
   | "catalog"
   | "consumption"
   | "cpf"
+  | "pickup"
   | "payment"
   | "pix"
   | "success"

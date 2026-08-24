@@ -54,6 +54,16 @@
   line-height: 1.6;
 }
 
+.modeRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+
+  > button {
+    flex: 1;
+  }
+}
+
 .fieldLabel {
   display: block;
   @include font('xs');

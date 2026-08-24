@@ -153,6 +153,7 @@ export default function SettingsScreen() {
       setLocalMenuLayout(r.data.catalog_menu_layout ?? "horizontal");
       setConsumptionModeEnabled(r.data.consumption_mode_enabled ?? false);
       setFulfillmentMode(r.data.fulfillment_mode ?? "por_item");
+      setPrepUrgencyMinutes(r.data.prep_urgency_minutes ?? 10);
     }).catch(() => null);
   }, [companyId]);
 
@@ -176,6 +177,10 @@ export default function SettingsScreen() {
   // ORD-118 — "por_item" (padrão, ticket unitário por item) ou
   // "retirada_unica" (produção centralizada, QR único por pedido).
   const [fulfillmentMode, setFulfillmentMode] = useState<string>("por_item");
+  // ORD-119 — minutos até um pedido em preparo virar "urgente" (laranja na
+  // metade do tempo, vermelho ao passar) no painel de retirada e na tela
+  // de Preparo do admin. Só relevante com fulfillmentMode="retirada_unica".
+  const [prepUrgencyMinutes, setPrepUrgencyMinutes] = useState<number>(10);
   const [savingBehavior, setSavingBehavior] = useState(false);
   const [saveBehaviorMsg, setSaveBehaviorMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -192,6 +197,7 @@ export default function SettingsScreen() {
       await api.patch(`/companies/${companyId}/behavior`, {
         consumption_mode_enabled: consumptionModeEnabled,
         fulfillment_mode: fulfillmentMode,
+        prep_urgency_minutes: prepUrgencyMinutes,
       });
       setSaveBehaviorMsg({ ok: true, text: "Comportamento salvo com sucesso!" });
     } catch {
@@ -907,6 +913,24 @@ export default function SettingsScreen() {
               options={FULFILLMENT_MODE_OPTIONS}
               disabled={savingBehavior}
             />
+
+            {fulfillmentMode === "retirada_unica" && (
+              <>
+                <div className={styles.cardTitle} style={{ marginTop: 24 }}>Tempo até urgência no preparo</div>
+                <div className={styles.cardDesc}>
+                  Minutos que um pedido pode ficar em preparo antes de ser sinalizado como
+                  urgente no painel de retirada e na tela de Preparo — laranja na metade do
+                  tempo, vermelho ao passar. Padrão: 10 minutos.
+                </div>
+                <InputBase
+                  type="number"
+                  label="Minutos até urgência"
+                  value={String(prepUrgencyMinutes)}
+                  onChange={(e) => setPrepUrgencyMinutes(Math.max(1, Math.min(180, Number(e.target.value) || 1)))}
+                  disabled={savingBehavior}
+                />
+              </>
+            )}
 
             <div className={styles.saveRow} style={{ marginTop: 24 }}>
               <Button

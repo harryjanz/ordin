@@ -1,0 +1,238 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  padding: 32px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.title {
+  @include font('xl-emphasys');
+  color: var(--a-text);
+  margin: 0;
+}
+
+.wsChip {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.wsDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.wsChip_connected {
+  background: color('success-light');
+  color: color('success-base');
+}
+
+.wsChip_connecting {
+  background: color('warning-light');
+  color: color('warning-base');
+}
+
+.wsChip_disconnected {
+  background: color('error-light');
+  color: color('error-base');
+}
+
+// ORD-119 (item 3, análise de concorrentes 2026-08-24) — tempo médio de
+// preparo / horário de pico, mesmo relatório de gargalo documentado por
+// Zig/Cplug na pesquisa de concorrentes.
+.statsBar {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.statCard {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 14px 20px;
+  flex: 1;
+  max-width: 260px;
+}
+
+.statLabel {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.statValue {
+  @include font('xl-emphasys');
+  color: color('brand-primary');
+}
+
+.statSub {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-top: 2px;
+}
+
+.feedback {
+  margin-bottom: 16px;
+}
+
+.empty {
+  color: rgba(var(--a-text-rgb), 0.45);
+  @include font('sm');
+  text-align: center;
+  padding: 48px 24px;
+  max-width: 480px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
+.column {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+  padding: 20px;
+}
+
+.columnTitle {
+  @include font('base-emphasys');
+  color: var(--a-text);
+  margin-bottom: 16px;
+}
+
+.emptyCol {
+  color: rgba(var(--a-text-rgb), 0.4);
+  @include font('sm');
+  text-align: center;
+  padding: 24px 0;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--a-bg);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+
+  &:hover {
+    border-color: color('brand-primary');
+  }
+}
+
+// ORD-119 — laranja na metade do tempo de urgência configurado pela
+// empresa, vermelho ao passar (mesmo critério do painel público).
+.cardOrange {
+  border-color: rgba(#f2994a, 0.6);
+  background: rgba(#f2994a, 0.06);
+}
+
+.cardRed {
+  border-color: rgba(#ff4d4d, 0.6);
+  background: rgba(#ff4d4d, 0.06);
+}
+
+.cardLabel {
+  @include font('sm-emphasys');
+  color: var(--a-text);
+}
+
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.time {
+  font-size: 12px;
+  color: rgba(var(--a-text-rgb), 0.45);
+}
+
+.timeOrange {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f2994a;
+}
+
+.timeRed {
+  font-size: 12px;
+  font-weight: 700;
+  color: #ff4d4d;
+}
+
+.itemsModal {
+  padding: 8px;
+}
+
+.itemsModalTitle {
+  @include font('xl-emphasys');
+  color: var(--a-text);
+  margin-bottom: 6px;
+}
+
+.itemsModalRef {
+  font-family: monospace;
+  font-size: 13px;
+  color: rgba(var(--a-text-rgb), 0.45);
+  margin-bottom: 24px;
+}
+
+// Achado ao vivo (2026-08-24): itens pequenos demais pra ler de relance na
+// operação — aumentado bem além do padrão de lista comum do resto do
+// admin, de propósito (tela vista rápido, não lida com calma).
+.itemsList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+
+  li {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--a-border);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+}
+
+.itemQty {
+  @include font('l-emphasys');
+  color: color('brand-primary');
+  flex-shrink: 0;
+  min-width: 40px;
+}
+
+.itemName {
+  @include font('l-emphasys');
+  color: var(--a-text);
+}

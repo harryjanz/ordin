@@ -105,6 +105,9 @@ class CompanyInfo(BaseModel):
     # ORD-118 — mesma armadilha de novo: "por_item" (padrão) ou
     # "retirada_unica" (QR único de pedido, ticket compacto).
     fulfillment_mode: str = "por_item"
+    # ORD-119 — mesma armadilha de novo: minutos até urgência no preparo,
+    # configurável por empresa.
+    prep_urgency_minutes: int = 10
 
 class TerminalInfo(BaseModel):
     id: int
@@ -467,14 +470,27 @@ async def device_challenge():
     summary="Verificar status do pareamento",
 )
 async def device_status(code: str = Query(..., description="Código de 6 caracteres")):
-    """Polling pelo totem. Retorna pending/approved/expired. Quando approved, gera JWT e consome o código."""
+    """
+    Polling pelo totem (ou painel, ORD-119). Retorna pending/approved/expired.
+    Quando approved, gera JWT e consome o código. `kind` no payload do Redis
+    (gravado por approve_device/approve_panel no company-service) decide o
+    formato do token: totem ganha `terminal` + role "kiosk"; painel não tem
+    terminal (não é ponto de venda) e ganha role "painel", só com company_id.
+    """
     raw = redis_client.get(f"device_challenge:{code.upper()}")
     if not raw:
         return DeviceStatusOut(status="expired")
     data = json.loads(raw)
     if data["status"] == "pending":
         return DeviceStatusOut(status="pending")
-    co   = data["company"]
+    co = data["company"]
+    if data.get("kind") == "panel":
+        token = make_token({"sub": "0", "company": co["id"], "role": "painel"}, timedelta(hours=12))
+        redis_client.delete(f"device_challenge:{code.upper()}")
+        return DeviceStatusOut(
+            status="approved", access_token=token, token_type="bearer",
+            company=CompanyInfo(**co),
+        )
     term = data["terminal"]
     token = make_token(
         {"sub": "0", "company": co["id"], "terminal": term["id"], "role": "kiosk"},

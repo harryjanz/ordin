@@ -42,6 +42,11 @@ export default defineConfig({
           if (req.headers["sec-fetch-dest"] === "document") return req.url;
         },
       },
+      // ORD-119 — primeiro cliente WebSocket do admin (FulfillmentScreen).
+      "/ws": {
+        target: "ws://localhost:8000",
+        ws: true,
+      },
     },
   },
   test: {

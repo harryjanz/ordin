@@ -1,7 +1,12 @@
 services:
 
   mysql:
-    image: mysql:8.0
+    # Pinado em 8.0.42 (não 8.0) — o CDN do Docker Hub estava servindo uma
+    # camada corrompida pra "mysql:8.0" nesta máquina/rede (checksum errado,
+    # reproduzido em isolamento total, mesmo trocando de rede). mysqld da
+    # tag "8.0" flutuante crashava com SIGSEGV até no --help. Reverter pra
+    # "mysql:8.0" quando o cache do Docker Hub se recuperar.
+    image: mysql:8.0.42
     restart: always
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
@@ -253,6 +258,16 @@ services:
     restart: always
     ports:
       - "3002:80"
+    networks:
+      - ordin
+    depends_on:
+      - nginx
+
+  painel:
+    build: ./frontend/painel
+    restart: always
+    ports:
+      - "3003:80"
     networks:
       - ordin
     depends_on:

@@ -1,5 +1,5 @@
 import api from "../api";
-import type { Order, OrderStatusSummary, Ticket } from "../types";
+import type { Order, OrderStatusSummary, PrepStats, Ticket } from "../types";
 
 export interface OrderListFilters {
   companyId?: number;
@@ -51,4 +51,13 @@ export async function listOrders(filters: OrderListFilters): Promise<OrderListRe
 export async function listOrderTickets(orderRef: string): Promise<Ticket[]> {
   const r = await api.get<{ tickets: Ticket[] }>(`/orders/${orderRef}/tickets`);
   return r.data.tickets ?? [];
+}
+
+// ORD-119 (item 3, análise de concorrentes 2026-08-24) — tempo médio de
+// preparo / gargalo por hora, últimas 24h por padrão (sem date_from).
+export async function getPrepStats(companyId?: number): Promise<PrepStats> {
+  const r = await api.get<PrepStats>("/orders/prep-stats", {
+    params: companyId ? { company_id: companyId } : {},
+  });
+  return r.data;
 }

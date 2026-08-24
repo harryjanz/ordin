@@ -48,6 +48,8 @@ export interface Company {
   is_demo?: boolean;
   // ORD-118 — "por_item" (padrão) ou "retirada_unica" (QR único de pedido).
   fulfillment_mode?: string;
+  // ORD-119 — só usado com fulfillment_mode="retirada_unica".
+  prep_urgency_minutes?: number;
 }
 
 // ORD-115 — vídeo de modo espera (attract mode) do totem.
@@ -178,6 +180,7 @@ export interface Order {
   company_id: number;
   terminal_id: number;
   cpf: string | null;
+  pickup_name?: string | null;
   created_at: string;
   tickets_total: number;
   tickets_collected: number;
@@ -192,8 +195,21 @@ export interface OrderStatusSummaryItem {
 // presentes, mesmo zerados — ver ORD-081, mesmo padrão do PaymentStatusSummary.
 export type OrderStatusSummary = Record<string, OrderStatusSummaryItem>;
 
+// ORD-119 — primeiro consumidor de WebSocket no admin (FulfillmentScreen),
+// mesmo formato de evento já usado no app de balcão.
+export interface WsEvent {
+  event: string;
+  order_ref?: string;
+  pickup_name?: string | null;
+  total?: number;
+  terminal_id?: number;
+}
+
 export interface Ticket {
   ticket_code: string;
+  // ORD-119 — nome do produto vem embutido no qr_data (mesmo formato usado
+  // no app de balcão: "{code}|{product_name}|{order_ref}|{ts}|{hmac}").
+  qr_data: string;
   status: string;
   unit_number: number;
   total_units: number;
@@ -289,4 +305,18 @@ export interface TrustedDevice {
   created_at: string | null;
   last_used_at: string | null;
   expires_at: string;
+}
+
+// ORD-119 (item 3, análise de concorrentes 2026-08-24) — relatório de
+// tempo médio de preparo / gargalo, GET /orders/prep-stats.
+export interface PrepStatsHourItem {
+  hour: number;
+  count: number;
+  avg_minutes: number;
+}
+
+export interface PrepStats {
+  count: number;
+  avg_prep_minutes: number | null;
+  by_hour: PrepStatsHourItem[];
 }

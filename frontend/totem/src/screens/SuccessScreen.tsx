@@ -4,6 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import type { Theme } from "../themes";
 import type { CompletedOrder } from "../types";
 import { useStore } from "../store";
+import api from "../api";
 import { silentPrint } from "../lib/printService";
 import type { PrintMethod } from "../lib/printService";
 import { RADIUS, FONT } from "../scale";
@@ -198,6 +199,11 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
   const compactPrint = fulfillmentMode === "retirada_unica" && !!order.order_qr_data;
   const [countdown, setCountdown] = useState(30);
   const [printMethod, setPrintMethod] = useState<PrintMethod | "pending">("pending");
+  // ORD-119 (item 4, análise de concorrentes 2026-08-24) — estimativa de
+  // tempo de espera baseada em dado real (GET /orders/prep-stats, últimas
+  // 24h), não em config — só mostra quando já existe histórico suficiente
+  // (count > 0); sem "achismo" quando a empresa ainda não tem dado nenhum.
+  const [prepEstimateMin, setPrepEstimateMin] = useState<number | null>(null);
   const qrContainerRef = useRef<HTMLDivElement>(null);
   const orderQrRef = useRef<HTMLDivElement>(null);
 
@@ -237,6 +243,13 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
     }, 300);
     return () => clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (fulfillmentMode !== "retirada_unica") return;
+    api.get("/orders/prep-stats")
+      .then((r) => setPrepEstimateMin(r.data.count > 0 ? r.data.avg_prep_minutes : null))
+      .catch(() => setPrepEstimateMin(null));
+  }, [fulfillmentMode]);
 
   useEffect(() => {
     const t = setInterval(() => {
@@ -287,6 +300,24 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
             {orderNumber}
           </div>
         </div>
+
+        {/* Estimativa de tempo — só retirada_unica, só com histórico real */}
+        {fulfillmentMode === "retirada_unica" && prepEstimateMin !== null && (
+          <div style={{
+            width: "100%",
+            padding: "14px 24px",
+            background: T.roxoSubtle,
+            border: `1px solid ${T.border}`,
+            borderRadius: RADIUS.sm,
+            textAlign: "center",
+          }}>
+            <p style={{ color: T.text, fontFamily: FONT_B, fontSize: FONT.body, margin: 0 }}>
+              Seu pedido deve ficar pronto em aproximadamente{" "}
+              <strong style={{ color: T.roxo }}>{Math.round(prepEstimateMin)} min</strong>
+              {" "}— acompanhe no painel de retirada
+            </p>
+          </div>
+        )}
 
         {/* Valor em destaque */}
         <div style={{
