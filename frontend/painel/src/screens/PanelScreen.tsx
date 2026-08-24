@@ -63,8 +63,13 @@ export default function PanelScreen({ T, companyId, companyName }: Props) {
     return () => ws.stop();
   }, [companyId, handleWsEvent, loadOrders]);
 
-  const preparing = orders.filter((o) => o.status === "paid");
-  const ready = orders.filter((o) => o.status === "ready");
+  // Mais antigos primeiro — quem espera há mais tempo fica no topo,
+  // achado ao vivo (2026-08-24): a API devolve mais recente primeiro
+  // (uso comum em telas de gestão), mas aqui é o oposto do que faz sentido.
+  const byOldestFirst = (a: OrderSummary, b: OrderSummary) =>
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  const preparing = orders.filter((o) => o.status === "paid").sort(byOldestFirst);
+  const ready = orders.filter((o) => o.status === "ready").sort(byOldestFirst);
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>

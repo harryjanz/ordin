@@ -122,8 +122,12 @@ export default function FulfillmentScreen() {
     );
   }
 
-  const preparing = orders.filter((o) => o.status === "paid");
-  const ready = orders.filter((o) => o.status === "ready");
+  // Mesma ordem do painel público (frontend/painel/PanelScreen.tsx) — mais
+  // antigo primeiro, pra equipe atender por ordem de espera real.
+  const byOldestFirst = (a: Order, b: Order) =>
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  const preparing = orders.filter((o) => o.status === "paid").sort(byOldestFirst);
+  const ready = orders.filter((o) => o.status === "ready").sort(byOldestFirst);
 
   return (
     <div className={styles.page}>
