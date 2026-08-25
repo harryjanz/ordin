@@ -235,6 +235,45 @@ async def _set_menu_composition(db: AsyncSession, menu_id: int, company_id: int,
     for product_id in unique_prod_ids:
         db.add(MenuProduct(menu_id=menu_id, product_id=product_id))
 
+# ── Regra de visibilidade condicional por horário (ORD-127) ────────────────
+# Categoria/produto sem nenhum vínculo de cardápio é sempre visível (padrão
+# seguro, mesmo comportamento de hoje). Com vínculo, só fica visível se
+# PELO MENOS UM dos cardápios ligados a ele estiver ativo agora (dia da
+# semana + horário) — união das janelas, não interseção (decisão de
+# produto registrada em ORD-124: produto pode estar em vários cardápios).
+# Só se aplica em include_inactive=False (chamada do totem) — o admin
+# sempre vê tudo, independente de horário.
+
+def _is_menu_active_now(menu: "Menu") -> bool:
+    if not menu.active:
+        return False
+    now = datetime.utcnow()
+    if now.weekday() not in menu.weekdays:
+        return False
+    return menu.start_time <= now.time() <= menu.end_time
+
+async def _menus_by_category(db: AsyncSession, company_id: int) -> dict[int, list["Menu"]]:
+    result = await db.execute(
+        select(MenuCategory.category_id, Menu)
+        .join(Menu, Menu.id == MenuCategory.menu_id)
+        .filter(Menu.company_id == company_id)
+    )
+    out: dict[int, list["Menu"]] = {}
+    for category_id, menu in result.all():
+        out.setdefault(category_id, []).append(menu)
+    return out
+
+async def _menus_by_product(db: AsyncSession, company_id: int) -> dict[int, list["Menu"]]:
+    result = await db.execute(
+        select(MenuProduct.product_id, Menu)
+        .join(Menu, Menu.id == MenuProduct.menu_id)
+        .filter(Menu.company_id == company_id)
+    )
+    out: dict[int, list["Menu"]] = {}
+    for product_id, menu in result.all():
+        out.setdefault(product_id, []).append(menu)
+    return out
+
 async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
     """Monta o dict de saída trocando as keys de S3 guardadas no banco por
     URLs assinadas (temporárias) — o cliente nunca vê a key crua."""
@@ -480,6 +519,14 @@ async def list_categories(
     q = q.order_by(Category.sort_order.asc(), Category.id.asc())
     result = await db.execute(q)
     cats = result.scalars().all()
+
+    if not include_inactive:
+        menus_by_cat = await _menus_by_category(db, company_id)
+        cats = [
+            c for c in cats
+            if not menus_by_cat.get(c.id) or any(_is_menu_active_now(m) for m in menus_by_cat[c.id])
+        ]
+
     return {"categories": [{"id": c.id, "name": c.name, "active": c.active, "sort_order": c.sort_order} for c in cats]}
 
 @app.get(
@@ -507,6 +554,19 @@ async def list_products(
     q = q.order_by(Product.sort_order.asc(), Product.id.asc())
     result = await db.execute(q)
     products = result.scalars().all()
+
+    if not include_inactive:
+        menus_by_cat = await _menus_by_category(db, company_id)
+        menus_by_prod = await _menus_by_product(db, company_id)
+
+        def _visible(p: "Product") -> bool:
+            linked = list(menus_by_prod.get(p.id, []))
+            if p.category_id is not None:
+                linked += menus_by_cat.get(p.category_id, [])
+            return not linked or any(_is_menu_active_now(m) for m in linked)
+
+        products = [p for p in products if _visible(p)]
+
     return {"products": [await _serialize_product(db, p) for p in products]}
 
 @app.get(
