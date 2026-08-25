@@ -3,7 +3,7 @@ import io
 from fastapi import FastAPI, File, HTTPException, Depends, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, ForeignKey, JSON, Text, UniqueConstraint, select, update, delete, func
+from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, Time, ForeignKey, JSON, Text, UniqueConstraint, select, update, delete, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
@@ -77,6 +77,10 @@ class Category(Base):
     # mesmo com include_inactive=true. A linha continua no banco só pra
     # manter o vínculo histórico com vendas já realizadas.
     deleted    = Column(Boolean, default=False, nullable=False)
+    # Ordem de apresentação no totem — gerenciado só via create_category
+    # (inicial) e /catalog/categories/reorder, mesmo padrão de
+    # Product.sort_order (drag-and-drop no admin, pedido direto do usuário).
+    sort_order = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Product(Base):
@@ -117,6 +121,36 @@ class ProductAllergen(Base):
     product_id  = Column(Integer, ForeignKey("products.id"), primary_key=True)
     allergen_id = Column(Integer, ForeignKey("allergens.id"), primary_key=True)
 
+class Menu(Base):
+    """Cardápio por horário (ORD-124/125) — dias da semana + janela de
+    horário únicos por cardápio (múltiplas janelas por dia ficaram pra v2,
+    ver ORD-124). Sem `deleted`/exclusão definitiva como Category/Product:
+    Menu não é referenciado por nenhuma venda, é só configuração de
+    disponibilidade — hard delete é seguro."""
+    __tablename__ = "menus"
+    id         = Column(Integer, primary_key=True)
+    company_id = Column(Integer, nullable=False, index=True)
+    name       = Column(String(80), nullable=False)
+    weekdays   = Column(JSON, nullable=False)  # [0..6] (Monday=0, mesmo datetime.weekday()), mesmo padrão de Product.tags
+    start_time = Column(Time, nullable=False)
+    end_time   = Column(Time, nullable=False)
+    active     = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class MenuCategory(Base):
+    """Vínculo dinâmico — categoria inteira. Produto criado na categoria
+    depois do vínculo já existir herda o horário automaticamente (resolvido
+    em tempo de consulta, não uma cópia estática de ids no momento do
+    cadastro — ver ORD-124)."""
+    __tablename__ = "menu_categories"
+    menu_id     = Column(Integer, ForeignKey("menus.id"), primary_key=True)
+    category_id = Column(Integer, ForeignKey("categories.id"), primary_key=True)
+
+class MenuProduct(Base):
+    __tablename__ = "menu_products"
+    menu_id    = Column(Integer, ForeignKey("menus.id"), primary_key=True)
+    product_id = Column(Integer, ForeignKey("products.id"), primary_key=True)
+
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
@@ -140,6 +174,105 @@ async def _set_product_allergens(db: AsyncSession, product_id: int, allergen_ids
     await db.execute(delete(ProductAllergen).where(ProductAllergen.product_id == product_id))
     for allergen_id in unique_ids:
         db.add(ProductAllergen(product_id=product_id, allergen_id=allergen_id))
+
+async def _resolve_menu_composition(db: AsyncSession, menu_id: int) -> dict:
+    cat_result = await db.execute(
+        select(Category.id, Category.name)
+        .join(MenuCategory, MenuCategory.category_id == Category.id)
+        .filter(MenuCategory.menu_id == menu_id, Category.deleted == False)  # noqa: E712
+        .order_by(Category.name)
+    )
+    prod_result = await db.execute(
+        select(Product.id, Product.name)
+        .join(MenuProduct, MenuProduct.product_id == Product.id)
+        .filter(MenuProduct.menu_id == menu_id, Product.deleted == False)  # noqa: E712
+        .order_by(Product.name)
+    )
+    return {
+        "categories": [{"id": c.id, "name": c.name} for c in cat_result.all()],
+        "products": [{"id": p.id, "name": p.name} for p in prod_result.all()],
+    }
+
+async def _serialize_menu(db: AsyncSession, m: "Menu") -> dict:
+    composition = await _resolve_menu_composition(db, m.id)
+    return {
+        "id": m.id,
+        "name": m.name,
+        "weekdays": m.weekdays,
+        "start_time": m.start_time.strftime("%H:%M"),
+        "end_time": m.end_time.strftime("%H:%M"),
+        "active": m.active,
+        **composition,
+    }
+
+async def _set_menu_composition(db: AsyncSession, menu_id: int, company_id: int, category_ids: list[int], product_ids: list[int]) -> None:
+    """Replace completo — mesmo padrão de _set_product_allergens, mas
+    validando que categoria/produto pertencem à MESMA empresa do cardápio
+    (allergens são master data global, não precisa disso; categoria/produto
+    são por empresa, então isolamento multi-tenant importa aqui)."""
+    unique_cat_ids = set(category_ids)
+    if unique_cat_ids:
+        result = await db.execute(
+            select(Category.id).filter(Category.id.in_(unique_cat_ids), Category.company_id == company_id, Category.deleted == False)  # noqa: E712
+        )
+        found = set(result.scalars().all())
+        if found != unique_cat_ids:
+            raise HTTPException(400, detail="category_ids contém id que não existe ou não pertence à empresa")
+
+    unique_prod_ids = set(product_ids)
+    if unique_prod_ids:
+        result = await db.execute(
+            select(Product.id).filter(Product.id.in_(unique_prod_ids), Product.company_id == company_id, Product.deleted == False)  # noqa: E712
+        )
+        found = set(result.scalars().all())
+        if found != unique_prod_ids:
+            raise HTTPException(400, detail="product_ids contém id que não existe ou não pertence à empresa")
+
+    await db.execute(delete(MenuCategory).where(MenuCategory.menu_id == menu_id))
+    await db.execute(delete(MenuProduct).where(MenuProduct.menu_id == menu_id))
+    for category_id in unique_cat_ids:
+        db.add(MenuCategory(menu_id=menu_id, category_id=category_id))
+    for product_id in unique_prod_ids:
+        db.add(MenuProduct(menu_id=menu_id, product_id=product_id))
+
+# ── Regra de visibilidade condicional por horário (ORD-127) ────────────────
+# Categoria/produto sem nenhum vínculo de cardápio é sempre visível (padrão
+# seguro, mesmo comportamento de hoje). Com vínculo, só fica visível se
+# PELO MENOS UM dos cardápios ligados a ele estiver ativo agora (dia da
+# semana + horário) — união das janelas, não interseção (decisão de
+# produto registrada em ORD-124: produto pode estar em vários cardápios).
+# Só se aplica em include_inactive=False (chamada do totem) — o admin
+# sempre vê tudo, independente de horário.
+
+def _is_menu_active_now(menu: "Menu") -> bool:
+    if not menu.active:
+        return False
+    now = datetime.utcnow()
+    if now.weekday() not in menu.weekdays:
+        return False
+    return menu.start_time <= now.time() <= menu.end_time
+
+async def _menus_by_category(db: AsyncSession, company_id: int) -> dict[int, list["Menu"]]:
+    result = await db.execute(
+        select(MenuCategory.category_id, Menu)
+        .join(Menu, Menu.id == MenuCategory.menu_id)
+        .filter(Menu.company_id == company_id)
+    )
+    out: dict[int, list["Menu"]] = {}
+    for category_id, menu in result.all():
+        out.setdefault(category_id, []).append(menu)
+    return out
+
+async def _menus_by_product(db: AsyncSession, company_id: int) -> dict[int, list["Menu"]]:
+    result = await db.execute(
+        select(MenuProduct.product_id, Menu)
+        .join(Menu, Menu.id == MenuProduct.menu_id)
+        .filter(Menu.company_id == company_id)
+    )
+    out: dict[int, list["Menu"]] = {}
+    for product_id, menu in result.all():
+        out.setdefault(product_id, []).append(menu)
+    return out
 
 async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
     """Monta o dict de saída trocando as keys de S3 guardadas no banco por
@@ -167,6 +300,7 @@ class CategoryOut(BaseModel):
     id: int
     name: str
     active: bool
+    sort_order: Optional[int] = None
 
 class CategoryListOut(BaseModel):
     categories: list[CategoryOut]
@@ -177,6 +311,9 @@ class CategoryIn(BaseModel):
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
     active: Optional[bool] = None
+
+class CategoryReorderIn(BaseModel):
+    category_ids: list[int]
 
 class AllergenOut(BaseModel):
     id: int
@@ -247,6 +384,68 @@ class ReorderIn(BaseModel):
     category_id: int
     product_ids: list[int]
 
+class MenuCategoryRef(BaseModel):
+    id: int
+    name: str
+
+class MenuProductRef(BaseModel):
+    id: int
+    name: str
+
+class MenuOut(BaseModel):
+    id: int
+    name: str
+    weekdays: list[int]
+    start_time: str  # "HH:MM"
+    end_time: str
+    active: bool
+    categories: list[MenuCategoryRef] = []
+    products: list[MenuProductRef] = []
+
+class MenuListOut(BaseModel):
+    menus: list[MenuOut]
+
+VALID_WEEKDAYS = set(range(7))
+
+class MenuIn(BaseModel):
+    name: str
+    weekdays: list[int]
+    start_time: str  # "HH:MM"
+    end_time: str
+
+    @field_validator("weekdays")
+    @classmethod
+    def validate_weekdays(cls, v: list[int]) -> list[int]:
+        if not v or not set(v).issubset(VALID_WEEKDAYS):
+            raise ValueError("weekdays deve ter ao menos 1 dia, valores de 0 (segunda) a 6 (domingo)")
+        return sorted(set(v))
+
+class MenuUpdate(BaseModel):
+    name: Optional[str] = None
+    weekdays: Optional[list[int]] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    active: Optional[bool] = None
+
+    @field_validator("weekdays")
+    @classmethod
+    def validate_weekdays(cls, v: Optional[list[int]]) -> Optional[list[int]]:
+        if v is not None and (not v or not set(v).issubset(VALID_WEEKDAYS)):
+            raise ValueError("weekdays deve ter ao menos 1 dia, valores de 0 (segunda) a 6 (domingo)")
+        return sorted(set(v)) if v is not None else v
+
+class MenuCompositionIn(BaseModel):
+    category_ids: list[int] = []
+    product_ids: list[int] = []
+
+class ProductMenuRef(BaseModel):
+    id: int
+    name: str
+    via_category: Optional[str] = None  # nome da categoria, se o vínculo for por herança (não direto)
+
+class ProductMenusOut(BaseModel):
+    menus: list[ProductMenuRef]
+
 class HealthOut(BaseModel):
     service: str
     status: str
@@ -260,6 +459,16 @@ _tags = [
             "Catálogo de produtos e categorias da empresa autenticada. "
             "Todos os endpoints são filtrados automaticamente por `company_id` do JWT — "
             "nunca é possível acessar o catálogo de outra empresa."
+        ),
+    },
+    {
+        "name": "Cardápios",
+        "description": (
+            "Cardápios por horário (ORD-124/125) — janelas de dia da semana + horário, "
+            "compostos por categorias inteiras e/ou produtos avulsos. Produto vinculado a "
+            "pelo menos um cardápio deixa de ser sempre-visível e passa a aparecer só na "
+            "união das janelas ativas (regra de visibilidade em si é ORD-127, ainda não "
+            "implementada aqui — esta versão é só o CRUD)."
         ),
     },
 ]
@@ -307,9 +516,18 @@ async def list_categories(
     q = select(Category).filter_by(company_id=company_id, deleted=False)
     if not include_inactive:
         q = q.filter_by(active=True)
+    q = q.order_by(Category.sort_order.asc(), Category.id.asc())
     result = await db.execute(q)
     cats = result.scalars().all()
-    return {"categories": [{"id": c.id, "name": c.name, "active": c.active} for c in cats]}
+
+    if not include_inactive:
+        menus_by_cat = await _menus_by_category(db, company_id)
+        cats = [
+            c for c in cats
+            if not menus_by_cat.get(c.id) or any(_is_menu_active_now(m) for m in menus_by_cat[c.id])
+        ]
+
+    return {"categories": [{"id": c.id, "name": c.name, "active": c.active, "sort_order": c.sort_order} for c in cats]}
 
 @app.get(
     "/catalog/products",
@@ -336,6 +554,19 @@ async def list_products(
     q = q.order_by(Product.sort_order.asc(), Product.id.asc())
     result = await db.execute(q)
     products = result.scalars().all()
+
+    if not include_inactive:
+        menus_by_cat = await _menus_by_category(db, company_id)
+        menus_by_prod = await _menus_by_product(db, company_id)
+
+        def _visible(p: "Product") -> bool:
+            linked = list(menus_by_prod.get(p.id, []))
+            if p.category_id is not None:
+                linked += menus_by_cat.get(p.category_id, [])
+            return not linked or any(_is_menu_active_now(m) for m in linked)
+
+        products = [p for p in products if _visible(p)]
+
     return {"products": [await _serialize_product(db, p) for p in products]}
 
 @app.get(
@@ -384,9 +615,38 @@ async def create_category(
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id_write),
 ):
-    cat = Category(company_id=company_id, name=body.name)
+    count_result = await db.execute(
+        select(func.count()).select_from(Category).filter_by(company_id=company_id, deleted=False)
+    )
+    next_sort_order = count_result.scalar_one()
+    cat = Category(company_id=company_id, name=body.name, sort_order=next_sort_order)
     db.add(cat); await db.commit(); await db.refresh(cat)
-    return {"id": cat.id, "name": cat.name, "active": cat.active}
+    return {"id": cat.id, "name": cat.name, "active": cat.active, "sort_order": cat.sort_order}
+
+@app.put(
+    "/catalog/categories/reorder",
+    status_code=204,
+    tags=["Catálogo"],
+    summary="Reordenar categorias",
+    responses={400: {"description": "algum id não pertence à empresa"}},
+)
+async def reorder_categories(
+    body: CategoryReorderIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """Rota registrada antes de /catalog/categories/{category_id} de propósito:
+    caso contrário o path param capturaria "reorder" como category_id (mesmo
+    racional de /catalog/products/reorder)."""
+    result = await db.execute(
+        select(Category.id).filter_by(company_id=company_id, deleted=False)
+    )
+    valid_ids = set(result.scalars().all())
+    if set(body.category_ids) != valid_ids:
+        raise HTTPException(400, detail="category_ids não corresponde exatamente às categorias da empresa")
+    for index, category_id in enumerate(body.category_ids):
+        await db.execute(update(Category).where(Category.id == category_id).values(sort_order=index))
+    await db.commit()
 
 @app.put(
     "/catalog/categories/{category_id}",
@@ -407,7 +667,7 @@ async def update_category(
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(cat, field, value)
     await db.commit(); await db.refresh(cat)
-    return {"id": cat.id, "name": cat.name, "active": cat.active}
+    return {"id": cat.id, "name": cat.name, "active": cat.active, "sort_order": cat.sort_order}
 
 @app.delete(
     "/catalog/categories/{category_id}",
@@ -668,6 +928,155 @@ async def delete_product_image(
     p.thumbnail_url = None
     await db.commit(); await db.refresh(p)
     return await _serialize_product(db, p)
+
+def _parse_time(value: str):
+    from datetime import time
+    try:
+        hh, mm = value.split(":")
+        return time(int(hh), int(mm))
+    except (ValueError, AttributeError):
+        raise HTTPException(400, detail=f"Horário inválido: '{value}', esperado formato HH:MM")
+
+@app.post(
+    "/catalog/menus",
+    status_code=201,
+    response_model=MenuOut,
+    tags=["Cardápios"],
+    summary="Criar cardápio por horário",
+)
+async def create_menu(
+    body: MenuIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    menu = Menu(
+        company_id=company_id,
+        name=body.name,
+        weekdays=body.weekdays,
+        start_time=_parse_time(body.start_time),
+        end_time=_parse_time(body.end_time),
+    )
+    db.add(menu); await db.commit(); await db.refresh(menu)
+    return await _serialize_menu(db, menu)
+
+@app.get(
+    "/catalog/menus",
+    response_model=MenuListOut,
+    tags=["Cardápios"],
+    summary="Listar cardápios da empresa",
+)
+async def list_menus(
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id),
+):
+    result = await db.execute(select(Menu).filter_by(company_id=company_id).order_by(Menu.name))
+    menus = result.scalars().all()
+    return {"menus": [await _serialize_menu(db, m) for m in menus]}
+
+@app.put(
+    "/catalog/menus/{menu_id}",
+    response_model=MenuOut,
+    tags=["Cardápios"],
+    summary="Editar cardápio",
+    responses={404: {"description": "Cardápio não encontrado"}},
+)
+async def update_menu(
+    menu_id: int,
+    body: MenuUpdate,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    result = await db.execute(select(Menu).filter_by(id=menu_id, company_id=company_id))
+    menu = result.scalars().first()
+    if not menu: raise HTTPException(404)
+    data = body.model_dump(exclude_none=True)
+    if "start_time" in data: data["start_time"] = _parse_time(data["start_time"])
+    if "end_time" in data: data["end_time"] = _parse_time(data["end_time"])
+    for field, value in data.items():
+        setattr(menu, field, value)
+    await db.commit(); await db.refresh(menu)
+    return await _serialize_menu(db, menu)
+
+@app.put(
+    "/catalog/menus/{menu_id}/composition",
+    response_model=MenuOut,
+    tags=["Cardápios"],
+    summary="Definir a composição do cardápio (categorias inteiras e/ou produtos avulsos)",
+    responses={
+        400: {"description": "category_ids/product_ids contém id que não existe ou não pertence à empresa"},
+        404: {"description": "Cardápio não encontrado"},
+    },
+)
+async def set_menu_composition(
+    menu_id: int,
+    body: MenuCompositionIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    result = await db.execute(select(Menu).filter_by(id=menu_id, company_id=company_id))
+    menu = result.scalars().first()
+    if not menu: raise HTTPException(404)
+    await _set_menu_composition(db, menu_id, company_id, body.category_ids, body.product_ids)
+    await db.commit()
+    return await _serialize_menu(db, menu)
+
+@app.delete(
+    "/catalog/menus/{menu_id}",
+    status_code=204,
+    tags=["Cardápios"],
+    summary="Remover cardápio",
+    responses={404: {"description": "Cardápio não encontrado"}},
+)
+async def delete_menu(
+    menu_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """Hard delete — Menu não é referenciado por venda nenhuma, ver
+    docstring do model. Remove os vínculos de composição junto, sem deixar
+    lixo órfão nas tabelas de junção."""
+    result = await db.execute(select(Menu).filter_by(id=menu_id, company_id=company_id))
+    menu = result.scalars().first()
+    if not menu: raise HTTPException(404)
+    await db.execute(delete(MenuCategory).where(MenuCategory.menu_id == menu_id))
+    await db.execute(delete(MenuProduct).where(MenuProduct.menu_id == menu_id))
+    await db.delete(menu)
+    await db.commit()
+
+@app.get(
+    "/catalog/products/{product_id}/menus",
+    response_model=ProductMenusOut,
+    tags=["Cardápios"],
+    summary="Listar a quais cardápios um produto pertence (direto ou via categoria)",
+    responses={404: {"description": "Produto não encontrado"}},
+)
+async def get_product_menus(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id),
+):
+    prod_result = await db.execute(select(Product).filter_by(id=product_id, company_id=company_id, deleted=False))
+    product = prod_result.scalars().first()
+    if not product: raise HTTPException(404)
+
+    direct_result = await db.execute(
+        select(Menu.id, Menu.name)
+        .join(MenuProduct, MenuProduct.menu_id == Menu.id)
+        .filter(MenuProduct.product_id == product_id, Menu.company_id == company_id)
+    )
+    refs = [{"id": m.id, "name": m.name, "via_category": None} for m in direct_result.all()]
+
+    if product.category_id is not None:
+        cat_result = await db.execute(select(Category.name).filter_by(id=product.category_id))
+        category_name = cat_result.scalar_one_or_none()
+        via_result = await db.execute(
+            select(Menu.id, Menu.name)
+            .join(MenuCategory, MenuCategory.menu_id == Menu.id)
+            .filter(MenuCategory.category_id == product.category_id, Menu.company_id == company_id)
+        )
+        refs += [{"id": m.id, "name": m.name, "via_category": category_name} for m in via_result.all()]
+
+    return {"menus": refs}
 
 @app.get("/health", response_model=HealthOut, tags=["Catálogo"], summary="Healthcheck")
 def health(): return {"service": "catalog", "status": "ok"}

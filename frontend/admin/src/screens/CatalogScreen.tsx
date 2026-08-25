@@ -1,5 +1,6 @@
-import { useState, useEffect, FormEvent, DragEvent } from "react";
+import { useState, useEffect, useRef, useCallback, FormEvent } from "react";
 import {
+  Alert,
   Button,
   CheckboxMultiselect,
   CurrencyInput,
@@ -7,6 +8,8 @@ import {
   InputBase,
   Modal,
   NumberInput,
+  Tab,
+  Tabs,
   Tag,
   TagInput,
   TextArea,
@@ -19,8 +22,9 @@ import {
 import api from "../api";
 import { listCompanies } from "../api/companies";
 import ConfirmDialog, { type ConfirmDialogProps } from "../components/ConfirmDialog";
+import Table from "../components/Table";
 import { useStore } from "../store";
-import type { Allergen, Category, Company, Product } from "../types";
+import type { Allergen, Category, Company, Menu, Product, ProductMenuRef } from "../types";
 import styles from "./CatalogScreen.module.scss";
 
 // Conjunto sugerido pra tags (usuário aprovou "adotar os padrões sugeridos,
@@ -47,17 +51,63 @@ function tagVariant(tag: string): TagProps["variant"] {
 const IMAGE_MAX_SIZE_MB = 2;
 const IMAGE_TYPES = ["image/jpeg", "image/png"];
 
-// Regra: qualquer par de botão que alterna "Desativar"/"Ativar" no mesmo
-// lugar (categoria e produto) precisa da mesma largura fixa nos dois
-// estados, senão o texto mais curto ("Ativar") encolhe o botão e empurra o
-// resto da linha. 140px cobre "Desativar" (o mais longo) com folga.
-// Usar `style` (não `className`) — o Button do design-system descarta
-// qualquer className passado por fora (ver Button.js), só style chega no DOM.
-const TOGGLE_ACTIVE_BTN_STYLE = { width: 140 };
-
 // Exclusão definitiva (irreversível) — cor de erro só no texto pra destacar
 // do resto das ações sem precisar de uma variant "danger" (o DS não tem).
 const DANGER_BTN_STYLE = { color: "var(--error-base)" };
+
+type StatusFilter = "active" | "inactive" | "all";
+
+// "Ativas/Inativas/Todas" (categoria, feminino) vs "Ativos/Inativos/Todos"
+// (produto, masculino) — mesmo cuidado de concordância já usado em
+// CompanyScreen (PAYMENT_STATUS_FILTER_OPTIONS vs STATUS_FILTER_OPTIONS).
+const CATEGORY_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "active", label: "Ativas" },
+  { value: "inactive", label: "Inativas" },
+  { value: "all", label: "Todas" },
+];
+
+const PRODUCT_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "active", label: "Ativos" },
+  { value: "inactive", label: "Inativos" },
+  { value: "all", label: "Todos" },
+];
+
+const MENU_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "active", label: "Ativos" },
+  { value: "inactive", label: "Inativos" },
+  { value: "all", label: "Todos" },
+];
+
+// 0=segunda..6=domingo, mesmo datetime.weekday() do backend (ORD-125).
+const WEEKDAY_ABBR = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+const WEEKDAY_OPTIONS = WEEKDAY_ABBR.map((label, i) => ({ value: String(i), label, disabled: false }));
+
+function formatWeekdays(weekdays: number[]): string {
+  const sorted = [...weekdays].sort((a, b) => a - b);
+  if (sorted.length === 7) return "Todos os dias";
+  const contiguous = sorted.every((d, i) => i === 0 || d === sorted[i - 1] + 1);
+  if (contiguous && sorted.length > 1) return `${WEEKDAY_ABBR[sorted[0]]}-${WEEKDAY_ABBR[sorted[sorted.length - 1]]}`;
+  return sorted.map((d) => WEEKDAY_ABBR[d]).join(", ");
+}
+
+// Um produto pode estar vinculado ao mesmo cardápio direto E via categoria
+// ao mesmo tempo (achado ao testar ORD-125 ao vivo) — mescla numa linha só
+// em vez de mostrar o mesmo cardápio duas vezes.
+function formatProductMenus(refs: ProductMenuRef[]): string[] {
+  const byMenu = new Map<number, { name: string; direct: boolean; viaCategories: string[] }>();
+  for (const r of refs) {
+    const entry = byMenu.get(r.id) ?? { name: r.name, direct: false, viaCategories: [] };
+    if (r.via_category) entry.viaCategories.push(r.via_category);
+    else entry.direct = true;
+    byMenu.set(r.id, entry);
+  }
+  return Array.from(byMenu.values(), (e) => {
+    const parts: string[] = [];
+    if (e.direct) parts.push("direto");
+    if (e.viaCategories.length) parts.push(`via ${e.viaCategories.join(", ")}`);
+    return `${e.name} (${parts.join(" + ")})`;
+  });
+}
 
 interface EditProdState {
   id: number;
@@ -109,74 +159,133 @@ export default function CatalogScreen() {
     };
   }
 
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  // Cadastro em abas + padrão Empresa (2026-08-24) — filterBar + Table +
+  // Modal, mesmo modelo de Usuários/Terminais/Pagamento em CompanyScreen.
+  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus">("categories");
+
   const [allergens, setAllergens] = useState<Allergen[]>([]);
-  const [draggedProductId, setDraggedProductId] = useState<number | null>(null);
-  const [selectedCat, setSelectedCat] = useState<number | null>(null);
-  const [newCatName, setNewCatName] = useState("");
-  const [newProd, setNewProd] = useState<{ name: string; price: number | null }>({ name: "", price: null });
-  const [editCat, setEditCat] = useState<{ id: number; name: string } | null>(null);
-  const [editProd, setEditProd] = useState<EditProdState | null>(null);
-  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
-  const [confirmState, setConfirmState] = useState<{
-    message: string;
-    onConfirm: () => void;
-    alertVariant?: ConfirmDialogProps["alertVariant"];
-    alertIcon?: string;
-  } | null>(null);
-  const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
-
   useEffect(() => { loadAllergens(); }, []);
-  useEffect(() => {
-    if (!hasCompanyContext) { setCategories([]); setSelectedCat(null); return; }
-    loadCategories();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasCompanyContext, companyId]);
-  useEffect(() => {
-    if (selectedCat && hasCompanyContext) loadProducts(selectedCat); else setProducts([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCat, hasCompanyContext, companyId]);
-
-  async function loadCategories() {
-    const r = await api.get("/catalog/categories", catalogParams({ include_inactive: true }));
-    setCategories(r.data.categories ?? r.data);
-  }
-
-  async function loadProducts(catId: number) {
-    const r = await api.get("/catalog/products", catalogParams({ category_id: catId, include_inactive: true }));
-    setProducts(r.data.products ?? r.data);
-  }
-
   async function loadAllergens() {
     // Master data global, não filtrado por empresa — sem catalogParams.
     const r = await api.get("/catalog/allergens");
     setAllergens(r.data.allergens ?? r.data);
   }
 
-  async function addCategory(e: FormEvent) {
-    e.preventDefault();
-    if (!newCatName.trim()) return;
-    await api.post("/catalog/categories", { name: newCatName.trim() }, catalogParams());
-    setNewCatName("");
-    loadCategories();
+  const [confirmState, setConfirmState] = useState<{
+    message: string;
+    onConfirm: () => void;
+    alertVariant?: ConfirmDialogProps["alertVariant"];
+    alertIcon?: string;
+  } | null>(null);
+
+  const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
+
+  // ── Categorias ─────────────────────────────────────────────────────────
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [errCategories, setErrCategories] = useState<string | null>(null);
+  const [categoryNameFilter, setCategoryNameFilter] = useState("");
+  const [categoryStatusFilter, setCategoryStatusFilter] = useState<StatusFilter>("active");
+  const categoryRequestId = useRef(0);
+
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [categoryNameDefault, setCategoryNameDefault] = useState("");
+  const [categoryModalKey, setCategoryModalKey] = useState(0);
+  const [categoryFormError, setCategoryFormError] = useState("");
+  const [categorySaving, setCategorySaving] = useState(false);
+  const categoryNameRef = useRef<HTMLInputElement>(null);
+
+  async function loadCategories() {
+    if (!hasCompanyContext) return;
+    const thisRequest = ++categoryRequestId.current;
+    try {
+      const r = await api.get("/catalog/categories", catalogParams({ include_inactive: true }));
+      if (thisRequest !== categoryRequestId.current) return; // resposta obsoleta, ignorar
+      setCategories(r.data.categories ?? r.data);
+      setErrCategories(null);
+    } catch {
+      if (thisRequest !== categoryRequestId.current) return;
+      setErrCategories("Erro ao carregar categorias.");
+    }
   }
 
-  async function saveEditCat(e: FormEvent) {
-    e.preventDefault();
-    if (!editCat) return;
-    await api.put(`/catalog/categories/${editCat.id}`, { name: editCat.name }, catalogParams());
-    setEditCat(null);
+  useEffect(() => {
+    if (!hasCompanyContext) { setCategories([]); return; }
     loadCategories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCompanyContext, companyId]);
+
+  const filteredCategories = categories.filter((c) => {
+    if (categoryStatusFilter === "active" && !c.active) return false;
+    if (categoryStatusFilter === "inactive" && c.active) return false;
+    if (categoryNameFilter && !c.name.toLowerCase().includes(categoryNameFilter.toLowerCase())) return false;
+    return true;
+  });
+
+  // Reordenar (pedido direto do usuário — refletir a ordem de apresentação
+  // no totem) exige que o conjunto visível bata EXATAMENTE com todas as
+  // categorias da empresa, mesma validação de reorderProducts — por isso só
+  // fica disponível com filtro de nome vazio e status "Todas".
+  const canReorderCategories = !categoryNameFilter && categoryStatusFilter === "all";
+
+  async function reorderCategories(orderedIds: (string | number)[]) {
+    const ids = orderedIds.map(Number);
+    const orderMap = new Map(ids.map((id, i) => [id, i]));
+    setCategories((prev) => [...prev].sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0)));
+    await api.put("/catalog/categories/reorder", { category_ids: ids }, catalogParams());
   }
 
-  function deleteCategory(id: number) {
+  function clearCategoryFilters() {
+    setCategoryNameFilter("");
+    setCategoryStatusFilter("active");
+  }
+
+  function openNewCategory() {
+    setEditingCategoryId(null);
+    setCategoryNameDefault("");
+    setCategoryFormError("");
+    setCategoryModalKey((k) => k + 1);
+    setCategoryModalOpen(true);
+  }
+
+  function openEditCategory(c: Category) {
+    setEditingCategoryId(c.id);
+    setCategoryNameDefault(c.name);
+    setCategoryFormError("");
+    setCategoryModalKey((k) => k + 1);
+    setCategoryModalOpen(true);
+  }
+
+  async function saveCategory(e: FormEvent) {
+    e.preventDefault();
+    const name = categoryNameRef.current?.value.trim() ?? "";
+    if (!name) {
+      setCategoryFormError("Nome é obrigatório.");
+      return;
+    }
+    setCategorySaving(true);
+    setCategoryFormError("");
+    try {
+      if (editingCategoryId === null) {
+        await api.post("/catalog/categories", { name }, catalogParams());
+      } else {
+        await api.put(`/catalog/categories/${editingCategoryId}`, { name }, catalogParams());
+      }
+      setCategoryModalOpen(false);
+      loadCategories();
+    } catch {
+      setCategoryFormError("Erro ao salvar categoria.");
+    } finally {
+      setCategorySaving(false);
+    }
+  }
+
+  function deactivateCategory(id: number) {
     setConfirmState({
       message: "Desativar categoria? Ela some do totem, mas os produtos continuam cadastrados e reaparecem se a categoria for reativada.",
       onConfirm: async () => {
         setConfirmState(null);
         await api.delete(`/catalog/categories/${id}`, catalogParams());
-        if (selectedCat === id) setSelectedCat(null);
         loadCategories();
       },
     });
@@ -195,26 +304,128 @@ export default function CatalogScreen() {
       onConfirm: async () => {
         setConfirmState(null);
         await api.delete(`/catalog/categories/${id}`, catalogParams({ permanent: true }));
-        if (selectedCat === id) setSelectedCat(null);
         loadCategories();
       },
     });
   }
 
-  async function addProduct(e: FormEvent) {
-    e.preventDefault();
-    if (!selectedCat || !newProd.name.trim() || !newProd.price) return;
-    await api.post("/catalog/products", {
-      category_id: selectedCat,
-      name: newProd.name.trim(),
-      price: newProd.price,
-    }, catalogParams());
-    setNewProd({ name: "", price: null });
-    loadProducts(selectedCat);
+  // Atalho de produtividade: clicar numa categoria já filtra e leva pra
+  // aba Produtos — sem isso, virar abas trocaria 1 clique por 2 (pedido
+  // explícito do usuário: manter "usabilidade aguçada").
+  function browseCategoryProducts(id: number) {
+    setProductCategoryFilter(String(id));
+    setActiveTab("products");
   }
 
-  function openEditProd(p: Product) {
-    setEditCat(null);
+  // ── Produtos ───────────────────────────────────────────────────────────
+  const [products, setProducts] = useState<Product[]>([]);
+  const [errProducts, setErrProducts] = useState<string | null>(null);
+  const [productNameFilter, setProductNameFilter] = useState("");
+  const [productCategoryFilter, setProductCategoryFilter] = useState(""); // "" = todas as categorias
+  const [productStatusFilter, setProductStatusFilter] = useState<StatusFilter>("active");
+  const productRequestId = useRef(0);
+
+  // Só categorias ativas — o backend rejeita mover produto pra categoria
+  // inativa (tanto na criação quanto na edição).
+  const activeCategoryOptions: DropdownOptions[] = categories
+    .filter((c) => c.active)
+    .map((c) => ({ value: String(c.id), label: c.name }));
+
+  // Filtro de produtos por categoria inclui inativas — precisa continuar
+  // dando pra listar produtos de uma categoria desativada.
+  const productCategoryFilterOptions: DropdownOptions[] = [
+    { value: "", label: "Todas" },
+    ...categories.map((c) => ({ value: String(c.id), label: c.active ? c.name : `${c.name} (inativa)` })),
+  ];
+
+  async function loadProducts() {
+    if (!hasCompanyContext) return;
+    const thisRequest = ++productRequestId.current;
+    try {
+      // Sem category_id — traz produtos de todas as categorias; o filtro
+      // de categoria é aplicado no cliente (mesma lista serve pro
+      // dropdown "Todas" e pra filtro específico, sem round-trip extra).
+      const r = await api.get("/catalog/products", catalogParams({ include_inactive: true }));
+      if (thisRequest !== productRequestId.current) return; // resposta obsoleta, ignorar
+      setProducts(r.data.products ?? r.data);
+      setErrProducts(null);
+    } catch {
+      if (thisRequest !== productRequestId.current) return;
+      setErrProducts("Erro ao carregar produtos.");
+    }
+  }
+
+  useEffect(() => {
+    if (!hasCompanyContext) { setProducts([]); return; }
+    loadProducts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCompanyContext, companyId]);
+
+  function clearProductFilters() {
+    setProductNameFilter("");
+    setProductCategoryFilter("");
+    setProductStatusFilter("active");
+  }
+
+  const filteredProducts = products
+    .filter((p) => {
+      if (productStatusFilter === "active" && !p.active) return false;
+      if (productStatusFilter === "inactive" && p.active) return false;
+      if (productCategoryFilter && String(p.category_id) !== productCategoryFilter) return false;
+      if (productNameFilter && !p.name.toLowerCase().includes(productNameFilter.toLowerCase())) return false;
+      return true;
+    })
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+
+  // Reordenar só faz sentido dentro de UMA categoria — sort_order é
+  // escopado por categoria no backend (PUT /catalog/products/reorder), que
+  // valida que o conjunto enviado bate EXATAMENTE com todos os produtos
+  // (ativos+inativos) da categoria — por isso também exige filtro de nome
+  // vazio e status "Todos", senão a lista visível seria um subconjunto e a
+  // chamada falharia. Drag-and-drop (não mais setas — pedido direto do
+  // usuário) via Pointer Events na própria Table (ver components/Table.tsx),
+  // mesmo mecanismo do drag-and-drop de Preparo, com suporte a touch.
+  const canReorderProducts = Boolean(productCategoryFilter) && !productNameFilter && productStatusFilter === "all";
+
+  async function reorderProducts(orderedIds: (string | number)[]) {
+    if (!productCategoryFilter) return;
+    const ids = orderedIds.map(Number);
+    const orderMap = new Map(ids.map((id, i) => [id, i]));
+    setProducts((prev) => prev.map((p) => (orderMap.has(p.id) ? { ...p, sort_order: orderMap.get(p.id)! } : p)));
+    await api.put("/catalog/products/reorder", {
+      category_id: Number(productCategoryFilter),
+      product_ids: ids,
+    }, catalogParams());
+  }
+
+  const [productModalOpen, setProductModalOpen] = useState(false);
+  const [newProd, setNewProd] = useState<{ name: string; price: number | null; category_id: number | null }>({
+    name: "", price: null, category_id: null,
+  });
+  const [editProd, setEditProd] = useState<EditProdState | null>(null); // não-nulo = editando
+  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
+  const [productFormError, setProductFormError] = useState("");
+  const [productSaving, setProductSaving] = useState(false);
+  // ORD-126 — a quais cardápios este produto pertence (direto ou via
+  // categoria), read-only aqui; edição de fato é na aba Cardápios.
+  const [editProdMenus, setEditProdMenus] = useState<ProductMenuRef[]>([]);
+
+  function openNewProduct() {
+    setEditProd(null);
+    setNewProd({
+      name: "",
+      price: null,
+      // Pré-seleciona a categoria do filtro atual, se houver — mesma
+      // conveniência de antes (adicionar direto na categoria que se está
+      // olhando), só que agora como valor inicial editável, não implícito.
+      category_id: productCategoryFilter ? Number(productCategoryFilter) : null,
+    });
+    setUploadFiles([]);
+    setProductFormError("");
+    setProductModalOpen(true);
+  }
+
+  function openEditProduct(p: Product) {
     setEditProd({
       id: p.id,
       name: p.name,
@@ -230,55 +441,71 @@ export default function CatalogScreen() {
       allergen_ids: (p.allergens ?? []).map((a) => String(a.id)),
     });
     setUploadFiles([]);
+    setProductFormError("");
+    setEditProdMenus([]);
+    api.get(`/catalog/products/${p.id}/menus`, catalogParams())
+      .then((r) => setEditProdMenus(r.data.menus ?? []))
+      .catch(() => null);
+    setProductModalOpen(true);
   }
 
-  function closeEditProd() {
+  // useCallback (não função solta) de propósito: Modal.js reroda seu efeito
+  // interno sempre que onClose/onBackdropClick/onCloseButtonClick mudam de
+  // referência — com uma função nova a cada render (como digitar num campo
+  // controlado dentro do modal dispara), o efeito reroda a cada tecla e
+  // acaba devolvendo o foco pro wrapper do modal, comendo caracteres
+  // digitados. Achado ao vivo 2026-08-24, testando o formulário de produto
+  // (que tem campos controlados, diferente do de categoria, só com ref).
+  const closeProductModal = useCallback(() => {
+    setProductModalOpen(false);
     setEditProd(null);
     setUploadFiles([]);
+  }, []);
+
+  async function saveNewProduct(e: FormEvent) {
+    e.preventDefault();
+    if (!newProd.name.trim() || !newProd.price || !newProd.category_id) return;
+    setProductSaving(true);
+    setProductFormError("");
+    try {
+      await api.post("/catalog/products", {
+        category_id: newProd.category_id,
+        name: newProd.name.trim(),
+        price: newProd.price,
+      }, catalogParams());
+      closeProductModal();
+      loadProducts();
+    } catch {
+      setProductFormError("Erro ao criar produto.");
+    } finally {
+      setProductSaving(false);
+    }
   }
 
   async function saveEditProd(e: FormEvent) {
     e.preventDefault();
     if (!editProd || !editProd.name.trim() || editProd.price <= 0) return;
-    await api.put(`/catalog/products/${editProd.id}`, {
-      name: editProd.name.trim(),
-      price: editProd.price,
-      category_id: editProd.category_id,
-      description: editProd.description.trim() || null,
-      description_long: editProd.description_long.trim() || null,
-      calories: editProd.calories,
-      sku: editProd.sku.trim() || null,
-      tags: editProd.tags,
-      allergen_ids: editProd.allergen_ids.map(Number),
-    }, catalogParams());
-    closeEditProd();
-    if (selectedCat) loadProducts(selectedCat);
-  }
-
-  function handleProductDragStart(id: number) {
-    setDraggedProductId(id);
-  }
-
-  function handleProductDragOver(e: DragEvent<HTMLDivElement>) {
-    e.preventDefault();
-  }
-
-  async function handleProductDrop(e: DragEvent<HTMLDivElement>, targetId: number) {
-    e.preventDefault();
-    const sourceId = draggedProductId;
-    setDraggedProductId(null);
-    if (sourceId === null || sourceId === targetId || !selectedCat) return;
-    const fromIndex = products.findIndex((p) => p.id === sourceId);
-    const toIndex = products.findIndex((p) => p.id === targetId);
-    if (fromIndex === -1 || toIndex === -1) return;
-    const reordered = [...products];
-    const [moved] = reordered.splice(fromIndex, 1);
-    reordered.splice(toIndex, 0, moved);
-    setProducts(reordered);
-    await api.put("/catalog/products/reorder", {
-      category_id: selectedCat,
-      product_ids: reordered.map((p) => p.id),
-    }, catalogParams());
+    setProductSaving(true);
+    setProductFormError("");
+    try {
+      await api.put(`/catalog/products/${editProd.id}`, {
+        name: editProd.name.trim(),
+        price: editProd.price,
+        category_id: editProd.category_id,
+        description: editProd.description.trim() || null,
+        description_long: editProd.description_long.trim() || null,
+        calories: editProd.calories,
+        sku: editProd.sku.trim() || null,
+        tags: editProd.tags,
+        allergen_ids: editProd.allergen_ids.map(Number),
+      }, catalogParams());
+      closeProductModal();
+      loadProducts();
+    } catch {
+      setProductFormError("Erro ao salvar produto.");
+    } finally {
+      setProductSaving(false);
+    }
   }
 
   async function handleImageFiles(files: UploadFile[]) {
@@ -298,7 +525,7 @@ export default function CatalogScreen() {
         ? { ...prev, image_url: r.data.image_url, thumbnail_url: r.data.thumbnail_url }
         : prev));
       setUploadFiles([]);
-      if (selectedCat) loadProducts(selectedCat);
+      loadProducts();
     } catch {
       setUploadFiles([{ ...picked, status: "error-send" }]);
     }
@@ -315,18 +542,18 @@ export default function CatalogScreen() {
         setEditProd((prev) => (prev && prev.id === productId
           ? { ...prev, image_url: r.data.image_url, thumbnail_url: r.data.thumbnail_url }
           : prev));
-        if (selectedCat) loadProducts(selectedCat);
+        loadProducts();
       },
     });
   }
 
-  function deleteProduct(id: number) {
+  function deactivateProduct(id: number) {
     setConfirmState({
       message: "Desativar produto?",
       onConfirm: async () => {
         setConfirmState(null);
         await api.delete(`/catalog/products/${id}`, catalogParams());
-        if (selectedCat) loadProducts(selectedCat);
+        loadProducts();
       },
     });
   }
@@ -339,20 +566,164 @@ export default function CatalogScreen() {
       onConfirm: async () => {
         setConfirmState(null);
         await api.delete(`/catalog/products/${id}`, catalogParams({ permanent: true }));
-        if (selectedCat) loadProducts(selectedCat);
+        loadProducts();
       },
     });
   }
 
   async function activateProduct(id: number) {
     await api.put(`/catalog/products/${id}`, { active: true }, catalogParams());
-    if (selectedCat) loadProducts(selectedCat);
+    loadProducts();
   }
 
-  // Só categorias ativas — o backend rejeita mover produto pra categoria inativa.
-  const categoryOptions: DropdownOptions[] = categories
-    .filter((c) => c.active)
-    .map((c) => ({ value: String(c.id), label: c.name }));
+  function categoryName(id: number): string {
+    return categories.find((c) => c.id === id)?.name ?? "—";
+  }
+
+  // ── Cardápios (ORD-126) ────────────────────────────────────────────────
+  const [menus, setMenus] = useState<Menu[]>([]);
+  const [errMenus, setErrMenus] = useState<string | null>(null);
+  const [menuNameFilter, setMenuNameFilter] = useState("");
+  const [menuStatusFilter, setMenuStatusFilter] = useState<StatusFilter>("active");
+  const menuRequestId = useRef(0);
+
+  async function loadMenus() {
+    if (!hasCompanyContext) return;
+    const thisRequest = ++menuRequestId.current;
+    try {
+      const r = await api.get("/catalog/menus", catalogParams());
+      if (thisRequest !== menuRequestId.current) return; // resposta obsoleta, ignorar
+      setMenus(r.data.menus ?? r.data);
+      setErrMenus(null);
+    } catch {
+      if (thisRequest !== menuRequestId.current) return;
+      setErrMenus("Erro ao carregar cardápios.");
+    }
+  }
+
+  useEffect(() => {
+    if (!hasCompanyContext) { setMenus([]); return; }
+    loadMenus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCompanyContext, companyId]);
+
+  const filteredMenus = menus.filter((m) => {
+    if (menuStatusFilter === "active" && !m.active) return false;
+    if (menuStatusFilter === "inactive" && m.active) return false;
+    if (menuNameFilter && !m.name.toLowerCase().includes(menuNameFilter.toLowerCase())) return false;
+    return true;
+  });
+
+  function clearMenuFilters() {
+    setMenuNameFilter("");
+    setMenuStatusFilter("active");
+  }
+
+  interface MenuFormState {
+    name: string;
+    weekdays: string[];
+    start_time: string;
+    end_time: string;
+    category_ids: string[];
+    product_ids: string[];
+  }
+
+  const [menuModalOpen, setMenuModalOpen] = useState(false);
+  const [editingMenuId, setEditingMenuId] = useState<number | null>(null); // null = criando
+  const [menuForm, setMenuForm] = useState<MenuFormState>({
+    name: "", weekdays: [], start_time: "", end_time: "", category_ids: [], product_ids: [],
+  });
+  const [menuProductSearch, setMenuProductSearch] = useState("");
+  const [menuFormError, setMenuFormError] = useState("");
+  const [menuSaving, setMenuSaving] = useState(false);
+
+  const menuCategoryOptions = categories.map((c) => ({ value: String(c.id), label: c.name, disabled: false }));
+  const menuProductOptions = products
+    .filter((p) => !menuProductSearch || p.name.toLowerCase().includes(menuProductSearch.toLowerCase()))
+    .map((p) => ({ value: String(p.id), label: p.name, disabled: false }));
+
+  function openNewMenu() {
+    setEditingMenuId(null);
+    setMenuForm({ name: "", weekdays: [], start_time: "", end_time: "", category_ids: [], product_ids: [] });
+    setMenuProductSearch("");
+    setMenuFormError("");
+    setMenuModalOpen(true);
+  }
+
+  function openEditMenu(m: Menu) {
+    setEditingMenuId(m.id);
+    setMenuForm({
+      name: m.name,
+      weekdays: m.weekdays.map(String),
+      start_time: m.start_time,
+      end_time: m.end_time,
+      category_ids: m.categories.map((c) => String(c.id)),
+      product_ids: m.products.map((p) => String(p.id)),
+    });
+    setMenuProductSearch("");
+    setMenuFormError("");
+    setMenuModalOpen(true);
+  }
+
+  async function saveMenu(e: FormEvent) {
+    e.preventDefault();
+    if (!menuForm.name.trim() || menuForm.weekdays.length === 0 || !menuForm.start_time || !menuForm.end_time) return;
+    setMenuSaving(true);
+    setMenuFormError("");
+    try {
+      const basePayload = {
+        name: menuForm.name.trim(),
+        weekdays: menuForm.weekdays.map(Number),
+        start_time: menuForm.start_time,
+        end_time: menuForm.end_time,
+      };
+      const menuId = editingMenuId ?? (
+        await api.post("/catalog/menus", basePayload, catalogParams())
+      ).data.id;
+      if (editingMenuId !== null) {
+        await api.put(`/catalog/menus/${editingMenuId}`, basePayload, catalogParams());
+      }
+      await api.put(`/catalog/menus/${menuId}/composition`, {
+        category_ids: menuForm.category_ids.map(Number),
+        product_ids: menuForm.product_ids.map(Number),
+      }, catalogParams());
+      setMenuModalOpen(false);
+      loadMenus();
+    } catch {
+      setMenuFormError("Erro ao salvar cardápio.");
+    } finally {
+      setMenuSaving(false);
+    }
+  }
+
+  function deactivateMenu(id: number) {
+    setConfirmState({
+      message: "Desativar cardápio? Os produtos vinculados a ele deixam de aparecer no totem enquanto estiver desativado, mesmo dentro do horário configurado.",
+      onConfirm: async () => {
+        setConfirmState(null);
+        await api.put(`/catalog/menus/${id}`, { active: false }, catalogParams());
+        loadMenus();
+      },
+    });
+  }
+
+  async function activateMenu(id: number) {
+    await api.put(`/catalog/menus/${id}`, { active: true }, catalogParams());
+    loadMenus();
+  }
+
+  function deleteMenu(id: number, name: string) {
+    setConfirmState({
+      message: `Excluir o cardápio "${name}"? Os produtos e categorias vinculados a ele voltam a ficar sempre visíveis (se não estiverem em nenhum outro cardápio). Essa ação não pode ser desfeita.`,
+      alertVariant: "warning",
+      alertIcon: "alert-triangle",
+      onConfirm: async () => {
+        setConfirmState(null);
+        await api.delete(`/catalog/menus/${id}`, catalogParams());
+        loadMenus();
+      },
+    });
+  }
 
   return (
     <div className={styles.page}>
@@ -373,274 +744,545 @@ export default function CatalogScreen() {
       {!hasCompanyContext ? (
         <div className={styles.empty}>Selecione uma empresa para gerenciar o catálogo.</div>
       ) : (
-      <div className={styles.row}>
-        <div className={styles.col}>
-          <div className={styles.sectionTitle}>Categorias</div>
-          {!editCat && (
-            <form className={`${styles.form} ${styles.formRow}`} onSubmit={addCategory}>
-              <div className={styles.formRowField}>
-                <InputBase
-                  label="Nome da categoria"
-                  value={newCatName}
-                  onChange={(e) => setNewCatName(e.target.value)}
-                />
-              </div>
-              <Button type="submit">Adicionar</Button>
-            </form>
-          )}
+      <>
+      <div className={styles.tabs}>
+        <Tabs activeTab={activeTab} onSelectTab={(v) => setActiveTab(v as typeof activeTab)}>
+          <Tab value="categories" label="Categorias" totalizer={categories.length} />
+          <Tab value="products" label="Produtos" totalizer={products.length} />
+          <Tab value="menus" label="Cardápios" totalizer={menus.length} />
+        </Tabs>
+      </div>
 
-          {editCat && (
-            <form className={styles.form} onSubmit={saveEditCat}>
-              <div className={styles.formLabel}>Editando categoria</div>
-              <div className={styles.formRow}>
-                <div className={styles.formRowField}>
-                  <InputBase
-                    label="Nome da categoria"
-                    value={editCat.name}
-                    onChange={(e) => setEditCat({ ...editCat, name: e.target.value })}
-                    autoFocus
-                  />
-                </div>
-                <div className={styles.formActions}>
-                  <Button type="submit">Salvar</Button>
-                  <Button type="button" variant="secondary" onClick={() => setEditCat(null)}>Cancelar</Button>
-                </div>
-              </div>
-            </form>
-          )}
-
-          {categories.map((c) => (
-            <div
-              key={c.id}
-              className={`${styles.item} ${selectedCat === c.id ? styles.itemSelected : styles.itemClickable}`}
-              onClick={() => setSelectedCat(c.id)}
-            >
-              <span className={styles.itemName}>
-                {c.name}
-                <Tag variant={c.active ? "success" : "error"}>{c.active ? "ativo" : "inativo"}</Tag>
-              </span>
-              <div className={styles.actions} onClick={(e) => e.stopPropagation()}>
-                <Button size="small" variant="secondary" onClick={() => setEditCat({ id: c.id, name: c.name })}>Editar</Button>
-                {c.active ? (
-                  <Button size="small" variant="secondary" style={TOGGLE_ACTIVE_BTN_STYLE} onClick={() => deleteCategory(c.id)}>Desativar</Button>
-                ) : (
-                  <Button size="small" style={TOGGLE_ACTIVE_BTN_STYLE} onClick={() => activateCategory(c.id)}>Ativar</Button>
-                )}
-                <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deleteCategoryPermanently(c.id, c.name)}>
-                  Excluir
-                </Button>
-              </div>
+      {/* ── Categorias ── */}
+      {activeTab === "categories" && (
+        <>
+          {errCategories && (
+            <div className={styles.errorRow}>
+              <span className={styles.muted}>{errCategories}</span>
+              <Button size="small" variant="secondary" onClick={loadCategories}>Tentar novamente</Button>
             </div>
-          ))}
-        </div>
+          )}
 
-        <div className={styles.col}>
-          <div className={styles.sectionTitle}>
-            Produtos {selectedCat ? `— ${categories.find((c) => c.id === selectedCat)?.name ?? ""}` : "(selecione uma categoria)"}
+          <div className={styles.filterBar}>
+            <InputBase
+              label="Categoria"
+              placeholder="Buscar por nome…"
+              value={categoryNameFilter}
+              onChange={(e) => setCategoryNameFilter(e.target.value)}
+            />
+            <Dropdown
+              label="Status"
+              value={CATEGORY_STATUS_FILTER_OPTIONS.find((o) => o.value === categoryStatusFilter) ?? CATEGORY_STATUS_FILTER_OPTIONS[0]}
+              onValueSelected={(opt) => setCategoryStatusFilter(opt.value as StatusFilter)}
+              options={CATEGORY_STATUS_FILTER_OPTIONS}
+            />
+            <Button type="button" variant="secondary" onClick={clearCategoryFilters}>Limpar filtros</Button>
+            <Button type="button" onClick={openNewCategory}>+ Nova categoria</Button>
           </div>
 
-          {selectedCat && !editProd && (
-            <form className={styles.form} onSubmit={addProduct}>
-              <div className={styles.formRow}>
-                <div className={styles.formRowField}>
-                  <InputBase
-                    label="Nome do produto"
-                    value={newProd.name}
-                    onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
-                  />
-                </div>
-                <div className={styles.formRowField}>
-                  <CurrencyInput
-                    label="Preço"
-                    value={newProd.price}
-                    onChange={(value: number) => setNewProd({ ...newProd, price: value })}
-                  />
-                </div>
-              </div>
+          <div className={styles.reorderHint}>
+            {canReorderCategories
+              ? "Arraste pelo ⠿ para reordenar — a ordem aqui é a mesma exibida no totem."
+              : "Reordenar só é possível com o filtro de nome vazio e status em \"Todas\"."}
+          </div>
+
+          <Table
+            variant="compact"
+            rowKey={(c: Category) => c.id}
+            emptyMessage="Nenhuma categoria encontrada."
+            onRowClick={(c: Category) => browseCategoryProducts(c.id)}
+            onReorder={canReorderCategories ? reorderCategories : undefined}
+            columns={[
+              { key: "name", header: "Categoria", render: (c: Category) => c.name },
+              {
+                key: "status", header: "Status",
+                render: (c: Category) => <Tag variant={c.active ? "success" : "error"}>{c.active ? "Ativa" : "Inativa"}</Tag>,
+              },
+              {
+                key: "action", header: "", render: (c: Category) => (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }} onClick={(e) => e.stopPropagation()}>
+                    <Button size="small" variant="secondary" onClick={() => openEditCategory(c)}>Editar</Button>
+                    {c.active ? (
+                      <Button size="small" variant="secondary" onClick={() => deactivateCategory(c.id)}>Desativar</Button>
+                    ) : (
+                      <Button size="small" variant="secondary" onClick={() => activateCategory(c.id)}>Ativar</Button>
+                    )}
+                    <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deleteCategoryPermanently(c.id, c.name)}>
+                      Excluir
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+            rows={filteredCategories}
+          />
+
+          <Modal
+            open={categoryModalOpen}
+            width={480}
+            onClose={() => setCategoryModalOpen(false)}
+            onBackdropClick={() => setCategoryModalOpen(false)}
+            onCloseButtonClick={() => setCategoryModalOpen(false)}
+          >
+            <form key={categoryModalKey} onSubmit={saveCategory} className={styles.modalForm}>
+              <div className={styles.formTitle}>{editingCategoryId === null ? "Nova categoria" : "Editar categoria"}</div>
+              {categoryFormError && <Alert variant="error" text={categoryFormError} fullWidth />}
+              <InputBase
+                label="Nome da categoria"
+                defaultValue={categoryNameDefault}
+                ref={categoryNameRef}
+                autoFocus
+                required
+              />
               <div className={styles.formActions}>
-                <Button type="submit">Adicionar produto</Button>
-              </div>
-              <div className={styles.formHint}>
-                A imagem pode ser adicionada depois de criar o produto, em "Editar".
+                <Button type="submit" disabled={categorySaving}>Salvar</Button>
+                <Button type="button" variant="secondary" onClick={() => setCategoryModalOpen(false)}>Cancelar</Button>
               </div>
             </form>
+          </Modal>
+        </>
+      )}
+
+      {/* ── Produtos ── */}
+      {activeTab === "products" && (
+        <>
+          {errProducts && (
+            <div className={styles.errorRow}>
+              <span className={styles.muted}>{errProducts}</span>
+              <Button size="small" variant="secondary" onClick={loadProducts}>Tentar novamente</Button>
+            </div>
           )}
 
-          {editProd && (
-            <form className={styles.form} onSubmit={saveEditProd}>
-              <div className={styles.formLabel}>Editando produto</div>
+          <div className={styles.filterBar}>
+            <InputBase
+              label="Produto"
+              placeholder="Buscar por nome…"
+              value={productNameFilter}
+              onChange={(e) => setProductNameFilter(e.target.value)}
+            />
+            <Dropdown
+              label="Categoria"
+              value={productCategoryFilterOptions.find((o) => o.value === productCategoryFilter) ?? productCategoryFilterOptions[0]}
+              onValueSelected={(opt) => setProductCategoryFilter(opt.value)}
+              options={productCategoryFilterOptions}
+            />
+            <Dropdown
+              label="Status"
+              value={PRODUCT_STATUS_FILTER_OPTIONS.find((o) => o.value === productStatusFilter) ?? PRODUCT_STATUS_FILTER_OPTIONS[0]}
+              onValueSelected={(opt) => setProductStatusFilter(opt.value as StatusFilter)}
+              options={PRODUCT_STATUS_FILTER_OPTIONS}
+            />
+            <Button type="button" variant="secondary" onClick={clearProductFilters}>Limpar filtros</Button>
+            <Button type="button" onClick={openNewProduct}>+ Novo produto</Button>
+          </div>
+
+          {productCategoryFilter && (
+            <div className={styles.reorderHint}>
+              {canReorderProducts
+                ? "Arraste pelo ⠿ para reordenar — a ordem aqui é a mesma exibida no totem."
+                : "Reordenar só é possível com o filtro de nome vazio e status em \"Todos\", dentro de uma categoria específica."}
+            </div>
+          )}
+
+          <Table
+            variant="compact"
+            rowKey={(p: Product) => p.id}
+            emptyMessage="Nenhum produto encontrado."
+            onReorder={canReorderProducts ? reorderProducts : undefined}
+            columns={[
+              {
+                key: "image", header: "", render: (p: Product) => (
+                  p.thumbnail_url ? (
+                    <img
+                      src={p.thumbnail_url}
+                      alt={p.name}
+                      className={styles.rowThumb}
+                      onClick={() => setPreviewImage({ url: p.image_url ?? p.thumbnail_url!, alt: p.name })}
+                    />
+                  ) : (
+                    <span className={styles.rowThumbPlaceholder} />
+                  )
+                ),
+              },
+              {
+                key: "name", header: "Produto", render: (p: Product) => (
+                  <>
+                    <strong>{p.name}</strong>
+                    {(p.tags ?? []).map((t) => (
+                      <Tag key={t} variant={tagVariant(t)}>{t}</Tag>
+                    ))}
+                  </>
+                ),
+              },
+              { key: "category", header: "Categoria", render: (p: Product) => categoryName(p.category_id) },
+              {
+                key: "price", header: "Preço",
+                render: (p: Product) => p.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+              },
+              {
+                key: "status", header: "Status",
+                render: (p: Product) => <Tag variant={p.active ? "success" : "error"}>{p.active ? "Ativo" : "Inativo"}</Tag>,
+              },
+              {
+                key: "action", header: "", render: (p: Product) => (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+                    <Button size="small" variant="secondary" onClick={() => openEditProduct(p)}>Editar</Button>
+                    {p.active ? (
+                      <Button size="small" variant="secondary" onClick={() => deactivateProduct(p.id)}>Desativar</Button>
+                    ) : (
+                      <Button size="small" variant="secondary" onClick={() => activateProduct(p.id)}>Ativar</Button>
+                    )}
+                    <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deleteProductPermanently(p.id, p.name)}>
+                      Excluir
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+            rows={filteredProducts}
+          />
+
+          <Modal
+            open={productModalOpen}
+            width={editProd ? 664 : 480}
+            onClose={closeProductModal}
+            onBackdropClick={closeProductModal}
+            onCloseButtonClick={closeProductModal}
+          >
+            {!editProd ? (
+              <form onSubmit={saveNewProduct} className={styles.modalForm}>
+                <div className={styles.formTitle}>Novo produto</div>
+                {productFormError && <Alert variant="error" text={productFormError} fullWidth />}
+                <InputBase
+                  label="Nome do produto"
+                  value={newProd.name}
+                  onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
+                  autoFocus
+                />
+                <CurrencyInput
+                  label="Preço"
+                  value={newProd.price}
+                  onChange={(value: number) => setNewProd({ ...newProd, price: value })}
+                />
+                <Dropdown
+                  label="Categoria"
+                  value={activeCategoryOptions.find((o) => o.value === String(newProd.category_id ?? "")) ?? null}
+                  onValueSelected={(opt) => setNewProd({ ...newProd, category_id: opt.value ? Number(opt.value) : null })}
+                  options={activeCategoryOptions}
+                />
+                <div className={styles.formHint}>
+                  Imagem, descrição, alérgenos e outros detalhes podem ser adicionados depois de criar o produto, em "Editar".
+                </div>
+                <div className={styles.formActions}>
+                  <Button type="submit" disabled={productSaving || !newProd.name.trim() || !newProd.price || !newProd.category_id}>
+                    Adicionar produto
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={closeProductModal}>Cancelar</Button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={saveEditProd} className={styles.modalForm}>
+                <div className={styles.formTitle}>Editando produto</div>
+                {productFormError && <Alert variant="error" text={productFormError} fullWidth />}
+                <div className={styles.formRow}>
+                  <div className={styles.formRowField}>
+                    <InputBase label="Nome" value={editProd.name} autoFocus
+                      onChange={(e) => setEditProd({ ...editProd, name: e.target.value })} />
+                  </div>
+                  <div className={styles.formRowField}>
+                    <CurrencyInput label="Preço"
+                      value={editProd.price}
+                      onChange={(value: number) => setEditProd({ ...editProd, price: value })} />
+                  </div>
+                </div>
+                <Dropdown
+                  label="Categoria"
+                  value={activeCategoryOptions.find((o) => o.value === String(editProd.category_id)) ?? null}
+                  onValueSelected={(opt) => setEditProd({ ...editProd, category_id: Number(opt.value) })}
+                  options={activeCategoryOptions}
+                />
+
+                {editProdMenus.length > 0 && (
+                  <div className={styles.menusInfo}>
+                    <div className={styles.formLabel}>Pertence aos cardápios</div>
+                    {formatProductMenus(editProdMenus).map((line) => (
+                      <div key={line}>{line}</div>
+                    ))}
+                  </div>
+                )}
+
+                <TextArea
+                  label="Descrição curta"
+                  value={editProd.description}
+                  onChange={(e) => setEditProd({ ...editProd, description: e.target.value })}
+                  maxLength={500}
+                  helperMessage="Aparece na grade/listagem do totem"
+                />
+
+                <TextArea
+                  label="Descrição longa"
+                  value={editProd.description_long}
+                  onChange={(e) => setEditProd({ ...editProd, description_long: e.target.value })}
+                  maxLength={2000}
+                  autoSize
+                  helperMessage="Detalhe completo, mostrado só ao abrir o item"
+                />
+
+                <div className={styles.formRow}>
+                  <div className={styles.formRowField}>
+                    <NumberInput
+                      label="Calorias (kcal)"
+                      value={editProd.calories ?? undefined}
+                      onChange={(value: number) => setEditProd({ ...editProd, calories: value })}
+                    />
+                  </div>
+                  <div className={styles.formRowField}>
+                    <InputBase
+                      label="SKU"
+                      value={editProd.sku}
+                      placeholder="Opcional, único por empresa"
+                      onChange={(e) => setEditProd({ ...editProd, sku: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <TagInput
+                  label="Tags"
+                  value={editProd.tags}
+                  onValueChange={(tags) => setEditProd({ ...editProd, tags })}
+                  placeholder={`Sugestões: ${SUGGESTED_TAGS}`}
+                />
+
+                <CheckboxMultiselect
+                  key={editProd.id}
+                  id={`edit-prod-${editProd.id}-allergens`}
+                  label="Alérgenos (RDC 727/2022)"
+                  options={allergens.map((a) => ({ value: String(a.id), label: a.name, disabled: false }))}
+                  initialSelection={editProd.allergen_ids}
+                  onSelectOption={(option, checked) => {
+                    setEditProd((prev) => {
+                      if (!prev) return prev;
+                      const ids = checked
+                        ? [...prev.allergen_ids, option.value]
+                        : prev.allergen_ids.filter((id) => id !== option.value);
+                      return { ...prev, allergen_ids: ids };
+                    });
+                  }}
+                />
+
+                <div className={styles.imageSection}>
+                  <div className={styles.formLabel}>Imagem do produto</div>
+                  {editProd.thumbnail_url ? (
+                    <div className={styles.imagePreview}>
+                      <img
+                        src={editProd.thumbnail_url}
+                        alt={editProd.name}
+                        className={styles.thumbnailImg}
+                        onClick={() => setPreviewImage({ url: editProd.image_url ?? editProd.thumbnail_url!, alt: editProd.name })}
+                      />
+                      <Button type="button" size="small" variant="secondary" onClick={removeProductImage}>
+                        Remover imagem
+                      </Button>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload
+                        fullWidth
+                        maxFileSize={IMAGE_MAX_SIZE_MB}
+                        multipleFiles={false}
+                        types={IMAGE_TYPES}
+                        showMaxFileSize={false}
+                        helperMessage="JPG ou PNG, até 2 MB"
+                        errorMessage="Envie um arquivo JPG ou PNG de até 2 MB"
+                        onCallbackUpload={handleImageFiles}
+                      />
+                      <UploadListFiles
+                        items={uploadFiles}
+                        removable={false}
+                      />
+                    </>
+                  )}
+                </div>
+
+                <div className={styles.formActions}>
+                  <Button type="submit" disabled={productSaving || !editProd.name.trim() || editProd.price <= 0}>
+                    Salvar
+                  </Button>
+                  <Button type="button" variant="secondary" onClick={closeProductModal}>Cancelar</Button>
+                </div>
+              </form>
+            )}
+          </Modal>
+        </>
+      )}
+
+      {/* ── Cardápios ── */}
+      {activeTab === "menus" && (
+        <>
+          {errMenus && (
+            <div className={styles.errorRow}>
+              <span className={styles.muted}>{errMenus}</span>
+              <Button size="small" variant="secondary" onClick={loadMenus}>Tentar novamente</Button>
+            </div>
+          )}
+
+          <div className={styles.filterBar}>
+            <InputBase
+              label="Cardápio"
+              placeholder="Buscar por nome…"
+              value={menuNameFilter}
+              onChange={(e) => setMenuNameFilter(e.target.value)}
+            />
+            <Dropdown
+              label="Status"
+              value={MENU_STATUS_FILTER_OPTIONS.find((o) => o.value === menuStatusFilter) ?? MENU_STATUS_FILTER_OPTIONS[0]}
+              onValueSelected={(opt) => setMenuStatusFilter(opt.value as StatusFilter)}
+              options={MENU_STATUS_FILTER_OPTIONS}
+            />
+            <Button type="button" variant="secondary" onClick={clearMenuFilters}>Limpar filtros</Button>
+            <Button type="button" onClick={openNewMenu}>+ Novo cardápio</Button>
+          </div>
+
+          <Table
+            variant="compact"
+            rowKey={(m: Menu) => m.id}
+            emptyMessage="Nenhum cardápio encontrado."
+            columns={[
+              { key: "name", header: "Cardápio", render: (m: Menu) => m.name },
+              { key: "days", header: "Dias", render: (m: Menu) => formatWeekdays(m.weekdays) },
+              { key: "hours", header: "Horário", render: (m: Menu) => `${m.start_time}-${m.end_time}` },
+              {
+                key: "composition", header: "Composição", render: (m: Menu) => (
+                  <span className={styles.muted}>
+                    {m.categories.length} categoria{m.categories.length === 1 ? "" : "s"}, {m.products.length} produto{m.products.length === 1 ? "" : "s"}
+                  </span>
+                ),
+              },
+              {
+                key: "status", header: "Status",
+                render: (m: Menu) => <Tag variant={m.active ? "success" : "error"}>{m.active ? "Ativo" : "Inativo"}</Tag>,
+              },
+              {
+                key: "action", header: "", render: (m: Menu) => (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <Button size="small" variant="secondary" onClick={() => openEditMenu(m)}>Editar</Button>
+                    {m.active ? (
+                      <Button size="small" variant="secondary" onClick={() => deactivateMenu(m.id)}>Desativar</Button>
+                    ) : (
+                      <Button size="small" variant="secondary" onClick={() => activateMenu(m.id)}>Ativar</Button>
+                    )}
+                    <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deleteMenu(m.id, m.name)}>
+                      Excluir
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+            rows={filteredMenus}
+          />
+
+          <Modal
+            open={menuModalOpen}
+            width={600}
+            onClose={() => setMenuModalOpen(false)}
+            onBackdropClick={() => setMenuModalOpen(false)}
+            onCloseButtonClick={() => setMenuModalOpen(false)}
+          >
+            <form onSubmit={saveMenu} className={styles.modalForm}>
+              <div className={styles.formTitle}>{editingMenuId === null ? "Novo cardápio" : "Editar cardápio"}</div>
+              {menuFormError && <Alert variant="error" text={menuFormError} fullWidth />}
+
+              <InputBase
+                label="Nome do cardápio"
+                placeholder="ex: Café da manhã"
+                value={menuForm.name}
+                onChange={(e) => setMenuForm({ ...menuForm, name: e.target.value })}
+                autoFocus
+              />
+
               <div className={styles.formRow}>
                 <div className={styles.formRowField}>
-                  <InputBase label="Nome" value={editProd.name} autoFocus
-                    onChange={(e) => setEditProd({ ...editProd, name: e.target.value })} />
-                </div>
-                <div className={styles.formRowField}>
-                  <CurrencyInput label="Preço"
-                    value={editProd.price}
-                    onChange={(value: number) => setEditProd({ ...editProd, price: value })} />
-                </div>
-              </div>
-              <Dropdown
-                label="Categoria"
-                value={categoryOptions.find((o) => o.value === String(editProd.category_id)) ?? null}
-                onValueSelected={(opt) => setEditProd({ ...editProd, category_id: Number(opt.value) })}
-                options={categoryOptions}
-              />
-
-              <TextArea
-                label="Descrição curta"
-                value={editProd.description}
-                onChange={(e) => setEditProd({ ...editProd, description: e.target.value })}
-                maxLength={500}
-                helperMessage="Aparece na grade/listagem do totem"
-              />
-
-              <TextArea
-                label="Descrição longa"
-                value={editProd.description_long}
-                onChange={(e) => setEditProd({ ...editProd, description_long: e.target.value })}
-                maxLength={2000}
-                autoSize
-                helperMessage="Detalhe completo, mostrado só ao abrir o item"
-              />
-
-              <div className={styles.formRow}>
-                <div className={styles.formRowField}>
-                  <NumberInput
-                    label="Calorias (kcal)"
-                    value={editProd.calories ?? undefined}
-                    onChange={(value: number) => setEditProd({ ...editProd, calories: value })}
+                  <InputBase
+                    label="Horário início"
+                    type="time"
+                    value={menuForm.start_time}
+                    onChange={(e) => setMenuForm({ ...menuForm, start_time: e.target.value })}
                   />
                 </div>
                 <div className={styles.formRowField}>
                   <InputBase
-                    label="SKU"
-                    value={editProd.sku}
-                    placeholder="Opcional, único por empresa"
-                    onChange={(e) => setEditProd({ ...editProd, sku: e.target.value })}
+                    label="Horário fim"
+                    type="time"
+                    value={menuForm.end_time}
+                    onChange={(e) => setMenuForm({ ...menuForm, end_time: e.target.value })}
                   />
                 </div>
               </div>
 
-              <TagInput
-                label="Tags"
-                value={editProd.tags}
-                onValueChange={(tags) => setEditProd({ ...editProd, tags })}
-                placeholder={`Sugestões: ${SUGGESTED_TAGS}`}
-              />
-
               <CheckboxMultiselect
-                key={editProd.id}
-                id={`edit-prod-${editProd.id}-allergens`}
-                label="Alérgenos (RDC 727/2022)"
-                options={allergens.map((a) => ({ value: String(a.id), label: a.name, disabled: false }))}
-                initialSelection={editProd.allergen_ids}
+                key={`${editingMenuId ?? "new"}-weekdays`}
+                id="menu-weekdays"
+                label="Dias da semana"
+                options={WEEKDAY_OPTIONS}
+                initialSelection={menuForm.weekdays}
                 onSelectOption={(option, checked) => {
-                  setEditProd((prev) => {
-                    if (!prev) return prev;
-                    const ids = checked
-                      ? [...prev.allergen_ids, option.value]
-                      : prev.allergen_ids.filter((id) => id !== option.value);
-                    return { ...prev, allergen_ids: ids };
-                  });
+                  setMenuForm((prev) => ({
+                    ...prev,
+                    weekdays: checked ? [...prev.weekdays, option.value] : prev.weekdays.filter((v) => v !== option.value),
+                  }));
                 }}
               />
 
-              <div className={styles.imageSection}>
-                <div className={styles.formLabel}>Imagem do produto</div>
-                {editProd.thumbnail_url ? (
-                  <div className={styles.imagePreview}>
-                    <img
-                      src={editProd.thumbnail_url}
-                      alt={editProd.name}
-                      className={styles.thumbnailImg}
-                      onClick={() => setPreviewImage({ url: editProd.image_url ?? editProd.thumbnail_url!, alt: editProd.name })}
-                    />
-                    <Button type="button" size="small" variant="secondary" onClick={removeProductImage}>
-                      Remover imagem
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <Upload
-                      fullWidth
-                      maxFileSize={IMAGE_MAX_SIZE_MB}
-                      multipleFiles={false}
-                      types={IMAGE_TYPES}
-                      showMaxFileSize={false}
-                      helperMessage="JPG ou PNG, até 2 MB"
-                      errorMessage="Envie um arquivo JPG ou PNG de até 2 MB"
-                      onCallbackUpload={handleImageFiles}
-                    />
-                    <UploadListFiles
-                      items={uploadFiles}
-                      removable={false}
-                    />
-                  </>
-                )}
-              </div>
+              <CheckboxMultiselect
+                key={`${editingMenuId ?? "new"}-categories`}
+                id="menu-categories"
+                label="Categorias inteiras"
+                helperMessage="Todo produto da categoria entra no cardápio, inclusive os criados depois"
+                options={menuCategoryOptions}
+                initialSelection={menuForm.category_ids}
+                onSelectOption={(option, checked) => {
+                  setMenuForm((prev) => ({
+                    ...prev,
+                    category_ids: checked ? [...prev.category_ids, option.value] : prev.category_ids.filter((v) => v !== option.value),
+                  }));
+                }}
+              />
+
+              <InputBase
+                label="Buscar produto avulso"
+                placeholder="Filtrar por nome…"
+                value={menuProductSearch}
+                onChange={(e) => setMenuProductSearch(e.target.value)}
+              />
+              <CheckboxMultiselect
+                key={`${editingMenuId ?? "new"}-products`}
+                id="menu-products"
+                label="Produtos avulsos"
+                options={menuProductOptions}
+                initialSelection={menuForm.product_ids}
+                emptyMessage="Nenhum produto encontrado"
+                onSelectOption={(option, checked) => {
+                  setMenuForm((prev) => ({
+                    ...prev,
+                    product_ids: checked ? [...prev.product_ids, option.value] : prev.product_ids.filter((v) => v !== option.value),
+                  }));
+                }}
+              />
 
               <div className={styles.formActions}>
-                <Button type="submit" disabled={!editProd.name.trim() || editProd.price <= 0}>
+                <Button
+                  type="submit"
+                  disabled={menuSaving || !menuForm.name.trim() || menuForm.weekdays.length === 0 || !menuForm.start_time || !menuForm.end_time}
+                >
                   Salvar
                 </Button>
-                <Button type="button" variant="secondary" onClick={closeEditProd}>Cancelar</Button>
+                <Button type="button" variant="secondary" onClick={() => setMenuModalOpen(false)}>Cancelar</Button>
               </div>
             </form>
-          )}
-
-          {products.map((p) => (
-            <div
-              key={p.id}
-              className={`${styles.item} ${draggedProductId === p.id ? styles.itemDragging : ""}`}
-              draggable
-              onDragStart={() => handleProductDragStart(p.id)}
-              onDragOver={handleProductDragOver}
-              onDrop={(e) => handleProductDrop(e, p.id)}
-            >
-              <span className={styles.itemName}>
-                <span className={styles.dragHandle} title="Arraste para reordenar">⠿</span>
-                {p.thumbnail_url ? (
-                  <img
-                    src={p.thumbnail_url}
-                    alt={p.name}
-                    className={styles.rowThumb}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPreviewImage({ url: p.image_url ?? p.thumbnail_url!, alt: p.name });
-                    }}
-                  />
-                ) : (
-                  <span className={styles.rowThumbPlaceholder} />
-                )}
-                {p.name}
-                <span className={styles.itemPrice}>
-                  {p.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
-                </span>
-                <Tag variant={p.active ? "success" : "error"}>{p.active ? "ativo" : "inativo"}</Tag>
-                {(p.tags ?? []).map((t) => (
-                  <Tag key={t} variant={tagVariant(t)}>{t}</Tag>
-                ))}
-              </span>
-              <div className={styles.actions}>
-                <Button size="small" variant="secondary" onClick={() => openEditProd(p)}>Editar</Button>
-                {p.active ? (
-                  <Button size="small" variant="secondary" style={TOGGLE_ACTIVE_BTN_STYLE} onClick={() => deleteProduct(p.id)}>Desativar</Button>
-                ) : (
-                  <Button size="small" style={TOGGLE_ACTIVE_BTN_STYLE} onClick={() => activateProduct(p.id)}>Ativar</Button>
-                )}
-                <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deleteProductPermanently(p.id, p.name)}>
-                  Excluir
-                </Button>
-              </div>
-            </div>
-          ))}
-
-          {selectedCat && products.length === 0 && (
-            <div className={styles.empty}>Nenhum produto nesta categoria.</div>
-          )}
-        </div>
-      </div>
+          </Modal>
+        </>
+      )}
+      </>
       )}
 
       <ConfirmDialog

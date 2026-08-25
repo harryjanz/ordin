@@ -76,3 +76,27 @@ código vendorizado, faz parte do repo do `ordin`.
   (`/home/harry/repositorios/design-system`) — não fiz isso aqui, só
   vendorizei os fixes; sem isso os bugs voltam na próxima atualização do
   `dist/`.
+
+- **`components/Modal/ModalPortal.js`** — terceiro bug do mesmo tipo,
+  achado ao vivo 2026-08-24 (tela de Catálogo, formulário de produto —
+  `CurrencyInput`/`TextArea`/etc dentro de um `Modal`). Os dois patches
+  acima resolvem o `Modal.js`, mas `ModalPortal.js` tinha um problema
+  próprio, separado: `body.insertBefore(element, body.childNodes[0])`
+  rodava direto no corpo da função `ModalPortal` — ou seja, em **todo**
+  render, não só na montagem. `insertBefore` num nó que já está no DOM
+  faz o browser remover e reinserir esse nó; se ele contém o elemento com
+  foco (um input controlado sendo digitado, que causa um re-render do pai
+  a cada tecla), o foco é perdido a cada tecla — sintoma idêntico ao bug
+  do `identifier`/nanoid, só que essa causa não é coberta por aquele
+  patch (o `id` do container continuava estável; o nó só estava sendo
+  fisicamente desconectado e reconectado do documento a cada render).
+  Só aparecia com campos controlados — o formulário de categoria (campo
+  único via `ref`, não-controlado) nunca disparava re-render do pai
+  durante a digitação, por isso nunca expôs o bug.
+
+  Corrigido guardando o elemento do portal num `useRef` (mesmo já
+  existente entre renders) e movendo `insertBefore`/`setAttribute` pra
+  dentro de um `useEffect` com `[element]` nas deps — roda só quando o
+  elemento realmente muda (uma vez por montagem), não em todo render.
+
+  **Reportar upstream também**, mesmo racional dos dois acima.

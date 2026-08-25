@@ -145,7 +145,7 @@ export interface Category {
   company_id: number;
   name: string;
   active: boolean;
-  sort_order: number;
+  sort_order: number | null;
 }
 
 export interface Allergen {
@@ -171,6 +171,30 @@ export interface Product {
   sku: string | null;
   sort_order: number | null;
   allergens: Allergen[];
+}
+
+// ORD-125 — cardápio por horário: dias da semana (0=segunda..6=domingo,
+// mesmo datetime.weekday() do backend) + janela de horário única.
+export interface MenuRef {
+  id: number;
+  name: string;
+}
+
+export interface Menu {
+  id: number;
+  name: string;
+  weekdays: number[];
+  start_time: string; // "HH:MM"
+  end_time: string;
+  active: boolean;
+  categories: MenuRef[];
+  products: MenuRef[];
+}
+
+export interface ProductMenuRef {
+  id: number;
+  name: string;
+  via_category: string | null;
 }
 
 export interface Order {

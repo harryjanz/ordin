@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import api from "../api";
 import type { Theme } from "../themes";
 import type { Category, Product, CartItem } from "../types";
@@ -7,6 +7,11 @@ import { RADIUS, FONT } from "../scale";
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
+
+// ORD-128 — revalida o catálogo periodicamente pra refletir cardápios por
+// horário (ORD-127) sem exigir navegação; 90s fica dentro da janela de 1-2
+// min combinada com o usuário.
+const POLL_INTERVAL_MS = 90_000;
 
 interface Props {
   T: Theme;
@@ -33,21 +38,56 @@ export default function CatalogScreen({
 
   const isVertical = menuLayout === "vertical";
 
-  useEffect(() => {
-    api.get("/catalog/categories").then((r) => {
-      const cats: Category[] = r.data.categories ?? [];
-      setCategories(cats);
-      if (cats.length > 0) setActiveCat(cats[0]);
-    }).catch(() => null).finally(() => setLoadingCat(false));
+  // ORD-128 — usado pelo poll de fundo pra saber a categoria ativa atual sem
+  // precisar recriar o callback a cada troca de aba (evitaria reiniciar o
+  // interval).
+  const activeCatRef = useRef<Category | null>(null);
+  useEffect(() => { activeCatRef.current = activeCat; }, [activeCat]);
+
+  const loadProducts = useCallback((categoryId: number, opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoadingProds(true);
+    return api.get(`/catalog/products?category_id=${categoryId}`).then((r) => {
+      setProducts(r.data.products ?? []);
+    }).catch(() => null).finally(() => { if (!opts?.silent) setLoadingProds(false); });
   }, []);
 
+  // Busca categorias e, se a categoria ativa some da lista (saiu da janela
+  // do cardápio — ORD-127), troca pra outra sem resetar carrinho/carrinho
+  // aberto/etc. (esse estado vive no App.tsx, não é tocado aqui). Se a
+  // categoria ativa continua a mesma, revalida os produtos dela também —
+  // um produto específico pode ter saído/entrado de janela mesmo com a
+  // categoria inteira continuando visível.
+  const refreshCatalog = useCallback((opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoadingCat(true);
+    return api.get("/catalog/categories").then((r) => {
+      const cats: Category[] = r.data.categories ?? [];
+      setCategories(cats);
+      const current = activeCatRef.current;
+      const stillVisible = current ? cats.find((c) => c.id === current.id) ?? null : null;
+      const nextCat = stillVisible ?? cats[0] ?? null;
+      if (nextCat?.id !== current?.id) {
+        setActiveCat(nextCat);
+      } else if (nextCat) {
+        return loadProducts(nextCat.id, opts);
+      } else {
+        setProducts([]);
+      }
+    }).catch(() => null).finally(() => { if (!opts?.silent) setLoadingCat(false); });
+  }, [loadProducts]);
+
   useEffect(() => {
-    if (!activeCat) return;
-    setLoadingProds(true);
-    api.get(`/catalog/products?category_id=${activeCat.id}`).then((r) => {
-      setProducts(r.data.products ?? []);
-    }).catch(() => null).finally(() => setLoadingProds(false));
-  }, [activeCat]);
+    refreshCatalog();
+  }, [refreshCatalog]);
+
+  useEffect(() => {
+    const iv = setInterval(() => { refreshCatalog({ silent: true }); }, POLL_INTERVAL_MS);
+    return () => clearInterval(iv);
+  }, [refreshCatalog]);
+
+  useEffect(() => {
+    if (!activeCat) { setProducts([]); return; }
+    loadProducts(activeCat.id);
+  }, [activeCat, loadProducts]);
 
   const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const count = cart.reduce((s, i) => s + i.qty, 0);
