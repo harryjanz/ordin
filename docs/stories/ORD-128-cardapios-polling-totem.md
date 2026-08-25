@@ -1,6 +1,6 @@
 ---
 id: ORD-128
-status: Ready
+status: Done
 fase: null
 sprint: null
 responsavel: Frontend
@@ -87,4 +87,11 @@ Consultar como o carrinho local do totem referencia produtos (por id apenas, ou 
 
 **Explorer:** [x] · **QA Explorer:** [x] · **Tech Explorer:** [x] · **Aprovação final:** [x] — decisão de produto (polling periódico, não só por navegação) já fechada em ORD-124.
 
-**Status: Ready** — depende de ORD-127 implementado antes de ter algo visível pra testar de ponta a ponta (o mecanismo em si pode ser construído mais cedo se o sequenciamento real pedir).
+**Status: Done** — implementado em `frontend/totem/src/screens/CatalogScreen.tsx` (`refreshCatalog`/`loadProducts`, `POLL_INTERVAL_MS = 90_000`) e validado ao vivo no Chrome contra o backend real (2026-08-25): criado um cardápio de teste vinculado só ao produto "Burger Trufado Especial" (categoria Especiais, que tem outros 6 produtos sempre visíveis), com item já no carrinho —
+
+- Janela fechada via API → produto some da grade no próximo ciclo de polling (sem navegação, sem reload), carrinho permanece intacto (`Ver pedido (1 item)`).
+- Janela reaberta via API → produto reaparece no próximo ciclo, carrinho (com outro item, adicionado enquanto o produto estava oculto) permanece intacto.
+- Categoria "Especiais" nunca ficou vazia nos dois testes (só 1 dos 7 produtos ficou de fora), então o cenário de "categoria esvazia" não foi validado ao vivo nesta rodada — coberto por revisão de código (`products.length === 0` já tratado na tela, sem crash) e é o mesmo código-caminho do teste que passou.
+- Timeout de inatividade do totem (recurso existente, não desta história) resetou a sessão/carrinho uma vez durante a espera do primeiro poll — comportamento correto e esperado (usuário real "sumiu" por >2min), não uma falha do polling do catálogo.
+
+`tsc --noEmit` limpo. Cardápio de teste removido (`DELETE /catalog/menus/7`) ao final.

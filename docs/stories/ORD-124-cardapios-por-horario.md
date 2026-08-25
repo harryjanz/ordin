@@ -1,6 +1,6 @@
 ---
 id: ORD-124
-status: Tech Explorer
+status: Done
 fase: null
 sprint: null
 responsavel: Full-stack
@@ -179,3 +179,5 @@ Não cravada — claramente maior que as mudanças recentes de Catálogo (tabs, 
 4. `ORD-128` — revalidação periódica no totem (depende de ORD-127 pra ter algo visível de ponta a ponta)
 
 Este documento (ORD-124) permanece como a referência de decisões de produto e pesquisa de mercado — a implementação acontece nas 4 subtarefas acima, não diretamente aqui.
+
+**Status: Done** (2026-08-25) — as 4 subtarefas (ORD-125, ORD-126, ORD-127, ORD-128) estão todas `Done`, cada uma validada ao vivo contra o backend/admin/totem reais. Cardápios por horário está funcional de ponta a ponta: CRUD no admin, regra de visibilidade condicional nos endpoints de produção, e revalidação periódica no totem.
