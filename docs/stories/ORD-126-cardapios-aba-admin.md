@@ -1,6 +1,6 @@
 ---
 id: ORD-126
-status: Ready
+status: Done
 fase: null
 sprint: null
 responsavel: Frontend

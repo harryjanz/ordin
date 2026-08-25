@@ -24,7 +24,7 @@ import { listCompanies } from "../api/companies";
 import ConfirmDialog, { type ConfirmDialogProps } from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { useStore } from "../store";
-import type { Allergen, Category, Company, Product } from "../types";
+import type { Allergen, Category, Company, Menu, Product, ProductMenuRef } from "../types";
 import styles from "./CatalogScreen.module.scss";
 
 // Conjunto sugerido pra tags (usuário aprovou "adotar os padrões sugeridos,
@@ -71,6 +71,43 @@ const PRODUCT_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
   { value: "inactive", label: "Inativos" },
   { value: "all", label: "Todos" },
 ];
+
+const MENU_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "active", label: "Ativos" },
+  { value: "inactive", label: "Inativos" },
+  { value: "all", label: "Todos" },
+];
+
+// 0=segunda..6=domingo, mesmo datetime.weekday() do backend (ORD-125).
+const WEEKDAY_ABBR = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
+const WEEKDAY_OPTIONS = WEEKDAY_ABBR.map((label, i) => ({ value: String(i), label, disabled: false }));
+
+function formatWeekdays(weekdays: number[]): string {
+  const sorted = [...weekdays].sort((a, b) => a - b);
+  if (sorted.length === 7) return "Todos os dias";
+  const contiguous = sorted.every((d, i) => i === 0 || d === sorted[i - 1] + 1);
+  if (contiguous && sorted.length > 1) return `${WEEKDAY_ABBR[sorted[0]]}-${WEEKDAY_ABBR[sorted[sorted.length - 1]]}`;
+  return sorted.map((d) => WEEKDAY_ABBR[d]).join(", ");
+}
+
+// Um produto pode estar vinculado ao mesmo cardápio direto E via categoria
+// ao mesmo tempo (achado ao testar ORD-125 ao vivo) — mescla numa linha só
+// em vez de mostrar o mesmo cardápio duas vezes.
+function formatProductMenus(refs: ProductMenuRef[]): string[] {
+  const byMenu = new Map<number, { name: string; direct: boolean; viaCategories: string[] }>();
+  for (const r of refs) {
+    const entry = byMenu.get(r.id) ?? { name: r.name, direct: false, viaCategories: [] };
+    if (r.via_category) entry.viaCategories.push(r.via_category);
+    else entry.direct = true;
+    byMenu.set(r.id, entry);
+  }
+  return Array.from(byMenu.values(), (e) => {
+    const parts: string[] = [];
+    if (e.direct) parts.push("direto");
+    if (e.viaCategories.length) parts.push(`via ${e.viaCategories.join(", ")}`);
+    return `${e.name} (${parts.join(" + ")})`;
+  });
+}
 
 interface EditProdState {
   id: number;
@@ -124,7 +161,7 @@ export default function CatalogScreen() {
 
   // Cadastro em abas + padrão Empresa (2026-08-24) — filterBar + Table +
   // Modal, mesmo modelo de Usuários/Terminais/Pagamento em CompanyScreen.
-  const [activeTab, setActiveTab] = useState<"categories" | "products">("categories");
+  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus">("categories");
 
   const [allergens, setAllergens] = useState<Allergen[]>([]);
   useEffect(() => { loadAllergens(); }, []);
@@ -369,6 +406,9 @@ export default function CatalogScreen() {
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
   const [productFormError, setProductFormError] = useState("");
   const [productSaving, setProductSaving] = useState(false);
+  // ORD-126 — a quais cardápios este produto pertence (direto ou via
+  // categoria), read-only aqui; edição de fato é na aba Cardápios.
+  const [editProdMenus, setEditProdMenus] = useState<ProductMenuRef[]>([]);
 
   function openNewProduct() {
     setEditProd(null);
@@ -402,6 +442,10 @@ export default function CatalogScreen() {
     });
     setUploadFiles([]);
     setProductFormError("");
+    setEditProdMenus([]);
+    api.get(`/catalog/products/${p.id}/menus`, catalogParams())
+      .then((r) => setEditProdMenus(r.data.menus ?? []))
+      .catch(() => null);
     setProductModalOpen(true);
   }
 
@@ -536,6 +580,151 @@ export default function CatalogScreen() {
     return categories.find((c) => c.id === id)?.name ?? "—";
   }
 
+  // ── Cardápios (ORD-126) ────────────────────────────────────────────────
+  const [menus, setMenus] = useState<Menu[]>([]);
+  const [errMenus, setErrMenus] = useState<string | null>(null);
+  const [menuNameFilter, setMenuNameFilter] = useState("");
+  const [menuStatusFilter, setMenuStatusFilter] = useState<StatusFilter>("active");
+  const menuRequestId = useRef(0);
+
+  async function loadMenus() {
+    if (!hasCompanyContext) return;
+    const thisRequest = ++menuRequestId.current;
+    try {
+      const r = await api.get("/catalog/menus", catalogParams());
+      if (thisRequest !== menuRequestId.current) return; // resposta obsoleta, ignorar
+      setMenus(r.data.menus ?? r.data);
+      setErrMenus(null);
+    } catch {
+      if (thisRequest !== menuRequestId.current) return;
+      setErrMenus("Erro ao carregar cardápios.");
+    }
+  }
+
+  useEffect(() => {
+    if (!hasCompanyContext) { setMenus([]); return; }
+    loadMenus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCompanyContext, companyId]);
+
+  const filteredMenus = menus.filter((m) => {
+    if (menuStatusFilter === "active" && !m.active) return false;
+    if (menuStatusFilter === "inactive" && m.active) return false;
+    if (menuNameFilter && !m.name.toLowerCase().includes(menuNameFilter.toLowerCase())) return false;
+    return true;
+  });
+
+  function clearMenuFilters() {
+    setMenuNameFilter("");
+    setMenuStatusFilter("active");
+  }
+
+  interface MenuFormState {
+    name: string;
+    weekdays: string[];
+    start_time: string;
+    end_time: string;
+    category_ids: string[];
+    product_ids: string[];
+  }
+
+  const [menuModalOpen, setMenuModalOpen] = useState(false);
+  const [editingMenuId, setEditingMenuId] = useState<number | null>(null); // null = criando
+  const [menuForm, setMenuForm] = useState<MenuFormState>({
+    name: "", weekdays: [], start_time: "", end_time: "", category_ids: [], product_ids: [],
+  });
+  const [menuProductSearch, setMenuProductSearch] = useState("");
+  const [menuFormError, setMenuFormError] = useState("");
+  const [menuSaving, setMenuSaving] = useState(false);
+
+  const menuCategoryOptions = categories.map((c) => ({ value: String(c.id), label: c.name, disabled: false }));
+  const menuProductOptions = products
+    .filter((p) => !menuProductSearch || p.name.toLowerCase().includes(menuProductSearch.toLowerCase()))
+    .map((p) => ({ value: String(p.id), label: p.name, disabled: false }));
+
+  function openNewMenu() {
+    setEditingMenuId(null);
+    setMenuForm({ name: "", weekdays: [], start_time: "", end_time: "", category_ids: [], product_ids: [] });
+    setMenuProductSearch("");
+    setMenuFormError("");
+    setMenuModalOpen(true);
+  }
+
+  function openEditMenu(m: Menu) {
+    setEditingMenuId(m.id);
+    setMenuForm({
+      name: m.name,
+      weekdays: m.weekdays.map(String),
+      start_time: m.start_time,
+      end_time: m.end_time,
+      category_ids: m.categories.map((c) => String(c.id)),
+      product_ids: m.products.map((p) => String(p.id)),
+    });
+    setMenuProductSearch("");
+    setMenuFormError("");
+    setMenuModalOpen(true);
+  }
+
+  async function saveMenu(e: FormEvent) {
+    e.preventDefault();
+    if (!menuForm.name.trim() || menuForm.weekdays.length === 0 || !menuForm.start_time || !menuForm.end_time) return;
+    setMenuSaving(true);
+    setMenuFormError("");
+    try {
+      const basePayload = {
+        name: menuForm.name.trim(),
+        weekdays: menuForm.weekdays.map(Number),
+        start_time: menuForm.start_time,
+        end_time: menuForm.end_time,
+      };
+      const menuId = editingMenuId ?? (
+        await api.post("/catalog/menus", basePayload, catalogParams())
+      ).data.id;
+      if (editingMenuId !== null) {
+        await api.put(`/catalog/menus/${editingMenuId}`, basePayload, catalogParams());
+      }
+      await api.put(`/catalog/menus/${menuId}/composition`, {
+        category_ids: menuForm.category_ids.map(Number),
+        product_ids: menuForm.product_ids.map(Number),
+      }, catalogParams());
+      setMenuModalOpen(false);
+      loadMenus();
+    } catch {
+      setMenuFormError("Erro ao salvar cardápio.");
+    } finally {
+      setMenuSaving(false);
+    }
+  }
+
+  function deactivateMenu(id: number) {
+    setConfirmState({
+      message: "Desativar cardápio? Os produtos vinculados a ele deixam de aparecer no totem enquanto estiver desativado, mesmo dentro do horário configurado.",
+      onConfirm: async () => {
+        setConfirmState(null);
+        await api.put(`/catalog/menus/${id}`, { active: false }, catalogParams());
+        loadMenus();
+      },
+    });
+  }
+
+  async function activateMenu(id: number) {
+    await api.put(`/catalog/menus/${id}`, { active: true }, catalogParams());
+    loadMenus();
+  }
+
+  function deleteMenu(id: number, name: string) {
+    setConfirmState({
+      message: `Excluir o cardápio "${name}"? Os produtos e categorias vinculados a ele voltam a ficar sempre visíveis (se não estiverem em nenhum outro cardápio). Essa ação não pode ser desfeita.`,
+      alertVariant: "warning",
+      alertIcon: "alert-triangle",
+      onConfirm: async () => {
+        setConfirmState(null);
+        await api.delete(`/catalog/menus/${id}`, catalogParams());
+        loadMenus();
+      },
+    });
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.title}>Catálogo</div>
@@ -560,6 +749,7 @@ export default function CatalogScreen() {
         <Tabs activeTab={activeTab} onSelectTab={(v) => setActiveTab(v as typeof activeTab)}>
           <Tab value="categories" label="Categorias" totalizer={categories.length} />
           <Tab value="products" label="Produtos" totalizer={products.length} />
+          <Tab value="menus" label="Cardápios" totalizer={menus.length} />
         </Tabs>
       </div>
 
@@ -812,6 +1002,15 @@ export default function CatalogScreen() {
                   options={activeCategoryOptions}
                 />
 
+                {editProdMenus.length > 0 && (
+                  <div className={styles.menusInfo}>
+                    <div className={styles.formLabel}>Pertence aos cardápios</div>
+                    {formatProductMenus(editProdMenus).map((line) => (
+                      <div key={line}>{line}</div>
+                    ))}
+                  </div>
+                )}
+
                 <TextArea
                   label="Descrição curta"
                   value={editProd.description}
@@ -913,6 +1112,173 @@ export default function CatalogScreen() {
                 </div>
               </form>
             )}
+          </Modal>
+        </>
+      )}
+
+      {/* ── Cardápios ── */}
+      {activeTab === "menus" && (
+        <>
+          {errMenus && (
+            <div className={styles.errorRow}>
+              <span className={styles.muted}>{errMenus}</span>
+              <Button size="small" variant="secondary" onClick={loadMenus}>Tentar novamente</Button>
+            </div>
+          )}
+
+          <div className={styles.filterBar}>
+            <InputBase
+              label="Cardápio"
+              placeholder="Buscar por nome…"
+              value={menuNameFilter}
+              onChange={(e) => setMenuNameFilter(e.target.value)}
+            />
+            <Dropdown
+              label="Status"
+              value={MENU_STATUS_FILTER_OPTIONS.find((o) => o.value === menuStatusFilter) ?? MENU_STATUS_FILTER_OPTIONS[0]}
+              onValueSelected={(opt) => setMenuStatusFilter(opt.value as StatusFilter)}
+              options={MENU_STATUS_FILTER_OPTIONS}
+            />
+            <Button type="button" variant="secondary" onClick={clearMenuFilters}>Limpar filtros</Button>
+            <Button type="button" onClick={openNewMenu}>+ Novo cardápio</Button>
+          </div>
+
+          <Table
+            variant="compact"
+            rowKey={(m: Menu) => m.id}
+            emptyMessage="Nenhum cardápio encontrado."
+            columns={[
+              { key: "name", header: "Cardápio", render: (m: Menu) => m.name },
+              { key: "days", header: "Dias", render: (m: Menu) => formatWeekdays(m.weekdays) },
+              { key: "hours", header: "Horário", render: (m: Menu) => `${m.start_time}-${m.end_time}` },
+              {
+                key: "composition", header: "Composição", render: (m: Menu) => (
+                  <span className={styles.muted}>
+                    {m.categories.length} categoria{m.categories.length === 1 ? "" : "s"}, {m.products.length} produto{m.products.length === 1 ? "" : "s"}
+                  </span>
+                ),
+              },
+              {
+                key: "status", header: "Status",
+                render: (m: Menu) => <Tag variant={m.active ? "success" : "error"}>{m.active ? "Ativo" : "Inativo"}</Tag>,
+              },
+              {
+                key: "action", header: "", render: (m: Menu) => (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <Button size="small" variant="secondary" onClick={() => openEditMenu(m)}>Editar</Button>
+                    {m.active ? (
+                      <Button size="small" variant="secondary" onClick={() => deactivateMenu(m.id)}>Desativar</Button>
+                    ) : (
+                      <Button size="small" variant="secondary" onClick={() => activateMenu(m.id)}>Ativar</Button>
+                    )}
+                    <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deleteMenu(m.id, m.name)}>
+                      Excluir
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+            rows={filteredMenus}
+          />
+
+          <Modal
+            open={menuModalOpen}
+            width={600}
+            onClose={() => setMenuModalOpen(false)}
+            onBackdropClick={() => setMenuModalOpen(false)}
+            onCloseButtonClick={() => setMenuModalOpen(false)}
+          >
+            <form onSubmit={saveMenu} className={styles.modalForm}>
+              <div className={styles.formTitle}>{editingMenuId === null ? "Novo cardápio" : "Editar cardápio"}</div>
+              {menuFormError && <Alert variant="error" text={menuFormError} fullWidth />}
+
+              <InputBase
+                label="Nome do cardápio"
+                placeholder="ex: Café da manhã"
+                value={menuForm.name}
+                onChange={(e) => setMenuForm({ ...menuForm, name: e.target.value })}
+                autoFocus
+              />
+
+              <div className={styles.formRow}>
+                <div className={styles.formRowField}>
+                  <InputBase
+                    label="Horário início"
+                    type="time"
+                    value={menuForm.start_time}
+                    onChange={(e) => setMenuForm({ ...menuForm, start_time: e.target.value })}
+                  />
+                </div>
+                <div className={styles.formRowField}>
+                  <InputBase
+                    label="Horário fim"
+                    type="time"
+                    value={menuForm.end_time}
+                    onChange={(e) => setMenuForm({ ...menuForm, end_time: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <CheckboxMultiselect
+                key={`${editingMenuId ?? "new"}-weekdays`}
+                id="menu-weekdays"
+                label="Dias da semana"
+                options={WEEKDAY_OPTIONS}
+                initialSelection={menuForm.weekdays}
+                onSelectOption={(option, checked) => {
+                  setMenuForm((prev) => ({
+                    ...prev,
+                    weekdays: checked ? [...prev.weekdays, option.value] : prev.weekdays.filter((v) => v !== option.value),
+                  }));
+                }}
+              />
+
+              <CheckboxMultiselect
+                key={`${editingMenuId ?? "new"}-categories`}
+                id="menu-categories"
+                label="Categorias inteiras"
+                helperMessage="Todo produto da categoria entra no cardápio, inclusive os criados depois"
+                options={menuCategoryOptions}
+                initialSelection={menuForm.category_ids}
+                onSelectOption={(option, checked) => {
+                  setMenuForm((prev) => ({
+                    ...prev,
+                    category_ids: checked ? [...prev.category_ids, option.value] : prev.category_ids.filter((v) => v !== option.value),
+                  }));
+                }}
+              />
+
+              <InputBase
+                label="Buscar produto avulso"
+                placeholder="Filtrar por nome…"
+                value={menuProductSearch}
+                onChange={(e) => setMenuProductSearch(e.target.value)}
+              />
+              <CheckboxMultiselect
+                key={`${editingMenuId ?? "new"}-products`}
+                id="menu-products"
+                label="Produtos avulsos"
+                options={menuProductOptions}
+                initialSelection={menuForm.product_ids}
+                emptyMessage="Nenhum produto encontrado"
+                onSelectOption={(option, checked) => {
+                  setMenuForm((prev) => ({
+                    ...prev,
+                    product_ids: checked ? [...prev.product_ids, option.value] : prev.product_ids.filter((v) => v !== option.value),
+                  }));
+                }}
+              />
+
+              <div className={styles.formActions}>
+                <Button
+                  type="submit"
+                  disabled={menuSaving || !menuForm.name.trim() || menuForm.weekdays.length === 0 || !menuForm.start_time || !menuForm.end_time}
+                >
+                  Salvar
+                </Button>
+                <Button type="button" variant="secondary" onClick={() => setMenuModalOpen(false)}>Cancelar</Button>
+              </div>
+            </form>
           </Modal>
         </>
       )}

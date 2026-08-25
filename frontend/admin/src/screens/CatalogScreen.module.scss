@@ -90,6 +90,20 @@
   margin-bottom: -2px;
 }
 
+// ORD-126 — "a quais cardápios este produto pertence", read-only na edição
+// de produto.
+.menusInfo {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.7);
+  background: rgba(var(--a-text-rgb), 0.03);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .formActions {
   display: flex;
   gap: 8px;
