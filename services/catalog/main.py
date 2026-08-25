@@ -77,6 +77,10 @@ class Category(Base):
     # mesmo com include_inactive=true. A linha continua no banco só pra
     # manter o vínculo histórico com vendas já realizadas.
     deleted    = Column(Boolean, default=False, nullable=False)
+    # Ordem de apresentação no totem — gerenciado só via create_category
+    # (inicial) e /catalog/categories/reorder, mesmo padrão de
+    # Product.sort_order (drag-and-drop no admin, pedido direto do usuário).
+    sort_order = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 class Product(Base):
@@ -167,6 +171,7 @@ class CategoryOut(BaseModel):
     id: int
     name: str
     active: bool
+    sort_order: Optional[int] = None
 
 class CategoryListOut(BaseModel):
     categories: list[CategoryOut]
@@ -177,6 +182,9 @@ class CategoryIn(BaseModel):
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
     active: Optional[bool] = None
+
+class CategoryReorderIn(BaseModel):
+    category_ids: list[int]
 
 class AllergenOut(BaseModel):
     id: int
@@ -307,9 +315,10 @@ async def list_categories(
     q = select(Category).filter_by(company_id=company_id, deleted=False)
     if not include_inactive:
         q = q.filter_by(active=True)
+    q = q.order_by(Category.sort_order.asc(), Category.id.asc())
     result = await db.execute(q)
     cats = result.scalars().all()
-    return {"categories": [{"id": c.id, "name": c.name, "active": c.active} for c in cats]}
+    return {"categories": [{"id": c.id, "name": c.name, "active": c.active, "sort_order": c.sort_order} for c in cats]}
 
 @app.get(
     "/catalog/products",
@@ -384,9 +393,38 @@ async def create_category(
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id_write),
 ):
-    cat = Category(company_id=company_id, name=body.name)
+    count_result = await db.execute(
+        select(func.count()).select_from(Category).filter_by(company_id=company_id, deleted=False)
+    )
+    next_sort_order = count_result.scalar_one()
+    cat = Category(company_id=company_id, name=body.name, sort_order=next_sort_order)
     db.add(cat); await db.commit(); await db.refresh(cat)
-    return {"id": cat.id, "name": cat.name, "active": cat.active}
+    return {"id": cat.id, "name": cat.name, "active": cat.active, "sort_order": cat.sort_order}
+
+@app.put(
+    "/catalog/categories/reorder",
+    status_code=204,
+    tags=["Catálogo"],
+    summary="Reordenar categorias",
+    responses={400: {"description": "algum id não pertence à empresa"}},
+)
+async def reorder_categories(
+    body: CategoryReorderIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """Rota registrada antes de /catalog/categories/{category_id} de propósito:
+    caso contrário o path param capturaria "reorder" como category_id (mesmo
+    racional de /catalog/products/reorder)."""
+    result = await db.execute(
+        select(Category.id).filter_by(company_id=company_id, deleted=False)
+    )
+    valid_ids = set(result.scalars().all())
+    if set(body.category_ids) != valid_ids:
+        raise HTTPException(400, detail="category_ids não corresponde exatamente às categorias da empresa")
+    for index, category_id in enumerate(body.category_ids):
+        await db.execute(update(Category).where(Category.id == category_id).values(sort_order=index))
+    await db.commit()
 
 @app.put(
     "/catalog/categories/{category_id}",
@@ -407,7 +445,7 @@ async def update_category(
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(cat, field, value)
     await db.commit(); await db.refresh(cat)
-    return {"id": cat.id, "name": cat.name, "active": cat.active}
+    return {"id": cat.id, "name": cat.name, "active": cat.active, "sort_order": cat.sort_order}
 
 @app.delete(
     "/catalog/categories/{category_id}",

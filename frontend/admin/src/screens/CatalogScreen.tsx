@@ -185,6 +185,19 @@ export default function CatalogScreen() {
     return true;
   });
 
+  // Reordenar (pedido direto do usuário — refletir a ordem de apresentação
+  // no totem) exige que o conjunto visível bata EXATAMENTE com todas as
+  // categorias da empresa, mesma validação de reorderProducts — por isso só
+  // fica disponível com filtro de nome vazio e status "Todas".
+  const canReorderCategories = !categoryNameFilter && categoryStatusFilter === "all";
+
+  async function reorderCategories(orderedIds: (string | number)[]) {
+    const ids = orderedIds.map(Number);
+    const orderMap = new Map(ids.map((id, i) => [id, i]));
+    setCategories((prev) => [...prev].sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0)));
+    await api.put("/catalog/categories/reorder", { category_ids: ids }, catalogParams());
+  }
+
   function clearCategoryFilters() {
     setCategoryNameFilter("");
     setCategoryStatusFilter("active");
@@ -328,24 +341,23 @@ export default function CatalogScreen() {
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
 
   // Reordenar só faz sentido dentro de UMA categoria — sort_order é
-  // escopado por categoria no backend (PUT /catalog/products/reorder).
-  // Setas (não mais drag nativo) porque a lista virou uma Table real —
-  // drag HTML5 também tem suporte ruim a touch/tablet (mesmo racional já
-  // aplicado no drag-and-drop da tela de Preparo).
-  const canReorder = Boolean(productCategoryFilter) && productStatusFilter !== "inactive";
+  // escopado por categoria no backend (PUT /catalog/products/reorder), que
+  // valida que o conjunto enviado bate EXATAMENTE com todos os produtos
+  // (ativos+inativos) da categoria — por isso também exige filtro de nome
+  // vazio e status "Todos", senão a lista visível seria um subconjunto e a
+  // chamada falharia. Drag-and-drop (não mais setas — pedido direto do
+  // usuário) via Pointer Events na própria Table (ver components/Table.tsx),
+  // mesmo mecanismo do drag-and-drop de Preparo, com suporte a touch.
+  const canReorderProducts = Boolean(productCategoryFilter) && !productNameFilter && productStatusFilter === "all";
 
-  async function moveProduct(id: number, direction: -1 | 1) {
+  async function reorderProducts(orderedIds: (string | number)[]) {
     if (!productCategoryFilter) return;
-    const list = [...filteredProducts];
-    const index = list.findIndex((p) => p.id === id);
-    const target = index + direction;
-    if (index === -1 || target < 0 || target >= list.length) return;
-    [list[index], list[target]] = [list[target], list[index]];
-    const orderMap = new Map(list.map((p, i) => [p.id, i]));
+    const ids = orderedIds.map(Number);
+    const orderMap = new Map(ids.map((id, i) => [id, i]));
     setProducts((prev) => prev.map((p) => (orderMap.has(p.id) ? { ...p, sort_order: orderMap.get(p.id)! } : p)));
     await api.put("/catalog/products/reorder", {
       category_id: Number(productCategoryFilter),
-      product_ids: list.map((p) => p.id),
+      product_ids: ids,
     }, catalogParams());
   }
 
@@ -578,11 +590,18 @@ export default function CatalogScreen() {
             <Button type="button" onClick={openNewCategory}>+ Nova categoria</Button>
           </div>
 
+          <div className={styles.reorderHint}>
+            {canReorderCategories
+              ? "Arraste pelo ⠿ para reordenar — a ordem aqui é a mesma exibida no totem."
+              : "Reordenar só é possível com o filtro de nome vazio e status em \"Todas\"."}
+          </div>
+
           <Table
             variant="compact"
             rowKey={(c: Category) => c.id}
             emptyMessage="Nenhuma categoria encontrada."
             onRowClick={(c: Category) => browseCategoryProducts(c.id)}
+            onReorder={canReorderCategories ? reorderCategories : undefined}
             columns={[
               { key: "name", header: "Categoria", render: (c: Category) => c.name },
               {
@@ -669,9 +688,9 @@ export default function CatalogScreen() {
 
           {productCategoryFilter && (
             <div className={styles.reorderHint}>
-              {canReorder
-                ? "Use as setas para reordenar — a ordem aqui é a mesma exibida no totem."
-                : "Reordenar só é possível com o filtro de status em \"Ativos\" ou \"Todos\" dentro de uma categoria específica."}
+              {canReorderProducts
+                ? "Arraste pelo ⠿ para reordenar — a ordem aqui é a mesma exibida no totem."
+                : "Reordenar só é possível com o filtro de nome vazio e status em \"Todos\", dentro de uma categoria específica."}
             </div>
           )}
 
@@ -679,6 +698,7 @@ export default function CatalogScreen() {
             variant="compact"
             rowKey={(p: Product) => p.id}
             emptyMessage="Nenhum produto encontrado."
+            onReorder={canReorderProducts ? reorderProducts : undefined}
             columns={[
               {
                 key: "image", header: "", render: (p: Product) => (
@@ -716,12 +736,6 @@ export default function CatalogScreen() {
               {
                 key: "action", header: "", render: (p: Product) => (
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                    {canReorder && (
-                      <span className={styles.reorderArrows}>
-                        <i className="icon-chevron-up" onClick={() => moveProduct(p.id, -1)} title="Mover para cima" />
-                        <i className="icon-chevron-down" onClick={() => moveProduct(p.id, 1)} title="Mover para baixo" />
-                      </span>
-                    )}
                     <Button size="small" variant="secondary" onClick={() => openEditProduct(p)}>Editar</Button>
                     {p.active ? (
                       <Button size="small" variant="secondary" onClick={() => deactivateProduct(p.id)}>Desativar</Button>

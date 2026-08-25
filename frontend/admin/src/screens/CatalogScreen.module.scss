@@ -54,22 +54,6 @@
   margin-bottom: 8px;
 }
 
-.reorderArrows {
-  display: flex;
-  flex-direction: column;
-  line-height: 0.7;
-
-  i {
-    cursor: pointer;
-    color: rgba(var(--a-text-rgb), 0.4);
-    font-size: 14px;
-
-    &:hover {
-      color: color('brand-primary');
-    }
-  }
-}
-
 .empty {
   color: rgba(var(--a-text-rgb), 0.35);
   @include font('sm');

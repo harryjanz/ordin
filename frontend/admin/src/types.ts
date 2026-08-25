@@ -145,7 +145,7 @@ export interface Category {
   company_id: number;
   name: string;
   active: boolean;
-  sort_order: number;
+  sort_order: number | null;
 }
 
 export interface Allergen {

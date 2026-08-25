@@ -84,6 +84,22 @@
   }
 }
 
+// Reordenação por arrastar (2026-08-24, Catálogo) — handle dedicado em vez
+// de arrastar a linha inteira, pra não conflitar com onRowClick/botões de
+// ação já existentes na mesma linha.
+.dragHandle {
+  cursor: grab;
+  color: rgba(var(--a-text-rgb), 0.35);
+  user-select: none;
+  touch-action: none;
+  display: inline-block;
+  padding: 4px;
+}
+
+.rowDragging {
+  opacity: 0.4;
+}
+
 .chev {
   display: inline-block;
   transition: transform 0.15s ease;
