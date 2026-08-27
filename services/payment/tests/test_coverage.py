@@ -106,6 +106,96 @@ async def test_mock_provider_cancel():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# infrastructure/providers/mercadopago.py — ORD-129 (migração Payment Intents → Orders API)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _mp_provider():
+    from infrastructure.providers.mercadopago import MPProvider
+    from domain.schemas import ProviderConfig
+    return MPProvider(ProviderConfig(provider="mercadopago", environment="sandbox", api_key="TEST-token"))
+
+
+async def test_mp_provider_card_usa_v1_orders_nao_payment_intents():
+    """ORD-129: _card_payment deve chamar POST /v1/orders — nunca a API legada
+    de payment-intents (/point/integration-api/...), que retorna 403 na API real."""
+    from domain.schemas import TransactionStatus
+    provider = _mp_provider()
+    with respx.mock:
+        respx.post("https://api.mercadopago.com/v1/orders").mock(
+            return_value=httpx.Response(201, json={
+                "id": "ORDTEST00001",
+                "status": "created",
+                "transactions": {"payments": [{"id": "PAYTEST001", "status": "created"}]},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDTEST00001").mock(
+            return_value=httpx.Response(200, json={
+                "id": "ORDTEST00001",
+                "status": "processed",
+                "transactions": {"payments": [{
+                    "id": "PAYTEST001", "status": "processed", "status_detail": "accredited",
+                }]},
+            })
+        )
+        result = await provider.create_transaction(
+            amount=Decimal("26.00"), method="credit",
+            terminal_ref="PAX_A910__SMARTPOS123", order_ref="ORD-MP01")
+    assert result.status == TransactionStatus.approved
+    assert result.provider_transaction_id == "ORDTEST00001"
+    assert result.nsu == "PAYTEST001"
+    assert result.authorization == "accredited"
+    # nenhuma chamada bateu na família legada
+    assert not any("/point/integration-api/" in str(c.request.url) for c in respx.calls)
+
+
+async def test_mp_provider_card_order_failed():
+    from domain.schemas import TransactionStatus
+    provider = _mp_provider()
+    with respx.mock:
+        respx.post("https://api.mercadopago.com/v1/orders").mock(
+            return_value=httpx.Response(201, json={
+                "id": "ORDTEST00002",
+                "status": "created",
+                "transactions": {"payments": [{"id": "PAYTEST002", "status": "created"}]},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDTEST00002").mock(
+            return_value=httpx.Response(200, json={
+                "id": "ORDTEST00002",
+                "status": "failed",
+                "transactions": {"payments": [{
+                    "id": "PAYTEST002", "status": "failed", "status_detail": "insufficient_amount",
+                }]},
+            })
+        )
+        result = await provider.create_transaction(
+            amount=Decimal("10.00"), method="debit",
+            terminal_ref="PAX_A910__SMARTPOS123", order_ref="ORD-MP02")
+    assert result.status == TransactionStatus.refused
+    assert result.error_message == "insufficient_amount"
+
+
+async def test_mp_provider_cancel_order_usa_v1_orders_cancel():
+    """ORD-129: cancelamento de order de cartão via POST /v1/orders/{id}/cancel
+    — nunca DELETE /point/integration-api/.../payment-intents/{id} (legado)."""
+    provider = _mp_provider()
+    with respx.mock:
+        respx.post("https://api.mercadopago.com/v1/orders/ORDTEST00003/cancel").mock(
+            return_value=httpx.Response(200, json={"id": "ORDTEST00003", "status": "canceled"})
+        )
+        result = await provider.cancel_transaction("ORDTEST00003", "PAX_A910__SMARTPOS123")
+    assert result is True
+
+
+async def test_mp_provider_cancel_pix_deixa_expirar():
+    """IDs de pagamento PIX (numéricos, não começam com 'ORD') não chamam a
+    API de orders — comportamento preservado do fluxo antigo (deixa expirar)."""
+    provider = _mp_provider()
+    result = await provider.cancel_transaction("123456789", "")
+    assert result is True
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # infrastructure/mongo.py
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -262,6 +352,53 @@ async def test_get_terminal_config_503():
         with pytest.raises(HTTPException) as exc:
             await svc._get_terminal_config(9997)
         assert exc.value.status_code == 503
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# main.py — _mp_order_fetch_and_update (ORD-129, webhook tópico "order")
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def test_mp_order_fetch_and_update_aprova_transacao_pendente(db_session):
+    """Reconciliação via webhook: order pendente que virou 'processed' na
+    consulta a GET /v1/orders deve ser marcada approved, notificar o pedido
+    e publicar payment.approved — mesmo comportamento que _mp_fetch_and_update
+    (PIX) já tinha, só que consultando /v1/orders em vez de /v1/payments."""
+    import main as svc
+    from main import Transaction
+    company_url = svc.COMPANY_SVC
+    order_url = svc.ORDER_SVC
+    async with db_session() as db:
+        tx = Transaction(company_id=1, order_ref="ORD-WH01", terminal_id=1,
+                          tef_number="T1", method="credit", amount=10.00,
+                          status="pending", provider="mercadopago", environment="sandbox",
+                          provider_transaction_id="ORDTEST00004")
+        db.add(tx); await db.commit(); await db.refresh(tx)
+        tx_id = tx.id
+
+    with respx.mock:
+        respx.get(f"{company_url}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json={
+                "paygo_terminal_id": None, "mp_device_id": "PAX_A910__SMARTPOS123",
+                "payment_provider": "mercadopago", "environment": "sandbox",
+                "config": {"api_key": "TEST-token"},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDTEST00004").mock(
+            return_value=httpx.Response(200, json={"id": "ORDTEST00004", "status": "processed"})
+        )
+        respx.patch(f"{order_url}/internal/orders/ORD-WH01/status").mock(
+            return_value=httpx.Response(200)
+        )
+        async with db_session() as db:
+            result = await db.execute(select(svc.Transaction).where(svc.Transaction.id == tx_id))
+            tx = result.scalars().first()
+            await svc._mp_order_fetch_and_update(tx, "ORDTEST00004", db)
+
+    async with db_session() as db:
+        result = await db.execute(select(svc.Transaction).where(svc.Transaction.id == tx_id))
+        assert result.scalars().first().status == "approved"
+        await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.id == tx_id))
+        await db.commit()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
