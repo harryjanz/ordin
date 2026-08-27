@@ -510,6 +510,54 @@ async def test_dir_cancel_mercadopago_pix_permitido(db_session):
         await db.commit()
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# main.py — _verify_mp_signature (ORD-130, fórmula de assinatura corrigida)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def test_verify_mp_signature_manifest_correto():
+    """Prova a fórmula do manifest: id:{data.id minúsculo};request-id:{x-request-id};ts:{ts};
+    Usa um secret de teste (não o real) + valores reais capturados via ngrok
+    inspector numa cobrança de cartão de verdade nesta sessão (data.id,
+    x-request-id e ts não são segredos, só identificadores da notificação)."""
+    import hmac, hashlib
+    import main as svc
+
+    secret = "test-webhook-secret-nao-eh-o-real"
+    data_id = "ORD01M10M7YZ1CN8NJRVX32EX1B76"  # como chega na query string (maiúsculas)
+    request_id = "fb1f1d8a-fa22-405f-8158-1af07dff0feb"
+    ts = "1787801538"
+
+    manifest_esperado = f"id:{data_id.lower()};request-id:{request_id};ts:{ts};"
+    v1_esperado = hmac.new(secret.encode(), manifest_esperado.encode(), hashlib.sha256).hexdigest()
+
+    assert svc._verify_mp_signature(secret, data_id, request_id, ts, v1_esperado) is True
+
+
+def test_verify_mp_signature_usa_data_id_da_query_nao_o_request_id_sozinho():
+    """Regressão do bug: a versão antiga usava só o x-request-id no campo
+    'id:' do manifest (sem 'request-id:' e sem o data.id de verdade) — um
+    v1 calculado com o data.id de verdade não deve bater se o código
+    voltar a ignorar esse campo."""
+    import hmac, hashlib
+    import main as svc
+
+    secret = "test-webhook-secret-nao-eh-o-real"
+    request_id = "fb1f1d8a-fa22-405f-8158-1af07dff0feb"
+    ts = "1787801538"
+
+    # v1 calculado com o manifest ERRADO (só request_id, sem data.id nem "request-id:")
+    manifest_errado = f"id:{request_id};request-date:{ts};"
+    v1_do_manifest_errado = hmac.new(secret.encode(), manifest_errado.encode(), hashlib.sha256).hexdigest()
+
+    assert svc._verify_mp_signature(secret, "ORD01M10M7YZ1CN8NJRVX32EX1B76", request_id, ts, v1_do_manifest_errado) is False
+
+
+def test_verify_mp_signature_assinatura_invalida():
+    import main as svc
+    result = svc._verify_mp_signature("secret", "ORD123", "req-1", "1787801538", "hash-invalido")
+    assert result is False
+
+
 async def test_dir_cancel_superadmin_cancela_transacao_de_outra_empresa(db_session):
     """Bug real reportado ao vivo: superadmin (company_id=1 no seed) tentou
     cancelar uma transação e recebeu 403 (_WRITE_ROLES não incluía

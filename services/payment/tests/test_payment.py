@@ -354,3 +354,71 @@ async def test_cancel_inexistente(client, token_owner):
         headers={"Authorization": f"Bearer {token_owner}"},
     )
     assert r.status_code == 404
+
+
+# ── Webhooks por provider (ORD-130) ───────────────────────────────────────────
+
+async def test_webhook_mercadopago_sem_secret_configurado_aceita(client):
+    """Sem MP_WEBHOOK_SECRET configurado, a assinatura não é validada (mesmo
+    comportamento de dev local hoje) — só não deve quebrar."""
+    r = await client.post(
+        "/payments/webhook/mercadopago?type=payment&data.id=123",
+        json={"type": "payment", "data": {"id": "123"}},
+    )
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+
+
+async def test_webhook_mercadopago_assinatura_valida_aceita(client):
+    import hmac, hashlib
+    import main as svc
+
+    secret = "test-secret"
+    data_id = "ORD01M10M7YZ1CN8NJRVX32EX1B76"
+    request_id = "req-abc-123"
+    ts = "1787801538"
+    manifest = f"id:{data_id.lower()};request-id:{request_id};ts:{ts};"
+    v1 = hmac.new(secret.encode(), manifest.encode(), hashlib.sha256).hexdigest()
+
+    original = svc.MP_WEBHOOK_SECRET
+    svc.MP_WEBHOOK_SECRET = secret
+    try:
+        r = await client.post(
+            f"/payments/webhook/mercadopago?type=order&data.id={data_id}",
+            json={"type": "order", "action": "order.processed", "data": {"id": data_id}},
+            headers={"x-signature": f"ts={ts},v1={v1}", "x-request-id": request_id},
+        )
+    finally:
+        svc.MP_WEBHOOK_SECRET = original
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+
+
+async def test_webhook_mercadopago_assinatura_invalida_retorna_401(client):
+    import main as svc
+
+    original = svc.MP_WEBHOOK_SECRET
+    svc.MP_WEBHOOK_SECRET = "test-secret"
+    try:
+        r = await client.post(
+            "/payments/webhook/mercadopago?type=order&data.id=ORD01",
+            json={"type": "order", "data": {"id": "ORD01"}},
+            headers={"x-signature": "ts=123,v1=hash-forjado", "x-request-id": "req-x"},
+        )
+    finally:
+        svc.MP_WEBHOOK_SECRET = original
+    assert r.status_code == 401
+
+
+async def test_webhook_paygo_aceita_placeholder(client):
+    r = await client.post("/payments/webhook/paygo", json={"qualquer": "coisa"})
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+
+
+async def test_webhook_rota_antiga_nao_existe_mais(client):
+    # 405 (não 404): "/payments/webhook" bate estruturalmente com a rota
+    # pré-existente DELETE /payments/{tx_id} (sem tipo no path string), que
+    # só aceita DELETE — de qualquer forma, não processa mais nada como webhook.
+    r = await client.post("/payments/webhook?source=mercadopago", json={})
+    assert r.status_code in (404, 405)

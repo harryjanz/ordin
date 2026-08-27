@@ -1013,8 +1013,12 @@ async def delete_payment(
 
 # ── Webhook helpers ───────────────────────────────────────────────────────────
 
-def _verify_mp_signature(secret: str, request_id: str, ts: str, v1: str) -> bool:
-    manifest = f"id:{request_id};request-date:{ts};"
+def _verify_mp_signature(secret: str, data_id: str, request_id: str, ts: str, v1: str) -> bool:
+    """Manifest oficial do Mercado Pago: id:{data.id em minúsculas};request-id:{x-request-id};ts:{ts};
+    data_id vem da query string (?data.id=...), não do body — são valores
+    normalmente iguais, mas a assinatura é calculada especificamente sobre o
+    da query string."""
+    manifest = f"id:{data_id.lower()};request-id:{request_id};ts:{ts};"
     expected = hmac.new(secret.encode(), manifest.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, v1)
 
@@ -1134,28 +1138,26 @@ async def _handle_mp_notification(payload: dict) -> None:
 
 
 @app.post(
-    "/payments/webhook",
+    "/payments/webhook/mercadopago",
     status_code=200,
     response_model=WebhookOut,
     tags=["Pagamentos"],
-    summary="Webhook de notificações (MP PIX, MP Point, PayGo)",
+    summary="Webhook de notificações — Mercado Pago",
     description=(
-        "Recebe notificações push dos provedores de pagamento.\n\n"
-        "**Mercado Pago:** `?source=mercadopago` (padrão). Valida `x-signature` se "
+        "Recebe notificações push do Mercado Pago. Valida `x-signature` se "
         "`MP_WEBHOOK_SECRET` estiver configurado. Suporta `type=payment` (PIX) e "
         "`type=order` (MP Point cartão, tópico \"Order (Mercado Pago)\").\n\n"
-        "**PayGo:** `?source=paygo`. Estrutura a confirmar com ControlPay Webservice.\n\n"
-        "Sempre retorna HTTP 200 para não bloquear reentregas do provider."
+        "Sempre retorna HTTP 200 para não bloquear reentregas do Mercado Pago."
     ),
 )
-async def payment_webhook(
+async def payment_webhook_mercadopago(
     request: Request,
     background_tasks: BackgroundTasks,
-    source: str = "mercadopago",
 ):
     body = await request.body()
 
-    if source == "mercadopago" and MP_WEBHOOK_SECRET:
+    if MP_WEBHOOK_SECRET:
+        data_id = request.query_params.get("data.id", "")
         sig_header = request.headers.get("x-signature", "")
         request_id = request.headers.get("x-request-id", "")
         ts = v1 = ""
@@ -1165,7 +1167,7 @@ async def payment_webhook(
                 ts = v.strip()
             elif k.strip() == "v1":
                 v1 = v.strip()
-        if not _verify_mp_signature(MP_WEBHOOK_SECRET, request_id, ts, v1):
+        if not _verify_mp_signature(MP_WEBHOOK_SECRET, data_id, request_id, ts, v1):
             logger.warning("Webhook MP: assinatura inválida — descartando")
             raise HTTPException(401, "Assinatura inválida")
 
@@ -1174,15 +1176,33 @@ async def payment_webhook(
     except Exception:
         return {"ok": True}
 
-    logger.info("Webhook recebido: source=%s type=%s", source, payload.get("type"))
+    logger.info("Webhook MP recebido: type=%s", payload.get("type"))
+    background_tasks.add_task(_handle_mp_notification, payload)
 
-    if source == "mercadopago":
-        background_tasks.add_task(_handle_mp_notification, payload)
-    elif source == "paygo":
-        # PayGo notifica via callback configurado no request de pagamento.
-        # Estrutura do payload a confirmar com ControlPay — implementar quando disponível.
-        logger.info("Webhook PayGo: %s", payload)
+    return {"ok": True}
 
+
+@app.post(
+    "/payments/webhook/paygo",
+    status_code=200,
+    response_model=WebhookOut,
+    tags=["Pagamentos"],
+    summary="Webhook de notificações — PayGo",
+    description=(
+        "Recebe notificações push do PayGo/ControlPay. Estrutura a confirmar "
+        "com ControlPay Webservice — implementar quando disponível.\n\n"
+        "Sempre retorna HTTP 200 para não bloquear reentregas do provider."
+    ),
+)
+async def payment_webhook_paygo(request: Request):
+    body = await request.body()
+    try:
+        payload = _json.loads(body)
+    except Exception:
+        return {"ok": True}
+    # PayGo notifica via callback configurado no request de pagamento.
+    # Estrutura do payload a confirmar com ControlPay — implementar quando disponível.
+    logger.info("Webhook PayGo: %s", payload)
     return {"ok": True}
 
 
