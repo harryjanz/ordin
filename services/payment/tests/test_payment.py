@@ -25,6 +25,18 @@ _PAYGO_TERMINAL_CONFIG = {
     },
 }
 
+_MP_TERMINAL_CONFIG = {
+    "paygo_terminal_id": None,
+    "mp_device_id": "PAX_A910__SMARTPOS123",
+    "payment_provider": "mercadopago",
+    "environment": "sandbox",
+    "config": {
+        "api_key": "TEST-token",
+        "api_secret": None,
+        "extra_config": {},
+    },
+}
+
 
 @pytest.fixture
 async def client():
@@ -233,6 +245,96 @@ async def test_create_payment_paygo_expired(client, token_kiosk):
     assert r.status_code == 201
     assert r.json()["ok"] is False
     assert r.json()["status"] == "expired"
+
+
+# ── MercadoPagoProvider (Point/Orders API) — aprovado ────────────────────────
+# ORD-129: migração da API legada de Payment Intents para a API de Orders.
+
+async def test_create_payment_mercadopago_card_approved(client, token_kiosk):
+    with respx.mock:
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
+        )
+        respx.post("https://api.mercadopago.com/v1/orders").mock(
+            return_value=httpx.Response(201, json={
+                "id": "ORDTEST00005",
+                "status": "created",
+                "transactions": {"payments": [{"id": "PAYTEST005", "status": "created"}]},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDTEST00005").mock(
+            return_value=httpx.Response(200, json={
+                "id": "ORDTEST00005",
+                "status": "processed",
+                "transactions": {"payments": [{
+                    "id": "PAYTEST005", "status": "processed", "status_detail": "accredited",
+                }]},
+            })
+        )
+        respx.patch(f"{_order_url()}/internal/orders/ORD-MP01/status").mock(
+            return_value=httpx.Response(200)
+        )
+        r = await client.post(
+            "/payments",
+            json={"order_ref": "ORD-MP01", "method": "credit", "amount": 26.00,
+                  "items": [{"product_id": 1, "name": "X-Burger", "qty": 1, "unit_price": 26.00}]},
+            headers={"Authorization": f"Bearer {token_kiosk}"},
+        )
+    assert r.status_code == 201
+    data = r.json()
+    assert data["ok"] is True
+    assert data["status"] == "approved"
+    assert data["nsu"] == "PAYTEST005"
+    assert data["authorization"] == "accredited"
+
+
+# ── MercadoPagoProvider (Point/Orders API) — recusado ────────────────────────
+
+async def test_create_payment_mercadopago_card_refused(client, token_kiosk):
+    with respx.mock:
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
+        )
+        respx.post("https://api.mercadopago.com/v1/orders").mock(
+            return_value=httpx.Response(201, json={
+                "id": "ORDTEST00006",
+                "status": "created",
+                "transactions": {"payments": [{"id": "PAYTEST006", "status": "created"}]},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDTEST00006").mock(
+            return_value=httpx.Response(200, json={
+                "id": "ORDTEST00006",
+                "status": "failed",
+                "transactions": {"payments": [{
+                    "id": "PAYTEST006", "status": "failed", "status_detail": "insufficient_amount",
+                }]},
+            })
+        )
+        r = await client.post(
+            "/payments",
+            json={"order_ref": "ORD-MP02", "method": "debit", "amount": 10.00, "items": []},
+            headers={"Authorization": f"Bearer {token_kiosk}"},
+        )
+    assert r.status_code == 201
+    assert r.json()["ok"] is False
+    assert r.json()["status"] == "refused"
+
+
+# ── Mercado Pago sem mp_device_id configurado ────────────────────────────────
+
+async def test_mercadopago_sem_mp_device_id_retorna_400(client, token_kiosk):
+    config_sem_device = {**_MP_TERMINAL_CONFIG, "mp_device_id": None}
+    with respx.mock:
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json=config_sem_device)
+        )
+        r = await client.post(
+            "/payments",
+            json={"order_ref": "ORD-MP03", "method": "credit", "amount": 5.00, "items": []},
+            headers={"Authorization": f"Bearer {token_kiosk}"},
+        )
+    assert r.status_code == 400
 
 
 # ── Listar e cancelar ─────────────────────────────────────────────────────────

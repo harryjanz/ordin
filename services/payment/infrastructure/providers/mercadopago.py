@@ -15,9 +15,9 @@ _POLL_TIMEOUT_CARD  = 120.0
 _POLL_INTERVAL_PIX  = 5.0
 _PIX_EXPIRY_MINUTES = 10
 
-# Point intent states
-_INTENT_TERMINAL_STATES = {"OPEN", "ON_TERMINAL"}
-_INTENT_FINAL_STATES    = {"FINISHED", "CANCELED", "ERROR"}
+# Status de uma order (API de Orders do MP Point) — created/at_terminal são
+# transitórios (continuar polling); os demais são finais.
+_ORDER_PENDING_STATUSES = {"created", "at_terminal"}
 
 
 class MPProvider(IPaymentProvider):
@@ -50,26 +50,29 @@ class MPProvider(IPaymentProvider):
         self,
         amount: Decimal,
         method: str,
-        device_id: str,
+        terminal_id: str,
         order_ref: str,
     ) -> TransactionResult:
         audit: list[dict] = []
-        amount_cents = int(amount * 100)
 
         body = {
-            "amount": amount_cents,
-            "description": f"Pedido {order_ref}",
-            "payment": {
-                "installments": 1,
-                "type": "credit_card" if method == "credit" else "debit_card",
+            "type": "point",
+            "external_reference": order_ref,
+            "transactions": {"payments": [{"amount": f"{amount:.2f}"}]},
+            "config": {
+                "point": {
+                    "terminal_id": terminal_id,
+                    "print_on_terminal": "no_ticket",
+                },
             },
+            "description": f"Pedido {order_ref}",
         }
 
         async with httpx.AsyncClient(timeout=30) as client:
             try:
                 resp = await client.post(
-                    f"{self.BASE_URL}/point/integration-api/devices/{device_id}/payment-intents",
-                    headers=self._headers,
+                    f"{self.BASE_URL}/v1/orders",
+                    headers={**self._headers, "X-Idempotency-Key": order_ref},
                     json=body,
                 )
             except Exception as exc:
@@ -80,7 +83,7 @@ class MPProvider(IPaymentProvider):
                 )
 
             audit.append({
-                "event": "intent_create",
+                "event": "order_create",
                 "ts": datetime.utcnow().isoformat(),
                 "http_status": resp.status_code,
                 "response": resp.text[:500],
@@ -93,7 +96,7 @@ class MPProvider(IPaymentProvider):
                     audit_events=audit,
                 )
 
-            intent_id = resp.json().get("id", "")
+            order_id = resp.json().get("id", "")
 
             deadline = asyncio.get_event_loop().time() + _POLL_TIMEOUT_CARD
             while asyncio.get_event_loop().time() < deadline:
@@ -101,7 +104,7 @@ class MPProvider(IPaymentProvider):
 
                 try:
                     poll = await client.get(
-                        f"{self.BASE_URL}/point/integration-api/payment-intents/{intent_id}",
+                        f"{self.BASE_URL}/v1/orders/{order_id}",
                         headers=self._headers,
                     )
                     poll_data = poll.json()
@@ -109,59 +112,47 @@ class MPProvider(IPaymentProvider):
                     logger.warning("MP Point poll error: %s", exc)
                     continue
 
-                state = poll_data.get("state", {}).get("value", "OPEN")
+                status = poll_data.get("status", "created")
                 audit.append({
                     "event": "poll",
                     "ts": datetime.utcnow().isoformat(),
-                    "state": state,
+                    "status": status,
                 })
 
-                if state in _INTENT_TERMINAL_STATES:
+                if status in _ORDER_PENDING_STATUSES:
                     continue
 
-                if state == "FINISHED":
-                    payment_id = poll_data.get("payment", {}).get("id")
-                    if payment_id:
-                        try:
-                            pay_resp = await client.get(
-                                f"{self.BASE_URL}/v1/payments/{payment_id}",
-                                headers=self._headers,
-                            )
-                            pay_data = pay_resp.json()
-                            audit.append({
-                                "event": "payment_fetch",
-                                "ts": datetime.utcnow().isoformat(),
-                                "payment_status": pay_data.get("status"),
-                            })
-                            if pay_data.get("status") == "approved":
-                                return TransactionResult(
-                                    status=TransactionStatus.approved,
-                                    provider_transaction_id=str(payment_id),
-                                    nsu=str(pay_data.get("id", "")),
-                                    authorization=pay_data.get("authorization_code") or "",
-                                    audit_events=audit,
-                                )
-                        except Exception as exc:
-                            logger.warning("MP payment fetch error: %s", exc)
+                payments = poll_data.get("transactions", {}).get("payments", [])
+                payment = payments[0] if payments else {}
 
+                if status == "processed":
                     return TransactionResult(
-                        status=TransactionStatus.refused,
-                        provider_transaction_id=intent_id,
-                        error_message="Pagamento não autorizado no terminal",
+                        status=TransactionStatus.approved,
+                        provider_transaction_id=order_id,
+                        nsu=str(payment.get("id", "")),
+                        authorization=payment.get("status_detail") or "",
                         audit_events=audit,
                     )
 
-                # CANCELED or ERROR
+                if status == "failed":
+                    return TransactionResult(
+                        status=TransactionStatus.refused,
+                        provider_transaction_id=order_id,
+                        error_message=payment.get("status_detail") or "Pagamento não autorizado no terminal",
+                        audit_events=audit,
+                    )
+
+                # canceled ou expired
                 return TransactionResult(
-                    status=TransactionStatus.cancelled if state == "CANCELED" else TransactionStatus.refused,
-                    provider_transaction_id=intent_id,
-                    error_message=f"Terminal retornou: {state}",
+                    status=TransactionStatus.cancelled if status == "canceled" else TransactionStatus.expired,
+                    provider_transaction_id=order_id,
+                    error_message=f"Order retornou status: {status}",
                     audit_events=audit,
                 )
 
         return TransactionResult(
             status=TransactionStatus.expired,
-            provider_transaction_id=intent_id,
+            provider_transaction_id=order_id,
             error_message="Timeout: terminal não respondeu em 120s",
             audit_events=audit,
         )
@@ -244,16 +235,18 @@ class MPProvider(IPaymentProvider):
         provider_transaction_id: str,
         terminal_ref: str,
     ) -> bool:
-        # Card intent IDs are UUID format (contain "-"); PIX IDs are numeric
-        if "-" in provider_transaction_id and terminal_ref:
+        # IDs de order da API de Orders começam com "ORD"; IDs de pagamento PIX são numéricos
+        if provider_transaction_id.startswith("ORD"):
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
-                    resp = await client.delete(
-                        f"{self.BASE_URL}/point/integration-api/devices/{terminal_ref}"
-                        f"/payment-intents/{provider_transaction_id}",
-                        headers=self._headers,
+                    resp = await client.post(
+                        f"{self.BASE_URL}/v1/orders/{provider_transaction_id}/cancel",
+                        headers={
+                            **self._headers,
+                            "X-Idempotency-Key": f"cancel-{provider_transaction_id}",
+                        },
                     )
-                    return resp.status_code in (200, 204)
+                    return resp.status_code in (200, 201)
                 except Exception:
                     return False
         # PIX pending — let it expire (has date_of_expiration set at creation)

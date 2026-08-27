@@ -1058,6 +1058,49 @@ async def _mp_fetch_and_update(tx: Transaction, payment_id: str, db: AsyncSessio
         logger.warning("Webhook _mp_fetch_and_update error: %s", exc)
 
 
+async def _mp_order_fetch_and_update(tx: Transaction, order_id: str, db: AsyncSession) -> None:
+    """Consulta /v1/orders na MP (API de Orders do Point) e atualiza a transação
+    conforme o status retornado. Equivalente a _mp_fetch_and_update, mas para
+    orders de cartão em vez de payments de PIX — os dois recursos têm
+    vocabulário de status diferente (order: processed/failed/canceled/expired
+    vs payment: approved/cancelled/rejected)."""
+    try:
+        terminal_cfg = await _get_terminal_config(tx.terminal_id)
+        access_token = (terminal_cfg.get("config") or {}).get("api_key", "")
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"https://api.mercadopago.com/v1/orders/{order_id}",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if resp.status_code != 200:
+                return
+
+            order_status = resp.json().get("status", "")
+
+            if order_status == "processed" and tx.status not in ("approved",):
+                tx.status = "approved"
+                await db.commit()
+                await _notify_order(tx.order_ref, "paid")
+                await _publish(
+                    "payment.approved",
+                    PaymentApprovedEvent(
+                        company_id=tx.company_id,
+                        order_ref=tx.order_ref,
+                        transaction_id=tx.id,
+                        amount=str(tx.amount),
+                        nsu="",
+                        authorization="",
+                        provider=tx.provider,
+                    ).to_dict(),
+                )
+            elif order_status in ("failed", "canceled", "expired") and tx.status not in ("approved", "cancelled", "refused"):
+                tx.status = "cancelled" if order_status == "canceled" else "refused"
+                await db.commit()
+    except Exception as exc:
+        logger.warning("Webhook _mp_order_fetch_and_update error: %s", exc)
+
+
 async def _handle_mp_notification(payload: dict) -> None:
     """Processa notificação MP em background com sessão DB própria."""
     notification_type = payload.get("type", "")
@@ -1076,34 +1119,15 @@ async def _handle_mp_notification(payload: dict) -> None:
                 if tx and tx.status == "processing":
                     await _mp_fetch_and_update(tx, data_id, db)
 
-            elif notification_type == "point_integration_ipn":
-                # MP Point: intent UUID → buscar payment_id associado
-                action = payload.get("action", "")  # ex: "state_FINISHED"
+            elif notification_type == "order":
+                # MP Point: order id da API de Orders (tópico "Order (Mercado
+                # Pago)", substitui o antigo point_integration_ipn)
                 result = await db.execute(
                     select(Transaction).where(Transaction.provider_transaction_id == data_id)
                 )
                 tx = result.scalars().first()
-                if not tx:
-                    return
-
-                state = action[len("state_"):] if action.startswith("state_") else action
-
-                if state == "FINISHED" and tx.status == "pending":
-                    terminal_cfg = await _get_terminal_config(tx.terminal_id)
-                    access_token = (terminal_cfg.get("config") or {}).get("api_key", "")
-                    async with httpx.AsyncClient(timeout=10) as client:
-                        poll = await client.get(
-                            f"https://api.mercadopago.com/point/integration-api/payment-intents/{data_id}",
-                            headers={"Authorization": f"Bearer {access_token}"},
-                        )
-                        if poll.status_code == 200:
-                            pay_id = poll.json().get("payment", {}).get("id")
-                            if pay_id:
-                                await _mp_fetch_and_update(tx, str(pay_id), db)
-
-                elif state in ("CANCELED", "ERROR") and tx.status == "pending":
-                    tx.status = "cancelled" if state == "CANCELED" else "refused"
-                    await db.commit()
+                if tx and tx.status == "pending":
+                    await _mp_order_fetch_and_update(tx, data_id, db)
 
         except Exception as exc:
             logger.warning("Webhook MP handler error: %s", exc)
@@ -1119,7 +1143,7 @@ async def _handle_mp_notification(payload: dict) -> None:
         "Recebe notificações push dos provedores de pagamento.\n\n"
         "**Mercado Pago:** `?source=mercadopago` (padrão). Valida `x-signature` se "
         "`MP_WEBHOOK_SECRET` estiver configurado. Suporta `type=payment` (PIX) e "
-        "`type=point_integration_ipn` (MP Point cartão).\n\n"
+        "`type=order` (MP Point cartão, tópico \"Order (Mercado Pago)\").\n\n"
         "**PayGo:** `?source=paygo`. Estrutura a confirmar com ControlPay Webservice.\n\n"
         "Sempre retorna HTTP 200 para não bloquear reentregas do provider."
     ),
