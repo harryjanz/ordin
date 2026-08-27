@@ -12,7 +12,7 @@ import styles from "./CompanyScreen.module.scss";
 // Adicionar novo provider: inserir entrada aqui. O formulário e a listagem
 // são gerados automaticamente a partir desta estrutura.
 
-type FieldKey = "api_key" | "api_secret" | `extra_config.${string}`;
+type FieldKey = "api_key" | "api_secret" | "webhook_secret" | `extra_config.${string}`;
 
 interface ProviderField {
   key: FieldKey;
@@ -44,6 +44,13 @@ const PROVIDERS: Record<string, ProviderDef> = {
         label: "Public Key",
         placeholder: "TEST-... ou APP_USR-... (opcional)",
         type: "text",
+        required: false,
+      },
+      {
+        key: "webhook_secret",
+        label: "Chave secreta do webhook",
+        placeholder: "Cole aqui a chave gerada ao configurar a URL abaixo no painel Mercado Pago (opcional)",
+        type: "password",
         required: false,
       },
     ],
@@ -146,6 +153,7 @@ function credentialLines(c: PaymentConfig, def: ProviderDef): string[] {
       let val: string | undefined | null;
       if (f.key === "api_key") val = c.api_key;
       else if (f.key === "api_secret") val = c.api_secret;
+      else if (f.key === "webhook_secret") val = c.webhook_secret;
       else if (f.key.startsWith("extra_config.")) {
         val = c.extra_config?.[f.key.slice("extra_config.".length)];
       }
@@ -437,6 +445,19 @@ function PaymentTab({ companyId }: PaymentTabProps) {
                   options={ENVIRONMENT_OPTIONS}
                 />
               </>
+            )}
+
+            {(editConfigId === null ? provider : editCfg?.provider) === "mercadopago" && (
+              <InputBase
+                label="URL do webhook (colar no painel Mercado Pago)"
+                value={`${window.location.origin}/payments/webhook/mercadopago/${companyId}`}
+                readOnly
+                icon="copy"
+                onActionIconClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/payments/webhook/mercadopago/${companyId}`);
+                  makeToast("success", "URL copiada!");
+                }}
+              />
             )}
 
             {modalDef.fields.map((f, i) => (

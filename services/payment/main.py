@@ -32,7 +32,6 @@ ORDER_SVC           = require_env("ORDER_SERVICE_URL")
 COMPANY_SVC         = require_env("COMPANY_SERVICE_URL")
 INTERNAL_SECRET     = require_env("INTERNAL_SECRET")
 INTERNAL_HEADERS    = {"X-Internal-Secret": INTERNAL_SECRET}
-MP_WEBHOOK_SECRET   = os.getenv("MP_WEBHOOK_SECRET", "")
 
 engine = create_async_engine(DB_URL.replace("mysql+pymysql://", "mysql+aiomysql://"), pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -124,6 +123,29 @@ async def _get_terminal_config(terminal_id: int) -> dict:
     if resp.status_code != 200:
         raise HTTPException(503, "company-service indisponível")
     return resp.json()
+
+
+async def _get_mp_webhook_secret(company_id: int) -> tuple[bool, str | None]:
+    """Busca o webhook_secret do Mercado Pago da empresa (ORD-131) — cada
+    empresa tem sua própria aplicação/conta MP, logo seu próprio secret.
+    Retorna (config_existe, secret). config_existe=False significa que a
+    empresa não tem nenhuma config MP ativa — o handler do webhook não deve
+    processar nada nesse caso. secret=None com config_existe=True significa
+    que a config existe mas o campo ainda não foi preenchido (aceita sem
+    validar assinatura, mesmo comportamento permissivo de antes da ORD-131)."""
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            resp = await c.get(
+                f"{COMPANY_SVC}/internal/companies/{company_id}/payment-config",
+                params={"provider": "mercadopago"},
+                headers=INTERNAL_HEADERS,
+            )
+        if resp.status_code != 200:
+            return False, None
+        return True, resp.json().get("webhook_secret")
+    except Exception as exc:
+        logger.warning("Erro ao buscar webhook_secret da empresa %s: %s", company_id, exc)
+        return False, None
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -1138,25 +1160,37 @@ async def _handle_mp_notification(payload: dict) -> None:
 
 
 @app.post(
-    "/payments/webhook/mercadopago",
+    "/payments/webhook/mercadopago/{company_id}",
     status_code=200,
     response_model=WebhookOut,
     tags=["Pagamentos"],
-    summary="Webhook de notificações — Mercado Pago",
+    summary="Webhook de notificações — Mercado Pago (por empresa)",
     description=(
-        "Recebe notificações push do Mercado Pago. Valida `x-signature` se "
-        "`MP_WEBHOOK_SECRET` estiver configurado. Suporta `type=payment` (PIX) e "
-        "`type=order` (MP Point cartão, tópico \"Order (Mercado Pago)\").\n\n"
-        "Sempre retorna HTTP 200 para não bloquear reentregas do Mercado Pago."
+        "Recebe notificações push do Mercado Pago. A URL é específica por "
+        "empresa (ORD-131) porque cada empresa tem sua própria aplicação/conta "
+        "MP e, portanto, seu próprio webhook_secret — não dá para validar a "
+        "assinatura sem antes saber de qual empresa é a notificação, e a URL "
+        "por empresa resolve isso sem depender de dado não confiável do "
+        "payload. Valida `x-signature` se a empresa tiver `webhook_secret` "
+        "configurado em `company_payment_configs`. Suporta `type=payment` "
+        "(PIX) e `type=order` (MP Point cartão, tópico \"Order (Mercado "
+        "Pago)\").\n\nSempre retorna HTTP 200 para não bloquear reentregas "
+        "do Mercado Pago."
     ),
 )
 async def payment_webhook_mercadopago(
+    company_id: int,
     request: Request,
     background_tasks: BackgroundTasks,
 ):
     body = await request.body()
 
-    if MP_WEBHOOK_SECRET:
+    config_existe, secret = await _get_mp_webhook_secret(company_id)
+    if not config_existe:
+        logger.warning("Webhook MP: empresa %s sem config Mercado Pago ativa — ignorando", company_id)
+        return {"ok": True}
+
+    if secret:
         data_id = request.query_params.get("data.id", "")
         sig_header = request.headers.get("x-signature", "")
         request_id = request.headers.get("x-request-id", "")
@@ -1167,8 +1201,8 @@ async def payment_webhook_mercadopago(
                 ts = v.strip()
             elif k.strip() == "v1":
                 v1 = v.strip()
-        if not _verify_mp_signature(MP_WEBHOOK_SECRET, data_id, request_id, ts, v1):
-            logger.warning("Webhook MP: assinatura inválida — descartando")
+        if not _verify_mp_signature(secret, data_id, request_id, ts, v1):
+            logger.warning("Webhook MP: assinatura inválida (empresa %s) — descartando", company_id)
             raise HTTPException(401, "Assinatura inválida")
 
     try:
@@ -1176,7 +1210,7 @@ async def payment_webhook_mercadopago(
     except Exception:
         return {"ok": True}
 
-    logger.info("Webhook MP recebido: type=%s", payload.get("type"))
+    logger.info("Webhook MP recebido: empresa=%s type=%s", company_id, payload.get("type"))
     background_tasks.add_task(_handle_mp_notification, payload)
 
     return {"ok": True}

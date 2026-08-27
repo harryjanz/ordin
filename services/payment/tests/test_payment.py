@@ -356,22 +356,45 @@ async def test_cancel_inexistente(client, token_owner):
     assert r.status_code == 404
 
 
-# ── Webhooks por provider (ORD-130) ───────────────────────────────────────────
+# ── Webhooks por provider (ORD-130/ORD-131) ───────────────────────────────────
 
-async def test_webhook_mercadopago_sem_secret_configurado_aceita(client):
-    """Sem MP_WEBHOOK_SECRET configurado, a assinatura não é validada (mesmo
-    comportamento de dev local hoje) — só não deve quebrar."""
-    r = await client.post(
-        "/payments/webhook/mercadopago?type=payment&data.id=123",
-        json={"type": "payment", "data": {"id": "123"}},
-    )
+def _mock_mp_payment_config(company_id: int, webhook_secret: str | None):
+    return respx.get(
+        f"{_company_url()}/internal/companies/{company_id}/payment-config",
+        params={"provider": "mercadopago"},
+    ).mock(return_value=httpx.Response(200, json={"webhook_secret": webhook_secret}))
+
+
+async def test_webhook_mercadopago_empresa_sem_config_nao_processa(client):
+    """Empresa sem nenhuma config MP ativa (404 no company-service) — aceita
+    (200) mas não processa nada, sem quebrar."""
+    with respx.mock:
+        respx.get(f"{_company_url()}/internal/companies/1/payment-config", params={"provider": "mercadopago"}).mock(
+            return_value=httpx.Response(404)
+        )
+        r = await client.post(
+            "/payments/webhook/mercadopago/1?type=payment&data.id=123",
+            json={"type": "payment", "data": {"id": "123"}},
+        )
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+
+
+async def test_webhook_mercadopago_config_sem_secret_ainda_aceita(client):
+    """Empresa com config MP ativa mas webhook_secret ainda não preenchido —
+    comportamento permissivo (mesmo de antes da ORD-131), sem validar assinatura."""
+    with respx.mock:
+        _mock_mp_payment_config(1, None)
+        r = await client.post(
+            "/payments/webhook/mercadopago/1?type=payment&data.id=123",
+            json={"type": "payment", "data": {"id": "123"}},
+        )
     assert r.status_code == 200
     assert r.json()["ok"] is True
 
 
 async def test_webhook_mercadopago_assinatura_valida_aceita(client):
     import hmac, hashlib
-    import main as svc
 
     secret = "test-secret"
     data_id = "ORD01M10M7YZ1CN8NJRVX32EX1B76"
@@ -380,33 +403,48 @@ async def test_webhook_mercadopago_assinatura_valida_aceita(client):
     manifest = f"id:{data_id.lower()};request-id:{request_id};ts:{ts};"
     v1 = hmac.new(secret.encode(), manifest.encode(), hashlib.sha256).hexdigest()
 
-    original = svc.MP_WEBHOOK_SECRET
-    svc.MP_WEBHOOK_SECRET = secret
-    try:
+    with respx.mock:
+        _mock_mp_payment_config(1, secret)
         r = await client.post(
-            f"/payments/webhook/mercadopago?type=order&data.id={data_id}",
+            f"/payments/webhook/mercadopago/1?type=order&data.id={data_id}",
             json={"type": "order", "action": "order.processed", "data": {"id": data_id}},
             headers={"x-signature": f"ts={ts},v1={v1}", "x-request-id": request_id},
         )
-    finally:
-        svc.MP_WEBHOOK_SECRET = original
     assert r.status_code == 200
     assert r.json()["ok"] is True
 
 
 async def test_webhook_mercadopago_assinatura_invalida_retorna_401(client):
-    import main as svc
-
-    original = svc.MP_WEBHOOK_SECRET
-    svc.MP_WEBHOOK_SECRET = "test-secret"
-    try:
+    with respx.mock:
+        _mock_mp_payment_config(1, "test-secret")
         r = await client.post(
-            "/payments/webhook/mercadopago?type=order&data.id=ORD01",
+            "/payments/webhook/mercadopago/1?type=order&data.id=ORD01",
             json={"type": "order", "data": {"id": "ORD01"}},
             headers={"x-signature": "ts=123,v1=hash-forjado", "x-request-id": "req-x"},
         )
-    finally:
-        svc.MP_WEBHOOK_SECRET = original
+    assert r.status_code == 401
+
+
+async def test_webhook_mercadopago_secret_da_empresa_2_nao_valida_empresa_1(client):
+    """ORD-131, isolamento multi-tenant: uma assinatura calculada com o
+    secret da empresa 2 não deve bater na validação da empresa 1, mesmo que
+    a URL/company_id da requisição seja da empresa 1."""
+    import hmac, hashlib
+
+    secret_empresa_2 = "secret-da-empresa-2"
+    data_id = "ORD02"
+    request_id = "req-1"
+    ts = "1787801538"
+    manifest = f"id:{data_id.lower()};request-id:{request_id};ts:{ts};"
+    v1_calculado_com_secret_errado = hmac.new(secret_empresa_2.encode(), manifest.encode(), hashlib.sha256).hexdigest()
+
+    with respx.mock:
+        _mock_mp_payment_config(1, "secret-da-empresa-1")  # empresa 1 tem outro secret
+        r = await client.post(
+            f"/payments/webhook/mercadopago/1?type=order&data.id={data_id}",
+            json={"type": "order", "data": {"id": data_id}},
+            headers={"x-signature": f"ts={ts},v1={v1_calculado_com_secret_errado}", "x-request-id": request_id},
+        )
     assert r.status_code == 401
 
 
