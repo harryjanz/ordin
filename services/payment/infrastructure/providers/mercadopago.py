@@ -55,6 +55,8 @@ class MPProvider(IPaymentProvider):
     ) -> TransactionResult:
         audit: list[dict] = []
 
+        mp_payment_type = "credit_card" if method == "credit" else "debit_card"
+
         body = {
             "type": "point",
             "external_reference": order_ref,
@@ -63,6 +65,9 @@ class MPProvider(IPaymentProvider):
                 "point": {
                     "terminal_id": terminal_id,
                     "print_on_terminal": "no_ticket",
+                },
+                "payment_method": {
+                    "default_type": mp_payment_type,
                 },
             },
             "description": f"Pedido {order_ref}",

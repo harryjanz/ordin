@@ -361,6 +361,18 @@ async def create_payment(
         raise HTTPException(400, "Terminal sem paygo_terminal_id configurado")
     if provider_name == "mercadopago" and body.method in ("credit", "debit") and not mp_device_id:
         raise HTTPException(400, "Terminal sem mp_device_id configurado para pagamento com cartão")
+    if provider_name == "mercadopago" and mp_device_id and "__" not in mp_device_id:
+        # Formato exigido pela API de Orders do MP Point: "{tipo_terminal}__{serial}"
+        # (ex.: "PAX_A910__SMARTPOS1234567890"), igual ao `id` retornado por
+        # GET /terminals/v1/list. Um mp_device_id fora desse formato (ex.: só o
+        # serial) faz a order nunca chegar à maquininha por push — o operador
+        # só vê o pedido apertando "Atualizar" no terminal.
+        raise HTTPException(
+            400,
+            "mp_device_id fora do formato esperado ({tipo_terminal}__{serial}) — "
+            "reconfigure com o id exato retornado por GET /terminals/v1/list, "
+            "senão a order não chega ao terminal automaticamente",
+        )
 
     # terminal_ref usado pelo provider (PayGo usa paygo_terminal_id; MP usa mp_device_id)
     terminal_ref = mp_device_id if provider_name == "mercadopago" else (paygo_terminal_id or "")

@@ -337,6 +337,24 @@ async def test_mercadopago_sem_mp_device_id_retorna_400(client, token_kiosk):
     assert r.status_code == 400
 
 
+async def test_mercadopago_mp_device_id_fora_do_formato_retorna_400(client, token_kiosk):
+    """mp_device_id sem "__" (ex.: só o serial, sem o prefixo do tipo de
+    terminal) nunca chega à maquininha via push — bloqueia antes de criar
+    a order pra evitar que o operador dependa do botão Atualizar."""
+    config_device_invalido = {**_MP_TERMINAL_CONFIG, "mp_device_id": "SMARTPOS123"}
+    with respx.mock:
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json=config_device_invalido)
+        )
+        r = await client.post(
+            "/payments",
+            json={"order_ref": "ORD-MP04", "method": "credit", "amount": 5.00, "items": []},
+            headers={"Authorization": f"Bearer {token_kiosk}"},
+        )
+    assert r.status_code == 400
+    assert "formato" in r.json()["detail"]
+
+
 # ── Listar e cancelar ─────────────────────────────────────────────────────────
 
 async def test_list_payments(client, token_owner):
