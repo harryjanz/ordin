@@ -1544,6 +1544,86 @@ async def list_terminals(
     return {"terminals": result.scalars().all(), "total": total}
 
 
+def _validate_mp_device_format(mp_device_id: str) -> None:
+    # Formato exigido pela API de Orders do MP Point: "{tipo_terminal}__{serial}"
+    # (ex.: "PAX_Q92__Q92-1734060436"), igual ao `id` de GET /terminals/v1/list.
+    if "__" not in mp_device_id:
+        raise HTTPException(400, "mp_device_id fora do formato esperado ({tipo_terminal}__{serial})")
+
+
+async def _check_mp_device_conflict(
+    db: AsyncSession, company_id: int, mp_device_id: str, exclude_terminal_id: Optional[int],
+) -> None:
+    q = select(Terminal).filter_by(company_id=company_id, mp_device_id=mp_device_id, active=True)
+    if exclude_terminal_id is not None:
+        q = q.where(Terminal.id != exclude_terminal_id)
+    conflicting = (await db.execute(q)).scalars().first()
+    if conflicting:
+        raise HTTPException(
+            409,
+            f"Este terminal Point já está configurado em '{conflicting.label}'. "
+            "Escolha outro ou desative o outro terminal primeiro.",
+        )
+
+
+@app.get(
+    "/companies/{company_id}/mp-terminals",
+    tags=["Terminais"],
+    summary="Listar terminais Point da conta Mercado Pago da empresa (ORD-133)",
+)
+async def list_mp_terminals(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """Consulta GET /terminals/v1/list na conta MP da empresa e anota, pra
+    cada device, se já está em uso por outro terminal ativo — usado pelo
+    select de MP Device ID em Empresa > Terminais."""
+    _require_company_admin(current_user, company_id)
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    cfg_result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(company_id=company_id, provider="mercadopago", active=True)
+    )
+    cfg = cfg_result.scalars().first()
+    if not cfg or not cfg.api_key:
+        return {"configured": False, "terminals": []}
+
+    access_token = decrypt_field(cfg.api_key)
+    mp_error = HTTPException(
+        502, "Não foi possível consultar os terminais do Mercado Pago. Tente novamente ou configure manualmente."
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.mercadopago.com/terminals/v1/list",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+    except httpx.HTTPError:
+        raise mp_error
+    if resp.status_code != 200:
+        raise mp_error
+    mp_terminals = resp.json().get("data", {}).get("terminals", [])
+
+    ids = [t["id"] for t in mp_terminals]
+    used_result = await db.execute(
+        select(Terminal).where(
+            Terminal.company_id == company_id, Terminal.mp_device_id.in_(ids), Terminal.active == True,
+        )
+    )
+    used_by = {t.mp_device_id: {"terminal_id": t.id, "label": t.label} for t in used_result.scalars().all()}
+
+    return {
+        "configured": True,
+        "terminals": [
+            {"id": t["id"], "operating_mode": t.get("operating_mode"), "in_use_by": used_by.get(t["id"])}
+            for t in mp_terminals
+        ],
+    }
+
+
 @app.post(
     "/companies/{company_id}/terminals",
     response_model=TerminalOut,
@@ -1561,6 +1641,9 @@ async def create_terminal(
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
+    if body.mp_device_id:
+        _validate_mp_device_format(body.mp_device_id)
+        await _check_mp_device_conflict(db, company_id, body.mp_device_id, exclude_terminal_id=None)
     terminal_code = body.terminal_code or f"T{company_id}{secrets.token_hex(3).upper()}"
     t = Terminal(
         company_id=company_id,
@@ -1607,6 +1690,9 @@ async def update_terminal(
     if body.paygo_terminal_id is not None:
         t.paygo_terminal_id = body.paygo_terminal_id
     if "mp_device_id" in body.model_fields_set:
+        if body.mp_device_id:
+            _validate_mp_device_format(body.mp_device_id)
+            await _check_mp_device_conflict(db, company_id, body.mp_device_id, exclude_terminal_id=terminal_id)
         t.mp_device_id = body.mp_device_id or None
     if body.environment is not None:
         t.environment = body.environment
