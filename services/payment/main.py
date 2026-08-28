@@ -1068,6 +1068,12 @@ async def _mp_fetch_and_update(tx: Transaction, payment_id: str, db: AsyncSessio
                 f"https://api.mercadopago.com/v1/payments/{payment_id}",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
+            await save_audit({
+                "event": "webhook_status_check", "provider": "mercadopago",
+                "company_id": tx.company_id, "transaction_id": tx.id, "order_ref": tx.order_ref,
+                "data_id": payment_id, "http_status": resp.status_code,
+                "payload": resp.json() if resp.status_code == 200 else {"raw": resp.text},
+            })
             if resp.status_code != 200:
                 return
 
@@ -1111,6 +1117,12 @@ async def _mp_order_fetch_and_update(tx: Transaction, order_id: str, db: AsyncSe
                 f"https://api.mercadopago.com/v1/orders/{order_id}",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
+            await save_audit({
+                "event": "webhook_status_check", "provider": "mercadopago",
+                "company_id": tx.company_id, "transaction_id": tx.id, "order_ref": tx.order_ref,
+                "data_id": order_id, "http_status": resp.status_code,
+                "payload": resp.json() if resp.status_code == 200 else {"raw": resp.text},
+            })
             if resp.status_code != 200:
                 return
 
@@ -1139,7 +1151,7 @@ async def _mp_order_fetch_and_update(tx: Transaction, order_id: str, db: AsyncSe
         logger.warning("Webhook _mp_order_fetch_and_update error: %s", exc)
 
 
-async def _handle_mp_notification(payload: dict) -> None:
+async def _handle_mp_notification(payload: dict, company_id: int) -> None:
     """Processa notificação MP em background com sessão DB própria."""
     notification_type = payload.get("type", "")
     data_id = str(payload.get("data", {}).get("id", ""))
@@ -1147,6 +1159,7 @@ async def _handle_mp_notification(payload: dict) -> None:
         return
 
     async with AsyncSessionLocal() as db:
+        tx = None
         try:
             if notification_type == "payment":
                 # PIX aprovado via /v1/payments
@@ -1167,6 +1180,18 @@ async def _handle_mp_notification(payload: dict) -> None:
                 if tx and tx.status == "pending":
                     await _mp_order_fetch_and_update(tx, data_id, db)
 
+            # ORD-132: audita o payload de retorno independente de ter
+            # encontrado a transação — correlated=False é rastro forense
+            # útil (notificação atrasada/duplicada/de transação já mudada
+            # por outro caminho), não deve ser descartado silenciosamente.
+            await save_audit({
+                "event": "webhook_received", "provider": "mercadopago", "webhook_type": notification_type,
+                "company_id": tx.company_id if tx else company_id,
+                "transaction_id": tx.id if tx else None,
+                "order_ref": tx.order_ref if tx else None,
+                "data_id": data_id, "signature_valid": True, "correlated": tx is not None,
+                "payload": payload,
+            })
         except Exception as exc:
             logger.warning("Webhook MP handler error: %s", exc)
 
@@ -1214,6 +1239,19 @@ async def payment_webhook_mercadopago(
             elif k.strip() == "v1":
                 v1 = v.strip()
         if not _verify_mp_signature(secret, data_id, request_id, ts, v1):
+            # ORD-132: audita a tentativa mesmo rejeitada — valor forense
+            # (pode ser tentativa de forjar notificação de pagamento).
+            try:
+                payload_invalido = _json.loads(body)
+            except Exception:
+                payload_invalido = {"raw": body.decode(errors="replace")}
+            await save_audit({
+                "event": "webhook_received", "provider": "mercadopago",
+                "webhook_type": payload_invalido.get("type") if isinstance(payload_invalido, dict) else None,
+                "company_id": company_id, "transaction_id": None, "order_ref": None,
+                "data_id": data_id, "signature_valid": False, "correlated": False,
+                "payload": payload_invalido,
+            })
             logger.warning("Webhook MP: assinatura inválida (empresa %s) — descartando", company_id)
             raise HTTPException(401, "Assinatura inválida")
 
@@ -1223,7 +1261,7 @@ async def payment_webhook_mercadopago(
         return {"ok": True}
 
     logger.info("Webhook MP recebido: empresa=%s type=%s", company_id, payload.get("type"))
-    background_tasks.add_task(_handle_mp_notification, payload)
+    background_tasks.add_task(_handle_mp_notification, payload, company_id)
 
     return {"ok": True}
 
@@ -1248,6 +1286,15 @@ async def payment_webhook_paygo(request: Request):
         return {"ok": True}
     # PayGo notifica via callback configurado no request de pagamento.
     # Estrutura do payload a confirmar com ControlPay — implementar quando disponível.
+    # ORD-132: company_id=None porque a rota (ainda placeholder) não recebe
+    # o identificador da empresa no path — limitação conhecida, documentada
+    # no Tech Explorer da história.
+    await save_audit({
+        "event": "webhook_received", "provider": "paygo", "webhook_type": None,
+        "company_id": None, "transaction_id": None, "order_ref": None,
+        "data_id": None, "signature_valid": None, "correlated": False,
+        "payload": payload,
+    })
     logger.info("Webhook PayGo: %s", payload)
     return {"ok": True}
 
