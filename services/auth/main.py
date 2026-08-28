@@ -113,6 +113,7 @@ class TerminalInfo(BaseModel):
     id: int
     label: str
     tef_number: Optional[str] = None
+    payment_provider: Optional[str] = None
 
 class TokenOut(BaseModel):
     access_token: str

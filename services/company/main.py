@@ -266,8 +266,9 @@ class CompanyPaymentConfig(Base):
     company_id   = Column(Integer, nullable=False, index=True)
     provider     = Column(String(20), nullable=False)
     environment  = Column(String(10), nullable=False)
-    api_key      = Column(String(500), nullable=True)
-    api_secret   = Column(String(500), nullable=True)
+    api_key         = Column(String(500), nullable=True)
+    api_secret      = Column(String(500), nullable=True)
+    webhook_secret  = Column(String(500), nullable=True)
     extra_config = Column(JSON, nullable=True)
     active       = Column(Boolean, default=True)
     created_at   = Column(DateTime, default=datetime.utcnow)
@@ -676,6 +677,7 @@ class PaymentConfigIn(BaseModel):
     environment: str
     api_key: Optional[str] = None
     api_secret: Optional[str] = None
+    webhook_secret: Optional[str] = None
     extra_config: Optional[dict] = None
 
 
@@ -685,6 +687,7 @@ class PaymentConfigOut(BaseModel):
     environment: str
     api_key: str = "***"
     api_secret: str = "***"
+    webhook_secret: str = "***"
     extra_config: Optional[dict] = None
     active: bool
     created_at: datetime
@@ -857,6 +860,12 @@ async def verify_pin(
     t = t_result.scalars().first()
     if not t:
         raise HTTPException(404, "Terminal não encontrado")
+
+    cfg_result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(company_id=co.id, active=True)
+    )
+    cfg = cfg_result.scalars().first()
+
     return {
         "company": {
             "id": co.id, "name": co.name, "plan": co.plan,
@@ -866,7 +875,10 @@ async def verify_pin(
             "fulfillment_mode": co.fulfillment_mode,
             "prep_urgency_minutes": co.prep_urgency_minutes,
         },
-        "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
+        "terminal": {
+            "id": t.id, "label": t.label, "tef_number": t.tef_number,
+            "payment_provider": cfg.provider if cfg else "mock",
+        },
     }
 
 
@@ -942,6 +954,33 @@ async def internal_get_terminal(
         "payment_provider":  cfg.provider,
         "environment":       cfg.environment,
         "config":            config,
+    }
+
+
+@app.get("/internal/companies/{company_id}/payment-config", include_in_schema=False)
+async def internal_get_payment_config(
+    company_id: int,
+    provider: str,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    """Retorna o webhook_secret descriptografado da config ativa de um provider
+    para uma empresa — usado pelo payment-service para validar assinatura de
+    webhooks (ORD-131). Diferente de /internal/terminals/{id}: aqui não há
+    terminal envolvido, o webhook chega identificado só pelo company_id na URL."""
+    cfg_result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(
+            company_id=company_id,
+            provider=provider,
+            active=True,
+        )
+    )
+    cfg = cfg_result.scalars().first()
+    if cfg is None:
+        raise HTTPException(404, "Config não encontrada")
+
+    return {
+        "webhook_secret": decrypt_field(cfg.webhook_secret) if cfg.webhook_secret else None,
     }
 
 
@@ -2579,6 +2618,7 @@ async def list_payment_configs(
                 "environment": c.environment,
                 "api_key": "***",
                 "api_secret": "***",
+                "webhook_secret": "***",
                 "extra_config": c.extra_config,
                 "active": c.active,
                 "created_at": c.created_at,
@@ -2618,6 +2658,7 @@ async def create_payment_config(
         environment=body.environment,
         api_key=encrypt_field(body.api_key) if body.api_key else None,
         api_secret=encrypt_field(body.api_secret) if body.api_secret else None,
+        webhook_secret=encrypt_field(body.webhook_secret) if body.webhook_secret else None,
         extra_config=body.extra_config,
         active=False,
     )
@@ -2630,6 +2671,7 @@ async def create_payment_config(
         "environment": cfg.environment,
         "api_key": "***",
         "api_secret": "***",
+        "webhook_secret": "***",
         "extra_config": cfg.extra_config,
         "active": cfg.active,
         "created_at": cfg.created_at,
@@ -2660,6 +2702,8 @@ async def update_payment_config(
         cfg.api_key = encrypt_field(body.api_key)
     if body.api_secret is not None:
         cfg.api_secret = encrypt_field(body.api_secret)
+    if body.webhook_secret is not None:
+        cfg.webhook_secret = encrypt_field(body.webhook_secret)
     if body.extra_config is not None:
         cfg.extra_config = body.extra_config
     await db.commit()
@@ -2670,6 +2714,7 @@ async def update_payment_config(
         "environment": cfg.environment,
         "api_key": "***",
         "api_secret": "***",
+        "webhook_secret": "***",
         "extra_config": cfg.extra_config,
         "active": cfg.active,
         "created_at": cfg.created_at,
@@ -2979,6 +3024,11 @@ async def approve_device(
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
 
+    cfg_result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(company_id=co.id, active=True)
+    )
+    cfg = cfg_result.scalars().first()
+
     redis_client.set(key, json.dumps({
         "status": "approved",
         "company":  {"id": co.id, "name": co.name, "plan": co.plan or "free",
@@ -2987,7 +3037,10 @@ async def approve_device(
                      "catalog_menu_layout": co.catalog_menu_layout,
                      "fulfillment_mode": co.fulfillment_mode,
                      "prep_urgency_minutes": co.prep_urgency_minutes},
-        "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
+        "terminal": {
+            "id": t.id, "label": t.label, "tef_number": t.tef_number,
+            "payment_provider": cfg.provider if cfg else "mock",
+        },
     }), ex=60)
 
     return {"ok": True}

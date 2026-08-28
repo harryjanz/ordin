@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
@@ -55,6 +56,14 @@ class MPProvider(IPaymentProvider):
     ) -> TransactionResult:
         audit: list[dict] = []
 
+        mp_payment_type = "credit_card" if method == "credit" else "debit_card"
+
+        payment_method_config = {"default_type": mp_payment_type}
+        if method == "credit":
+            # default_installments só é aceito quando default_type = credit_card.
+            # 1 = à vista, evita a tela de seleção de parcelas no terminal.
+            payment_method_config["default_installments"] = 1
+
         body = {
             "type": "point",
             "external_reference": order_ref,
@@ -64,6 +73,7 @@ class MPProvider(IPaymentProvider):
                     "terminal_id": terminal_id,
                     "print_on_terminal": "no_ticket",
                 },
+                "payment_method": payment_method_config,
             },
             "description": f"Pedido {order_ref}",
         }
@@ -72,7 +82,12 @@ class MPProvider(IPaymentProvider):
             try:
                 resp = await client.post(
                     f"{self.BASE_URL}/v1/orders",
-                    headers={**self._headers, "X-Idempotency-Key": order_ref},
+                    # UUID por tentativa, não order_ref: um order_ref reaproveitado
+                    # numa nova tentativa (ex.: cliente troca de crédito pra débito
+                    # após recusa) manda um body diferente com a MESMA chave, e o MP
+                    # responde 409 idempotency_key_already_used sem nunca chamar o
+                    # terminal.
+                    headers={**self._headers, "X-Idempotency-Key": f"{order_ref}-{uuid.uuid4()}"},
                     json=body,
                 )
             except Exception as exc:
@@ -169,6 +184,14 @@ class MPProvider(IPaymentProvider):
             "date_of_expiration": expiry.strftime("%Y-%m-%dT%H:%M:%S.000+00:00"),
         }
 
+        # Uma chave por chamada a _pix_payment (não por order_ref): os 3
+        # attempts do retry abaixo reaproveitam a mesma, o que é correto (é a
+        # mesma tentativa lógica); mas uma nova chamada — cliente pede um PIX
+        # novo pro mesmo order_ref depois do primeiro expirar — precisa de
+        # chave nova, senão o MP devolve o QR code antigo (expirado) em vez
+        # de gerar um novo.
+        idempotency_key = f"{order_ref}-{uuid.uuid4()}"
+
         async with httpx.AsyncClient(timeout=30) as client:
             resp = None
             last_error = ""
@@ -178,7 +201,7 @@ class MPProvider(IPaymentProvider):
                 try:
                     resp = await client.post(
                         f"{self.BASE_URL}/v1/payments",
-                        headers={**self._headers, "X-Idempotency-Key": order_ref},
+                        headers={**self._headers, "X-Idempotency-Key": idempotency_key},
                         json=body,
                     )
                 except Exception as exc:

@@ -230,6 +230,35 @@ async def test_dir_verify_pin_valido(db_session):
     await _cleanup_seed(db_session, co_id)
 
 
+async def test_dir_verify_pin_sem_config_ativa_retorna_mock(db_session):
+    """Sem company_payment_configs ativa, o totem deve receber
+    payment_provider="mock" — nunca None, senão a dica de UX da maquininha
+    MP (ORD-131) fica indefinida no frontend."""
+    import main as svc
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        result = await svc.verify_pin({"pin": "2468", "terminal_id": t_id}, db, None)
+    assert result["terminal"]["payment_provider"] == "mock"
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_verify_pin_com_mercadopago_ativo_retorna_provider(db_session):
+    """Com company_payment_configs ativa pra mercadopago, o totem deve
+    receber payment_provider="mercadopago" — usado só pra decidir se mostra
+    a dica 'toque em Atualizar na maquininha' (ORD-131)."""
+    import main as svc
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        db.add(svc.CompanyPaymentConfig(
+            company_id=co_id, provider="mercadopago", environment="production", active=True,
+        ))
+        await db.commit()
+    async with db_session() as db:
+        result = await svc.verify_pin({"pin": "2468", "terminal_id": t_id}, db, None)
+    assert result["terminal"]["payment_provider"] == "mercadopago"
+    await _cleanup_seed(db_session, co_id)
+
+
 # ── verify_credentials (linhas 353-358) ───────────────────────────────────────
 
 async def test_dir_verify_credentials_user_inexistente(db_session):

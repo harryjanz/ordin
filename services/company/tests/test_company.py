@@ -186,6 +186,64 @@ async def test_payment_config_wrong_company_forbidden(client, seed):
     assert r.status_code == 403
 
 
+# ── Webhook secret por empresa (ORD-131) ──────────────────────────────────────
+
+async def test_create_payment_config_com_webhook_secret(client, seed):
+    r = await client.post(
+        f"/companies/{seed['company_id']}/payment-configs",
+        json={"provider": "mercadopago", "environment": "sandbox",
+              "api_key": "TEST-token", "webhook_secret": "chave-secreta-webhook"},
+        headers=auth(seed["token"]),
+    )
+    assert r.status_code == 201
+    assert r.json()["webhook_secret"] == "***"
+
+
+async def test_internal_get_payment_config_retorna_secret_descriptografado(client, seed):
+    import os
+    internal_headers = {"X-Internal-Secret": os.environ.get("INTERNAL_SECRET", "test-internal-secret-ci")}
+
+    create = await client.post(
+        f"/companies/{seed['company_id']}/payment-configs",
+        json={"provider": "mercadopago", "environment": "production",
+              "api_key": "APP_USR-token", "webhook_secret": "segredo-real-123"},
+        headers=auth(seed["token"]),
+    )
+    config_id = create.json()["id"]
+    await client.patch(
+        f"/companies/{seed['company_id']}/payment-configs/{config_id}/activate",
+        headers=auth(seed["token"]),
+    )
+
+    r = await client.get(
+        f"/internal/companies/{seed['company_id']}/payment-config",
+        params={"provider": "mercadopago"},
+        headers=internal_headers,
+    )
+    assert r.status_code == 200
+    assert r.json()["webhook_secret"] == "segredo-real-123"
+
+
+async def test_internal_get_payment_config_sem_config_retorna_404(client, seed):
+    import os
+    internal_headers = {"X-Internal-Secret": os.environ.get("INTERNAL_SECRET", "test-internal-secret-ci")}
+    r = await client.get(
+        "/internal/companies/999999/payment-config",
+        params={"provider": "mercadopago"},
+        headers=internal_headers,
+    )
+    assert r.status_code == 404
+
+
+async def test_internal_get_payment_config_secret_errado_retorna_403(client, seed):
+    r = await client.get(
+        f"/internal/companies/{seed['company_id']}/payment-config",
+        params={"provider": "mercadopago"},
+        headers={"X-Internal-Secret": "errado"},
+    )
+    assert r.status_code == 403
+
+
 # ── Encryption helpers ────────────────────────────────────────────────────────
 
 def test_encrypt_decrypt_field():

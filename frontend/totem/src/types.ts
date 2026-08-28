@@ -17,6 +17,10 @@ export interface CompanyInfo {
 export interface TerminalInfo {
   id: number;
   label: string;
+  // Usado só pra decidir dicas de UX específicas do provider (ex: aviso da
+  // maquininha Mercado Pago) — nunca pra decisão de negócio, que é sempre
+  // resolvida no payment-service a partir da config real da empresa.
+  payment_provider?: string;
 }
 
 export interface AvailableTerminal {

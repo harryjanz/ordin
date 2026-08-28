@@ -2,7 +2,7 @@
 Testes de cobertura para payment service.
 Usa chamadas diretas e unit tests para cobrir infraestrutura e lógica de negócio.
 """
-import sys, os
+import sys, os, json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
@@ -146,6 +146,147 @@ async def test_mp_provider_card_usa_v1_orders_nao_payment_intents():
     assert result.authorization == "accredited"
     # nenhuma chamada bateu na família legada
     assert not any("/point/integration-api/" in str(c.request.url) for c in respx.calls)
+
+
+@pytest.mark.parametrize("method,expected_default_type", [
+    ("credit", "credit_card"),
+    ("debit", "debit_card"),
+])
+async def test_mp_provider_card_envia_default_type_no_terminal(method, expected_default_type):
+    """A maquininha só pré-seleciona o meio de pagamento (crédito/débito) se a
+    order informar config.payment_method.default_type — sem isso o terminal
+    chega ao cliente sem meio escolhido, exigindo seleção manual."""
+    from domain.schemas import TransactionStatus
+    provider = _mp_provider()
+    with respx.mock:
+        order_route = respx.post("https://api.mercadopago.com/v1/orders").mock(
+            return_value=httpx.Response(201, json={
+                "id": "ORDTEST00099",
+                "status": "created",
+                "transactions": {"payments": [{"id": "PAYTEST099", "status": "created"}]},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDTEST00099").mock(
+            return_value=httpx.Response(200, json={
+                "id": "ORDTEST00099",
+                "status": "processed",
+                "transactions": {"payments": [{
+                    "id": "PAYTEST099", "status": "processed", "status_detail": "accredited",
+                }]},
+            })
+        )
+        result = await provider.create_transaction(
+            amount=Decimal("15.00"), method=method,
+            terminal_ref="PAX_A910__SMARTPOS123", order_ref="ORD-MP99")
+    assert result.status == TransactionStatus.approved
+    sent_body = json.loads(order_route.calls[0].request.content)
+    assert sent_body["config"]["payment_method"]["default_type"] == expected_default_type
+
+
+async def test_mp_provider_credit_envia_default_installments_a_vista():
+    """default_installments só é aceito quando default_type = credit_card —
+    envia 1 (à vista) pra evitar a tela de seleção de parcelas no terminal.
+    Débito não tem parcelamento, então não deve enviar esse campo."""
+    provider = _mp_provider()
+    with respx.mock:
+        order_route = respx.post("https://api.mercadopago.com/v1/orders").mock(
+            return_value=httpx.Response(201, json={
+                "id": "ORDTEST00098",
+                "status": "created",
+                "transactions": {"payments": [{"id": "PAYTEST098", "status": "created"}]},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDTEST00098").mock(
+            return_value=httpx.Response(200, json={
+                "id": "ORDTEST00098",
+                "status": "processed",
+                "transactions": {"payments": [{
+                    "id": "PAYTEST098", "status": "processed", "status_detail": "accredited",
+                }]},
+            })
+        )
+        await provider.create_transaction(
+            amount=Decimal("15.00"), method="credit",
+            terminal_ref="PAX_A910__SMARTPOS123", order_ref="ORD-MP98")
+    sent_body = json.loads(order_route.calls[0].request.content)
+    assert sent_body["config"]["payment_method"]["default_installments"] == 1
+
+    with respx.mock:
+        debit_route = respx.post("https://api.mercadopago.com/v1/orders").mock(
+            return_value=httpx.Response(201, json={
+                "id": "ORDTEST00097",
+                "status": "created",
+                "transactions": {"payments": [{"id": "PAYTEST097", "status": "created"}]},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDTEST00097").mock(
+            return_value=httpx.Response(200, json={
+                "id": "ORDTEST00097",
+                "status": "processed",
+                "transactions": {"payments": [{
+                    "id": "PAYTEST097", "status": "processed", "status_detail": "accredited",
+                }]},
+            })
+        )
+        await provider.create_transaction(
+            amount=Decimal("15.00"), method="debit",
+            terminal_ref="PAX_A910__SMARTPOS123", order_ref="ORD-MP97")
+    sent_body = json.loads(debit_route.calls[0].request.content)
+    assert "default_installments" not in sent_body["config"]["payment_method"]
+
+
+async def test_mp_provider_card_retry_com_outro_metodo_usa_idempotency_key_diferente():
+    """Bug real observado em produção: cliente escolhe crédito, é recusado,
+    tenta débito no mesmo pedido (mesmo order_ref). Se a X-Idempotency-Key for
+    o order_ref puro, o MP responde 409 idempotency_key_already_used pro
+    segundo body (diferente do primeiro) e a order nunca chega no terminal —
+    sintoma relatado como "nem chamou a máquina"."""
+    from domain.schemas import TransactionStatus
+    provider = _mp_provider()
+    order_ref = "ORD-RETRY01"
+
+    with respx.mock:
+        route1 = respx.post("https://api.mercadopago.com/v1/orders").mock(
+            return_value=httpx.Response(201, json={
+                "id": "ORDRETRY001", "status": "created",
+                "transactions": {"payments": [{"id": "PAYRETRY001", "status": "created"}]},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDRETRY001").mock(
+            return_value=httpx.Response(200, json={
+                "id": "ORDRETRY001", "status": "failed",
+                "transactions": {"payments": [{
+                    "id": "PAYRETRY001", "status": "failed", "status_detail": "cc_rejected_other_reason",
+                }]},
+            })
+        )
+        await provider.create_transaction(
+            amount=Decimal("20.00"), method="credit",
+            terminal_ref="PAX_A910__SMARTPOS123", order_ref=order_ref)
+        key1 = route1.calls[0].request.headers["X-Idempotency-Key"]
+
+    with respx.mock:
+        route2 = respx.post("https://api.mercadopago.com/v1/orders").mock(
+            return_value=httpx.Response(201, json={
+                "id": "ORDRETRY002", "status": "created",
+                "transactions": {"payments": [{"id": "PAYRETRY002", "status": "created"}]},
+            })
+        )
+        respx.get("https://api.mercadopago.com/v1/orders/ORDRETRY002").mock(
+            return_value=httpx.Response(200, json={
+                "id": "ORDRETRY002", "status": "processed",
+                "transactions": {"payments": [{
+                    "id": "PAYRETRY002", "status": "processed", "status_detail": "accredited",
+                }]},
+            })
+        )
+        result = await provider.create_transaction(
+            amount=Decimal("20.00"), method="debit",
+            terminal_ref="PAX_A910__SMARTPOS123", order_ref=order_ref)
+        key2 = route2.calls[0].request.headers["X-Idempotency-Key"]
+
+    assert key1 != key2
+    assert result.status == TransactionStatus.approved
 
 
 async def test_mp_provider_card_order_failed():

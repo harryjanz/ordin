@@ -124,6 +124,7 @@ export interface PaymentConfig {
   environment: string;
   api_key: string;
   api_secret: string;
+  webhook_secret?: string | null;
   extra_config?: Record<string, string> | null;
   active: boolean;
   created_at: string;
