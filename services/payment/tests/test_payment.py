@@ -365,6 +365,153 @@ async def test_list_payments(client, token_owner):
         assert "provider" in item
 
 
+# ── ORD-134: date_to deve incluir o dia inteiro, não só até meia-noite ────────
+
+async def _make_tx(client, order_ref, created_at, company_id=1):
+    import main as svc
+    tx = svc.Transaction(
+        company_id=company_id, order_ref=order_ref, terminal_id=1, method="pix",
+        amount=1.00, status="approved", provider="mercadopago", created_at=created_at,
+    )
+    async with svc.AsyncSessionLocal() as db:
+        db.add(tx)
+        await db.commit()
+        await db.refresh(tx)
+    return tx.id
+
+
+async def _del_tx(client, tx_id):
+    import main as svc
+    from sqlalchemy import delete as sa_delete
+    async with svc.AsyncSessionLocal() as db:
+        await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.id == tx_id))
+        await db.commit()
+
+
+async def test_list_payments_date_to_inclui_fim_do_dia(client, token_owner):
+    import os
+    from datetime import datetime
+    order_ref = f"ORD134{os.urandom(3).hex()}"
+    tx_id = await _make_tx(client, order_ref, datetime(2026, 8, 28, 23, 59, 0))
+    try:
+        r = await client.get(
+            "/payments", params={"date_from": "2026-08-28", "date_to": "2026-08-28", "limit": 200},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        assert r.status_code == 200
+        assert any(i["order_ref"] == order_ref for i in r.json()["items"])
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_list_payments_date_to_nao_vaza_pro_dia_seguinte(client, token_owner):
+    import os
+    from datetime import datetime
+    order_ref = f"ORD134{os.urandom(3).hex()}"
+    tx_id = await _make_tx(client, order_ref, datetime(2026, 8, 29, 0, 0, 1))
+    try:
+        r = await client.get(
+            "/payments", params={"date_from": "2026-08-28", "date_to": "2026-08-28", "limit": 200},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        assert not any(i["order_ref"] == order_ref for i in r.json()["items"])
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_list_payments_meia_noite_do_date_to_continua_incluida(client, token_owner):
+    """Regressão: transação exatamente à meia-noite do date_to já funcionava
+    antes (created_at <= date_to inclui '00:00:00' exato) — não pode parar
+    de funcionar com o limite exclusivo do dia seguinte."""
+    import os
+    from datetime import datetime
+    order_ref = f"ORD134{os.urandom(3).hex()}"
+    tx_id = await _make_tx(client, order_ref, datetime(2026, 8, 28, 0, 0, 0))
+    try:
+        r = await client.get(
+            "/payments", params={"date_from": "2026-08-28", "date_to": "2026-08-28", "limit": 200},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        assert any(i["order_ref"] == order_ref for i in r.json()["items"])
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_list_payments_date_from_igual_date_to_retorna_dia_inteiro(client, token_owner):
+    import os
+    from datetime import datetime
+    ref_inicio = f"ORD134{os.urandom(3).hex()}"
+    ref_fim = f"ORD134{os.urandom(3).hex()}"
+    tx1 = await _make_tx(client, ref_inicio, datetime(2026, 8, 28, 0, 0, 0))
+    tx2 = await _make_tx(client, ref_fim, datetime(2026, 8, 28, 23, 59, 59))
+    try:
+        r = await client.get(
+            "/payments", params={"date_from": "2026-08-28", "date_to": "2026-08-28", "limit": 200},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        refs = {i["order_ref"] for i in r.json()["items"]}
+        assert ref_inicio in refs and ref_fim in refs
+    finally:
+        await _del_tx(client, tx1)
+        await _del_tx(client, tx2)
+
+
+async def test_list_payments_date_from_sem_mudanca_de_comportamento(client, token_owner):
+    """date_from continua sendo comparação simples, sem tratamento especial —
+    só o limite superior (date_to) muda nesta história."""
+    import os
+    from datetime import datetime
+    order_ref = f"ORD134{os.urandom(3).hex()}"
+    tx_id = await _make_tx(client, order_ref, datetime(2026, 8, 27, 23, 59, 59))
+    try:
+        r = await client.get(
+            "/payments", params={"date_from": "2026-08-28", "limit": 200},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        assert not any(i["order_ref"] == order_ref for i in r.json()["items"])
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_list_payments_sem_date_to_sem_limite_superior(client, token_owner):
+    import os
+    from datetime import datetime
+    order_ref = f"ORD134{os.urandom(3).hex()}"
+    tx_id = await _make_tx(client, order_ref, datetime(2026, 8, 29, 0, 0, 1))
+    try:
+        r = await client.get(
+            "/payments", params={"date_from": "2026-08-28", "limit": 200},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        assert any(i["order_ref"] == order_ref for i in r.json()["items"])
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_list_payments_date_to_formato_invalido_retorna_400(client, token_owner):
+    r = await client.get(
+        "/payments", params={"date_to": "28/08/2026"},
+        headers={"Authorization": f"Bearer {token_owner}"},
+    )
+    assert r.status_code == 400
+
+
+async def test_list_payments_isolamento_multitenant_com_filtro_data(client, token_owner, token_company_b):
+    """A correção de date_to não deve vazar transações de outra empresa."""
+    import os
+    from datetime import datetime
+    order_ref = f"ORD134{os.urandom(3).hex()}"
+    tx_id = await _make_tx(client, order_ref, datetime(2026, 8, 28, 23, 59, 0), company_id=2)
+    try:
+        r = await client.get(
+            "/payments", params={"date_from": "2026-08-28", "date_to": "2026-08-28", "limit": 200},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        assert not any(i["order_ref"] == order_ref for i in r.json()["items"])
+    finally:
+        await _del_tx(client, tx_id)
+
+
 async def test_cancel_inexistente(client, token_owner):
     r = await client.post(
         "/payments/9999/cancel",
