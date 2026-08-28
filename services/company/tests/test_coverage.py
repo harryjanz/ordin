@@ -8,6 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 import bcrypt
+import httpx
+import respx
 from datetime import datetime, timedelta
 from fastapi import HTTPException
 from httpx import AsyncClient, ASGITransport
@@ -519,6 +521,184 @@ async def test_dir_update_terminal_inexistente(db_session):
             await svc.update_terminal(1, 999999, TerminalUpdate(label="X"),
                                       db, _user("owner", 1))
         assert exc.value.status_code == 404
+
+
+# ── ORD-133: MP Device ID como select + validação de terminal duplicado ───────
+
+async def test_dir_create_terminal_mp_device_formato_invalido(db_session):
+    import main as svc
+    from main import TerminalIn
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.create_terminal(
+                co_id, TerminalIn(label="__dir_t2__", environment="sandbox", mp_device_id="SMARTPOS123"),
+                db, _user("owner", co_id))
+        assert exc.value.status_code == 400
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_create_terminal_mp_device_conflito_com_ativo(db_session):
+    import main as svc
+    from main import TerminalIn
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        result = await svc.create_terminal(
+            co_id, TerminalIn(label="__dir_t_a__", environment="sandbox", mp_device_id="PAX_X__111"),
+            db, _user("owner", co_id))
+        t_a_id = result.id
+    async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.create_terminal(
+                co_id, TerminalIn(label="__dir_t_b__", environment="sandbox", mp_device_id="PAX_X__111"),
+                db, _user("owner", co_id))
+        assert exc.value.status_code == 409
+        assert "__dir_t_a__" in exc.value.detail
+    async with db_session() as db:
+        await db.execute(sa_delete(svc.Terminal).where(svc.Terminal.id == t_a_id))
+        await db.commit()
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_update_terminal_mp_device_conflito_com_outro_ativo(db_session):
+    import main as svc
+    from main import TerminalIn, TerminalUpdate
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        t_a = await svc.create_terminal(
+            co_id, TerminalIn(label="__dir_t_a2__", environment="sandbox", mp_device_id="PAX_X__222"),
+            db, _user("owner", co_id))
+        t_b = await svc.create_terminal(
+            co_id, TerminalIn(label="__dir_t_b2__", environment="sandbox", mp_device_id="PAX_X__333"),
+            db, _user("owner", co_id))
+    async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.update_terminal(
+                co_id, t_b.id, TerminalUpdate(mp_device_id="PAX_X__222"),
+                db, _user("owner", co_id))
+        assert exc.value.status_code == 409
+        assert "__dir_t_a2__" in exc.value.detail
+    async with db_session() as db:
+        await db.execute(sa_delete(svc.Terminal).where(svc.Terminal.id.in_([t_a.id, t_b.id])))
+        await db.commit()
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_update_terminal_mantendo_proprio_device_nao_bloqueia(db_session):
+    """Editar um terminal sem trocar o device não deve comparar contra si mesmo."""
+    import main as svc
+    from main import TerminalIn, TerminalUpdate
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        t_a = await svc.create_terminal(
+            co_id, TerminalIn(label="__dir_t_a3__", environment="sandbox", mp_device_id="PAX_X__444"),
+            db, _user("owner", co_id))
+    async with db_session() as db:
+        result = await svc.update_terminal(
+            co_id, t_a.id, TerminalUpdate(label="__dir_t_a3_renamed__", mp_device_id="PAX_X__444"),
+            db, _user("owner", co_id))
+    assert result.mp_device_id == "PAX_X__444"
+    async with db_session() as db:
+        await db.execute(sa_delete(svc.Terminal).where(svc.Terminal.id == t_a.id))
+        await db.commit()
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_create_terminal_mp_device_terminal_conflitante_inativo_nao_bloqueia(db_session):
+    import main as svc
+    from main import TerminalIn, TerminalUpdate
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        t_a = await svc.create_terminal(
+            co_id, TerminalIn(label="__dir_t_a4__", environment="sandbox", mp_device_id="PAX_X__555"),
+            db, _user("owner", co_id))
+        await svc.update_terminal(co_id, t_a.id, TerminalUpdate(active=False), db, _user("owner", co_id))
+    async with db_session() as db:
+        result = await svc.create_terminal(
+            co_id, TerminalIn(label="__dir_t_c4__", environment="sandbox", mp_device_id="PAX_X__555"),
+            db, _user("owner", co_id))
+    assert result.mp_device_id == "PAX_X__555"
+    async with db_session() as db:
+        await db.execute(sa_delete(svc.Terminal).where(svc.Terminal.id.in_([t_a.id, result.id])))
+        await db.commit()
+    await _cleanup_seed(db_session, co_id)
+
+
+# ── list_mp_terminals (ORD-133) ────────────────────────────────────────────────
+
+async def test_dir_list_mp_terminals_sem_config_retorna_configured_false(db_session):
+    import main as svc
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        result = await svc.list_mp_terminals(co_id, db, _user("owner", co_id))
+    assert result == {"configured": False, "terminals": []}
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_list_mp_terminals_falha_consulta_mp_retorna_502(db_session):
+    import main as svc
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        db.add(svc.CompanyPaymentConfig(
+            company_id=co_id, provider="mercadopago", environment="production", active=True,
+            api_key=svc.encrypt_field("APP_USR-fake-token"),
+        ))
+        await db.commit()
+    with respx.mock:
+        respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
+            return_value=httpx.Response(500)
+        )
+        async with db_session() as db:
+            with pytest.raises(HTTPException) as exc:
+                await svc.list_mp_terminals(co_id, db, _user("owner", co_id))
+            assert exc.value.status_code == 502
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_list_mp_terminals_sucesso_anota_in_use_by(db_session):
+    import main as svc
+    from main import TerminalIn
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        db.add(svc.CompanyPaymentConfig(
+            company_id=co_id, provider="mercadopago", environment="production", active=True,
+            api_key=svc.encrypt_field("APP_USR-fake-token"),
+        ))
+        await db.commit()
+        t_used = await svc.create_terminal(
+            co_id, TerminalIn(label="__dir_t_used__", environment="sandbox", mp_device_id="PAX_Q92__666"),
+            db, _user("owner", co_id))
+    with respx.mock:
+        respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
+            return_value=httpx.Response(200, json={
+                "data": {"terminals": [
+                    {"id": "PAX_Q92__666", "operating_mode": "PDV"},
+                    {"id": "PAX_A910__777", "operating_mode": "PDV"},
+                ]},
+                "paging": {"total": 2},
+            })
+        )
+        async with db_session() as db:
+            result = await svc.list_mp_terminals(co_id, db, _user("owner", co_id))
+    assert result["configured"] is True
+    by_id = {t["id"]: t for t in result["terminals"]}
+    assert by_id["PAX_Q92__666"]["in_use_by"] == {"terminal_id": t_used.id, "label": "__dir_t_used__"}
+    assert by_id["PAX_A910__777"]["in_use_by"] is None
+    async with db_session() as db:
+        await db.execute(sa_delete(svc.Terminal).where(svc.Terminal.id == t_used.id))
+        await db.commit()
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_list_mp_terminals_empresa_de_outro_token_retorna_403(db_session):
+    """Isolamento multi-tenant: admin de uma empresa não consulta terminais MP de outra."""
+    import main as svc
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.list_mp_terminals(co_id, db, _user("owner", company_id=co_id + 1))
+        assert exc.value.status_code == 403
+    await _cleanup_seed(db_session, co_id)
 
 
 # ── delete_terminal (linhas 663-667) ──────────────────────────────────────────

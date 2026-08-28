@@ -5,7 +5,7 @@ import { listCompanies } from "../api/companies";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { useStore } from "../store";
-import type { Terminal, User, Role, PaymentConfig, Company } from "../types";
+import type { Terminal, User, Role, PaymentConfig, Company, MpTerminal } from "../types";
 import styles from "./CompanyScreen.module.scss";
 
 // ── Provider catalog ─────────────────────────────────────────────────────────
@@ -552,6 +552,16 @@ export default function CompanyScreen() {
   // Ler o valor só na hora de salvar evita re-renderizar o Modal ao digitar.
   const terminalLabelRef = useRef<HTMLInputElement>(null);
   const terminalMpDeviceRef = useRef<HTMLInputElement>(null);
+  // ORD-133: MP Device ID vira select carregado do Mercado Pago — controlado
+  // (diferente do label/ref acima) porque a seleção de uma opção não dispara
+  // re-render a cada tecla, então não tem o problema de foco documentado
+  // acima (mesmo padrão seguro já usado por terminalEnvironment/Dropdown).
+  const [mpDeviceId, setMpDeviceId] = useState("");
+  const [mpTerminalOptions, setMpTerminalOptions] = useState<DropdownOptions[]>([]);
+  const [mpTerminalsStatus, setMpTerminalsStatus] = useState<"idle" | "loading" | "loaded" | "error" | "not_configured">("idle");
+  // Escape hatch pra quando a consulta ao MP falha — volta pro InputBase de
+  // texto livre de antes, com a mesma validação de formato feita no backend.
+  const [mpManualMode, setMpManualMode] = useState(false);
 
   // ── Users ─────────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<User[]>([]);
@@ -670,29 +680,57 @@ export default function CompanyScreen() {
     }
   }
 
+  // exclude_terminal_id: o próprio terminal sendo editado não deve ficar de
+  // fora da lista só porque já usa aquele device (ver ORD-133 QA Explorer).
+  async function fetchMpTerminals(excludeTerminalId: number | null) {
+    if (!companyId) return;
+    setMpTerminalsStatus("loading");
+    try {
+      const r = await api.get(`/companies/${companyId}/mp-terminals`);
+      if (!r.data.configured) {
+        setMpTerminalOptions([]);
+        setMpTerminalsStatus("not_configured");
+        return;
+      }
+      const options: DropdownOptions[] = (r.data.terminals as MpTerminal[])
+        .filter((t) => !t.in_use_by || t.in_use_by.terminal_id === excludeTerminalId)
+        .map((t) => ({ value: t.id, label: t.id }));
+      setMpTerminalOptions(options);
+      setMpTerminalsStatus("loaded");
+    } catch {
+      setMpTerminalsStatus("error");
+    }
+  }
+
   function openNewTerminal() {
     setEditingTerminalId(null);
     setTerminalDefaults({ label: "", mp_device_id: "" });
     setTerminalEnvironment("sandbox");
+    setMpDeviceId("");
+    setMpManualMode(false);
     setTerminalFormError("");
     setTerminalModalKey((k) => k + 1);
     setTerminalModalOpen(true);
+    fetchMpTerminals(null);
   }
 
   function openEditTerminal(t: Terminal) {
     setEditingTerminalId(t.id);
     setTerminalDefaults({ label: t.label, mp_device_id: t.mp_device_id ?? "" });
     setTerminalEnvironment(t.environment ?? "sandbox");
+    setMpDeviceId(t.mp_device_id ?? "");
+    setMpManualMode(false);
     setTerminalFormError("");
     setTerminalModalKey((k) => k + 1);
     setTerminalModalOpen(true);
+    fetchMpTerminals(t.id);
   }
 
   async function saveTerminal(e: FormEvent) {
     e.preventDefault();
     if (!companyId) return;
     const label = terminalLabelRef.current?.value.trim() ?? "";
-    const mpDeviceId = terminalMpDeviceRef.current?.value.trim() ?? "";
+    const mpDeviceIdValue = (mpManualMode ? terminalMpDeviceRef.current?.value.trim() : mpDeviceId) ?? "";
     if (!label) {
       setTerminalFormError("Rótulo é obrigatório.");
       return;
@@ -702,17 +740,18 @@ export default function CompanyScreen() {
     try {
       if (editingTerminalId === null) {
         await api.post(`/companies/${companyId}/terminals`, {
-          label, environment: terminalEnvironment, mp_device_id: mpDeviceId || undefined,
+          label, environment: terminalEnvironment, mp_device_id: mpDeviceIdValue || undefined,
         });
       } else {
         await api.put(`/companies/${companyId}/terminals/${editingTerminalId}`, {
-          label, environment: terminalEnvironment, mp_device_id: mpDeviceId || null,
+          label, environment: terminalEnvironment, mp_device_id: mpDeviceIdValue || null,
         });
       }
       setTerminalModalOpen(false);
       loadTerminals();
-    } catch {
-      setTerminalFormError("Erro ao salvar terminal.");
+    } catch (e: unknown) {
+      const axErr = e as { response?: { data?: { detail?: string } } };
+      setTerminalFormError(axErr?.response?.data?.detail ?? "Erro ao salvar terminal.");
     } finally {
       setTerminalSaving(false);
     }
@@ -993,12 +1032,45 @@ export default function CompanyScreen() {
                 onValueSelected={(opt) => setTerminalEnvironment(opt.value)}
                 options={ENVIRONMENT_OPTIONS}
               />
-              <InputBase
-                label="MP Device ID"
-                placeholder="PAX_A910__SMARTPOS..."
-                defaultValue={terminalDefaults.mp_device_id}
-                ref={terminalMpDeviceRef}
-              />
+              {mpManualMode ? (
+                <InputBase
+                  label="MP Device ID"
+                  placeholder="PAX_A910__SMARTPOS..."
+                  defaultValue={terminalDefaults.mp_device_id}
+                  ref={terminalMpDeviceRef}
+                />
+              ) : mpTerminalsStatus === "not_configured" ? (
+                <Alert
+                  variant="warning"
+                  fullWidth
+                  text="Configure o Mercado Pago em Pagamentos antes de vincular um terminal Point."
+                />
+              ) : mpTerminalsStatus === "error" ? (
+                <>
+                  <Alert
+                    variant="error"
+                    fullWidth
+                    text="Não foi possível consultar os terminais do Mercado Pago."
+                  />
+                  <div className={styles.formActions}>
+                    <Button type="button" variant="secondary" onClick={() => fetchMpTerminals(editingTerminalId)}>
+                      Tentar novamente
+                    </Button>
+                    <Button type="button" variant="secondary" onClick={() => setMpManualMode(true)}>
+                      Digitar manualmente
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <Dropdown
+                  label="MP Device ID"
+                  value={mpTerminalOptions.find((o) => o.value === mpDeviceId) ?? null}
+                  onValueSelected={(opt) => setMpDeviceId(opt.value)}
+                  options={mpTerminalOptions}
+                  loading={mpTerminalsStatus === "loading"}
+                  emptyMessage="Nenhum terminal Point disponível nesta conta Mercado Pago"
+                />
+              )}
               <div className={styles.formActions}>
                 <Button type="submit" loading={terminalSaving} disabled={terminalSaving}>Salvar</Button>
                 <Button type="button" variant="secondary" onClick={() => setTerminalModalOpen(false)}>Cancelar</Button>

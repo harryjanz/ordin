@@ -118,6 +118,14 @@ export interface Terminal {
   active: boolean;
 }
 
+// ORD-133 — terminal Point retornado por GET /companies/{id}/mp-terminals
+// (proxy pro GET /terminals/v1/list do Mercado Pago).
+export interface MpTerminal {
+  id: string;
+  operating_mode?: string | null;
+  in_use_by: { terminal_id: number; label: string } | null;
+}
+
 export interface PaymentConfig {
   id: number;
   provider: string;
