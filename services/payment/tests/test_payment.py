@@ -472,6 +472,112 @@ async def test_webhook_paygo_aceita_placeholder(client):
     assert r.json()["ok"] is True
 
 
+# ── ORD-132: auditoria de payloads de webhook no Mongo ────────────────────────
+
+async def test_webhook_mercadopago_type_payment_correlacionado_grava_audit(client):
+    """Webhook type=payment correlacionado a uma transação existente grava
+    documento com correlated=True, transaction_id e company_id preenchidos."""
+    import main as svc
+    from unittest.mock import AsyncMock, patch
+
+    # provider_transaction_id único por execução — evita colisão com
+    # resíduo de execuções anteriores no banco de dev compartilhado.
+    payment_id = f"1759{os.urandom(4).hex()}"
+    order_ref = f"P-WH{os.urandom(3).hex()}"
+    tx = svc.Transaction(
+        company_id=1, order_ref=order_ref, terminal_id=1, method="pix",
+        amount=15.00, status="processing", provider="mercadopago",
+        provider_transaction_id=payment_id,
+    )
+    async with svc.AsyncSessionLocal() as db:
+        db.add(tx)
+        await db.commit()
+        await db.refresh(tx)
+
+    with respx.mock:
+        _mock_mp_payment_config(1, None)
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
+        )
+        respx.get(f"https://api.mercadopago.com/v1/payments/{payment_id}").mock(
+            return_value=httpx.Response(200, json={"status": "approved"})
+        )
+        respx.patch(f"{_order_url()}/internal/orders/{order_ref}/status").mock(
+            return_value=httpx.Response(200)
+        )
+        with patch.object(svc, "save_audit", new=AsyncMock()) as mock_audit:
+            r = await client.post(
+                f"/payments/webhook/mercadopago/1?type=payment&data.id={payment_id}",
+                json={"type": "payment", "data": {"id": payment_id}},
+            )
+    assert r.status_code == 200
+    received_docs = [
+        c.args[0] for c in mock_audit.await_args_list if c.args[0].get("event") == "webhook_received"
+    ]
+    assert len(received_docs) == 1
+    doc = received_docs[0]
+    assert doc["correlated"] is True
+    assert doc["transaction_id"] == tx.id
+    assert doc["company_id"] == 1
+    assert doc["signature_valid"] is True
+    assert doc["webhook_type"] == "payment"
+
+
+async def test_webhook_mercadopago_nao_correlacionavel_grava_audit(client):
+    """Webhook sem transação correspondente ainda é gravado — rastro
+    forense, não deve ser descartado silenciosamente."""
+    import main as svc
+    from unittest.mock import AsyncMock, patch
+
+    with respx.mock:
+        _mock_mp_payment_config(1, None)
+        with patch.object(svc, "save_audit", new=AsyncMock()) as mock_audit:
+            r = await client.post(
+                "/payments/webhook/mercadopago/1?type=payment&data.id=999999999",
+                json={"type": "payment", "data": {"id": "999999999"}},
+            )
+    assert r.status_code == 200
+    mock_audit.assert_awaited_once()
+    doc = mock_audit.await_args.args[0]
+    assert doc["correlated"] is False
+    assert doc["transaction_id"] is None
+    assert doc["company_id"] == 1
+
+
+async def test_webhook_mercadopago_assinatura_invalida_grava_audit(client):
+    """Tentativa com assinatura inválida é rejeitada (401) mas ainda auditada
+    — valor forense/segurança, decisão tomada no QA Explorer do ORD-132."""
+    import main as svc
+    from unittest.mock import AsyncMock, patch
+
+    with respx.mock:
+        _mock_mp_payment_config(1, "test-secret")
+        with patch.object(svc, "save_audit", new=AsyncMock()) as mock_audit:
+            r = await client.post(
+                "/payments/webhook/mercadopago/1?type=order&data.id=ORD01",
+                json={"type": "order", "data": {"id": "ORD01"}},
+                headers={"x-signature": "ts=123,v1=hash-forjado", "x-request-id": "req-x"},
+            )
+    assert r.status_code == 401
+    mock_audit.assert_awaited_once()
+    doc = mock_audit.await_args.args[0]
+    assert doc["signature_valid"] is False
+    assert doc["correlated"] is False
+    assert doc["company_id"] == 1
+
+
+async def test_webhook_paygo_grava_audit(client):
+    import main as svc
+    from unittest.mock import AsyncMock, patch
+
+    with patch.object(svc, "save_audit", new=AsyncMock()) as mock_audit:
+        r = await client.post("/payments/webhook/paygo", json={"qualquer": "coisa"})
+    assert r.status_code == 200
+    mock_audit.assert_awaited_once()
+    doc = mock_audit.await_args.args[0]
+    assert doc["provider"] == "paygo"
+
+
 async def test_webhook_rota_antiga_nao_existe_mais(client):
     # 405 (não 404): "/payments/webhook" bate estruturalmente com a rota
     # pré-existente DELETE /payments/{tx_id} (sem tipo no path string), que
