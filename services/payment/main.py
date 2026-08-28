@@ -533,7 +533,16 @@ async def list_payments(
     if date_from:
         base_filters.append(Transaction.created_at >= date_from)
     if date_to:
-        base_filters.append(Transaction.created_at <= date_to)
+        # ORD-134: date_to é "AAAA-MM-DD" — comparar created_at <= date_to
+        # equivale a <= meia-noite daquele dia, escondendo qualquer
+        # transação do próprio dia final criada depois das 00:00. Vira
+        # limite exclusivo no dia seguinte, mesmo padrão já usado em
+        # payments_analytics (linha ~672).
+        try:
+            date_to_exclusive = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(400, "date_to deve estar no formato AAAA-MM-DD")
+        base_filters.append(Transaction.created_at < date_to_exclusive)
 
     # filters = base_filters + status, usado na lista/contagem paginada.
     # O resumo por status (summary, abaixo) usa só base_filters — ignora o
