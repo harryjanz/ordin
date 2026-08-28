@@ -35,8 +35,8 @@ function DotsAnimation({ T }: { T: Theme }) {
   );
 }
 
-function CardProcessingView({ T, countdown, error, onRetry, onCancel }: {
-  T: Theme; countdown: number; error: string; onRetry: () => void; onCancel: () => void;
+function CardProcessingView({ T, countdown, error, onRetry, onCancel, showMpHint }: {
+  T: Theme; countdown: number; error: string; onRetry: () => void; onCancel: () => void; showMpHint: boolean;
 }) {
   return (
     <div style={{
@@ -76,6 +76,14 @@ function CardProcessingView({ T, countdown, error, onRetry, onCancel }: {
             <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.3, margin: 0 }}>
               Aguardando terminal… {countdown}s
             </p>
+            {showMpHint && (
+              <p style={{
+                color: T.text, fontFamily: FONT_B, fontSize: FONT.body,
+                fontWeight: 700, margin: 0, opacity: 0.85,
+              }}>
+                Se a maquininha não atualizar sozinha, toque em "Atualizar" na tela dela.
+              </p>
+            )}
           </>
         )}
       </div>
@@ -108,13 +116,14 @@ interface Props {
   total: number;
   cpf: string | null;
   orderRef: string;
+  paymentProvider?: string;
   onSuccess: (order: CompletedOrder) => void;
   onRefused: (method: string) => void;
   onPix: (data: PixData) => void;
   onBack: () => void;
 }
 
-export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess, onRefused, onPix, onBack }: Props) {
+export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentProvider, onSuccess, onRefused, onPix, onBack }: Props) {
   const [method, setMethod] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [countdown, setCountdown] = useState(90);
@@ -178,7 +187,12 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, onSuccess
   function handleRetry() { setProcessing(false); setError(""); setMethod(null); setCountdown(90); }
 
   if (processing && method !== "pix") {
-    return <CardProcessingView T={T} countdown={countdown} error={error} onRetry={handleRetry} onCancel={handleRetry} />;
+    return (
+      <CardProcessingView
+        T={T} countdown={countdown} error={error} onRetry={handleRetry} onCancel={handleRetry}
+        showMpHint={paymentProvider === "mercadopago"}
+      />
+    );
   }
 
   const isSelected = (id: string) => method === id;

@@ -306,6 +306,7 @@ export default function App() {
           total={cartTotal}
           cpf={cpf}
           orderRef={orderRef}
+          paymentProvider={terminal?.payment_provider}
           onSuccess={handleSuccess}
           onRefused={(m) => { setRefusedMethod(m); setScreen("refused"); }}
           onPix={handlePix}

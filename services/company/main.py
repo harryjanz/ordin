@@ -860,6 +860,12 @@ async def verify_pin(
     t = t_result.scalars().first()
     if not t:
         raise HTTPException(404, "Terminal não encontrado")
+
+    cfg_result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(company_id=co.id, active=True)
+    )
+    cfg = cfg_result.scalars().first()
+
     return {
         "company": {
             "id": co.id, "name": co.name, "plan": co.plan,
@@ -869,7 +875,10 @@ async def verify_pin(
             "fulfillment_mode": co.fulfillment_mode,
             "prep_urgency_minutes": co.prep_urgency_minutes,
         },
-        "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
+        "terminal": {
+            "id": t.id, "label": t.label, "tef_number": t.tef_number,
+            "payment_provider": cfg.provider if cfg else "mock",
+        },
     }
 
 
@@ -3015,6 +3024,11 @@ async def approve_device(
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
 
+    cfg_result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(company_id=co.id, active=True)
+    )
+    cfg = cfg_result.scalars().first()
+
     redis_client.set(key, json.dumps({
         "status": "approved",
         "company":  {"id": co.id, "name": co.name, "plan": co.plan or "free",
@@ -3023,7 +3037,10 @@ async def approve_device(
                      "catalog_menu_layout": co.catalog_menu_layout,
                      "fulfillment_mode": co.fulfillment_mode,
                      "prep_urgency_minutes": co.prep_urgency_minutes},
-        "terminal": {"id": t.id, "label": t.label, "tef_number": t.tef_number},
+        "terminal": {
+            "id": t.id, "label": t.label, "tef_number": t.tef_number,
+            "payment_provider": cfg.provider if cfg else "mock",
+        },
     }), ex=60)
 
     return {"ok": True}
