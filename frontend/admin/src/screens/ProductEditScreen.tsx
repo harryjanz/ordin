@@ -16,6 +16,7 @@ import {
   type UploadFile,
 } from "design-system";
 import api from "../api";
+import Breadcrumb from "../components/Breadcrumb";
 import { useCatalogParams } from "../lib/catalogParams";
 import type { Allergen, Category, Product, ProductMenuRef } from "../types";
 import styles from "./ProductEditScreen.module.scss";
@@ -184,8 +185,15 @@ export default function ProductEditScreen() {
 
   return (
     <div className={styles.page}>
+      <Breadcrumb
+        items={[
+          { label: "Catálogo", href: "/catalog" },
+          { label: "Produtos", href: "/catalog?tab=products" },
+          { label: "Editando produto" },
+        ]}
+      />
       <div className={styles.header}>
-        <h2 className={styles.h2}>Editando produto</h2>
+        <h1 className={styles.h1}>Editando produto</h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/catalog?tab=products")}>Voltar</Button>
           <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0} loading={productSaving}>
