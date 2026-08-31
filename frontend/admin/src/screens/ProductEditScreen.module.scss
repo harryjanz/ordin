@@ -28,25 +28,39 @@
   margin-bottom: 16px;
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 20px;
-  align-items: start;
-}
-
-.mainCol,
-.sideCol {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 .panel {
   background: var(--a-surface);
   border: 1px solid var(--a-border);
   border-radius: 16px;
   @include padding('l', 'xl', 'l', 'xl');
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+// Título de seção dentro de um .panel — mesmo padrão de NewCompanyScreen
+// (.h2), reaproveitado aqui pra dar hierarquia visual clara entre as
+// seções (Informações básicas/Imagem, Descrição, Detalhes, Opções do
+// produto) em vez de um bloco único de campos sem separação (correção de
+// UX pós-implementação de ORD-140, 01/09 — "boxes dispersos, sem nexo").
+.h2 {
+  @include font('l-emphasys');
+}
+
+// Informações básicas (esquerda) + Imagem (direita), lado a lado dentro do
+// MESMO card — antes eram 2 painéis separados (grid/mainCol/sideCol), o que
+// lia como caixas soltas. Mesma proporção 2:1 de antes, só que sem borda
+// própria entre as colunas.
+.sectionRow {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.sectionMain,
+.sectionSide {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -68,6 +82,10 @@
   @include font('xs');
   color: rgba(var(--a-text-rgb), 0.5);
   margin-bottom: -2px;
+}
+
+.formTitle {
+  @include font('sm-emphasys');
 }
 
 .menusInfo {
@@ -109,4 +127,65 @@
   max-width: 80vw;
   max-height: 80vh;
   object-fit: contain;
+}
+
+// ── Opções do produto (ORD-140) ────────────────────────────────────────────
+
+.optionsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.optionGroupCards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.optionGroupCard {
+  background: rgba(var(--a-text-rgb), 0.02);
+  border: 1px solid var(--a-border);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.optionGroupCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.optionPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+// Modal "Vincular grupo de opção" — mesmo padrão de CatalogScreen (.modalForm)
+.modalForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+}
+
+.existingGroupList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+  // Checkbox do design-system desenha a caixinha com margin-left negativo
+  // pra sobrepor o input nativo escondido — sem padding aqui, o overflow-y
+  // acaba cortando essa borda esquerda (efeito colateral do CSS: um eixo
+  // com overflow definido força o outro a virar "auto" também).
+  padding: 4px 4px 4px 12px;
 }

@@ -180,6 +180,7 @@ export interface Product {
   sku: string | null;
   sort_order: number | null;
   allergens: Allergen[];
+  option_groups: OptionGroup[];
 }
 
 // ORD-125 — cardápio por horário: dias da semana (0=segunda..6=domingo,

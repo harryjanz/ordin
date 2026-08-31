@@ -3,22 +3,28 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Button,
+  Checkbox,
   CheckboxMultiselect,
   CurrencyInput,
+  Divider,
   Dropdown,
   InputBase,
+  Modal,
   NumberInput,
+  Tag,
   TagInput,
   TextArea,
   Upload,
   UploadListFiles,
+  makeToast,
   type DropdownOptions,
   type UploadFile,
 } from "design-system";
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
+import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
-import type { Allergen, Category, Product, ProductMenuRef } from "../types";
+import type { Allergen, Category, OptionGroup, Product, ProductMenuRef } from "../types";
 import styles from "./ProductEditScreen.module.scss";
 
 const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
@@ -57,6 +63,7 @@ interface EditProdState {
   sku: string;
   tags: string[];
   allergen_ids: string[];
+  option_groups: OptionGroup[];
 }
 
 // ORD-136 — edição de produto sai do modal (espaço comprometido, mais
@@ -78,6 +85,18 @@ export default function ProductEditScreen() {
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
   const [productFormError, setProductFormError] = useState("");
   const [productSaving, setProductSaving] = useState(false);
+
+  // ── Opções do produto (ORD-140) ──────────────────────────────────────────
+  // Só vincula grupo já cadastrado — criação fica em Catálogo > Opções
+  // (ORD-139), sem duplicar formulário aqui (decisão pós-implementação,
+  // 01/09, ver docs/stories/ORD-140).
+  const [allOptionGroups, setAllOptionGroups] = useState<OptionGroup[]>([]);
+  const [optionGroupsLoaded, setOptionGroupsLoaded] = useState(false);
+  const [optionModalOpen, setOptionModalOpen] = useState(false);
+  const [existingSearch, setExistingSearch] = useState("");
+  const [selectedExistingIds, setSelectedExistingIds] = useState<number[]>([]);
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [linkError, setLinkError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -106,6 +125,7 @@ export default function ProductEditScreen() {
           sku: p.sku ?? "",
           tags: p.tags ?? [],
           allergen_ids: (p.allergens ?? []).map((a) => String(a.id)),
+          option_groups: p.option_groups ?? [],
         });
         setCategories(categoriesRes.data.categories ?? categoriesRes.data);
         setAllergens(allergensRes.data.allergens ?? allergensRes.data);
@@ -148,6 +168,68 @@ export default function ProductEditScreen() {
     if (!editProd) return;
     const r = await api.delete(`/catalog/products/${productId}/image`, catalogParams());
     setEditProd((prev) => (prev ? { ...prev, image_url: r.data.image_url, thumbnail_url: r.data.thumbnail_url } : prev));
+  }
+
+  function resetOptionModal() {
+    setExistingSearch("");
+    setSelectedExistingIds([]);
+    setLinkError("");
+  }
+
+  async function openOptionModal() {
+    resetOptionModal();
+    setOptionModalOpen(true);
+    if (!optionGroupsLoaded) {
+      try {
+        const r = await api.get("/catalog/option-groups", catalogParams());
+        setAllOptionGroups(r.data.option_groups ?? r.data);
+        setOptionGroupsLoaded(true);
+      } catch {
+        // silencioso — a lista simplesmente fica vazia, o usuário pode tentar de novo reabrindo o modal
+      }
+    }
+  }
+
+  function closeOptionModal() {
+    setOptionModalOpen(false);
+  }
+
+  function toggleExistingSelection(id: number) {
+    setSelectedExistingIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  const linkedIds = editProd?.option_groups.map((g) => g.id) ?? [];
+  const availableExistingGroups = allOptionGroups
+    .filter((g) => !linkedIds.includes(g.id))
+    .filter((g) => g.name.toLowerCase().includes(existingSearch.toLowerCase()));
+
+  async function persistOptionGroupIds(ids: number[]) {
+    if (!editProd) return null;
+    const r = await api.put(`/catalog/products/${editProd.id}/option-groups`, { option_group_ids: ids }, catalogParams());
+    setEditProd((prev) => (prev ? { ...prev, option_groups: r.data.option_groups } : prev));
+    return r.data;
+  }
+
+  async function linkExisting() {
+    if (selectedExistingIds.length === 0) return;
+    setLinkSaving(true);
+    setLinkError("");
+    try {
+      await persistOptionGroupIds([...linkedIds, ...selectedExistingIds]);
+      setOptionModalOpen(false);
+    } catch (err) {
+      setLinkError(parseApiError(err).message || "Erro ao vincular grupo de opção.");
+    } finally {
+      setLinkSaving(false);
+    }
+  }
+
+  async function unlinkOptionGroup(groupId: number) {
+    try {
+      await persistOptionGroupIds(linkedIds.filter((id) => id !== groupId));
+    } catch {
+      makeToast("error", "Erro ao desvincular grupo de opção.");
+    }
   }
 
   async function saveEditProd() {
@@ -204,9 +286,10 @@ export default function ProductEditScreen() {
 
       {productFormError && <div className={styles.alertBox}><Alert variant="error" text={productFormError} fullWidth /></div>}
 
-      <div className={styles.grid}>
-        <div className={styles.mainCol}>
-          <div className={styles.panel}>
+      <div className={styles.panel}>
+        <div className={styles.sectionRow}>
+          <div className={styles.sectionMain}>
+            <h2 className={styles.h2}>Informações básicas</h2>
             <div className={styles.formRow}>
               <div className={styles.formRowField}>
                 <InputBase
@@ -239,71 +322,10 @@ export default function ProductEditScreen() {
                 ))}
               </div>
             )}
-
-            <TextArea
-              label="Descrição curta"
-              value={editProd.description}
-              onChange={(e) => setEditProd({ ...editProd, description: e.target.value })}
-              maxLength={500}
-              helperMessage="Aparece na grade/listagem do totem"
-            />
-
-            <TextArea
-              label="Descrição longa"
-              value={editProd.description_long}
-              onChange={(e) => setEditProd({ ...editProd, description_long: e.target.value })}
-              maxLength={2000}
-              autoSize
-              helperMessage="Detalhe completo, mostrado só ao abrir o item"
-            />
-
-            <div className={styles.formRow}>
-              <div className={styles.formRowField}>
-                <NumberInput
-                  label="Calorias (kcal)"
-                  value={editProd.calories ?? undefined}
-                  onChange={(value: number) => setEditProd({ ...editProd, calories: value })}
-                />
-              </div>
-              <div className={styles.formRowField}>
-                <InputBase
-                  label="SKU"
-                  value={editProd.sku}
-                  placeholder="Opcional, único por empresa"
-                  onChange={(e) => setEditProd({ ...editProd, sku: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <TagInput
-              label="Tags"
-              value={editProd.tags}
-              onValueChange={(tags) => setEditProd({ ...editProd, tags })}
-              placeholder={`Sugestões: ${SUGGESTED_TAGS}`}
-            />
-
-            <CheckboxMultiselect
-              key={editProd.id}
-              id={`edit-prod-${editProd.id}-allergens`}
-              label="Alérgenos (RDC 727/2022)"
-              options={allergens.map((a) => ({ value: String(a.id), label: a.name, disabled: false }))}
-              initialSelection={editProd.allergen_ids}
-              onSelectOption={(option, checked) => {
-                setEditProd((prev) => {
-                  if (!prev) return prev;
-                  const ids = checked
-                    ? [...prev.allergen_ids, option.value]
-                    : prev.allergen_ids.filter((id) => id !== option.value);
-                  return { ...prev, allergen_ids: ids };
-                });
-              }}
-            />
           </div>
-        </div>
 
-        <div className={styles.sideCol}>
-          <div className={styles.panel}>
-            <div className={styles.formLabel}>Imagem do produto</div>
+          <div className={styles.sectionSide}>
+            <h2 className={styles.h2}>Imagem</h2>
             {editProd.thumbnail_url ? (
               <div className={styles.imagePreview}>
                 <img
@@ -333,6 +355,101 @@ export default function ProductEditScreen() {
             )}
           </div>
         </div>
+
+        <Divider />
+
+        <h2 className={styles.h2}>Descrição</h2>
+        <TextArea
+          label="Descrição curta"
+          value={editProd.description}
+          onChange={(e) => setEditProd({ ...editProd, description: e.target.value })}
+          maxLength={500}
+          helperMessage="Aparece na grade/listagem do totem"
+        />
+        <TextArea
+          label="Descrição longa"
+          value={editProd.description_long}
+          onChange={(e) => setEditProd({ ...editProd, description_long: e.target.value })}
+          maxLength={2000}
+          autoSize
+          helperMessage="Detalhe completo, mostrado só ao abrir o item"
+        />
+
+        <Divider />
+
+        <h2 className={styles.h2}>Detalhes</h2>
+        <div className={styles.formRow}>
+          <div className={styles.formRowField}>
+            <NumberInput
+              label="Calorias (kcal)"
+              value={editProd.calories ?? undefined}
+              onChange={(value: number) => setEditProd({ ...editProd, calories: value })}
+            />
+          </div>
+          <div className={styles.formRowField}>
+            <InputBase
+              label="SKU"
+              value={editProd.sku}
+              placeholder="Opcional, único por empresa"
+              onChange={(e) => setEditProd({ ...editProd, sku: e.target.value })}
+            />
+          </div>
+        </div>
+
+        <TagInput
+          label="Tags"
+          value={editProd.tags}
+          onValueChange={(tags) => setEditProd({ ...editProd, tags })}
+          placeholder={`Sugestões: ${SUGGESTED_TAGS}`}
+        />
+
+        <CheckboxMultiselect
+          key={editProd.id}
+          id={`edit-prod-${editProd.id}-allergens`}
+          label="Alérgenos (RDC 727/2022)"
+          options={allergens.map((a) => ({ value: String(a.id), label: a.name, disabled: false }))}
+          initialSelection={editProd.allergen_ids}
+          onSelectOption={(option, checked) => {
+            setEditProd((prev) => {
+              if (!prev) return prev;
+              const ids = checked
+                ? [...prev.allergen_ids, option.value]
+                : prev.allergen_ids.filter((id) => id !== option.value);
+              return { ...prev, allergen_ids: ids };
+            });
+          }}
+        />
+      </div>
+
+      <div className={styles.panel}>
+        <div className={styles.optionsHeader}>
+          <h2 className={styles.h2}>Opções do produto</h2>
+          <Button type="button" size="small" onClick={openOptionModal}>+ Vincular grupo de opção</Button>
+        </div>
+
+        {editProd.option_groups.length === 0 ? (
+          <div className={styles.menusInfo}>Nenhum grupo de opção vinculado.</div>
+        ) : (
+          <div className={styles.optionGroupCards}>
+            {editProd.option_groups.map((g) => (
+              <div key={g.id} className={styles.optionGroupCard}>
+                <div className={styles.optionGroupCardHeader}>
+                  <strong>{g.name}</strong>
+                  <Tag variant={g.min_selections >= 1 ? "emphasys" : "neutral"}>{g.min_selections >= 1 ? "Obrigatório" : "Opcional"}</Tag>
+                  <Tag variant="neutral">{g.max_selections === 1 ? "Única" : "Múltipla"}</Tag>
+                  <Button type="button" size="small" variant="secondary" style={{ color: "var(--error-base)", marginLeft: "auto" }} onClick={() => unlinkOptionGroup(g.id)}>
+                    Desvincular
+                  </Button>
+                </div>
+                <div className={styles.optionPills}>
+                  {g.options.map((o) => (
+                    <Tag key={o.id} variant="neutral">{o.label}{o.price_delta > 0 ? ` +${o.price_delta.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}</Tag>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {previewImage && (
@@ -340,6 +457,39 @@ export default function ProductEditScreen() {
           <img src={previewImage.url} alt={previewImage.alt} className={styles.previewImage} />
         </div>
       )}
+
+      <Modal open={optionModalOpen} width={520} onClose={closeOptionModal} onBackdropClick={closeOptionModal} onCloseButtonClick={closeOptionModal}>
+        <div className={styles.modalForm}>
+          <div className={styles.formTitle}>Vincular grupo de opção</div>
+
+          {linkError && <Alert variant="error" text={linkError} fullWidth />}
+
+          <InputBase label="Buscar grupo" placeholder="Nome do grupo…" value={existingSearch} onChange={(e) => setExistingSearch(e.target.value)} />
+          <div className={styles.existingGroupList}>
+            {availableExistingGroups.length === 0 ? (
+              <div className={styles.menusInfo}>
+                {allOptionGroups.length === 0
+                  ? "Nenhum grupo de opção cadastrado ainda — crie um em Catálogo > Opções."
+                  : "Nenhum grupo disponível para vincular."}
+              </div>
+            ) : (
+              availableExistingGroups.map((g) => (
+                <Checkbox
+                  key={g.id}
+                  id={`link-group-${g.id}`}
+                  label={`${g.name} (${g.options.length} opç${g.options.length === 1 ? "ão" : "ões"})`}
+                  checked={selectedExistingIds.includes(g.id)}
+                  onChange={() => toggleExistingSelection(g.id)}
+                />
+              ))
+            )}
+          </div>
+          <div className={styles.formActions}>
+            <Button type="button" onClick={linkExisting} disabled={selectedExistingIds.length === 0 || linkSaving} loading={linkSaving}>Vincular</Button>
+            <Button type="button" variant="secondary" onClick={closeOptionModal}>Cancelar</Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
