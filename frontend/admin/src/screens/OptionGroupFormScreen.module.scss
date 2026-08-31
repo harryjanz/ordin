@@ -1,0 +1,132 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  padding: 32px;
+  color: var(--a-text);
+  max-width: 760px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.h1 {
+  @include font('xl');
+}
+
+.headerActions {
+  display: flex;
+  gap: 12px;
+}
+
+.alertBox {
+  margin-bottom: 16px;
+}
+
+.panel {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+  @include padding('l', 'xl', 'l', 'xl');
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.formRow {
+  display: flex;
+  flex-direction: row;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.formRowField {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.formLabel {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+}
+
+.formHint {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.7);
+  background: rgba(var(--a-text-rgb), 0.03);
+  border: 1px solid var(--a-border);
+  @include rounded('default');
+  padding: 10px 12px;
+}
+
+.optionsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.rowThumb {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  @include rounded('default');
+  flex-shrink: 0;
+}
+
+.rowThumbPlaceholder {
+  width: 32px;
+  height: 32px;
+  @include rounded('default');
+  background: rgba(var(--a-text-rgb), 0.06);
+  flex-shrink: 0;
+}
+
+// Conteúdo do Modal de opção — sem "cartão" próprio, o Modal já fornece
+// fundo/borda/padding (mesmo padrão de CatalogScreen .modalForm).
+.modalForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.formTitle {
+  @include font('sm-emphasys');
+  margin-bottom: 4px;
+}
+
+.formActions {
+  display: flex;
+  gap: 8px;
+}
+
+.imageSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(var(--a-text-rgb), 0.03);
+  @include rounded('card');
+}
+
+.imagePreview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.thumbnailImg {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  @include rounded('default');
+  border: 1px solid var(--a-border);
+}

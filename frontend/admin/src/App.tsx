@@ -12,6 +12,7 @@ import DashboardScreen from "./screens/DashboardScreen";
 import CatalogScreen from "./screens/CatalogScreen";
 import ProductEditScreen from "./screens/ProductEditScreen";
 import MenuFormScreen from "./screens/MenuFormScreen";
+import OptionGroupFormScreen from "./screens/OptionGroupFormScreen";
 import OrdersScreen from "./screens/OrdersScreen";
 import PaymentsScreen from "./screens/PaymentsScreen";
 import CompanyScreen from "./screens/CompanyScreen";
@@ -29,10 +30,10 @@ const ROLE_ROUTES: Record<string, string[]> = {
   // de seleção de empresa já usado em /settings (ORD-082). "/platform-users"
   // (ORD-093) é o CRUD separado pra usuários da própria Ordin — não confundir
   // com "/company", que é sobre a equipe de uma empresa cliente.
-  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment"],
-  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment"],
-  owner:      ["/dashboard", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/fulfillment"],
-  manager:    ["/dashboard", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/fulfillment"],
+  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment"],
+  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment"],
+  owner:      ["/dashboard", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/fulfillment"],
+  manager:    ["/dashboard", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/fulfillment"],
   // ORD-088: cashier ganha acesso a /settings só pra seção "Minha segurança"
   // (2FA pessoal) — SettingsScreen esconde PIN/Aparência/política de MFA
   // pra quem não é owner/manager/superadmin/admin (ver canManageCompany).
@@ -116,6 +117,8 @@ export default function App() {
             <Route path="/catalog/products/:id/edit" element={<ProtectedRoute path="/catalog/products/:id/edit" element={<ProductEditScreen />} />} />
             <Route path="/catalog/menus/new"         element={<ProtectedRoute path="/catalog/menus/new"         element={<MenuFormScreen />} />} />
             <Route path="/catalog/menus/:id/edit"    element={<ProtectedRoute path="/catalog/menus/:id/edit"    element={<MenuFormScreen />} />} />
+            <Route path="/catalog/option-groups/new"      element={<ProtectedRoute path="/catalog/option-groups/new"      element={<OptionGroupFormScreen />} />} />
+            <Route path="/catalog/option-groups/:id/edit" element={<ProtectedRoute path="/catalog/option-groups/:id/edit" element={<OptionGroupFormScreen />} />} />
             <Route path="/orders"    element={<ProtectedRoute path="/orders"    element={<OrdersScreen />} />} />
             <Route path="/fulfillment" element={<ProtectedRoute path="/fulfillment" element={<FulfillmentScreen />} />} />
             <Route path="/payments"  element={<ProtectedRoute path="/payments"  element={<PaymentsScreen />} />} />
