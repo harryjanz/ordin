@@ -75,6 +75,25 @@ def upload_product_thumbnail(category_id: int, product_id: int, ext: str, conten
     return key
 
 
+def _option_image_key(option_group_id: int, option_id: int, ext: str, thumb: bool) -> str:
+    suffix = "[thumb]" if thumb else ""
+    return f"opcoes/{option_group_id}/opcao-{option_id}{suffix}.{ext}"
+
+
+def upload_option_image(option_group_id: int, option_id: int, ext: str, content: bytes) -> str:
+    """Sobe a imagem original de uma opção (ORD-138) e retorna a key (não a URL) pra persistir no banco."""
+    key = _option_image_key(option_group_id, option_id, ext, thumb=False)
+    _client().put_object(Bucket=_S3_BUCKET, Key=key, Body=content)
+    return key
+
+
+def upload_option_thumbnail(option_group_id: int, option_id: int, ext: str, content: bytes) -> str:
+    """Sobe o thumbnail de uma opção e retorna a key (não a URL) pra persistir no banco."""
+    key = _option_image_key(option_group_id, option_id, ext, thumb=True)
+    _client().put_object(Bucket=_S3_BUCKET, Key=key, Body=content)
+    return key
+
+
 def delete_object(key: str) -> None:
     """Remove um objeto do bucket. Idempotente — não falha se a key já não existir."""
     try:

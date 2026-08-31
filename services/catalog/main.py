@@ -7,7 +7,7 @@ from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, Time
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional
 from datetime import datetime
 from config import require_env, get_cors_origins
@@ -16,6 +16,8 @@ from infrastructure.image_storage import (
     delete_object,
     ensure_bucket,
     presigned_download_url,
+    upload_option_image,
+    upload_option_thumbnail,
     upload_product_image,
     upload_product_thumbnail,
 )
@@ -121,6 +123,41 @@ class ProductAllergen(Base):
     product_id  = Column(Integer, ForeignKey("products.id"), primary_key=True)
     allergen_id = Column(Integer, ForeignKey("allergens.id"), primary_key=True)
 
+class OptionGroup(Base):
+    """Grupo de opção (ORD-138) — variação de produto (sabor, tamanho etc.),
+    reutilizável entre produtos (vínculo N:N via ProductOptionGroup), mesmo
+    padrão de mercado confirmado em docs/analise-concorrentes-grupos-opcao-produto.md
+    (schema real da API do iFood: min/max de seleção + opção com preço
+    próprio). min_selections/max_selections cobrem obrigatório/opcional
+    (min>=1) e seleção única/múltipla (max=1) com os mesmos dois campos."""
+    __tablename__ = "option_groups"
+    id             = Column(Integer, primary_key=True)
+    company_id     = Column(Integer, nullable=False, index=True)
+    name           = Column(String(80), nullable=False)
+    min_selections = Column(Integer, nullable=False, default=1)
+    max_selections = Column(Integer, nullable=False, default=1)
+    active         = Column(Boolean, nullable=False, default=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+class Option(Base):
+    """price_delta é um ACRÉSCIMO sobre o preço-base do produto, não o preço
+    absoluto da opção (delta=0 = opção padrão, herda o preço do produto sem
+    nenhum rótulo tipo "grátis" — decisão de UX do protótipo). Ver ORD-142
+    pra regra de cálculo com múltiplas opções escolhidas (soma dos deltas)."""
+    __tablename__ = "options"
+    id              = Column(Integer, primary_key=True)
+    option_group_id = Column(Integer, ForeignKey("option_groups.id"), nullable=False)
+    label           = Column(String(80), nullable=False)
+    price_delta     = Column(Numeric(10, 2), nullable=False, default=0)
+    image_url       = Column(String(500))  # key do objeto no bucket — ver infrastructure/image_storage.py
+    thumbnail_url   = Column(String(500))
+    sort_order      = Column(Integer)
+
+class ProductOptionGroup(Base):
+    __tablename__ = "product_option_groups"
+    product_id      = Column(Integer, ForeignKey("products.id"), primary_key=True)
+    option_group_id = Column(Integer, ForeignKey("option_groups.id"), primary_key=True)
+
 class Menu(Base):
     """Cardápio por horário (ORD-124/125) — dias da semana + janela de
     horário únicos por cardápio (múltiplas janelas por dia ficaram pra v2,
@@ -174,6 +211,85 @@ async def _set_product_allergens(db: AsyncSession, product_id: int, allergen_ids
     await db.execute(delete(ProductAllergen).where(ProductAllergen.product_id == product_id))
     for allergen_id in unique_ids:
         db.add(ProductAllergen(product_id=product_id, allergen_id=allergen_id))
+
+async def _get_option_group_options(db: AsyncSession, option_group_id: int) -> list[dict]:
+    result = await db.execute(
+        select(Option).filter_by(option_group_id=option_group_id).order_by(Option.sort_order.asc(), Option.id.asc())
+    )
+    return [
+        {
+            "id": o.id,
+            "label": o.label,
+            "price_delta": float(o.price_delta),
+            "image_url": presigned_download_url(o.image_url) if o.image_url else None,
+            "thumbnail_url": presigned_download_url(o.thumbnail_url) if o.thumbnail_url else None,
+            "sort_order": o.sort_order,
+        }
+        for o in result.scalars().all()
+    ]
+
+async def _serialize_option_group(db: AsyncSession, g: "OptionGroup") -> dict:
+    return {
+        "id": g.id,
+        "name": g.name,
+        "min_selections": g.min_selections,
+        "max_selections": g.max_selections,
+        "active": g.active,
+        "options": await _get_option_group_options(db, g.id),
+    }
+
+async def _set_option_group_options(db: AsyncSession, option_group_id: int, options: list["OptionIn"]) -> None:
+    """Replace completo, mesmo espírito de _set_product_allergens — remove
+    todas as opções antigas do grupo e recria a partir da lista enviada.
+    Efeito colateral aceito (decisão do Tech Explorer, mesmo padrão de
+    allergen_ids): como as opções antigas são removidas e recriadas com id
+    novo, a imagem de cada opção antiga é descartada do bucket junto — editar
+    a lista de opções de um grupo exige re-upload de imagem depois. Se isso
+    virar problema de UX real em ORD-139, é ponto pra revisar lá (endpoint
+    passaria a aceitar id por opção pra edição parcial), não nesta história."""
+    if not options:
+        raise HTTPException(400, detail="Grupo precisa de ao menos uma opção")
+    old_result = await db.execute(select(Option).filter_by(option_group_id=option_group_id))
+    for old in old_result.scalars().all():
+        if old.image_url: delete_object(old.image_url)
+        if old.thumbnail_url: delete_object(old.thumbnail_url)
+    await db.execute(delete(Option).where(Option.option_group_id == option_group_id))
+    for index, opt in enumerate(options):
+        db.add(Option(option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index))
+
+async def _get_product_option_groups(db: AsyncSession, product_id: int) -> list[dict]:
+    result = await db.execute(
+        select(OptionGroup)
+        .join(ProductOptionGroup, ProductOptionGroup.option_group_id == OptionGroup.id)
+        .filter(ProductOptionGroup.product_id == product_id)
+        .order_by(OptionGroup.name)
+    )
+    return [await _serialize_option_group(db, g) for g in result.scalars().all()]
+
+async def _set_product_option_groups(db: AsyncSession, product_id: int, company_id: int, option_group_ids: list[int]) -> None:
+    """Replace completo — mesmo padrão de _set_product_allergens, mas
+    validando que o grupo pertence à MESMA empresa do produto (option_groups
+    não é master data global como allergens, é por empresa)."""
+    unique_ids = set(option_group_ids)
+    if unique_ids:
+        result = await db.execute(
+            select(OptionGroup.id).filter(OptionGroup.id.in_(unique_ids), OptionGroup.company_id == company_id)
+        )
+        found = set(result.scalars().all())
+        if found != unique_ids:
+            raise HTTPException(400, detail="option_group_ids contém id que não existe ou não pertence à empresa")
+    await db.execute(delete(ProductOptionGroup).where(ProductOptionGroup.product_id == product_id))
+    for option_group_id in unique_ids:
+        db.add(ProductOptionGroup(product_id=product_id, option_group_id=option_group_id))
+
+async def _get_option_scoped(db: AsyncSession, option_id: int, company_id: int) -> Optional["Option"]:
+    """Option não tem company_id direto — isolamento multi-tenant via join
+    com OptionGroup, mesmo racional de qualquer entidade filha por empresa."""
+    result = await db.execute(
+        select(Option).join(OptionGroup, OptionGroup.id == Option.option_group_id)
+        .filter(Option.id == option_id, OptionGroup.company_id == company_id)
+    )
+    return result.scalars().first()
 
 async def _resolve_menu_composition(db: AsyncSession, menu_id: int) -> dict:
     cat_result = await db.execute(
@@ -292,6 +408,7 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "sku": p.sku,
         "sort_order": p.sort_order,
         "allergens": await _get_product_allergens(db, p.id),
+        "option_groups": await _get_product_option_groups(db, p.id),
     }
 
 # ── Response schemas ──────────────────────────────────────────────────────────
@@ -324,6 +441,76 @@ class AllergenOut(BaseModel):
 class AllergenListOut(BaseModel):
     allergens: list[AllergenOut]
 
+class OptionIn(BaseModel):
+    label: str
+    price_delta: float = 0  # acréscimo sobre o preço-base do produto, não preço absoluto — ver ORD-142
+
+class OptionOut(BaseModel):
+    id: int
+    label: str
+    price_delta: float
+    image_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    sort_order: Optional[int] = None
+
+class OptionGroupOut(BaseModel):
+    id: int
+    name: str
+    min_selections: int
+    max_selections: int
+    active: bool
+    options: list[OptionOut] = []
+
+class OptionGroupListOut(BaseModel):
+    option_groups: list[OptionGroupOut]
+
+class OptionGroupIn(BaseModel):
+    name: str
+    min_selections: int = 1
+    max_selections: int = 1
+    options: list[OptionIn]
+
+    @field_validator("options")
+    @classmethod
+    def options_not_empty(cls, v: list[OptionIn]) -> list[OptionIn]:
+        if not v:
+            raise ValueError("Grupo precisa de ao menos uma opção")
+        return v
+
+    @field_validator("max_selections")
+    @classmethod
+    def max_at_least_one(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("max_selections deve ser ao menos 1")
+        return v
+
+    @model_validator(mode="after")
+    def min_not_greater_than_max(self) -> "OptionGroupIn":
+        if self.min_selections > self.max_selections:
+            raise ValueError("min_selections não pode ser maior que max_selections")
+        return self
+
+class OptionGroupUpdate(BaseModel):
+    name: Optional[str] = None
+    min_selections: Optional[int] = None
+    max_selections: Optional[int] = None
+
+class OptionGroupOptionsIn(BaseModel):
+    options: list[OptionIn]
+
+    @field_validator("options")
+    @classmethod
+    def options_not_empty(cls, v: list[OptionIn]) -> list[OptionIn]:
+        if not v:
+            raise ValueError("Grupo precisa de ao menos uma opção")
+        return v
+
+class OptionGroupReorderIn(BaseModel):
+    option_ids: list[int]
+
+class ProductOptionGroupsIn(BaseModel):
+    option_group_ids: list[int]
+
 class ProductOut(BaseModel):
     id: int
     category_id: Optional[int] = None
@@ -339,6 +526,7 @@ class ProductOut(BaseModel):
     sku: Optional[str] = None
     sort_order: Optional[int] = None
     allergens: list[AllergenOut] = []
+    option_groups: list[OptionGroupOut] = []
 
 class ProductListOut(BaseModel):
     products: list[ProductOut]
@@ -926,6 +1114,247 @@ async def delete_product_image(
     if p.thumbnail_url: delete_object(p.thumbnail_url)
     p.image_url = None
     p.thumbnail_url = None
+    await db.commit(); await db.refresh(p)
+    return await _serialize_product(db, p)
+
+# ── Grupos de opção (ORD-138) ────────────────────────────────────────────────
+
+@app.post(
+    "/catalog/option-groups",
+    status_code=201,
+    response_model=OptionGroupOut,
+    tags=["Catálogo"],
+    summary="Criar grupo de opção",
+)
+async def create_option_group(
+    body: OptionGroupIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    group = OptionGroup(
+        company_id=company_id, name=body.name,
+        min_selections=body.min_selections, max_selections=body.max_selections,
+    )
+    db.add(group)
+    await db.commit(); await db.refresh(group)
+    for index, opt in enumerate(body.options):
+        db.add(Option(option_group_id=group.id, label=opt.label, price_delta=opt.price_delta, sort_order=index))
+    await db.commit()
+    return await _serialize_option_group(db, group)
+
+@app.get(
+    "/catalog/option-groups",
+    response_model=OptionGroupListOut,
+    tags=["Catálogo"],
+    summary="Listar grupos de opção da empresa",
+)
+async def list_option_groups(
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id),
+):
+    result = await db.execute(select(OptionGroup).filter_by(company_id=company_id).order_by(OptionGroup.name))
+    groups = result.scalars().all()
+    return {"option_groups": [await _serialize_option_group(db, g) for g in groups]}
+
+@app.put(
+    "/catalog/option-groups/{option_group_id}/options/reorder",
+    status_code=204,
+    tags=["Catálogo"],
+    summary="Reordenar as opções de um grupo",
+    responses={
+        400: {"description": "option_ids não corresponde exatamente às opções do grupo"},
+        404: {"description": "Grupo não encontrado"},
+    },
+)
+async def reorder_options(
+    option_group_id: int,
+    body: OptionGroupReorderIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    group = (await db.execute(select(OptionGroup).filter_by(id=option_group_id, company_id=company_id))).scalars().first()
+    if not group: raise HTTPException(404)
+    result = await db.execute(select(Option.id).filter_by(option_group_id=option_group_id))
+    valid_ids = set(result.scalars().all())
+    if set(body.option_ids) != valid_ids:
+        raise HTTPException(400, detail="option_ids não corresponde exatamente às opções do grupo")
+    for index, option_id in enumerate(body.option_ids):
+        await db.execute(update(Option).where(Option.id == option_id).values(sort_order=index))
+    await db.commit()
+
+@app.put(
+    "/catalog/option-groups/{option_group_id}",
+    response_model=OptionGroupOut,
+    tags=["Catálogo"],
+    summary="Editar grupo de opção",
+    responses={
+        400: {"description": "min_selections/max_selections inválidos"},
+        404: {"description": "Grupo não encontrado"},
+    },
+)
+async def update_option_group(
+    option_group_id: int,
+    body: OptionGroupUpdate,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    group = (await db.execute(select(OptionGroup).filter_by(id=option_group_id, company_id=company_id))).scalars().first()
+    if not group: raise HTTPException(404)
+    for field, value in body.model_dump(exclude_none=True).items():
+        setattr(group, field, value)
+    if group.min_selections > group.max_selections:
+        raise HTTPException(400, detail="min_selections não pode ser maior que max_selections")
+    if group.max_selections < 1:
+        raise HTTPException(400, detail="max_selections deve ser ao menos 1")
+    await db.commit(); await db.refresh(group)
+    return await _serialize_option_group(db, group)
+
+@app.put(
+    "/catalog/option-groups/{option_group_id}/options",
+    response_model=OptionGroupOut,
+    tags=["Catálogo"],
+    summary="Substituir a lista de opções de um grupo (replace completo)",
+    responses={
+        404: {"description": "Grupo não encontrado"},
+        422: {"description": "lista de opções vazia"},
+    },
+)
+async def set_option_group_options(
+    option_group_id: int,
+    body: OptionGroupOptionsIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    group = (await db.execute(select(OptionGroup).filter_by(id=option_group_id, company_id=company_id))).scalars().first()
+    if not group: raise HTTPException(404)
+    await _set_option_group_options(db, option_group_id, body.options)
+    await db.commit(); await db.refresh(group)
+    return await _serialize_option_group(db, group)
+
+@app.delete(
+    "/catalog/option-groups/{option_group_id}",
+    status_code=204,
+    tags=["Catálogo"],
+    summary="Excluir grupo de opção",
+    responses={
+        404: {"description": "Grupo não encontrado"},
+        409: {"description": "Grupo vinculado a um ou mais produtos"},
+    },
+)
+async def delete_option_group(
+    option_group_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    group = (await db.execute(select(OptionGroup).filter_by(id=option_group_id, company_id=company_id))).scalars().first()
+    if not group: raise HTTPException(404)
+    linked_result = await db.execute(
+        select(Product.name)
+        .join(ProductOptionGroup, ProductOptionGroup.product_id == Product.id)
+        .filter(ProductOptionGroup.option_group_id == option_group_id, Product.deleted == False)  # noqa: E712
+    )
+    linked_names = list(linked_result.scalars().all())
+    if linked_names:
+        raise HTTPException(409, detail=f"Grupo vinculado a: {', '.join(linked_names)}")
+    options_result = await db.execute(select(Option).filter_by(option_group_id=option_group_id))
+    for opt in options_result.scalars().all():
+        if opt.image_url: delete_object(opt.image_url)
+        if opt.thumbnail_url: delete_object(opt.thumbnail_url)
+    await db.execute(delete(Option).where(Option.option_group_id == option_group_id))
+    await db.delete(group)
+    await db.commit()
+
+@app.post(
+    "/catalog/options/{option_id}/image",
+    response_model=OptionOut,
+    tags=["Catálogo"],
+    summary="Enviar imagem de uma opção (gera também o thumbnail)",
+    responses={
+        404: {"description": "Opção não encontrada"},
+        415: {"description": "Formato de arquivo não aceito (só jpg/png)"},
+        413: {"description": "Arquivo maior que 2 MB"},
+        422: {"description": "Arquivo não é uma imagem válida"},
+    },
+)
+async def upload_option_image_endpoint(
+    option_id: int,
+    image: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    opt = await _get_option_scoped(db, option_id, company_id)
+    if not opt: raise HTTPException(404)
+
+    ext = _IMAGE_CONTENT_TYPES.get(image.content_type)
+    if not ext:
+        raise HTTPException(415, detail="Formato de arquivo não aceito — envie jpg ou png")
+
+    content = await image.read()
+    if len(content) > _IMAGE_MAX_BYTES:
+        raise HTTPException(413, detail=f"Arquivo maior que {_IMAGE_MAX_BYTES // (1024 * 1024)} MB")
+
+    pillow_format = "JPEG" if ext == "jpg" else "PNG"
+    try:
+        thumb_content = _make_thumbnail(content, pillow_format)
+    except Exception:
+        raise HTTPException(422, detail="Arquivo não é uma imagem válida")
+
+    if opt.image_url: delete_object(opt.image_url)
+    if opt.thumbnail_url: delete_object(opt.thumbnail_url)
+
+    opt.image_url = upload_option_image(opt.option_group_id, opt.id, ext, content)
+    opt.thumbnail_url = upload_option_thumbnail(opt.option_group_id, opt.id, ext, thumb_content)
+    await db.commit(); await db.refresh(opt)
+    return {
+        "id": opt.id, "label": opt.label, "price_delta": float(opt.price_delta),
+        "image_url": presigned_download_url(opt.image_url), "thumbnail_url": presigned_download_url(opt.thumbnail_url),
+        "sort_order": opt.sort_order,
+    }
+
+@app.delete(
+    "/catalog/options/{option_id}/image",
+    response_model=OptionOut,
+    tags=["Catálogo"],
+    summary="Remover imagem de uma opção",
+    responses={404: {"description": "Opção não encontrada"}},
+)
+async def delete_option_image(
+    option_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    opt = await _get_option_scoped(db, option_id, company_id)
+    if not opt: raise HTTPException(404)
+    if opt.image_url: delete_object(opt.image_url)
+    if opt.thumbnail_url: delete_object(opt.thumbnail_url)
+    opt.image_url = None
+    opt.thumbnail_url = None
+    await db.commit(); await db.refresh(opt)
+    return {
+        "id": opt.id, "label": opt.label, "price_delta": float(opt.price_delta),
+        "image_url": None, "thumbnail_url": None, "sort_order": opt.sort_order,
+    }
+
+@app.put(
+    "/catalog/products/{product_id}/option-groups",
+    response_model=ProductOut,
+    tags=["Catálogo"],
+    summary="Vincular grupos de opção a um produto (replace completo)",
+    responses={
+        400: {"description": "option_group_ids contém id que não existe ou não pertence à empresa"},
+        404: {"description": "Produto não encontrado"},
+    },
+)
+async def set_product_option_groups(
+    product_id: int,
+    body: ProductOptionGroupsIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    result = await db.execute(select(Product).filter_by(id=product_id, company_id=company_id, deleted=False))
+    p = result.scalars().first()
+    if not p: raise HTTPException(404)
+    await _set_product_option_groups(db, product_id, company_id, body.option_group_ids)
     await db.commit(); await db.refresh(p)
     return await _serialize_product(db, p)
 
