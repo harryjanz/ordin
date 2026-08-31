@@ -6,6 +6,7 @@ import {
   CurrencyInput,
   InputBase,
   Modal,
+  NumberInput,
   RadioButton,
   RadioGroup,
   Upload,
@@ -56,6 +57,10 @@ export default function OptionGroupFormScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [radios, setRadios] = useState<OptionGroupRadios>({ requiredness: "required", selectionType: "single" });
+  // Só usado quando radios.selectionType === "multiple" — máximo de opções
+  // que podem ser escolhidas juntas (ex.: pizza G, até 3 sabores). null =
+  // ainda não customizado pelo usuário, cai no default (todas as opções).
+  const [maxSelections, setMaxSelections] = useState<number | null>(null);
   const [advancedMinMax, setAdvancedMinMax] = useState<{ min_selections: number; max_selections: number } | null>(null);
   const [rows, setRows] = useState<OptionRow[]>([]);
   const [originalRows, setOriginalRows] = useState<{ id: number; label: string; price_delta: number; image_url: string | null }[]>([]);
@@ -81,6 +86,7 @@ export default function OptionGroupFormScreen() {
         if (mapped) {
           setRadios(mapped);
           setAdvancedMinMax(null);
+          setMaxSelections(mapped.selectionType === "multiple" ? g.max_selections : null);
         } else {
           setAdvancedMinMax({ min_selections: g.min_selections, max_selections: g.max_selections });
         }
@@ -256,7 +262,7 @@ export default function OptionGroupFormScreen() {
     setSaving(true);
     setFormError("");
     try {
-      const { min_selections, max_selections } = advancedMinMax ?? radiosToMinMax(radios, rows.length);
+      const { min_selections, max_selections } = advancedMinMax ?? radiosToMinMax(radios, rows.length, maxSelections);
       const optionsPayload = rows.map((r) => ({ label: r.label.trim(), price_delta: r.price_delta ?? 0 }));
 
       let groupId = editingGroupId;
@@ -359,6 +365,17 @@ export default function OptionGroupFormScreen() {
                 <RadioButton id="selectionType-multiple" value="multiple" label="Múltipla" />
               </RadioGroup>
             </div>
+
+            {radios.selectionType === "multiple" && (
+              <div className={styles.formRowField}>
+                <div className={styles.formLabel}>Máximo de opções selecionáveis</div>
+                <NumberInput
+                  helperMessage="ex.: pizza G, até 3 sabores"
+                  value={maxSelections ?? Math.max(rows.length, 2)}
+                  onChange={(value: number) => setMaxSelections(value)}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>

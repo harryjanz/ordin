@@ -298,3 +298,17 @@ Checklist de saída conferido contra o conteúdo já escrito neste arquivo:
 - [x] Priorizada no sprint backlog
 
 **Status final: Ready.**
+
+---
+
+## Correção pós-implementação (01/09)
+
+O usuário apontou que uma regra original ficou de fora: quando a seleção é "Múltipla", precisa existir um campo pra definir o **máximo de opções que podem ser escolhidas juntas** — exemplo dado: pizza G com sabores, até 3 selecionáveis. Isso já estava documentado como gap conhecido no Tech Explorer original (nota acima, "múltipla hoje não expõe um campo de quantidade máxima"), mas nunca tinha sido fechado.
+
+**Implementado:** quando o radio "Múltipla" está marcado, aparece o campo `NumberInput` "Máximo de opções selecionáveis" (helper: "ex.: pizza G, até 3 sabores"), ao lado dos dois radios. Default é o total de opções cadastradas até o usuário digitar um valor customizado — preserva o comportamento anterior ("pode escolher todas") quando o campo não é tocado. Mapeamento em `lib/optionGroupMapping.ts`:
+- `radiosToMinMax` agora aceita um terceiro parâmetro opcional `maxSelections`, clampado entre 2 e o total de opções.
+- `minMaxToRadios` agora reconhece qualquer `max_selections` entre 2 e o total de opções como "Múltipla" (antes só reconhecia `max_selections === total de opções`) — grupos com máximo customizado abrem em modo normal (radios editáveis), não em modo avançado somente-leitura.
+
+Validado com o cenário exato do usuário: grupo "Sabores de pizza G", obrigatório, múltipla, 3 opções cadastradas, máximo = 3 — `min_selections=1, max_selections=3` persistido corretamente no backend e recarregado certo na edição.
+
+**Ajuste visual (mesmo dia):** a primeira versão usava o `label` embutido do `NumberInput` ("Máximo de opções selecionáveis" dentro da caixa) — em uma coluna estreita (1/3 da linha), o texto quebrava em duas linhas e sobrepunha o valor digitado. Corrigido movendo o rótulo pra fora, como texto simples acima do campo (mesmo padrão já usado em "Obrigatoriedade"/"Seleção"), sem usar o `label` interno do componente.
