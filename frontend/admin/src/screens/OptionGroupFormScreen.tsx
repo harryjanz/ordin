@@ -6,7 +6,7 @@ import {
   CurrencyInput,
   InputBase,
   Modal,
-  NumberInput,
+  NumberSpinInput,
   RadioButton,
   RadioGroup,
   Upload,
@@ -18,7 +18,7 @@ import Breadcrumb from "../components/Breadcrumb";
 import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
-import { minMaxToRadios, radiosToMinMax, type OptionGroupRadios } from "../lib/optionGroupMapping";
+import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN, minMaxToRadios, radiosToMinMax, type OptionGroupRadios } from "../lib/optionGroupMapping";
 import type { OptionGroup } from "../types";
 import styles from "./OptionGroupFormScreen.module.scss";
 
@@ -82,7 +82,7 @@ export default function OptionGroupFormScreen() {
         if (!g) { if (!cancelled) setLoadError("Grupo de opção não encontrado."); return; }
         if (cancelled) return;
         setName(g.name);
-        const mapped = minMaxToRadios(g.min_selections, g.max_selections, g.options.length);
+        const mapped = minMaxToRadios(g.min_selections, g.max_selections);
         if (mapped) {
           setRadios(mapped);
           setAdvancedMinMax(null);
@@ -369,10 +369,14 @@ export default function OptionGroupFormScreen() {
             {radios.selectionType === "multiple" && (
               <div className={styles.formRowField}>
                 <div className={styles.formLabel}>Máximo de opções selecionáveis</div>
-                <NumberInput
-                  helperMessage="ex.: pizza G, até 3 sabores"
-                  value={maxSelections ?? Math.max(rows.length, 2)}
-                  onChange={(value: number) => setMaxSelections(value)}
+                <NumberSpinInput
+                  typeable
+                  step={1}
+                  minValue={MAX_SELECTIONS_MIN}
+                  maxValue={MAX_SELECTIONS_MAX}
+                  helperMessage="ex.: pizza G, até 3 sabores — pode ajustar antes de terminar de cadastrar as opções"
+                  value={maxSelections ?? Math.max(rows.length, MAX_SELECTIONS_MIN)}
+                  onChange={(value?: number) => setMaxSelections(value ?? null)}
                 />
               </div>
             )}
