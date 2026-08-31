@@ -180,6 +180,7 @@ export interface Product {
   sku: string | null;
   sort_order: number | null;
   allergens: Allergen[];
+  option_groups: OptionGroup[];
 }
 
 // ORD-125 — cardápio por horário: dias da semana (0=segunda..6=domingo,
@@ -198,6 +199,27 @@ export interface Menu {
   active: boolean;
   categories: MenuRef[];
   products: MenuRef[];
+}
+
+// ORD-138/139 — grupos de opção reutilizáveis (sabor, tamanho, etc.).
+// price_delta é um ACRÉSCIMO sobre o preço-base do produto, não um preço
+// absoluto — ver ORD-142 (regra de cálculo: soma dos deltas escolhidos).
+export interface OptionGroupOption {
+  id: number;
+  label: string;
+  price_delta: number;
+  image_url: string | null;
+  thumbnail_url: string | null;
+  sort_order: number | null;
+}
+
+export interface OptionGroup {
+  id: number;
+  name: string;
+  min_selections: number;
+  max_selections: number;
+  active: boolean;
+  options: OptionGroupOption[];
 }
 
 export interface ProductMenuRef {

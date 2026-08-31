@@ -10,6 +10,7 @@ import {
   Tab,
   Tabs,
   Tag,
+  makeToast,
   type DropdownOptions,
   type TagProps,
 } from "design-system";
@@ -17,8 +18,9 @@ import api from "../api";
 import { listCompanies } from "../api/companies";
 import ConfirmDialog, { type ConfirmDialogProps } from "../components/ConfirmDialog";
 import Table from "../components/Table";
+import { parseApiError } from "../lib/apiErrors";
 import { useStore } from "../store";
-import type { Category, Company, Menu, Product } from "../types";
+import type { Category, Company, Menu, OptionGroup, Product } from "../types";
 import styles from "./CatalogScreen.module.scss";
 
 // Variant semântica por tag conhecida — o resto cai no default (neutral).
@@ -113,8 +115,8 @@ export default function CatalogScreen() {
   // "categories". ?tab= preserva de qual aba o usuário saiu.
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const initialTab = tabParam === "products" || tabParam === "menus" ? tabParam : "categories";
-  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus">(initialTab);
+  const initialTab = tabParam === "products" || tabParam === "menus" || tabParam === "options" ? tabParam : "categories";
+  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus" | "options">(initialTab);
 
   const [confirmState, setConfirmState] = useState<{
     message: string;
@@ -495,6 +497,60 @@ export default function CatalogScreen() {
     });
   }
 
+  // ── Opções (ORD-139) ───────────────────────────────────────────────────
+  const [optionGroups, setOptionGroups] = useState<OptionGroup[]>([]);
+  const [errOptionGroups, setErrOptionGroups] = useState<string | null>(null);
+  const [optionGroupNameFilter, setOptionGroupNameFilter] = useState("");
+  const optionGroupRequestId = useRef(0);
+
+  async function loadOptionGroups() {
+    if (!hasCompanyContext) return;
+    const thisRequest = ++optionGroupRequestId.current;
+    try {
+      const r = await api.get("/catalog/option-groups", catalogParams());
+      if (thisRequest !== optionGroupRequestId.current) return; // resposta obsoleta, ignorar
+      setOptionGroups(r.data.option_groups ?? r.data);
+      setErrOptionGroups(null);
+    } catch {
+      if (thisRequest !== optionGroupRequestId.current) return;
+      setErrOptionGroups("Erro ao carregar grupos de opção.");
+    }
+  }
+
+  useEffect(() => {
+    if (!hasCompanyContext) { setOptionGroups([]); return; }
+    loadOptionGroups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCompanyContext, companyId]);
+
+  const filteredOptionGroups = optionGroups.filter((g) => {
+    if (optionGroupNameFilter && !g.name.toLowerCase().includes(optionGroupNameFilter.toLowerCase())) return false;
+    return true;
+  });
+
+  function clearOptionGroupFilters() {
+    setOptionGroupNameFilter("");
+  }
+
+  function deleteOptionGroup(id: number, name: string) {
+    setConfirmState({
+      message: `Excluir o grupo de opção "${name}"? Essa ação não pode ser desfeita.`,
+      alertVariant: "warning",
+      alertIcon: "alert-triangle",
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          await api.delete(`/catalog/option-groups/${id}`, catalogParams());
+          loadOptionGroups();
+        } catch (err) {
+          // 409 = grupo vinculado a produto(s) — mensagem da API já nomeia
+          // os produtos, exibida tal como veio (ver QA Explorer de ORD-139).
+          makeToast("error", parseApiError(err).message);
+        }
+      },
+    });
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.title}>Catálogo</div>
@@ -520,6 +576,7 @@ export default function CatalogScreen() {
           <Tab value="categories" label="Categorias" totalizer={categories.length} />
           <Tab value="products" label="Produtos" totalizer={products.length} />
           <Tab value="menus" label="Cardápios" totalizer={menus.length} />
+          <Tab value="options" label="Opções" totalizer={optionGroups.length} />
         </Tabs>
       </div>
 
@@ -816,6 +873,69 @@ export default function CatalogScreen() {
               },
             ]}
             rows={filteredMenus}
+          />
+        </>
+      )}
+
+      {/* ── Opções (ORD-139) ── */}
+      {activeTab === "options" && (
+        <>
+          {errOptionGroups && (
+            <div className={styles.errorRow}>
+              <span className={styles.muted}>{errOptionGroups}</span>
+              <Button size="small" variant="secondary" onClick={loadOptionGroups}>Tentar novamente</Button>
+            </div>
+          )}
+
+          <div className={styles.filterBar}>
+            <InputBase
+              label="Grupo"
+              placeholder="Buscar por nome…"
+              value={optionGroupNameFilter}
+              onChange={(e) => setOptionGroupNameFilter(e.target.value)}
+            />
+            <Button type="button" variant="secondary" onClick={clearOptionGroupFilters}>Limpar filtros</Button>
+            <Button type="button" onClick={() => navigate("/catalog/option-groups/new")}>+ Novo grupo</Button>
+          </div>
+
+          <Table
+            variant="compact"
+            rowKey={(g: OptionGroup) => g.id}
+            emptyMessage="Nenhum grupo de opção encontrado."
+            columns={[
+              { key: "name", header: "Grupo", render: (g: OptionGroup) => g.name },
+              {
+                key: "required", header: "Obrigatoriedade",
+                render: (g: OptionGroup) => (
+                  <Tag variant={g.min_selections >= 1 ? "emphasys" : "neutral"}>
+                    {g.min_selections >= 1 ? "Obrigatório" : "Opcional"}
+                  </Tag>
+                ),
+              },
+              {
+                key: "selection", header: "Seleção",
+                render: (g: OptionGroup) => (
+                  <Tag variant="neutral">{g.max_selections === 1 ? "Única" : "Múltipla"}</Tag>
+                ),
+              },
+              {
+                key: "options", header: "Opções",
+                render: (g: OptionGroup) => (
+                  <span className={styles.muted}>{g.options.length} opç{g.options.length === 1 ? "ão" : "ões"}</span>
+                ),
+              },
+              {
+                key: "action", header: "", render: (g: OptionGroup) => (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <Button size="small" variant="secondary" onClick={() => navigate(`/catalog/option-groups/${g.id}/edit`)}>Editar</Button>
+                    <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deleteOptionGroup(g.id, g.name)}>
+                      Excluir
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+            rows={filteredOptionGroups}
           />
         </>
       )}
