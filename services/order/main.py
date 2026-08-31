@@ -668,7 +668,15 @@ async def list_orders(
     if date_from:
         base_filters.append(Order.created_at >= date_from)
     if date_to:
-        base_filters.append(Order.created_at <= date_to)
+        # ORD-135 (mesmo bug do ORD-134 em list_payments): date_to é
+        # "AAAA-MM-DD" — created_at <= date_to equivale a <= meia-noite
+        # daquele dia, escondendo pedidos criados depois das 00:00. Vira
+        # limite exclusivo no dia seguinte.
+        try:
+            date_to_exclusive = datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1)
+        except ValueError:
+            raise HTTPException(400, "date_to deve estar no formato AAAA-MM-DD")
+        base_filters.append(Order.created_at < date_to_exclusive)
     # Faixa de horário só tem efeito com date_from setado (validado também
     # no frontend — campo desabilitado até "De" ser preenchido). Sem essa
     # trava, "só entre 11h-14h" sozinho filtraria o histórico inteiro por

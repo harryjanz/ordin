@@ -89,6 +89,93 @@ async def test_list_companies_owner_forbidden(client, seed):
     assert r.status_code == 403
 
 
+# ── ORD-135: date_to deve incluir o dia inteiro ───────────────────────────────
+
+async def _make_company(client, created_at):
+    import main as svc
+    doc = f"9{os.urandom(6).hex()}"[:14]
+    co = svc.Company(
+        name=f"__ord135_{os.urandom(3).hex()}__", document=doc,
+        pin_hash="x", state="SP", active=True, created_at=created_at,
+    )
+    async with svc.AsyncSessionLocal() as db:
+        db.add(co)
+        await db.commit()
+        await db.refresh(co)
+    return co.id
+
+
+async def _del_company(client, co_id):
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        await db.execute(sa_delete(svc.Company).where(svc.Company.id == co_id))
+        await db.commit()
+
+
+async def test_list_companies_date_to_inclui_fim_do_dia(client, token_superadmin):
+    from datetime import datetime
+    co_id = await _make_company(client, datetime(2026, 8, 28, 23, 59, 0))
+    try:
+        r = await client.get(
+            "/companies", params={"date_from": "2026-08-28", "date_to": "2026-08-28", "limit": 200},
+            headers=auth(token_superadmin),
+        )
+        assert r.status_code == 200
+        assert any(c["id"] == co_id for c in r.json()["companies"])
+    finally:
+        await _del_company(client, co_id)
+
+
+async def test_list_companies_date_to_nao_vaza_pro_dia_seguinte(client, token_superadmin):
+    from datetime import datetime
+    co_id = await _make_company(client, datetime(2026, 8, 29, 0, 0, 1))
+    try:
+        r = await client.get(
+            "/companies", params={"date_from": "2026-08-28", "date_to": "2026-08-28", "limit": 200},
+            headers=auth(token_superadmin),
+        )
+        assert not any(c["id"] == co_id for c in r.json()["companies"])
+    finally:
+        await _del_company(client, co_id)
+
+
+async def test_list_companies_date_from_igual_date_to_retorna_dia_inteiro(client, token_superadmin):
+    from datetime import datetime
+    co1 = await _make_company(client, datetime(2026, 8, 28, 0, 0, 0))
+    co2 = await _make_company(client, datetime(2026, 8, 28, 23, 59, 59))
+    try:
+        r = await client.get(
+            "/companies", params={"date_from": "2026-08-28", "date_to": "2026-08-28", "limit": 200},
+            headers=auth(token_superadmin),
+        )
+        ids = {c["id"] for c in r.json()["companies"]}
+        assert co1 in ids and co2 in ids
+    finally:
+        await _del_company(client, co1)
+        await _del_company(client, co2)
+
+
+async def test_list_companies_sem_date_to_sem_limite_superior(client, token_superadmin):
+    from datetime import datetime
+    co_id = await _make_company(client, datetime(2026, 8, 29, 0, 0, 1))
+    try:
+        r = await client.get(
+            "/companies", params={"date_from": "2026-08-28", "limit": 200},
+            headers=auth(token_superadmin),
+        )
+        assert any(c["id"] == co_id for c in r.json()["companies"])
+    finally:
+        await _del_company(client, co_id)
+
+
+async def test_list_companies_date_to_formato_invalido_retorna_400(client, token_superadmin):
+    r = await client.get(
+        "/companies", params={"date_to": "28/08/2026"},
+        headers=auth(token_superadmin),
+    )
+    assert r.status_code == 400
+
+
 # ── Terminais ─────────────────────────────────────────────────────────────────
 
 async def test_list_terminals_owner(client, seed):
