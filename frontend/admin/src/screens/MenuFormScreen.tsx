@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, CheckboxMultiselect, InputBase } from "design-system";
 import api from "../api";
+import Breadcrumb from "../components/Breadcrumb";
 import SearchMultiSelect from "../components/SearchMultiSelect";
 import { useCatalogParams } from "../lib/catalogParams";
 import type { Category, Menu, Product } from "../types";
@@ -139,8 +140,15 @@ export default function MenuFormScreen() {
 
   return (
     <div className={styles.page}>
+      <Breadcrumb
+        items={[
+          { label: "Catálogo", href: "/catalog" },
+          { label: "Cardápio", href: "/catalog?tab=menus" },
+          { label: editingMenuId === null ? "Novo cardápio" : "Editar cardápio" },
+        ]}
+      />
       <div className={styles.header}>
-        <h2 className={styles.h2}>{editingMenuId === null ? "Novo cardápio" : "Editar cardápio"}</h2>
+        <h1 className={styles.h1}>{editingMenuId === null ? "Novo cardápio" : "Editar cardápio"}</h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/catalog?tab=menus")}>Voltar</Button>
           <Button onClick={saveMenu} disabled={!canSave} loading={menuSaving}>Salvar</Button>

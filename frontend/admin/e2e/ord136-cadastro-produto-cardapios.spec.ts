@@ -52,7 +52,7 @@ test("editar produto abre em tela dedicada, não em modal", async ({ page }) => 
   await firstEditButton.click();
 
   await expect(page).toHaveURL(/\/catalog\/products\/\d+\/edit/);
-  await expect(page.getByText("Editando produto")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editando produto" })).toBeVisible();
   // Campos do formulário pesado, que antes só existiam dentro do modal.
   await expect(page.getByText("Descrição curta")).toBeVisible();
   await expect(page.getByText("Alérgenos (RDC 727/2022)")).toBeVisible();
@@ -80,7 +80,7 @@ test("criar cardápio em tela dedicada, compor com busca + dropdown", async ({ p
 
   await page.getByRole("button", { name: "+ Novo cardápio" }).click();
   await expect(page).toHaveURL(/\/catalog\/menus\/new/);
-  await expect(page.getByText("Novo cardápio")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Novo cardápio" })).toBeVisible();
   await page.waitForLoadState("networkidle");
 
   // InputBase do design system não expõe o <label> associado via aria (o
@@ -119,6 +119,6 @@ test("editar cardápio existente abre em tela dedicada", async ({ page }) => {
   await firstEditButton.click();
 
   await expect(page).toHaveURL(/\/catalog\/menus\/\d+\/edit/);
-  await expect(page.getByText("Editar cardápio")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Editar cardápio" })).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("05-cardapio-edicao-tela-dedicada.png") });
 });
