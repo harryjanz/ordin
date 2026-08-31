@@ -1,36 +1,25 @@
 import { useState, useEffect, useRef, useCallback, FormEvent } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Button,
-  CheckboxMultiselect,
   CurrencyInput,
   Dropdown,
   InputBase,
   Modal,
-  NumberInput,
   Tab,
   Tabs,
   Tag,
-  TagInput,
-  TextArea,
-  Upload,
-  UploadListFiles,
   type DropdownOptions,
   type TagProps,
-  type UploadFile,
 } from "design-system";
 import api from "../api";
 import { listCompanies } from "../api/companies";
 import ConfirmDialog, { type ConfirmDialogProps } from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { useStore } from "../store";
-import type { Allergen, Category, Company, Menu, Product, ProductMenuRef } from "../types";
+import type { Category, Company, Menu, Product } from "../types";
 import styles from "./CatalogScreen.module.scss";
-
-// Conjunto sugerido pra tags (usuário aprovou "adotar os padrões sugeridos,
-// mas podem surgir mais") — o TagInput do DS não tem suporte nativo a
-// sugestões, então isso vira só um texto de apoio; qualquer tag livre é aceita.
-const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
 
 // Variant semântica por tag conhecida — o resto cai no default (neutral).
 const TAG_VARIANTS: Record<string, TagProps["variant"]> = {
@@ -42,14 +31,6 @@ const TAG_VARIANTS: Record<string, TagProps["variant"]> = {
 function tagVariant(tag: string): TagProps["variant"] {
   return TAG_VARIANTS[tag.toLowerCase()] ?? "neutral";
 }
-
-// Upload do DS espera o limite de tamanho em MB.
-// Valor redondo em MB de propósito — o Upload do DS monta a mensagem de erro
-// de tamanho como `Utilize arquivos com menos de ${maxFileSize} MB` direto
-// com esse número (não dá pra customizar o texto, só o valor), então um
-// valor fracionário tipo 500/1024 vira "0.48828125 MB" na tela do usuário.
-const IMAGE_MAX_SIZE_MB = 2;
-const IMAGE_TYPES = ["image/jpeg", "image/png"];
 
 // Exclusão definitiva (irreversível) — cor de erro só no texto pra destacar
 // do resto das ações sem precisar de uma variant "danger" (o DS não tem).
@@ -80,7 +61,6 @@ const MENU_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
 
 // 0=segunda..6=domingo, mesmo datetime.weekday() do backend (ORD-125).
 const WEEKDAY_ABBR = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
-const WEEKDAY_OPTIONS = WEEKDAY_ABBR.map((label, i) => ({ value: String(i), label, disabled: false }));
 
 function formatWeekdays(weekdays: number[]): string {
   const sorted = [...weekdays].sort((a, b) => a - b);
@@ -90,41 +70,8 @@ function formatWeekdays(weekdays: number[]): string {
   return sorted.map((d) => WEEKDAY_ABBR[d]).join(", ");
 }
 
-// Um produto pode estar vinculado ao mesmo cardápio direto E via categoria
-// ao mesmo tempo (achado ao testar ORD-125 ao vivo) — mescla numa linha só
-// em vez de mostrar o mesmo cardápio duas vezes.
-function formatProductMenus(refs: ProductMenuRef[]): string[] {
-  const byMenu = new Map<number, { name: string; direct: boolean; viaCategories: string[] }>();
-  for (const r of refs) {
-    const entry = byMenu.get(r.id) ?? { name: r.name, direct: false, viaCategories: [] };
-    if (r.via_category) entry.viaCategories.push(r.via_category);
-    else entry.direct = true;
-    byMenu.set(r.id, entry);
-  }
-  return Array.from(byMenu.values(), (e) => {
-    const parts: string[] = [];
-    if (e.direct) parts.push("direto");
-    if (e.viaCategories.length) parts.push(`via ${e.viaCategories.join(", ")}`);
-    return `${e.name} (${parts.join(" + ")})`;
-  });
-}
-
-interface EditProdState {
-  id: number;
-  name: string;
-  price: number;
-  category_id: number;
-  image_url: string | null;
-  thumbnail_url: string | null;
-  description: string;
-  description_long: string;
-  calories: number | null;
-  sku: string;
-  tags: string[];
-  allergen_ids: string[];
-}
-
 export default function CatalogScreen() {
+  const navigate = useNavigate();
   const role = useStore((s) => s.role);
   // superadmin e admin são equivalentes (gestão da plataforma, ver
   // docs/ARQUITETURA.md §1.2) — administram catálogo de qualquer empresa
@@ -161,15 +108,13 @@ export default function CatalogScreen() {
 
   // Cadastro em abas + padrão Empresa (2026-08-24) — filterBar + Table +
   // Modal, mesmo modelo de Usuários/Terminais/Pagamento em CompanyScreen.
-  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus">("categories");
-
-  const [allergens, setAllergens] = useState<Allergen[]>([]);
-  useEffect(() => { loadAllergens(); }, []);
-  async function loadAllergens() {
-    // Master data global, não filtrado por empresa — sem catalogParams.
-    const r = await api.get("/catalog/allergens");
-    setAllergens(r.data.allergens ?? r.data);
-  }
+  // ORD-136 — produto/cardápio agora navegam pra tela dedicada e voltam via
+  // navigate("/catalog"), o que remontava a tela sempre na aba padrão
+  // "categories". ?tab= preserva de qual aba o usuário saiu.
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const initialTab = tabParam === "products" || tabParam === "menus" ? tabParam : "categories";
+  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus">(initialTab);
 
   const [confirmState, setConfirmState] = useState<{
     message: string;
@@ -402,16 +347,10 @@ export default function CatalogScreen() {
   const [newProd, setNewProd] = useState<{ name: string; price: number | null; category_id: number | null }>({
     name: "", price: null, category_id: null,
   });
-  const [editProd, setEditProd] = useState<EditProdState | null>(null); // não-nulo = editando
-  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
   const [productFormError, setProductFormError] = useState("");
   const [productSaving, setProductSaving] = useState(false);
-  // ORD-126 — a quais cardápios este produto pertence (direto ou via
-  // categoria), read-only aqui; edição de fato é na aba Cardápios.
-  const [editProdMenus, setEditProdMenus] = useState<ProductMenuRef[]>([]);
 
   function openNewProduct() {
-    setEditProd(null);
     setNewProd({
       name: "",
       price: null,
@@ -420,32 +359,7 @@ export default function CatalogScreen() {
       // olhando), só que agora como valor inicial editável, não implícito.
       category_id: productCategoryFilter ? Number(productCategoryFilter) : null,
     });
-    setUploadFiles([]);
     setProductFormError("");
-    setProductModalOpen(true);
-  }
-
-  function openEditProduct(p: Product) {
-    setEditProd({
-      id: p.id,
-      name: p.name,
-      price: p.price,
-      category_id: p.category_id,
-      image_url: p.image_url,
-      thumbnail_url: p.thumbnail_url,
-      description: p.description ?? "",
-      description_long: p.description_long ?? "",
-      calories: p.calories,
-      sku: p.sku ?? "",
-      tags: p.tags ?? [],
-      allergen_ids: (p.allergens ?? []).map((a) => String(a.id)),
-    });
-    setUploadFiles([]);
-    setProductFormError("");
-    setEditProdMenus([]);
-    api.get(`/catalog/products/${p.id}/menus`, catalogParams())
-      .then((r) => setEditProdMenus(r.data.menus ?? []))
-      .catch(() => null);
     setProductModalOpen(true);
   }
 
@@ -458,8 +372,6 @@ export default function CatalogScreen() {
   // (que tem campos controlados, diferente do de categoria, só com ref).
   const closeProductModal = useCallback(() => {
     setProductModalOpen(false);
-    setEditProd(null);
-    setUploadFiles([]);
   }, []);
 
   async function saveNewProduct(e: FormEvent) {
@@ -480,71 +392,6 @@ export default function CatalogScreen() {
     } finally {
       setProductSaving(false);
     }
-  }
-
-  async function saveEditProd(e: FormEvent) {
-    e.preventDefault();
-    if (!editProd || !editProd.name.trim() || editProd.price <= 0) return;
-    setProductSaving(true);
-    setProductFormError("");
-    try {
-      await api.put(`/catalog/products/${editProd.id}`, {
-        name: editProd.name.trim(),
-        price: editProd.price,
-        category_id: editProd.category_id,
-        description: editProd.description.trim() || null,
-        description_long: editProd.description_long.trim() || null,
-        calories: editProd.calories,
-        sku: editProd.sku.trim() || null,
-        tags: editProd.tags,
-        allergen_ids: editProd.allergen_ids.map(Number),
-      }, catalogParams());
-      closeProductModal();
-      loadProducts();
-    } catch {
-      setProductFormError("Erro ao salvar produto.");
-    } finally {
-      setProductSaving(false);
-    }
-  }
-
-  async function handleImageFiles(files: UploadFile[]) {
-    const picked = files[0];
-    if (!editProd || !picked) return;
-    if (picked.status === "error-read") {
-      setUploadFiles([picked]);
-      return;
-    }
-    const productId = editProd.id;
-    setUploadFiles([{ ...picked, status: "loading" }]);
-    try {
-      const formData = new FormData();
-      formData.append("image", picked.file);
-      const r = await api.post(`/catalog/products/${productId}/image`, formData, catalogParams());
-      setEditProd((prev) => (prev && prev.id === productId
-        ? { ...prev, image_url: r.data.image_url, thumbnail_url: r.data.thumbnail_url }
-        : prev));
-      setUploadFiles([]);
-      loadProducts();
-    } catch {
-      setUploadFiles([{ ...picked, status: "error-send" }]);
-    }
-  }
-
-  function removeProductImage() {
-    if (!editProd) return;
-    const productId = editProd.id;
-    setConfirmState({
-      message: "Remover a imagem deste produto?",
-      onConfirm: async () => {
-        setConfirmState(null);
-        const r = await api.delete(`/catalog/products/${productId}/image`, catalogParams());
-        setEditProd((prev) => (prev && prev.id === productId
-          ? { ...prev, image_url: r.data.image_url, thumbnail_url: r.data.thumbnail_url }
-          : prev));
-        loadProducts();
-      },
-    });
   }
 
   function deactivateProduct(id: number) {
@@ -617,83 +464,6 @@ export default function CatalogScreen() {
   function clearMenuFilters() {
     setMenuNameFilter("");
     setMenuStatusFilter("active");
-  }
-
-  interface MenuFormState {
-    name: string;
-    weekdays: string[];
-    start_time: string;
-    end_time: string;
-    category_ids: string[];
-    product_ids: string[];
-  }
-
-  const [menuModalOpen, setMenuModalOpen] = useState(false);
-  const [editingMenuId, setEditingMenuId] = useState<number | null>(null); // null = criando
-  const [menuForm, setMenuForm] = useState<MenuFormState>({
-    name: "", weekdays: [], start_time: "", end_time: "", category_ids: [], product_ids: [],
-  });
-  const [menuProductSearch, setMenuProductSearch] = useState("");
-  const [menuFormError, setMenuFormError] = useState("");
-  const [menuSaving, setMenuSaving] = useState(false);
-
-  const menuCategoryOptions = categories.map((c) => ({ value: String(c.id), label: c.name, disabled: false }));
-  const menuProductOptions = products
-    .filter((p) => !menuProductSearch || p.name.toLowerCase().includes(menuProductSearch.toLowerCase()))
-    .map((p) => ({ value: String(p.id), label: p.name, disabled: false }));
-
-  function openNewMenu() {
-    setEditingMenuId(null);
-    setMenuForm({ name: "", weekdays: [], start_time: "", end_time: "", category_ids: [], product_ids: [] });
-    setMenuProductSearch("");
-    setMenuFormError("");
-    setMenuModalOpen(true);
-  }
-
-  function openEditMenu(m: Menu) {
-    setEditingMenuId(m.id);
-    setMenuForm({
-      name: m.name,
-      weekdays: m.weekdays.map(String),
-      start_time: m.start_time,
-      end_time: m.end_time,
-      category_ids: m.categories.map((c) => String(c.id)),
-      product_ids: m.products.map((p) => String(p.id)),
-    });
-    setMenuProductSearch("");
-    setMenuFormError("");
-    setMenuModalOpen(true);
-  }
-
-  async function saveMenu(e: FormEvent) {
-    e.preventDefault();
-    if (!menuForm.name.trim() || menuForm.weekdays.length === 0 || !menuForm.start_time || !menuForm.end_time) return;
-    setMenuSaving(true);
-    setMenuFormError("");
-    try {
-      const basePayload = {
-        name: menuForm.name.trim(),
-        weekdays: menuForm.weekdays.map(Number),
-        start_time: menuForm.start_time,
-        end_time: menuForm.end_time,
-      };
-      const menuId = editingMenuId ?? (
-        await api.post("/catalog/menus", basePayload, catalogParams())
-      ).data.id;
-      if (editingMenuId !== null) {
-        await api.put(`/catalog/menus/${editingMenuId}`, basePayload, catalogParams());
-      }
-      await api.put(`/catalog/menus/${menuId}/composition`, {
-        category_ids: menuForm.category_ids.map(Number),
-        product_ids: menuForm.product_ids.map(Number),
-      }, catalogParams());
-      setMenuModalOpen(false);
-      loadMenus();
-    } catch {
-      setMenuFormError("Erro ao salvar cardápio.");
-    } finally {
-      setMenuSaving(false);
-    }
   }
 
   function deactivateMenu(id: number) {
@@ -926,7 +696,7 @@ export default function CatalogScreen() {
               {
                 key: "action", header: "", render: (p: Product) => (
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-                    <Button size="small" variant="secondary" onClick={() => openEditProduct(p)}>Editar</Button>
+                    <Button size="small" variant="secondary" onClick={() => navigate(`/catalog/products/${p.id}/edit`)}>Editar</Button>
                     {p.active ? (
                       <Button size="small" variant="secondary" onClick={() => deactivateProduct(p.id)}>Desativar</Button>
                     ) : (
@@ -944,174 +714,41 @@ export default function CatalogScreen() {
 
           <Modal
             open={productModalOpen}
-            width={editProd ? 664 : 480}
+            width={480}
             onClose={closeProductModal}
             onBackdropClick={closeProductModal}
             onCloseButtonClick={closeProductModal}
           >
-            {!editProd ? (
-              <form onSubmit={saveNewProduct} className={styles.modalForm}>
-                <div className={styles.formTitle}>Novo produto</div>
-                {productFormError && <Alert variant="error" text={productFormError} fullWidth />}
-                <InputBase
-                  label="Nome do produto"
-                  value={newProd.name}
-                  onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
-                  autoFocus
-                />
-                <CurrencyInput
-                  label="Preço"
-                  value={newProd.price}
-                  onChange={(value: number) => setNewProd({ ...newProd, price: value })}
-                />
-                <Dropdown
-                  label="Categoria"
-                  value={activeCategoryOptions.find((o) => o.value === String(newProd.category_id ?? "")) ?? null}
-                  onValueSelected={(opt) => setNewProd({ ...newProd, category_id: opt.value ? Number(opt.value) : null })}
-                  options={activeCategoryOptions}
-                />
-                <div className={styles.formHint}>
-                  Imagem, descrição, alérgenos e outros detalhes podem ser adicionados depois de criar o produto, em "Editar".
-                </div>
-                <div className={styles.formActions}>
-                  <Button type="submit" disabled={productSaving || !newProd.name.trim() || !newProd.price || !newProd.category_id}>
-                    Adicionar produto
-                  </Button>
-                  <Button type="button" variant="secondary" onClick={closeProductModal}>Cancelar</Button>
-                </div>
-              </form>
-            ) : (
-              <form onSubmit={saveEditProd} className={styles.modalForm}>
-                <div className={styles.formTitle}>Editando produto</div>
-                {productFormError && <Alert variant="error" text={productFormError} fullWidth />}
-                <div className={styles.formRow}>
-                  <div className={styles.formRowField}>
-                    <InputBase label="Nome" value={editProd.name} autoFocus
-                      onChange={(e) => setEditProd({ ...editProd, name: e.target.value })} />
-                  </div>
-                  <div className={styles.formRowField}>
-                    <CurrencyInput label="Preço"
-                      value={editProd.price}
-                      onChange={(value: number) => setEditProd({ ...editProd, price: value })} />
-                  </div>
-                </div>
-                <Dropdown
-                  label="Categoria"
-                  value={activeCategoryOptions.find((o) => o.value === String(editProd.category_id)) ?? null}
-                  onValueSelected={(opt) => setEditProd({ ...editProd, category_id: Number(opt.value) })}
-                  options={activeCategoryOptions}
-                />
-
-                {editProdMenus.length > 0 && (
-                  <div className={styles.menusInfo}>
-                    <div className={styles.formLabel}>Pertence aos cardápios</div>
-                    {formatProductMenus(editProdMenus).map((line) => (
-                      <div key={line}>{line}</div>
-                    ))}
-                  </div>
-                )}
-
-                <TextArea
-                  label="Descrição curta"
-                  value={editProd.description}
-                  onChange={(e) => setEditProd({ ...editProd, description: e.target.value })}
-                  maxLength={500}
-                  helperMessage="Aparece na grade/listagem do totem"
-                />
-
-                <TextArea
-                  label="Descrição longa"
-                  value={editProd.description_long}
-                  onChange={(e) => setEditProd({ ...editProd, description_long: e.target.value })}
-                  maxLength={2000}
-                  autoSize
-                  helperMessage="Detalhe completo, mostrado só ao abrir o item"
-                />
-
-                <div className={styles.formRow}>
-                  <div className={styles.formRowField}>
-                    <NumberInput
-                      label="Calorias (kcal)"
-                      value={editProd.calories ?? undefined}
-                      onChange={(value: number) => setEditProd({ ...editProd, calories: value })}
-                    />
-                  </div>
-                  <div className={styles.formRowField}>
-                    <InputBase
-                      label="SKU"
-                      value={editProd.sku}
-                      placeholder="Opcional, único por empresa"
-                      onChange={(e) => setEditProd({ ...editProd, sku: e.target.value })}
-                    />
-                  </div>
-                </div>
-
-                <TagInput
-                  label="Tags"
-                  value={editProd.tags}
-                  onValueChange={(tags) => setEditProd({ ...editProd, tags })}
-                  placeholder={`Sugestões: ${SUGGESTED_TAGS}`}
-                />
-
-                <CheckboxMultiselect
-                  key={editProd.id}
-                  id={`edit-prod-${editProd.id}-allergens`}
-                  label="Alérgenos (RDC 727/2022)"
-                  options={allergens.map((a) => ({ value: String(a.id), label: a.name, disabled: false }))}
-                  initialSelection={editProd.allergen_ids}
-                  onSelectOption={(option, checked) => {
-                    setEditProd((prev) => {
-                      if (!prev) return prev;
-                      const ids = checked
-                        ? [...prev.allergen_ids, option.value]
-                        : prev.allergen_ids.filter((id) => id !== option.value);
-                      return { ...prev, allergen_ids: ids };
-                    });
-                  }}
-                />
-
-                <div className={styles.imageSection}>
-                  <div className={styles.formLabel}>Imagem do produto</div>
-                  {editProd.thumbnail_url ? (
-                    <div className={styles.imagePreview}>
-                      <img
-                        src={editProd.thumbnail_url}
-                        alt={editProd.name}
-                        className={styles.thumbnailImg}
-                        onClick={() => setPreviewImage({ url: editProd.image_url ?? editProd.thumbnail_url!, alt: editProd.name })}
-                      />
-                      <Button type="button" size="small" variant="secondary" onClick={removeProductImage}>
-                        Remover imagem
-                      </Button>
-                    </div>
-                  ) : (
-                    <>
-                      <Upload
-                        fullWidth
-                        maxFileSize={IMAGE_MAX_SIZE_MB}
-                        multipleFiles={false}
-                        types={IMAGE_TYPES}
-                        showMaxFileSize={false}
-                        helperMessage="JPG ou PNG, até 2 MB"
-                        errorMessage="Envie um arquivo JPG ou PNG de até 2 MB"
-                        onCallbackUpload={handleImageFiles}
-                      />
-                      <UploadListFiles
-                        items={uploadFiles}
-                        removable={false}
-                      />
-                    </>
-                  )}
-                </div>
-
-                <div className={styles.formActions}>
-                  <Button type="submit" disabled={productSaving || !editProd.name.trim() || editProd.price <= 0}>
-                    Salvar
-                  </Button>
-                  <Button type="button" variant="secondary" onClick={closeProductModal}>Cancelar</Button>
-                </div>
-              </form>
-            )}
+            <form onSubmit={saveNewProduct} className={styles.modalForm}>
+              <div className={styles.formTitle}>Novo produto</div>
+              {productFormError && <Alert variant="error" text={productFormError} fullWidth />}
+              <InputBase
+                label="Nome do produto"
+                value={newProd.name}
+                onChange={(e) => setNewProd({ ...newProd, name: e.target.value })}
+                autoFocus
+              />
+              <CurrencyInput
+                label="Preço"
+                value={newProd.price}
+                onChange={(value: number) => setNewProd({ ...newProd, price: value })}
+              />
+              <Dropdown
+                label="Categoria"
+                value={activeCategoryOptions.find((o) => o.value === String(newProd.category_id ?? "")) ?? null}
+                onValueSelected={(opt) => setNewProd({ ...newProd, category_id: opt.value ? Number(opt.value) : null })}
+                options={activeCategoryOptions}
+              />
+              <div className={styles.formHint}>
+                Imagem, descrição, alérgenos e outros detalhes podem ser adicionados depois de criar o produto, em "Editar".
+              </div>
+              <div className={styles.formActions}>
+                <Button type="submit" disabled={productSaving || !newProd.name.trim() || !newProd.price || !newProd.category_id}>
+                  Adicionar produto
+                </Button>
+                <Button type="button" variant="secondary" onClick={closeProductModal}>Cancelar</Button>
+              </div>
+            </form>
           </Modal>
         </>
       )}
@@ -1140,7 +777,7 @@ export default function CatalogScreen() {
               options={MENU_STATUS_FILTER_OPTIONS}
             />
             <Button type="button" variant="secondary" onClick={clearMenuFilters}>Limpar filtros</Button>
-            <Button type="button" onClick={openNewMenu}>+ Novo cardápio</Button>
+            <Button type="button" onClick={() => navigate("/catalog/menus/new")}>+ Novo cardápio</Button>
           </div>
 
           <Table
@@ -1165,7 +802,7 @@ export default function CatalogScreen() {
               {
                 key: "action", header: "", render: (m: Menu) => (
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                    <Button size="small" variant="secondary" onClick={() => openEditMenu(m)}>Editar</Button>
+                    <Button size="small" variant="secondary" onClick={() => navigate(`/catalog/menus/${m.id}/edit`)}>Editar</Button>
                     {m.active ? (
                       <Button size="small" variant="secondary" onClick={() => deactivateMenu(m.id)}>Desativar</Button>
                     ) : (
@@ -1180,106 +817,6 @@ export default function CatalogScreen() {
             ]}
             rows={filteredMenus}
           />
-
-          <Modal
-            open={menuModalOpen}
-            width={600}
-            onClose={() => setMenuModalOpen(false)}
-            onBackdropClick={() => setMenuModalOpen(false)}
-            onCloseButtonClick={() => setMenuModalOpen(false)}
-          >
-            <form onSubmit={saveMenu} className={styles.modalForm}>
-              <div className={styles.formTitle}>{editingMenuId === null ? "Novo cardápio" : "Editar cardápio"}</div>
-              {menuFormError && <Alert variant="error" text={menuFormError} fullWidth />}
-
-              <InputBase
-                label="Nome do cardápio"
-                placeholder="ex: Café da manhã"
-                value={menuForm.name}
-                onChange={(e) => setMenuForm({ ...menuForm, name: e.target.value })}
-                autoFocus
-              />
-
-              <div className={styles.formRow}>
-                <div className={styles.formRowField}>
-                  <InputBase
-                    label="Horário início"
-                    type="time"
-                    value={menuForm.start_time}
-                    onChange={(e) => setMenuForm({ ...menuForm, start_time: e.target.value })}
-                  />
-                </div>
-                <div className={styles.formRowField}>
-                  <InputBase
-                    label="Horário fim"
-                    type="time"
-                    value={menuForm.end_time}
-                    onChange={(e) => setMenuForm({ ...menuForm, end_time: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <CheckboxMultiselect
-                key={`${editingMenuId ?? "new"}-weekdays`}
-                id="menu-weekdays"
-                label="Dias da semana"
-                options={WEEKDAY_OPTIONS}
-                initialSelection={menuForm.weekdays}
-                onSelectOption={(option, checked) => {
-                  setMenuForm((prev) => ({
-                    ...prev,
-                    weekdays: checked ? [...prev.weekdays, option.value] : prev.weekdays.filter((v) => v !== option.value),
-                  }));
-                }}
-              />
-
-              <CheckboxMultiselect
-                key={`${editingMenuId ?? "new"}-categories`}
-                id="menu-categories"
-                label="Categorias inteiras"
-                helperMessage="Todo produto da categoria entra no cardápio, inclusive os criados depois"
-                options={menuCategoryOptions}
-                initialSelection={menuForm.category_ids}
-                onSelectOption={(option, checked) => {
-                  setMenuForm((prev) => ({
-                    ...prev,
-                    category_ids: checked ? [...prev.category_ids, option.value] : prev.category_ids.filter((v) => v !== option.value),
-                  }));
-                }}
-              />
-
-              <InputBase
-                label="Buscar produto avulso"
-                placeholder="Filtrar por nome…"
-                value={menuProductSearch}
-                onChange={(e) => setMenuProductSearch(e.target.value)}
-              />
-              <CheckboxMultiselect
-                key={`${editingMenuId ?? "new"}-products`}
-                id="menu-products"
-                label="Produtos avulsos"
-                options={menuProductOptions}
-                initialSelection={menuForm.product_ids}
-                emptyMessage="Nenhum produto encontrado"
-                onSelectOption={(option, checked) => {
-                  setMenuForm((prev) => ({
-                    ...prev,
-                    product_ids: checked ? [...prev.product_ids, option.value] : prev.product_ids.filter((v) => v !== option.value),
-                  }));
-                }}
-              />
-
-              <div className={styles.formActions}>
-                <Button
-                  type="submit"
-                  disabled={menuSaving || !menuForm.name.trim() || menuForm.weekdays.length === 0 || !menuForm.start_time || !menuForm.end_time}
-                >
-                  Salvar
-                </Button>
-                <Button type="button" variant="secondary" onClick={() => setMenuModalOpen(false)}>Cancelar</Button>
-              </div>
-            </form>
-          </Modal>
         </>
       )}
       </>

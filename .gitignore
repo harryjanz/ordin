@@ -14,6 +14,11 @@ venv/
 *.tfvars
 node_modules/
 docs/exemples/
+
+# material de apoio/pesquisa que não deve entrar no repo
+docs/analise-priorizacao-combo-modificadores.md
+docs/estudo-design-system-totem.md
+docs/estudo-nfce.md
 frontend/admin/e2e/.test-data-manifest.json
 
 # design system vendorizado (ver frontend/admin/vendor/design-system/README.md)
