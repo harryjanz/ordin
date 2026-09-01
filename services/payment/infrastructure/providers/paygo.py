@@ -7,7 +7,11 @@ import httpx
 
 from domain.interfaces.payment_provider import IPaymentProvider
 from domain.schemas import (
-    ProviderConfig, TransactionResult, TransactionStatus, PROVIDER_BASE_URLS,
+    PROVIDER_BASE_URLS,
+    ProviderConfig,
+    RefundResult,
+    TransactionResult,
+    TransactionStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -186,6 +190,13 @@ class PayGoProvider(IPaymentProvider):
                 headers=self._headers(),
             )
         return resp.status_code == 200
+
+    async def refund_transaction(self, provider_transaction_id: str) -> RefundResult:
+        # Fora do escopo do ORD-147 — PayGo/ControlPay não tem reembolso via
+        # API integrado ainda; cancelamento same-day continua sendo o único
+        # mecanismo. Nunca é chamado na prática: o endpoint de reembolso só
+        # roteia pra provider == "mercadopago".
+        raise NotImplementedError("Reembolso PayGo fora do escopo — usar cancelamento no mesmo dia")
 
     async def test_connection(self, terminal_ref: str) -> dict:
         """Inicia R$ 0,01 via PayGo, aguarda acionamento da máquina, cancela imediatamente."""

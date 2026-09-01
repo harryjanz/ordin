@@ -731,3 +731,227 @@ async def test_webhook_rota_antiga_nao_existe_mais(client):
     # só aceita DELETE — de qualquer forma, não processa mais nada como webhook.
     r = await client.post("/payments/webhook?source=mercadopago", json={})
     assert r.status_code in (404, 405)
+
+
+# ── ORD-147: reembolso de transação Mercado Pago (Point e PIX) ───────────────
+
+async def _make_mp_tx(order_ref, method, provider_transaction_id, created_at=None, status="approved", company_id=1):
+    import main as svc
+    from datetime import datetime
+    tx = svc.Transaction(
+        company_id=company_id, order_ref=order_ref, terminal_id=1, method=method,
+        amount=10.00, status=status, provider="mercadopago", environment="sandbox",
+        provider_transaction_id=provider_transaction_id,
+        created_at=created_at or datetime.utcnow(),
+    )
+    async with svc.AsyncSessionLocal() as db:
+        db.add(tx)
+        await db.commit()
+        await db.refresh(tx)
+    return tx.id
+
+
+async def _get_tx(tx_id):
+    import main as svc
+    from sqlalchemy import select
+    async with svc.AsyncSessionLocal() as db:
+        result = await db.execute(select(svc.Transaction).where(svc.Transaction.id == tx_id))
+        return result.scalars().first()
+
+
+async def test_refund_payment_mercadopago_card_success(client, token_owner):
+    order_ref = f"R147CA{os.urandom(3).hex()}"
+    tx_id = await _make_mp_tx(order_ref, "credit", "ORDTEST00010")
+    try:
+        with respx.mock:
+            respx.get(f"{_company_url()}/internal/terminals/1").mock(
+                return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
+            )
+            respx.post("https://api.mercadopago.com/v1/orders/ORDTEST00010/refund").mock(
+                return_value=httpx.Response(201, json={"id": "ORDTEST00010", "status": "refunded"})
+            )
+            r = await client.post(
+                f"/payments/{tx_id}/refund",
+                json={"reason": "Contestação do cliente"},
+                headers={"Authorization": f"Bearer {token_owner}"},
+            )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is True
+        assert data["status"] == "refunded"
+        tx = await _get_tx(tx_id)
+        assert tx.status == "refunded"
+        assert tx.refunded_at is not None
+        assert tx.refund_reason == "Contestação do cliente"
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_refund_payment_mercadopago_pix_success(client, token_owner):
+    order_ref = f"R147PX{os.urandom(3).hex()}"
+    tx_id = await _make_mp_tx(order_ref, "pix", "175900001122")
+    try:
+        with respx.mock:
+            respx.get(f"{_company_url()}/internal/terminals/1").mock(
+                return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
+            )
+            respx.post("https://api.mercadopago.com/v1/payments/175900001122/refunds").mock(
+                return_value=httpx.Response(201, json={"id": 1, "payment_id": 175900001122, "status": "approved"})
+            )
+            r = await client.post(
+                f"/payments/{tx_id}/refund",
+                json={"reason": "Erro operacional"},
+                headers={"Authorization": f"Bearer {token_owner}"},
+            )
+        assert r.status_code == 200
+        tx = await _get_tx(tx_id)
+        assert tx.status == "refunded"
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_refund_payment_falha_do_provider_nao_muda_status(client, token_owner):
+    """QA Explorer: falha na chamada ao Mercado Pago não marca a transação
+    como reembolsada — diferente do cancelamento PayGo (best-effort)."""
+    order_ref = f"R147FL{os.urandom(3).hex()}"
+    tx_id = await _make_mp_tx(order_ref, "credit", "ORDTEST00011")
+    try:
+        with respx.mock:
+            respx.get(f"{_company_url()}/internal/terminals/1").mock(
+                return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
+            )
+            respx.post("https://api.mercadopago.com/v1/orders/ORDTEST00011/refund").mock(
+                return_value=httpx.Response(400, json={"message": "Saldo insuficiente"})
+            )
+            r = await client.post(
+                f"/payments/{tx_id}/refund",
+                json={"reason": "teste"},
+                headers={"Authorization": f"Bearer {token_owner}"},
+            )
+        assert r.status_code == 502
+        assert "Saldo insuficiente" in r.json()["detail"]
+        tx = await _get_tx(tx_id)
+        assert tx.status == "approved"
+        assert tx.refunded_at is None
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_refund_payment_fora_do_prazo_retorna_422(client, token_owner):
+    """ORD-147: cartão via Point aceita reembolso só até 90 dias da
+    aprovação — checagem preventiva no backend, sem sequer chamar o MP.
+
+    Margem de 10 dias além do limite (não 1) de propósito: o MySQL DATETIME
+    trunca microssegundos ao gravar, então um teste com timedelta(days=91)
+    contra o limite de 90 tem, na prática, menos de 1 segundo de margem real
+    — qualquer jitter de relógio (NTP, scheduler) já derruba a asserção sem
+    nenhum bug na lógica de produção. Descoberto e reproduzido nesta sessão
+    (2026-09-01) com print de debug direto no endpoint."""
+    from datetime import datetime, timedelta
+    order_ref = f"R147EX{os.urandom(3).hex()}"
+    old_date = datetime.utcnow() - timedelta(days=100)
+    tx_id = await _make_mp_tx(order_ref, "credit", "ORDTEST00012", created_at=old_date)
+    try:
+        with respx.mock:
+            respx.get(f"{_company_url()}/internal/terminals/1").mock(
+                return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
+            )
+            # Nenhuma rota de refund registrada — se o código chamar o MP
+            # mesmo assim, respx derruba o teste com rota não mockada.
+            r = await client.post(
+                f"/payments/{tx_id}/refund",
+                json={"reason": "teste"},
+                headers={"Authorization": f"Bearer {token_owner}"},
+            )
+        assert r.status_code == 422
+        tx = await _get_tx(tx_id)
+        assert tx.status == "approved"
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_refund_payment_pix_dentro_do_prazo_de_cartao_mas_fora_do_prazo_pix_nao_se_aplica(client, token_owner):
+    """PIX aceita até 180 dias — uma transação com 100 dias já estaria fora
+    do prazo de cartão (90d) mas ainda dentro do prazo de PIX (180d).
+    Confirma que a janela usada é por método, não uma constante única."""
+    from datetime import datetime, timedelta
+    order_ref = f"R147PW{os.urandom(3).hex()}"
+    date_100d_ago = datetime.utcnow() - timedelta(days=100)
+    tx_id = await _make_mp_tx(order_ref, "pix", "175900002233", created_at=date_100d_ago)
+    try:
+        with respx.mock:
+            respx.get(f"{_company_url()}/internal/terminals/1").mock(
+                return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
+            )
+            respx.post("https://api.mercadopago.com/v1/payments/175900002233/refunds").mock(
+                return_value=httpx.Response(201, json={"id": 1, "status": "approved"})
+            )
+            r = await client.post(
+                f"/payments/{tx_id}/refund",
+                json={"reason": "teste"},
+                headers={"Authorization": f"Bearer {token_owner}"},
+            )
+        assert r.status_code == 200
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_refund_payment_transacao_ja_reembolsada_retorna_400(client, token_owner):
+    order_ref = f"R147RF{os.urandom(3).hex()}"
+    tx_id = await _make_mp_tx(order_ref, "credit", "ORDTEST00013", status="refunded")
+    try:
+        r = await client.post(
+            f"/payments/{tx_id}/refund",
+            json={"reason": "teste"},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        assert r.status_code == 400
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_refund_payment_transacao_cancelada_retorna_400(client, token_owner):
+    order_ref = f"R147CN{os.urandom(3).hex()}"
+    tx_id = await _make_mp_tx(order_ref, "credit", "ORDTEST00014", status="cancelled")
+    try:
+        r = await client.post(
+            f"/payments/{tx_id}/refund",
+            json={"reason": "teste"},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        assert r.status_code == 400
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_refund_payment_provider_paygo_retorna_400(client, token_owner):
+    """Reembolso é exclusivo Mercado Pago — PayGo/mock continuam usando
+    POST /payments/{tx_id}/cancel, não este endpoint."""
+    import main as svc
+    tx = svc.Transaction(
+        company_id=1, order_ref=f"R147PG{os.urandom(3).hex()}", terminal_id=1, method="credit",
+        amount=10.00, status="approved", provider="paygo", provider_transaction_id="INTENCAO001",
+    )
+    async with svc.AsyncSessionLocal() as db:
+        db.add(tx)
+        await db.commit()
+        await db.refresh(tx)
+    tx_id = tx.id
+    try:
+        r = await client.post(
+            f"/payments/{tx_id}/refund",
+            json={"reason": "teste"},
+            headers={"Authorization": f"Bearer {token_owner}"},
+        )
+        assert r.status_code == 400
+    finally:
+        await _del_tx(client, tx_id)
+
+
+async def test_refund_payment_inexistente_retorna_404(client, token_owner):
+    r = await client.post(
+        "/payments/999999/refund",
+        json={"reason": "teste"},
+        headers={"Authorization": f"Bearer {token_owner}"},
+    )
+    assert r.status_code == 404

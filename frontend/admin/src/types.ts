@@ -306,6 +306,9 @@ export interface Transaction {
   cancelled_at: string | null;
   cancel_reason: string | null;
   refused_reason: string | null;
+  // ORD-147 — reembolso Mercado Pago (distinto de cancelamento).
+  refunded_at: string | null;
+  refund_reason: string | null;
 }
 
 // ORD-101/ORD-102 — GET /payments/analytics

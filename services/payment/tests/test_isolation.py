@@ -88,6 +88,27 @@ async def test_cancel_sem_role_de_escrita_retorna_403(client, token_kiosk):
     assert r.status_code == 403
 
 
+# ORD-147: reembolso de transação de outra empresa retorna 404 (mesma
+# semântica multi-tenant do cancelamento).
+async def test_refund_transacao_alheia_retorna_404(client, ids, token_owner):
+    r = await client.post(
+        f"/payments/{ids['tx_b_id']}/refund",
+        json={"reason": "tentativa de acesso cruzado"},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 404
+
+
+# ORD-147: reembolso exige a mesma role de escrita do cancelamento.
+async def test_refund_sem_role_de_escrita_retorna_403(client, token_kiosk):
+    r = await client.post(
+        "/payments/9999/refund",
+        json={"reason": "teste"},
+        headers=auth(token_kiosk),
+    )
+    assert r.status_code == 403
+
+
 # Empresa B enxerga apenas suas próprias transações
 async def test_empresa_b_enxerga_apenas_suas_transacoes(client, ids, token_company_b):
     r = await client.get("/payments", headers=auth(token_company_b))

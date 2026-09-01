@@ -66,3 +66,13 @@ export interface CancelPaymentPayload {
 export async function cancelPayment(id: number, payload: CancelPaymentPayload): Promise<void> {
   await api.post(`/payments/${id}/cancel`, payload);
 }
+
+// ORD-147 — reembolso real (pós-captura), exclusivo Mercado Pago. Endpoint
+// dedicado, não reaproveita /cancel: são operações semanticamente diferentes.
+export interface RefundPaymentPayload {
+  reason: string;
+}
+
+export async function refundPayment(id: number, payload: RefundPaymentPayload): Promise<void> {
+  await api.post(`/payments/${id}/refund`, payload);
+}

@@ -1,7 +1,5 @@
 from dataclasses import dataclass, field
-from decimal import Decimal
 from enum import Enum
-from typing import Optional
 
 
 class PaymentMethod(str, Enum):
@@ -17,26 +15,38 @@ class TransactionStatus(str, Enum):
     cancelled  = "cancelled"
     expired    = "expired"
     processing = "processing"
+    refunded   = "refunded"
 
 
 @dataclass
 class TransactionResult:
     status: TransactionStatus
-    provider_transaction_id: Optional[str] = None
-    nsu: Optional[str] = None
-    authorization: Optional[str] = None
-    error_message: Optional[str] = None
+    provider_transaction_id: str | None = None
+    nsu: str | None = None
+    authorization: str | None = None
+    error_message: str | None = None
     audit_events: list = field(default_factory=list)
-    qr_code: Optional[str] = None
-    qr_code_base64: Optional[str] = None
+    qr_code: str | None = None
+    qr_code_base64: str | None = None
+
+
+@dataclass
+class RefundResult:
+    """Retorno de IPaymentProvider.refund_transaction — diferente de
+    cancel_transaction (bool puro, best-effort), reembolso precisa carregar
+    detalhe do erro pra alimentar uma mensagem específica no endpoint (ver
+    ORD-147: saldo insuficiente, prazo expirado, id inválido)."""
+    success: bool
+    error_message: str | None = None
+    raw_response: dict | None = None
 
 
 @dataclass
 class ProviderConfig:
     provider: str
     environment: str
-    api_key: Optional[str] = None
-    api_secret: Optional[str] = None
+    api_key: str | None = None
+    api_secret: str | None = None
     extra_config: dict = field(default_factory=dict)
 
 

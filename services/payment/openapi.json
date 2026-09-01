@@ -7,45 +7,26 @@
   },
   "paths": {
     "/payments": {
-      "get": {
-        "tags": [
-          "Pagamentos"
-        ],
-        "summary": "Listar transações da empresa",
-        "operationId": "list_payments_payments_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentListOut"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      },
       "post": {
         "tags": [
           "Pagamentos"
         ],
         "summary": "Processar pagamento TEF/PIX",
         "operationId": "create_payment_payments_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PaymentIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -68,12 +49,249 @@
               }
             }
           }
-        },
+        }
+      },
+      "get": {
+        "tags": [
+          "Pagamentos"
+        ],
+        "summary": "Listar transações da empresa (superadmin vê todas, com filtro opcional de empresa)",
+        "operationId": "list_payments_payments_get",
         "security": [
           {
             "HTTPBearer": []
           }
-        ]
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/analytics": {
+      "get": {
+        "tags": [
+          "Pagamentos"
+        ],
+        "summary": "KPIs comparativos, série temporal, venda por terminal e por forma de pagamento (ORD-101/ORD-102)",
+        "operationId": "payments_analytics_payments_analytics_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "hour",
+                "day",
+                "week",
+                "month"
+              ],
+              "type": "string",
+              "default": "hour",
+              "title": "Granularity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentAnalyticsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/payments/{tx_id}/cancel": {
@@ -121,13 +339,78 @@
             }
           },
           "400": {
-            "description": "Transação não está no status `approved`"
+            "description": "Transação não está no status `approved`, ou é Mercado Pago já aprovado (use POST /payments/{tx_id}/refund)"
+          },
+          "403": {
+            "description": "Role sem permissão de cancelamento"
           },
           "404": {
             "description": "Transação não encontrada"
           },
           "422": {
             "description": "Cancelamento PayGo permitido apenas no mesmo dia"
+          }
+        }
+      }
+    },
+    "/payments/{tx_id}/refund": {
+      "post": {
+        "tags": [
+          "Pagamentos"
+        ],
+        "summary": "Reembolsar transação Mercado Pago já aprovada (cartão ou PIX)",
+        "operationId": "refund_payment_payments__tx_id__refund_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "tx_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Tx Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefundIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Transação não está `approved`, provider não é Mercado Pago, ou transação sem provider_transaction_id"
+          },
+          "403": {
+            "description": "Role sem permissão de reembolso"
+          },
+          "404": {
+            "description": "Transação não encontrada"
+          },
+          "422": {
+            "description": "Fora do prazo de reembolso da integração (90 dias cartão / 180 dias PIX)"
+          },
+          "502": {
+            "description": "Mercado Pago recusou o reembolso (saldo insuficiente, id inválido, etc.)"
           }
         }
       }
@@ -252,23 +535,22 @@
         }
       }
     },
-    "/payments/webhook": {
+    "/payments/webhook/mercadopago/{company_id}": {
       "post": {
         "tags": [
           "Pagamentos"
         ],
-        "summary": "Webhook de notificações (MP PIX, MP Point, PayGo)",
-        "description": "Recebe notificações push dos provedores de pagamento.\n\n**Mercado Pago:** `?source=mercadopago` (padrão). Valida `x-signature` se `MP_WEBHOOK_SECRET` estiver configurado. Suporta `type=payment` (PIX) e `type=point_integration_ipn` (MP Point cartão).\n\n**PayGo:** `?source=paygo`. Estrutura a confirmar com ControlPay Webservice.\n\nSempre retorna HTTP 200 para não bloquear reentregas do provider.",
-        "operationId": "payment_webhook_payments_webhook_post",
+        "summary": "Webhook de notificações — Mercado Pago (por empresa)",
+        "description": "Recebe notificações push do Mercado Pago. A URL é específica por empresa (ORD-131) porque cada empresa tem sua própria aplicação/conta MP e, portanto, seu próprio webhook_secret — não dá para validar a assinatura sem antes saber de qual empresa é a notificação, e a URL por empresa resolve isso sem depender de dado não confiável do payload. Valida `x-signature` se a empresa tiver `webhook_secret` configurado em `company_payment_configs`. Suporta `type=payment` (PIX) e `type=order` (MP Point cartão, tópico \"Order (Mercado Pago)\").\n\nSempre retorna HTTP 200 para não bloquear reentregas do Mercado Pago.",
+        "operationId": "payment_webhook_mercadopago_payments_webhook_mercadopago__company_id__post",
         "parameters": [
           {
-            "name": "source",
-            "in": "query",
-            "required": false,
+            "name": "company_id",
+            "in": "path",
+            "required": true,
             "schema": {
-              "type": "string",
-              "default": "mercadopago",
-              "title": "Source"
+              "type": "integer",
+              "title": "Company Id"
             }
           }
         ],
@@ -289,6 +571,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/payments/webhook/paygo": {
+      "post": {
+        "tags": [
+          "Pagamentos"
+        ],
+        "summary": "Webhook de notificações — PayGo",
+        "description": "Recebe notificações push do PayGo/ControlPay. Estrutura a confirmar com ControlPay Webservice — implementar quando disponível.\n\nSempre retorna HTTP 200 para não bloquear reentregas do provider.",
+        "operationId": "payment_webhook_paygo_payments_webhook_paygo_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookOut"
                 }
               }
             }
@@ -414,6 +718,94 @@
           "unit_price"
         ],
         "title": "ItemIn"
+      },
+      "MethodBreakdown": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method"
+          },
+          "revenue": {
+            "type": "number",
+            "title": "Revenue"
+          },
+          "ticket_medio": {
+            "type": "number",
+            "title": "Ticket Medio"
+          },
+          "volume": {
+            "type": "integer",
+            "title": "Volume"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "revenue",
+          "ticket_medio",
+          "volume"
+        ],
+        "title": "MethodBreakdown"
+      },
+      "PaymentAnalyticsOut": {
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/PeriodMetrics"
+          },
+          "previous": {
+            "$ref": "#/components/schemas/PeriodMetrics"
+          },
+          "change_pct": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Change Pct"
+          },
+          "granularity": {
+            "type": "string",
+            "title": "Granularity"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/RevenuePoint"
+            },
+            "type": "array",
+            "title": "Series"
+          },
+          "by_terminal": {
+            "items": {
+              "$ref": "#/components/schemas/TerminalBreakdown"
+            },
+            "type": "array",
+            "title": "By Terminal"
+          },
+          "by_method": {
+            "items": {
+              "$ref": "#/components/schemas/MethodBreakdown"
+            },
+            "type": "array",
+            "title": "By Method"
+          }
+        },
+        "type": "object",
+        "required": [
+          "current",
+          "previous",
+          "change_pct",
+          "granularity",
+          "series",
+          "by_terminal",
+          "by_method"
+        ],
+        "title": "PaymentAnalyticsOut"
       },
       "PaymentApprovedOut": {
         "properties": {
@@ -576,11 +968,24 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "summary": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/StatusSummaryItem"
+            },
+            "type": "object",
+            "title": "Summary"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "total",
+          "summary"
         ],
         "title": "PaymentListOut"
       },
@@ -623,6 +1028,139 @@
           "status"
         ],
         "title": "PaymentStatusOut"
+      },
+      "PeriodMetrics": {
+        "properties": {
+          "revenue": {
+            "type": "number",
+            "title": "Revenue"
+          },
+          "ticket_medio": {
+            "type": "number",
+            "title": "Ticket Medio"
+          },
+          "volume": {
+            "type": "integer",
+            "title": "Volume"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revenue",
+          "ticket_medio",
+          "volume"
+        ],
+        "title": "PeriodMetrics"
+      },
+      "RefundIn": {
+        "properties": {
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "default": "Reembolso solicitado"
+          }
+        },
+        "type": "object",
+        "title": "RefundIn"
+      },
+      "RefundOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "transaction_id": {
+            "type": "integer",
+            "title": "Transaction Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "transaction_id",
+          "status"
+        ],
+        "title": "RefundOut"
+      },
+      "RevenuePoint": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "revenue": {
+            "type": "number",
+            "title": "Revenue"
+          },
+          "previous_revenue": {
+            "type": "number",
+            "title": "Previous Revenue"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "revenue",
+          "previous_revenue"
+        ],
+        "title": "RevenuePoint"
+      },
+      "StatusSummaryItem": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "amount"
+        ],
+        "title": "StatusSummaryItem"
+      },
+      "TerminalBreakdown": {
+        "properties": {
+          "terminal_id": {
+            "type": "integer",
+            "title": "Terminal Id"
+          },
+          "revenue": {
+            "type": "number",
+            "title": "Revenue"
+          },
+          "ticket_medio": {
+            "type": "number",
+            "title": "Ticket Medio"
+          },
+          "volume": {
+            "type": "integer",
+            "title": "Volume"
+          }
+        },
+        "type": "object",
+        "required": [
+          "terminal_id",
+          "revenue",
+          "ticket_medio",
+          "volume"
+        ],
+        "title": "TerminalBreakdown"
       },
       "TestConnectionOut": {
         "properties": {
@@ -693,6 +1231,102 @@
           "created_at": {
             "type": "string",
             "title": "Created At"
+          },
+          "company_id": {
+            "type": "integer",
+            "title": "Company Id"
+          },
+          "terminal_id": {
+            "type": "integer",
+            "title": "Terminal Id"
+          },
+          "environment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Environment"
+          },
+          "provider_transaction_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Transaction Id"
+          },
+          "tef_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tef Number"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "cancel_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancel Reason"
+          },
+          "refused_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refused Reason"
+          },
+          "refunded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refunded At"
+          },
+          "refund_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refund Reason"
           }
         },
         "type": "object",
@@ -703,7 +1337,9 @@
           "amount",
           "status",
           "provider",
-          "created_at"
+          "created_at",
+          "company_id",
+          "terminal_id"
         ],
         "title": "TransactionOut"
       },

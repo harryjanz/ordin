@@ -1,13 +1,18 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
 
 from domain.interfaces.payment_provider import IPaymentProvider
-from domain.schemas import ProviderConfig, TransactionResult, TransactionStatus
+from domain.schemas import (
+    ProviderConfig,
+    RefundResult,
+    TransactionResult,
+    TransactionStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -274,6 +279,46 @@ class MPProvider(IPaymentProvider):
                     return False
         # PIX pending — let it expire (has date_of_expiration set at creation)
         return True
+
+    async def refund_transaction(self, provider_transaction_id: str) -> RefundResult:
+        # IDs de order da API de Orders começam com "ORD" (cartão); IDs de
+        # pagamento PIX são numéricos — mesma distinção de cancel_transaction.
+        is_card = provider_transaction_id.startswith("ORD")
+        url = (
+            f"{self.BASE_URL}/v1/orders/{provider_transaction_id}/refund"
+            if is_card else
+            f"{self.BASE_URL}/v1/payments/{provider_transaction_id}/refunds"
+        )
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                resp = await client.post(
+                    url,
+                    headers={
+                        **self._headers,
+                        "X-Idempotency-Key": f"refund-{provider_transaction_id}",
+                    },
+                    json={},  # sem amount/body = reembolso total, conforme doc oficial do MP
+                )
+            except Exception as exc:
+                return RefundResult(success=False, error_message=str(exc))
+
+        try:
+            body = resp.json() if resp.content else None
+        except Exception:
+            body = None
+
+        if resp.status_code in (200, 201):
+            return RefundResult(success=True, raw_response=body)
+
+        detail = (body or {}).get("message") or resp.text or f"HTTP {resp.status_code}"
+        return RefundResult(success=False, error_message=detail, raw_response=body)
+
+    def refund_window_days(self, method: str) -> int | None:
+        # Prazo confirmado na documentação oficial do Mercado Pago: cartão
+        # via Point (Orders API) aceita reembolso até 90 dias da aprovação;
+        # PIX (Payments API) até 180 dias. Restrição desta integração
+        # específica, não uma regra genérica de pagamento — ver ORD-147.
+        return 180 if method == "pix" else 90
 
     async def test_connection(self, terminal_ref: str) -> dict:
         async with httpx.AsyncClient(timeout=10) as client:
