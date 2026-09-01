@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { Button, DateInput, Dropdown, Pagination, Skeleton, Tag, TextArea, makeToast, type DropdownOptions, type TagProps } from "design-system";
-import { listPayments, cancelPayment } from "../api/payments";
+import { listPayments, cancelPayment, refundPayment } from "../api/payments";
 import { listCompanies, listTerminals } from "../api/companies";
 import { useStore } from "../store";
 import { parseApiError } from "../lib/apiErrors";
@@ -15,6 +15,7 @@ const STATUS_VARIANT: Record<string, TagProps["variant"]> = {
   cancelled: "warning",
   processing: "neutral",
   expired: "error",
+  refunded: "warning",
 };
 
 const PROVIDER_OPTIONS: DropdownOptions[] = [
@@ -31,6 +32,7 @@ const STATUS_OPTIONS: DropdownOptions[] = [
   { value: "cancelled", label: "Cancelado" },
   { value: "processing", label: "Em processamento" },
   { value: "expired", label: "Expirado" },
+  { value: "refunded", label: "Reembolsado" },
 ];
 
 const ENVIRONMENT_OPTIONS: DropdownOptions[] = [
@@ -105,6 +107,12 @@ function canCancel(t: Transaction): boolean {
   return t.status === "approved" && t.provider !== "mercadopago";
 }
 
+// ORD-147 — transação Mercado Pago já aprovada é sempre um caso de
+// REEMBOLSO (cobrança já capturada), nunca de cancelamento.
+function canRefund(t: Transaction): boolean {
+  return t.status === "approved" && t.provider === "mercadopago";
+}
+
 // PayGo só permite cancelar no mesmo dia da venda (regra do provider,
 // ver services/payment/main.py cancel_payment) — checagem local só pra
 // avisar antes de tentar, o backend segue sendo a fonte da verdade (422).
@@ -113,6 +121,21 @@ function isPaygoBlocked(t: Transaction): boolean {
   const created = new Date(t.created_at);
   const now = new Date();
   return created.toDateString() !== now.toDateString();
+}
+
+// Prazo de reembolso via API — específico da integração Mercado Pago (Orders
+// API pra cartão, Payments API pra PIX), confirmado na documentação oficial
+// do MP. NÃO é uma regra genérica de reembolso — outro provider que vier a
+// implementar reembolso (Stone/Pagar.me/Adyen) precisa da própria constante,
+// com o próprio prazo. Checagem local só pra avisar antes de tentar, o
+// backend segue sendo a fonte da verdade (422).
+const MP_REFUND_WINDOW_DAYS: Record<string, number> = { credit: 90, debit: 90, pix: 180 };
+
+function isMpRefundExpired(t: Transaction): boolean {
+  if (t.provider !== "mercadopago") return false;
+  const limitDays = MP_REFUND_WINDOW_DAYS[t.method] ?? 90;
+  const elapsedMs = Date.now() - new Date(t.created_at).getTime();
+  return elapsedMs > limitDays * 24 * 60 * 60 * 1000;
 }
 
 export default function PaymentsScreen() {
@@ -146,7 +169,10 @@ export default function PaymentsScreen() {
   const [terminalsByCompany, setTerminalsByCompany] = useState<Record<number, Terminal[]>>({});
   const fetchingCompanies = useRef<Set<number>>(new Set());
 
-  const [cancelling, setCancelling] = useState<Transaction | null>(null);
+  // ORD-147 — generalizado pra guardar qual ação disparar (cancelamento
+  // pré-captura ou reembolso pós-captura), mesmo padrão de estado
+  // bidirecional já usado no toggle ativar/desativar opção (ORD-145).
+  const [actionTarget, setActionTarget] = useState<{ tx: Transaction; kind: "cancel" | "refund" } | null>(null);
   const [reason, setReason] = useState("contestacao");
   const [submitting, setSubmitting] = useState(false);
   // Não-controlado de propósito: o Modal do design system gera um id novo
@@ -244,37 +270,49 @@ export default function PaymentsScreen() {
   ];
 
   function openCancel(t: Transaction) {
-    setCancelling(t);
+    setActionTarget({ tx: t, kind: "cancel" });
     setReason("contestacao");
   }
 
-  function closeCancel() {
-    if (submitting) return;
-    setCancelling(null);
+  function openRefund(t: Transaction) {
+    setActionTarget({ tx: t, kind: "refund" });
+    setReason("contestacao");
   }
 
-  async function confirmCancel() {
-    if (!cancelling) return;
+  function closeAction() {
+    if (submitting) return;
+    setActionTarget(null);
+  }
+
+  async function confirmAction() {
+    if (!actionTarget) return;
+    const { tx, kind } = actionTarget;
     const reasonLabel = CANCEL_REASONS.find((r) => r.value === reason)?.label ?? reason;
     const reasonText = reason === "outro" ? (otherReasonRef.current?.value.trim() ?? "") : reasonLabel;
     if (reason === "outro" && !reasonText) {
-      makeToast("error", "Descreva o motivo do cancelamento.");
+      makeToast("error", kind === "refund" ? "Descreva o motivo do estorno." : "Descreva o motivo do cancelamento.");
       return;
     }
 
     setSubmitting(true);
     try {
-      await cancelPayment(cancelling.id, { reason: reasonText });
-      makeToast("success", "Transação cancelada");
-      setCancelling(null);
-      // Refaz a busca em vez de só corrigir a linha local — cancelar muda os
-      // cards de resumo (Aprovado -1 / Cancelado +1), que só vêm de listPayments.
+      if (kind === "refund") {
+        await refundPayment(tx.id, { reason: reasonText });
+        makeToast("success", "Transação estornada — o valor será devolvido ao cliente pelo Mercado Pago");
+      } else {
+        await cancelPayment(tx.id, { reason: reasonText });
+        makeToast("success", "Transação cancelada");
+      }
+      setActionTarget(null);
+      // Refaz a busca em vez de só corrigir a linha local — cancelar/estornar
+      // muda os cards de resumo, que só vêm de listPayments.
       fetchTransactions();
     } catch (err) {
       const status = (err as { response?: { status?: number } })?.response?.status;
+      const action = kind === "refund" ? "estornar" : "cancelar";
       const msg =
         status === 404 ? "Transação não encontrada — pode já ter sido alterada por outra sessão."
-        : status === 403 ? "Você não tem permissão para cancelar transações."
+        : status === 403 ? `Você não tem permissão para ${action} transações.`
         : parseApiError(err).message;
       makeToast("error", msg);
     } finally {
@@ -290,7 +328,7 @@ export default function PaymentsScreen() {
     {
       key: "status", header: "Status", render: (t) => (
         <Tag variant={STATUS_VARIANT[t.status] ?? "neutral"}>
-          <span title={t.status === "cancelled" ? (t.cancel_reason ?? undefined) : undefined}>{t.status}</span>
+          <span title={t.status === "cancelled" ? (t.cancel_reason ?? undefined) : t.status === "refunded" ? (t.refund_reason ?? undefined) : undefined}>{t.status}</span>
         </Tag>
       ),
     },
@@ -303,6 +341,10 @@ export default function PaymentsScreen() {
           <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => openCancel(t)}>
             Cancelar
           </Button>
+        ) : canRefund(t) ? (
+          <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => openRefund(t)}>
+            Estornar
+          </Button>
         ) : (
           <span className={styles.muted}>—</span>
         ),
@@ -313,7 +355,8 @@ export default function PaymentsScreen() {
     ? (companyId ? companyOptions.find((o) => o.value === String(companyId))?.label : "Todas as empresas")
     : null;
 
-  const sameDayBlocked = cancelling ? isPaygoBlocked(cancelling) : false;
+  const sameDayBlocked = actionTarget?.kind === "cancel" ? isPaygoBlocked(actionTarget.tx) : false;
+  const refundExpired = actionTarget?.kind === "refund" ? isMpRefundExpired(actionTarget.tx) : false;
 
   return (
     <div className={styles.page}>
@@ -479,27 +522,31 @@ export default function PaymentsScreen() {
       )}
 
       <ConfirmDialog
-        open={!!cancelling}
-        title="Cancelar transação"
+        open={!!actionTarget}
+        title={actionTarget?.kind === "refund" ? "Estornar transação" : "Cancelar transação"}
         message={
           sameDayBlocked
             ? "Transação PayGo de dia anterior — cancelamento só é permitido no mesmo dia da venda. Fale com o suporte da adquirente pra estornar esta."
+            : refundExpired && actionTarget
+            ? `Este pagamento foi aprovado há mais de ${MP_REFUND_WINDOW_DAYS[actionTarget.tx.method] ?? 90} dias — o Mercado Pago pode recusar o reembolso via API. Você pode tentar mesmo assim, ou reembolsar diretamente pelo painel do Mercado Pago.`
+            : actionTarget?.kind === "refund"
+            ? "A cobrança já foi capturada — ao confirmar, o valor será devolvido ao cliente pelo Mercado Pago."
             : "Essa ação não pode ser desfeita pelo admin — o valor volta pro cliente de acordo com o provider."
         }
-        confirmLabel="Confirmar cancelamento"
-        onConfirm={confirmCancel}
-        onCancel={closeCancel}
-        alertVariant={sameDayBlocked ? "warning" : undefined}
-        alertIcon={sameDayBlocked ? "alert-triangle" : undefined}
+        confirmLabel={actionTarget?.kind === "refund" ? "Confirmar estorno" : "Confirmar cancelamento"}
+        onConfirm={confirmAction}
+        onCancel={closeAction}
+        alertVariant={sameDayBlocked || refundExpired ? "warning" : undefined}
+        alertIcon={sameDayBlocked || refundExpired ? "alert-triangle" : undefined}
         confirmDisabled={submitting}
       >
-        {cancelling && (
+        {actionTarget && (
           <div className={styles.cancelForm}>
             <dl className={styles.cancelSummary}>
-              <dt>Pedido</dt><dd>{cancelling.order_ref}</dd>
-              <dt>Valor</dt><dd>{cancelling.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</dd>
-              <dt>Provider</dt><dd>{cancelling.provider}</dd>
-              <dt>Data</dt><dd>{new Date(cancelling.created_at).toLocaleString("pt-BR")}</dd>
+              <dt>Pedido</dt><dd>{actionTarget.tx.order_ref}</dd>
+              <dt>Valor</dt><dd>{actionTarget.tx.amount.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</dd>
+              <dt>Provider</dt><dd>{actionTarget.tx.provider}</dd>
+              <dt>Data</dt><dd>{new Date(actionTarget.tx.created_at).toLocaleString("pt-BR")}</dd>
             </dl>
             <Dropdown
               label="Motivo"

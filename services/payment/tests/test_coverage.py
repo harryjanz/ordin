@@ -337,6 +337,82 @@ async def test_mp_provider_cancel_pix_deixa_expirar():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# infrastructure/providers/*.py — ORD-147 (refund_transaction / refund_window_days)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def test_mp_provider_refund_cartao_usa_v1_orders_refund():
+    """ORD-147: reembolso de cartão via Point usa POST /v1/orders/{id}/refund,
+    sem body (reembolso total)."""
+    provider = _mp_provider()
+    with respx.mock:
+        route = respx.post("https://api.mercadopago.com/v1/orders/ORDTEST00020/refund").mock(
+            return_value=httpx.Response(201, json={"id": "ORDTEST00020", "status": "refunded"})
+        )
+        result = await provider.refund_transaction("ORDTEST00020")
+    assert result.success is True
+    assert route.called
+    assert json.loads(route.calls[0].request.content or b"{}") == {}
+
+
+async def test_mp_provider_refund_pix_usa_v1_payments_refunds():
+    """ORD-147: reembolso de PIX usa POST /v1/payments/{id}/refunds (Payments
+    API), não a rota de orders — id numérico, sem prefixo ORD."""
+    provider = _mp_provider()
+    with respx.mock:
+        route = respx.post("https://api.mercadopago.com/v1/payments/175900001/refunds").mock(
+            return_value=httpx.Response(201, json={"id": 1, "status": "approved"})
+        )
+        result = await provider.refund_transaction("175900001")
+    assert result.success is True
+    assert route.called
+
+
+async def test_mp_provider_refund_falha_carrega_mensagem_de_erro():
+    """Diferente de cancel_transaction (bool puro), refund_transaction precisa
+    carregar o detalhe do erro pra alimentar uma mensagem específica."""
+    provider = _mp_provider()
+    with respx.mock:
+        respx.post("https://api.mercadopago.com/v1/orders/ORDTEST00021/refund").mock(
+            return_value=httpx.Response(400, json={"message": "Saldo insuficiente"})
+        )
+        result = await provider.refund_transaction("ORDTEST00021")
+    assert result.success is False
+    assert result.error_message == "Saldo insuficiente"
+
+
+def test_mp_provider_refund_window_days():
+    """ORD-147: prazo é uma capacidade do provider — 90 dias cartão, 180 PIX."""
+    provider = _mp_provider()
+    assert provider.refund_window_days("credit") == 90
+    assert provider.refund_window_days("debit") == 90
+    assert provider.refund_window_days("pix") == 180
+
+
+def test_mock_provider_refund_window_days_sem_limite():
+    """MockProvider não sobrescreve — usa o default None da interface."""
+    from infrastructure.providers.mock import MockProvider
+    provider = MockProvider()
+    assert provider.refund_window_days("credit") is None
+
+
+async def test_mock_provider_refund_transaction_sucesso():
+    from infrastructure.providers.mock import MockProvider
+    result = await MockProvider().refund_transaction("qualquer-id")
+    assert result.success is True
+
+
+async def test_paygo_provider_refund_transaction_nao_implementado():
+    """PayGo não tem reembolso via API nesta história — nunca é chamado na
+    prática (o endpoint só roteia refund pra provider mercadopago), mas a
+    interface exige a implementação."""
+    from infrastructure.providers.paygo import PayGoProvider
+    from domain.schemas import ProviderConfig
+    provider = PayGoProvider(ProviderConfig(provider="paygo", environment="sandbox", api_key="k", api_secret="s"))
+    with pytest.raises(NotImplementedError):
+        await provider.refund_transaction("qualquer-id")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # infrastructure/mongo.py
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -627,26 +703,28 @@ async def test_dir_cancel_mercadopago_cartao_bloqueado(db_session):
         await db.commit()
 
 
-async def test_dir_cancel_mercadopago_pix_permitido(db_session):
-    """O bloqueio do achado acima é só pra cartão (credit/debit) — PIX via
-    Mercado Pago não passa pela API de payment-intents e continua cancelável
-    normalmente."""
+async def test_dir_cancel_mercadopago_pix_bloqueado(db_session):
+    """ORD-147: o guard antigo só bloqueava credit/debit, deixando PIX MP
+    aprovado cair em `tx.status = "cancelled"` sem nunca chamar nenhuma API
+    do provider (bug latente, nunca alcançável pela UI mas explorável via
+    chamada direta). Corrigido pra bloquear TODO provider mercadopago
+    aprovado — o caminho correto agora é POST /payments/{tx_id}/refund."""
     import main as svc
     from main import CancelIn, Transaction
     async with db_session() as db:
         tx = Transaction(company_id=1, order_ref="ORD-C04", terminal_id=1,
-                         tef_number="T1", method="PIX", amount=10.00,
+                         tef_number="T1", method="pix", amount=10.00,
                          status="approved", provider="mercadopago", environment="sandbox")
         db.add(tx); await db.commit()
         tx_id = tx.id
-    order_url = svc.ORDER_SVC
-    with respx.mock:
-        respx.patch(f"{order_url}/internal/orders/ORD-C04/status").mock(
-            return_value=httpx.Response(200))
-        async with db_session() as db:
-            result = await svc.cancel_payment(tx_id, CancelIn(reason="teste"), db, _user("owner", 1))
-    assert result["ok"] is True
     async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.cancel_payment(tx_id, CancelIn(reason="teste"), db, _user("owner", 1))
+        assert exc.value.status_code == 400
+        assert "Mercado Pago" in exc.value.detail
+    async with db_session() as db:
+        result = await db.execute(select(svc.Transaction).where(svc.Transaction.id == tx_id))
+        assert result.scalars().first().status == "approved"
         await db.execute(sa_delete(svc.Transaction).where(svc.Transaction.id == tx_id))
         await db.commit()
 

@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from domain.interfaces.payment_provider import IPaymentProvider
-from domain.schemas import TransactionResult, TransactionStatus
+from domain.schemas import RefundResult, TransactionResult, TransactionStatus
 
 
 class MockProvider(IPaymentProvider):
@@ -34,6 +34,9 @@ class MockProvider(IPaymentProvider):
         terminal_ref: str,
     ) -> bool:
         return True
+
+    async def refund_transaction(self, provider_transaction_id: str) -> RefundResult:
+        return RefundResult(success=True)
 
     async def test_connection(self, terminal_ref: str) -> dict:
         import asyncio

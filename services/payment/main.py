@@ -6,19 +6,24 @@ import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Literal, Optional, List
+from typing import Literal
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Query, Request
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, Text, select, func
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy import Column, DateTime, Integer, Numeric, String, Text, func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-from config import require_env, get_cors_origins
-from auth import get_current_user, TokenPayload
-from domain.events import PaymentApprovedEvent, PaymentRefusedEvent, PaymentCancelledEvent
+from auth import TokenPayload, get_current_user
+from config import get_cors_origins, require_env
+from domain.events import (
+    PaymentApprovedEvent,
+    PaymentCancelledEvent,
+    PaymentRefundedEvent,
+    PaymentRefusedEvent,
+)
 from domain.interfaces.message_broker import IMessageBroker
 from domain.schemas import ProviderConfig, TransactionStatus
 from infrastructure.broker_factory import get_broker
@@ -71,6 +76,8 @@ class Transaction(Base):
     cancelled_at            = Column(DateTime)
     cancel_reason           = Column(String(255))
     refused_reason          = Column(String(255), nullable=True)
+    refunded_at             = Column(DateTime, nullable=True)
+    refund_reason           = Column(String(255), nullable=True)
     created_at              = Column(DateTime, default=datetime.utcnow)
     updated_at              = Column(DateTime, onupdate=datetime.utcnow)
 
@@ -161,33 +168,37 @@ class PaymentIn(BaseModel):
     order_ref:  str
     method:     str
     amount:     float
-    items:      List[ItemIn]
-    cpf:        Optional[str] = None
-    tef_number: Optional[str] = None  # legado — ignorado quando company-service fornece config
+    items:      list[ItemIn]
+    cpf:        str | None = None
+    tef_number: str | None = None  # legado — ignorado quando company-service fornece config
 
 
 class CancelIn(BaseModel):
-    reason: Optional[str] = "Cancelamento solicitado"
+    reason: str | None = "Cancelamento solicitado"
+
+
+class RefundIn(BaseModel):
+    reason: str | None = "Reembolso solicitado"
 
 
 class PaymentApprovedOut(BaseModel):
     ok:             bool
     transaction_id: int
     status:         str
-    nsu:            Optional[str] = None
-    authorization:  Optional[str] = None
-    order_ref:      Optional[str] = None
-    amount:         Optional[float] = None
-    error:          Optional[str] = None
-    qr_code:        Optional[str] = None
-    qr_code_base64: Optional[str] = None
+    nsu:            str | None = None
+    authorization:  str | None = None
+    order_ref:      str | None = None
+    amount:         float | None = None
+    error:          str | None = None
+    qr_code:        str | None = None
+    qr_code_base64: str | None = None
 
 
 class PaymentStatusOut(BaseModel):
     transaction_id: int
     status:         str
-    qr_code:        Optional[str] = None
-    qr_code_base64: Optional[str] = None
+    qr_code:        str | None = None
+    qr_code_base64: str | None = None
 
 
 class TransactionOut(BaseModel):
@@ -197,19 +208,21 @@ class TransactionOut(BaseModel):
     amount:                  float
     status:                  str
     provider:                str
-    nsu:                     Optional[str] = None
-    authorization:           Optional[str] = None
+    nsu:                     str | None = None
+    authorization:           str | None = None
     created_at:              str
     # Campos abaixo já existiam na tabela mas nunca eram serializados — ver
     # ORD-080. Usados pelo painel de detalhe expansível da linha.
     company_id:               int
     terminal_id:              int
-    environment:              Optional[str] = None
-    provider_transaction_id:  Optional[str] = None
-    tef_number:               Optional[str] = None
-    cancelled_at:             Optional[str] = None
-    cancel_reason:            Optional[str] = None
-    refused_reason:           Optional[str] = None
+    environment:              str | None = None
+    provider_transaction_id:  str | None = None
+    tef_number:               str | None = None
+    cancelled_at:             str | None = None
+    cancel_reason:            str | None = None
+    refused_reason:           str | None = None
+    refunded_at:              str | None = None
+    refund_reason:            str | None = None
 
 
 class StatusSummaryItem(BaseModel):
@@ -263,7 +276,7 @@ class PaymentAnalyticsOut(BaseModel):
     previous: PeriodMetrics
     # None quando o período anterior tem denominador 0 (não dá pra calcular
     # variação percentual "a partir de zero") — ver ORD-101.
-    change_pct: dict[str, Optional[float]]
+    change_pct: dict[str, float | None]
     granularity: str
     series: list[RevenuePoint]
     by_terminal: list[TerminalBreakdown]
@@ -273,6 +286,12 @@ class PaymentAnalyticsOut(BaseModel):
 class CancelOut(BaseModel):
     ok:     bool
     detail: str
+
+
+class RefundOut(BaseModel):
+    ok:             bool
+    transaction_id: int
+    status:         str
 
 
 class HealthOut(BaseModel):
@@ -505,12 +524,12 @@ async def create_payment(
 async def list_payments(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
-    status: Optional[str] = None,
-    provider: Optional[str] = None,
-    environment: Optional[str] = None,
-    company_id: Optional[int] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
+    status: str | None = None,
+    provider: str | None = None,
+    environment: str | None = None,
+    company_id: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     skip: int = 0,
     limit: int = 50,
 ):
@@ -595,6 +614,8 @@ async def list_payments(
                 "cancelled_at": str(t.cancelled_at) if t.cancelled_at else None,
                 "cancel_reason": t.cancel_reason,
                 "refused_reason": t.refused_reason,
+                "refunded_at": str(t.refunded_at) if t.refunded_at else None,
+                "refund_reason": t.refund_reason,
             }
             for t in txs
         ],
@@ -662,7 +683,7 @@ def _build_series(
 async def payments_analytics(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
-    company_id: Optional[int] = None,
+    company_id: int | None = None,
     date_from: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
     date_to: str = Query(..., pattern=r"^\d{4}-\d{2}-\d{2}$"),
     granularity: Literal["hour", "day", "week", "month"] = "hour",
@@ -705,7 +726,7 @@ async def payments_analytics(
     current = await period_metrics(start, end)
     previous = await period_metrics(prev_start, prev_end)
 
-    def pct(cur: float, prev: float) -> Optional[float]:
+    def pct(cur: float, prev: float) -> float | None:
         if not prev:
             return None
         return round((cur - prev) / prev * 100, 1)
@@ -803,7 +824,7 @@ async def payments_analytics(
     tags=["Pagamentos"],
     summary="Cancelar transação aprovada",
     responses={
-        400: {"description": "Transação não está no status `approved`, ou é cartão Mercado Pago já aprovado (estorno ainda não suportado)"},
+        400: {"description": "Transação não está no status `approved`, ou é Mercado Pago já aprovado (use POST /payments/{tx_id}/refund)"},
         403: {"description": "Role sem permissão de cancelamento"},
         404: {"description": "Transação não encontrada"},
         422: {"description": "Cancelamento PayGo permitido apenas no mesmo dia"},
@@ -827,13 +848,14 @@ async def cancel_payment(
     if tx.status != "approved":
         raise HTTPException(400, f"Status: {tx.status}")
 
-    # Cancelamento de cartão via Mercado Pago hoje chama a API de intenção de
-    # pagamento (payment-intents), pensada pra cancelar uma cobrança em
-    # andamento — não a API de Refunds, que é a correta pra estornar um
-    # pagamento já capturado. Recusa até confirmar o fluxo de estorno real
-    # (ver ORD-079, Achado 3).
-    if tx.provider == "mercadopago" and tx.method in ("credit", "debit"):
-        raise HTTPException(400, "Cancelamento de cartão via Mercado Pago ainda não suportado — contate o suporte")
+    # Transação Mercado Pago já aprovada é sempre um caso de REEMBOLSO, não
+    # de cancelamento — dinheiro já foi capturado. Vale pra cartão E PIX:
+    # antes do ORD-147 este guard só bloqueava credit/debit, deixando PIX MP
+    # aprovado cair no `tx.status = "cancelled"` abaixo sem nunca chamar
+    # nenhuma API do provider (bug latente, nunca alcançável pela UI porque
+    # o frontend já escondia a ação, mas explorável via chamada direta).
+    if tx.provider == "mercadopago":
+        raise HTTPException(400, "Transação Mercado Pago já aprovada — use POST /payments/{tx_id}/refund")
 
     # Validação de data para PayGo
     if tx.provider == "paygo":
@@ -894,6 +916,111 @@ async def cancel_payment(
     })
 
     return {"ok": True, "detail": "Transação cancelada"}
+
+
+@app.post(
+    "/payments/{tx_id}/refund",
+    response_model=RefundOut,
+    tags=["Pagamentos"],
+    summary="Reembolsar transação Mercado Pago já aprovada (cartão ou PIX)",
+    responses={
+        400: {"description": "Transação não está `approved`, provider não é Mercado Pago, ou transação sem provider_transaction_id"},
+        403: {"description": "Role sem permissão de reembolso"},
+        404: {"description": "Transação não encontrada"},
+        422: {"description": "Fora do prazo de reembolso da integração (90 dias cartão / 180 dias PIX)"},
+        502: {"description": "Mercado Pago recusou o reembolso (saldo insuficiente, id inválido, etc.)"},
+    },
+)
+async def refund_payment(
+    tx_id: int,
+    body: RefundIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(require_write_role),
+):
+    # Mesmo filtro de tenant do cancelamento — superadmin/admin vê qualquer
+    # empresa, demais roles restritos à própria.
+    tx_filters = [Transaction.id == tx_id]
+    if current_user.role not in ("superadmin", "admin"):
+        tx_filters.append(Transaction.company_id == current_user.company_id)
+    result = await db.execute(select(Transaction).where(*tx_filters))
+    tx = result.scalars().first()
+    if not tx:
+        raise HTTPException(404)
+    # status != "approved" cobre tanto "nunca foi aprovada" quanto "já foi
+    # reembolsada/cancelada antes" (status vira "refunded"/"cancelled") —
+    # não precisa de checagem de idempotência separada.
+    if tx.status != "approved":
+        raise HTTPException(400, f"Status: {tx.status}")
+    if tx.provider != "mercadopago":
+        raise HTTPException(400, "Reembolso disponível apenas para Mercado Pago — use POST /payments/{tx_id}/cancel para outros providers")
+    if not tx.provider_transaction_id:
+        raise HTTPException(400, "Transação sem provider_transaction_id — não é possível reembolsar")
+
+    terminal_cfg = await _get_terminal_config(tx.terminal_id)
+    raw_config = terminal_cfg.get("config") or {}
+    config = ProviderConfig(
+        provider="mercadopago",
+        environment=tx.environment or "sandbox",
+        api_key=raw_config.get("api_key"),
+        api_secret=raw_config.get("api_secret"),
+        extra_config=raw_config.get("extra_config") or {},
+    )
+    provider = get_provider(config)
+
+    # Checagem de prazo — pergunta ao próprio provider (capacidade dele, não
+    # uma tabela genérica aqui), evita chamada desnecessária ao Mercado Pago
+    # quando já sabemos que vai ser recusado. Ver ORD-147.
+    limit_days = provider.refund_window_days(tx.method)
+    if limit_days is not None and tx.created_at:
+        if (datetime.utcnow() - tx.created_at).days > limit_days:
+            raise HTTPException(422, f"Prazo de reembolso expirado — {tx.provider} aceita até {limit_days} dias da aprovação")
+
+    refund_result = await provider.refund_transaction(provider_transaction_id=tx.provider_transaction_id)
+
+    # Auditoria mesmo em caso de falha (rastro forense, mesmo padrão do ORD-132).
+    await save_audit({
+        "transaction_id":          tx.id,
+        "company_id":              current_user.company_id,
+        "order_ref":               tx.order_ref,
+        "provider":                tx.provider,
+        "environment":             tx.environment,
+        "provider_transaction_id": tx.provider_transaction_id,
+        "refunded_by":             current_user.sub,
+        "events":                  [{
+            "event": "refund_attempt",
+            "ts": datetime.utcnow().isoformat(),
+            "reason": body.reason,
+            "success": refund_result.success,
+            "error_message": refund_result.error_message,
+            "raw_response": refund_result.raw_response,
+        }],
+        "final_status": "refunded" if refund_result.success else tx.status,
+    })
+
+    if not refund_result.success:
+        # Transação NÃO muda de status local — diferente do cancelamento
+        # PayGo (best-effort), reembolso só é confirmado quando o Mercado
+        # Pago confirma de verdade.
+        raise HTTPException(502, refund_result.error_message or "Mercado Pago recusou o reembolso")
+
+    tx.status = "refunded"
+    tx.refunded_at = datetime.utcnow()
+    tx.refund_reason = body.reason
+    await db.commit()
+
+    await _publish(
+        "payment.refunded",
+        PaymentRefundedEvent(
+            company_id=current_user.company_id,
+            order_ref=tx.order_ref,
+            transaction_id=tx.id,
+            amount=str(tx.amount),
+            refund_reason=body.reason or "",
+            provider=tx.provider or "mock",
+        ).to_dict(),
+    )
+
+    return {"ok": True, "transaction_id": tx.id, "status": "refunded"}
 
 
 class TestConnectionOut(BaseModel):
