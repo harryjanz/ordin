@@ -955,3 +955,84 @@ async def test_refund_payment_inexistente_retorna_404(client, token_owner):
         headers={"Authorization": f"Bearer {token_owner}"},
     )
     assert r.status_code == 404
+
+
+# ── ORD-149: test-connection roteia terminal_ref certo por provider ─────────
+
+async def test_test_connection_paygo_sem_terminal_id_mensagem_inalterada(client, token_kiosk):
+    """Regressão: PayGo sem paygo_terminal_id continua com a mesma mensagem
+    e o mesmo comportamento de antes desta história."""
+    with respx.mock:
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json={**_PAYGO_TERMINAL_CONFIG, "paygo_terminal_id": None})
+        )
+        r = await client.post(
+            "/payments/test-connection", json={}, headers={"Authorization": f"Bearer {token_kiosk}"},
+        )
+    assert r.status_code == 200
+    assert r.json()["success"] is False
+    assert r.json()["detail"] == "Terminal sem credenciais TEF configuradas"
+
+
+async def test_test_connection_mercadopago_usa_mp_device_id_nao_paygo_terminal_id(client, token_kiosk):
+    """Prova da correção do bug: mesmo com paygo_terminal_id preenchido (lixo
+    de configuração antiga, ou coincidência), o provider mercadopago precisa
+    receber mp_device_id como terminal_ref — não paygo_terminal_id. Se o bug
+    antigo ainda estivesse presente, a consulta a terminals/v1/list buscaria
+    por "BOGUS-PAYGO-ID" e não encontraria o device, retornando 'não
+    encontrado' em vez de sucesso."""
+    terminal_cfg = {
+        **_MP_TERMINAL_CONFIG,
+        "paygo_terminal_id": "BOGUS-PAYGO-ID",
+        "mp_device_id": "PAX_REAL__123",
+    }
+    with respx.mock:
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json=terminal_cfg)
+        )
+        respx.get("https://api.mercadopago.com/v1/users/me").mock(
+            return_value=httpx.Response(200, json={"email": "loja@teste.com"})
+        )
+        respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
+            return_value=httpx.Response(200, json={
+                "data": {"terminals": [{"id": "PAX_REAL__123", "operating_mode": "PDV"}]}
+            })
+        )
+        r = await client.post(
+            "/payments/test-connection", json={}, headers={"Authorization": f"Bearer {token_kiosk}"},
+        )
+    assert r.status_code == 200
+    assert r.json()["success"] is True
+
+
+async def test_test_connection_mercadopago_terminal_fora_do_pdv(client, token_kiosk):
+    with respx.mock:
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
+        )
+        respx.get("https://api.mercadopago.com/v1/users/me").mock(
+            return_value=httpx.Response(200, json={"email": "loja@teste.com"})
+        )
+        respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
+            return_value=httpx.Response(200, json={
+                "data": {"terminals": [{"id": _MP_TERMINAL_CONFIG["mp_device_id"], "operating_mode": "UNDEFINED"}]}
+            })
+        )
+        r = await client.post(
+            "/payments/test-connection", json={}, headers={"Authorization": f"Bearer {token_kiosk}"},
+        )
+    assert r.status_code == 200
+    assert r.json()["success"] is False
+    assert "fora do modo PDV" in r.json()["detail"]
+
+
+async def test_test_connection_mock_permanece_inalterado(client, token_kiosk):
+    with respx.mock:
+        respx.get(f"{_company_url()}/internal/terminals/1").mock(
+            return_value=httpx.Response(200, json=_MOCK_TERMINAL_CONFIG)
+        )
+        r = await client.post(
+            "/payments/test-connection", json={}, headers={"Authorization": f"Bearer {token_kiosk}"},
+        )
+    assert r.status_code == 200
+    assert r.json()["success"] is True

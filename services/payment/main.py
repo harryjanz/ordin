@@ -1040,14 +1040,26 @@ async def test_connection(
     if current_user.role != "kiosk" or current_user.terminal_id is None:
         raise HTTPException(403, "Apenas kiosk pode testar conexão")
 
-    terminal_cfg = await _get_terminal_config(current_user.terminal_id)
-    provider_name     = terminal_cfg.get("payment_provider", "mock")
-    paygo_terminal_id = terminal_cfg.get("paygo_terminal_id") or ""
-    environment       = terminal_cfg.get("environment", "sandbox")
-    raw_config        = terminal_cfg.get("config") or {}
+    terminal_cfg  = await _get_terminal_config(current_user.terminal_id)
+    provider_name = terminal_cfg.get("payment_provider", "mock")
+    environment   = terminal_cfg.get("environment", "sandbox")
+    raw_config    = terminal_cfg.get("config") or {}
 
-    if provider_name == "paygo" and not paygo_terminal_id:
-        return TestConnectionOut(success=False, detail="Terminal sem credenciais TEF configuradas")
+    # ORD-149: terminal_ref identifica o hardware físico pra cada provider —
+    # PayGo usa paygo_terminal_id (PIN-pad), Mercado Pago usa mp_device_id
+    # (terminal Point). Antes desta história, MP sempre recebia
+    # paygo_terminal_id (bug: sempre vazio pra MP, terminal_ref nunca
+    # carregava o device de verdade).
+    if provider_name == "paygo":
+        terminal_ref = terminal_cfg.get("paygo_terminal_id") or ""
+        if not terminal_ref:
+            return TestConnectionOut(success=False, detail="Terminal sem credenciais TEF configuradas")
+    elif provider_name == "mercadopago":
+        # Vazio é um caso válido aqui (terminal ainda sem Point vinculado, ou
+        # só PIX) — tratado dentro do provider, não é erro neste ponto.
+        terminal_ref = terminal_cfg.get("mp_device_id") or ""
+    else:
+        terminal_ref = ""
 
     config = ProviderConfig(
         provider=provider_name,
@@ -1061,7 +1073,7 @@ async def test_connection(
     import asyncio
     try:
         result = await asyncio.wait_for(
-            provider.test_connection(terminal_ref=paygo_terminal_id),
+            provider.test_connection(terminal_ref=terminal_ref),
             timeout=30.0,
         )
     except asyncio.TimeoutError:
