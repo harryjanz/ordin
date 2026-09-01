@@ -1,6 +1,6 @@
 ---
 id: ORD-147
-status: Ready
+status: Done
 fase: null
 sprint: null
 responsavel: Backend SR + Frontend
@@ -586,3 +586,13 @@ igual o PayGo já faz).
 - [x] Priorização aprovada para implementação imediata
 
 **Status: Ready** — apta para implementação.
+
+---
+
+## Done
+
+Implementado em `feature/ord-147-reembolso-mercadopago`, PR [#113](https://github.com/harryjanz/ordin/pull/113), mergeado em `main` (2026-09-01). Suíte de testes: 116/116 passando.
+
+**QA manual em ambiente real, confirmado pelo usuário (2026-09-01):** estorno de cartão de crédito e estorno de PIX via Mercado Pago testados manualmente na tela de Transações do admin — ambos funcionaram, valor devolvido ao cliente pelo Mercado Pago.
+
+**Status: Done.**
