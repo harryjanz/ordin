@@ -3,13 +3,16 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Button,
+  CheckboxMultiselect,
   CurrencyInput,
+  Divider,
   InputBase,
   Modal,
   NumberSpinInput,
   RadioButton,
   RadioGroup,
   Tag,
+  TextArea,
   Upload,
   makeToast,
   type UploadFile,
@@ -21,7 +24,7 @@ import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN, minMaxToRadios, radiosToMinMax, type OptionGroupRadios } from "../lib/optionGroupMapping";
-import type { OptionGroup } from "../types";
+import type { Allergen, OptionGroup } from "../types";
 import styles from "./OptionGroupFormScreen.module.scss";
 
 const IMAGE_MAX_SIZE_MB = 2;
@@ -43,6 +46,12 @@ interface OptionRow {
   pendingFile: File | null;
   pendingPreviewUrl: string | null;
   active: boolean;
+  // ORD-146 — mesmo nível de detalhe que Product já tem (ORD-075).
+  // allergen_ids em string, mesmo padrão de CheckboxMultiselect já usado em
+  // ProductEditScreen (initialSelection/onSelectOption trabalham com string).
+  description: string | null;
+  sku: string | null;
+  allergen_ids: string[];
 }
 
 let newRowSeq = 0;
@@ -66,9 +75,20 @@ export default function OptionGroupFormScreen() {
   const [maxSelections, setMaxSelections] = useState<number | null>(null);
   const [advancedMinMax, setAdvancedMinMax] = useState<{ min_selections: number; max_selections: number } | null>(null);
   const [rows, setRows] = useState<OptionRow[]>([]);
-  const [originalRows, setOriginalRows] = useState<{ id: number; label: string; price_delta: number; image_url: string | null }[]>([]);
+  const [originalRows, setOriginalRows] = useState<{
+    id: number; label: string; price_delta: number; image_url: string | null;
+    description: string | null; sku: string | null; allergen_ids: string[];
+  }[]>([]);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [allergens, setAllergens] = useState<Allergen[]>([]);
+
+  useEffect(() => {
+    api.get("/catalog/allergens", catalogParams()).then((r) => {
+      setAllergens(r.data.allergens ?? r.data);
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (editingGroupId === null) return;
@@ -96,9 +116,13 @@ export default function OptionGroupFormScreen() {
         setRows(g.options.map((o) => ({
           key: `existing-${o.id}`, id: o.id, label: o.label, price_delta: o.price_delta,
           image_url: o.image_url, thumbnail_url: o.thumbnail_url, pendingFile: null, pendingPreviewUrl: null,
-          active: o.active,
+          active: o.active, description: o.description, sku: o.sku,
+          allergen_ids: o.allergens.map((a) => String(a.id)),
         })));
-        setOriginalRows(g.options.map((o) => ({ id: o.id, label: o.label, price_delta: o.price_delta, image_url: o.image_url })));
+        setOriginalRows(g.options.map((o) => ({
+          id: o.id, label: o.label, price_delta: o.price_delta, image_url: o.image_url,
+          description: o.description, sku: o.sku, allergen_ids: o.allergens.map((a) => String(a.id)),
+        })));
       } catch {
         if (!cancelled) setLoadError("Erro ao carregar grupo de opção.");
       } finally {
@@ -175,6 +199,9 @@ export default function OptionGroupFormScreen() {
   const [draftPendingFile, setDraftPendingFile] = useState<File | null>(null);
   const [draftPendingPreviewUrl, setDraftPendingPreviewUrl] = useState<string | null>(null);
   const [draftUploading, setDraftUploading] = useState(false);
+  const [draftDescription, setDraftDescription] = useState("");
+  const [draftSku, setDraftSku] = useState("");
+  const [draftAllergenIds, setDraftAllergenIds] = useState<string[]>([]);
 
   function openNewOptionModal() {
     setEditingRowKey(null);
@@ -183,6 +210,9 @@ export default function OptionGroupFormScreen() {
     setDraftImageUrl(null);
     setDraftPendingFile(null);
     setDraftPendingPreviewUrl(null);
+    setDraftDescription("");
+    setDraftSku("");
+    setDraftAllergenIds([]);
     setOptionModalOpen(true);
   }
 
@@ -193,6 +223,9 @@ export default function OptionGroupFormScreen() {
     setDraftImageUrl(row.thumbnail_url);
     setDraftPendingFile(row.pendingFile);
     setDraftPendingPreviewUrl(row.pendingPreviewUrl);
+    setDraftDescription(row.description ?? "");
+    setDraftSku(row.sku ?? "");
+    setDraftAllergenIds(row.allergen_ids);
     setOptionModalOpen(true);
   }
 
@@ -260,12 +293,15 @@ export default function OptionGroupFormScreen() {
       setRows((prev) => [...prev, {
         key, id: null, label: draftLabel.trim(), price_delta: draftPrice ?? 0,
         image_url: null, thumbnail_url: null, pendingFile: draftPendingFile, pendingPreviewUrl: draftPendingPreviewUrl,
-        active: true,
+        active: true, description: draftDescription.trim() || null, sku: draftSku.trim() || null,
+        allergen_ids: draftAllergenIds,
       }]);
     } else {
       updateRow(editingRowKey, {
         label: draftLabel.trim(), price_delta: draftPrice ?? 0,
         pendingFile: draftPendingFile, pendingPreviewUrl: draftPendingPreviewUrl,
+        description: draftDescription.trim() || null, sku: draftSku.trim() || null,
+        allergen_ids: draftAllergenIds,
       });
     }
     setOptionModalOpen(false);
@@ -281,7 +317,12 @@ export default function OptionGroupFormScreen() {
       if (r.id === null) return true;
       const orig = originalById.get(r.id);
       if (!orig) return true;
-      return orig.label !== r.label || orig.price_delta !== (r.price_delta ?? 0);
+      if (orig.label !== r.label || orig.price_delta !== (r.price_delta ?? 0)) return true;
+      if ((orig.description ?? "") !== (r.description ?? "")) return true;
+      if ((orig.sku ?? "") !== (r.sku ?? "")) return true;
+      const origAllergens = [...orig.allergen_ids].sort().join(",");
+      const rowAllergens = [...r.allergen_ids].sort().join(",");
+      return origAllergens !== rowAllergens;
     });
   })();
   const hasImageAtRisk = contentChanged && originalRows.some((r) => r.image_url);
@@ -295,7 +336,10 @@ export default function OptionGroupFormScreen() {
     setFormError("");
     try {
       const { min_selections, max_selections } = advancedMinMax ?? radiosToMinMax(radios, rows.length, maxSelections);
-      const optionsPayload = rows.map((r) => ({ label: r.label.trim(), price_delta: r.price_delta ?? 0, active: r.active }));
+      const optionsPayload = rows.map((r) => ({
+        label: r.label.trim(), price_delta: r.price_delta ?? 0, active: r.active,
+        description: r.description, sku: r.sku, allergen_ids: r.allergen_ids.map(Number),
+      }));
 
       let groupId = editingGroupId;
       let savedOptions: { id: number }[] | null = null;
@@ -489,7 +533,7 @@ export default function OptionGroupFormScreen() {
 
       <Modal
         open={optionModalOpen}
-        width={520}
+        width={760}
         onClose={closeOptionModal}
         onBackdropClick={closeOptionModal}
         onCloseButtonClick={closeOptionModal}
@@ -497,45 +541,84 @@ export default function OptionGroupFormScreen() {
         <div className={styles.modalForm}>
           <div className={styles.formTitle}>{editingRowKey === null ? "Nova opção" : "Editar opção"}</div>
 
-          <InputBase label="Label" placeholder="ex: Coca-Cola" value={draftLabel} onChange={(e) => setDraftLabel(e.target.value)} autoFocus />
-          <CurrencyInput label="Acréscimo de preço" value={draftPrice} onChange={(value: number) => setDraftPrice(value)} />
-
-          <div className={styles.imageSection}>
-            <div className={styles.formLabel}>Imagem</div>
-            {modalPreviewUrl ? (
-              <div className={styles.imagePreview}>
-                <img src={modalPreviewUrl} alt={draftLabel || "Opção"} className={styles.thumbnailImg} />
-                <Button
-                  type="button"
-                  size="small"
-                  variant="secondary"
-                  loading={draftUploading}
-                  onClick={() => {
-                    const row = editingRowKey ? rows.find((r) => r.key === editingRowKey) : null;
-                    if (row?.id !== null && row?.id !== undefined) removeModalExistingImage();
-                    else removeModalPendingImage();
-                  }}
-                >
-                  Remover imagem
-                </Button>
+          <div className={styles.modalSectionRow}>
+            <div className={styles.modalSectionMain}>
+              <div className={styles.formRow}>
+                <div className={styles.formRowField}>
+                  <InputBase label="Label" placeholder="ex: Coca-Cola" value={draftLabel} onChange={(e) => setDraftLabel(e.target.value)} autoFocus />
+                </div>
+                <div className={styles.formRowField}>
+                  <CurrencyInput label="Acréscimo de preço" value={draftPrice} onChange={(value: number) => setDraftPrice(value)} />
+                </div>
               </div>
-            ) : (
-              <Upload
-                fullWidth
-                maxFileSize={IMAGE_MAX_SIZE_MB}
-                multipleFiles={false}
-                types={IMAGE_TYPES}
-                showMaxFileSize={false}
-                helperMessage="JPG ou PNG, até 2 MB"
-                errorMessage="Envie um arquivo JPG ou PNG de até 2 MB"
-                onCallbackUpload={(files) => {
-                  const row = editingRowKey ? rows.find((r) => r.key === editingRowKey) : null;
-                  if (row?.id !== null && row?.id !== undefined) handleModalExistingImage(files);
-                  else handleModalPendingImage(files);
-                }}
+
+              <TextArea
+                label="Descrição"
+                value={draftDescription}
+                onChange={(e) => setDraftDescription(e.target.value)}
+                maxLength={500}
+                helperMessage="Opcional — ajuda a diferenciar opções com nome pouco óbvio"
               />
-            )}
+              <InputBase
+                label="SKU"
+                value={draftSku}
+                placeholder="Opcional, único por empresa"
+                onChange={(e) => setDraftSku(e.target.value)}
+              />
+            </div>
+
+            <div className={styles.modalSectionSide}>
+              <div className={styles.imageSection}>
+                <div className={styles.formLabel}>Imagem</div>
+                {modalPreviewUrl ? (
+                  <div className={styles.imagePreview}>
+                    <img src={modalPreviewUrl} alt={draftLabel || "Opção"} className={styles.thumbnailImg} />
+                    <Button
+                      type="button"
+                      size="small"
+                      variant="secondary"
+                      loading={draftUploading}
+                      onClick={() => {
+                        const row = editingRowKey ? rows.find((r) => r.key === editingRowKey) : null;
+                        if (row?.id !== null && row?.id !== undefined) removeModalExistingImage();
+                        else removeModalPendingImage();
+                      }}
+                    >
+                      Remover imagem
+                    </Button>
+                  </div>
+                ) : (
+                  <Upload
+                    fullWidth
+                    maxFileSize={IMAGE_MAX_SIZE_MB}
+                    multipleFiles={false}
+                    types={IMAGE_TYPES}
+                    showMaxFileSize={false}
+                    helperMessage="JPG ou PNG, até 2 MB"
+                    errorMessage="Envie um arquivo JPG ou PNG de até 2 MB"
+                    onCallbackUpload={(files) => {
+                      const row = editingRowKey ? rows.find((r) => r.key === editingRowKey) : null;
+                      if (row?.id !== null && row?.id !== undefined) handleModalExistingImage(files);
+                      else handleModalPendingImage(files);
+                    }}
+                  />
+                )}
+              </div>
+            </div>
           </div>
+
+          <Divider />
+
+          <CheckboxMultiselect
+            key={editingRowKey ?? "new"}
+            id={`option-modal-${editingRowKey ?? "new"}-allergens`}
+            label="Alérgenos (RDC 727/2022)"
+            options={allergens.map((a) => ({ value: String(a.id), label: a.name, disabled: false }))}
+            initialSelection={draftAllergenIds}
+            onSelectOption={(option, checked) => {
+              setDraftAllergenIds((prev) => (checked ? [...prev, option.value] : prev.filter((id) => id !== option.value)));
+            }}
+          />
 
           <div className={styles.formActions}>
             <Button type="button" onClick={saveOptionModal} disabled={!canSaveOption}>

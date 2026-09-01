@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -51,7 +51,13 @@ async def seed(client):
             "allergen_leite_id": allergen_leite.id,
         }
         yield ids
-        await db.execute(sa_delete(svc.ProductAllergen))
+        # Escopado pelas categorias desta fixture — um sa_delete(ProductAllergen)
+        # sem WHERE apagaria alérgeno de produto real de QUALQUER empresa no
+        # mesmo banco compartilhado (mesma classe de incidente, 2026-09-01,
+        # ver services/catalog/tests/test_grupos_opcao.py).
+        await db.execute(sa_delete(svc.ProductAllergen).where(
+            svc.ProductAllergen.product_id.in_(select(svc.Product.id).where(svc.Product.category_id.in_([cat.id, cat_b.id])))
+        ))
         await db.execute(sa_delete(svc.Product).where(svc.Product.category_id.in_([cat.id, cat_b.id])))
         await db.execute(sa_delete(svc.Category).where(svc.Category.id.in_([cat.id, cat_b.id])))
         await db.execute(

@@ -221,6 +221,11 @@ export interface OptionGroupOption {
   thumbnail_url: string | null;
   sort_order: number | null;
   active: boolean;
+  // ORD-146 — mesmo nível de detalhe que Product já tem (ORD-075), pra
+  // opção que representa uma variante física própria (sabor, bebida).
+  description: string | null;
+  sku: string | null;
+  allergens: Allergen[];
 }
 
 export interface OptionGroup {

@@ -13,7 +13,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from moto import mock_aws
 from PIL import Image
-from sqlalchemy import delete as sa_delete
+from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -51,21 +51,52 @@ async def client():
 
 @pytest.fixture
 async def seed(client):
+    """ATENÇÃO: DB_URL aponta pro MESMO banco fk_catalog do ambiente de dev
+    (sem banco de teste isolado neste setup) — um teardown sem WHERE aqui
+    apaga dado real (foi o que aconteceu: incidente 2026-09-01, "Pizzas
+    Tradicionais" e outros grupos de opção do usuário foram apagados por um
+    `sa_delete(OptionGroup)` sem filtro que já existia nesta fixture desde
+    ORD-138). Correção: tira um "antes" dos ids de OptionGroup existentes ao
+    entrar, e no teardown apaga só os que são NOVOS (criados durante o
+    teste) — não a tabela inteira. Mesmo racional dos ids de category/product
+    específicos que a fixture já cria e já limpava certo."""
     import main as svc
     async with svc.AsyncSessionLocal() as db:
+        before_group_ids = set((await db.execute(select(svc.OptionGroup.id))).scalars().all())
+
         cat = svc.Category(company_id=1, name="__opt_cat__", active=True)
         db.add(cat)
         await db.flush()
         prod = svc.Product(company_id=1, category_id=cat.id, name="__opt_prod__", price=10.0, active=True)
         db.add(prod)
+        # Códigos fake propositalmente (__ord146_*__) — colidir com os códigos
+        # reais do seed de produção (unique=True em Allergen.code) já causou
+        # perda dos 19 alérgenos oficiais numa rodada de teste contra banco
+        # compartilhado (incidente 2026-08-11, ver test_ord075_campos_catalogo.py).
+        allergen_a = svc.Allergen(code="__ord146_crustaceos__", name="Crustáceos", active=True)
+        allergen_b = svc.Allergen(code="__ord146_leite__", name="Leite de todos os mamíferos", active=True)
+        db.add_all([allergen_a, allergen_b])
         await db.commit()
-        ids = {"cat_id": cat.id, "prod_id": prod.id}
+        ids = {
+            "cat_id": cat.id, "prod_id": prod.id,
+            "allergen_a_id": allergen_a.id, "allergen_b_id": allergen_b.id,
+        }
         yield ids
-        await db.execute(sa_delete(svc.ProductOptionGroup))
-        await db.execute(sa_delete(svc.Option))
-        await db.execute(sa_delete(svc.OptionGroup))
+
+        after_group_ids = set((await db.execute(select(svc.OptionGroup.id))).scalars().all())
+        new_group_ids = after_group_ids - before_group_ids
+        if new_group_ids:
+            new_option_ids = set((await db.execute(
+                select(svc.Option.id).where(svc.Option.option_group_id.in_(new_group_ids))
+            )).scalars().all())
+            if new_option_ids:
+                await db.execute(sa_delete(svc.OptionAllergen).where(svc.OptionAllergen.option_id.in_(new_option_ids)))
+            await db.execute(sa_delete(svc.ProductOptionGroup).where(svc.ProductOptionGroup.option_group_id.in_(new_group_ids)))
+            await db.execute(sa_delete(svc.Option).where(svc.Option.option_group_id.in_(new_group_ids)))
+            await db.execute(sa_delete(svc.OptionGroup).where(svc.OptionGroup.id.in_(new_group_ids)))
         await db.execute(sa_delete(svc.Product).where(svc.Product.id == prod.id))
         await db.execute(sa_delete(svc.Category).where(svc.Category.id == cat.id))
+        await db.execute(sa_delete(svc.Allergen).where(svc.Allergen.id.in_([allergen_a.id, allergen_b.id])))
         await db.commit()
 
 
@@ -412,7 +443,10 @@ async def test_cenario_pizza_mesmo_grupo_maximo_diferente_por_tamanho(client, to
 
     import main as svc
     async with svc.AsyncSessionLocal() as db:
-        await db.execute(sa_delete(svc.ProductOptionGroup))
+        # Escopado por gid/product ids desta função — um sa_delete(ProductOptionGroup)
+        # sem WHERE já apagou vínculo real de produto↔grupo de outra empresa
+        # no mesmo banco compartilhado (incidente 2026-09-01, ver seed acima).
+        await db.execute(sa_delete(svc.ProductOptionGroup).where(svc.ProductOptionGroup.option_group_id == gid))
         await db.execute(sa_delete(svc.Option).where(svc.Option.option_group_id == gid))
         await db.execute(sa_delete(svc.OptionGroup).where(svc.OptionGroup.id == gid))
         await db.execute(sa_delete(svc.Product).where(svc.Product.id.in_([broto_id, big_id])))
@@ -594,3 +628,147 @@ async def test_listagem_de_grupos_retorna_active_em_cada_opcao(client, seed, tok
     r2 = await client.get("/catalog/option-groups", headers=auth(token_owner))
     grupo = next(g for g in r2.json()["option_groups"] if g["id"] == r.json()["id"])
     assert all("active" in o for o in grupo["options"])
+
+
+# ── ORD-146: descrição, SKU e alérgenos em Option ────────────────────────────
+
+async def test_criar_opcao_com_descricao_sku_e_alergenos(client, seed, token_owner):
+    r = await _create_group(client, token_owner, options=[{
+        "label": "Coca-Cola", "price_delta": 0,
+        "description": "Refrigerante de cola, lata 350ml",
+        "sku": "__ord146_ref_coca_350__",
+        "allergen_ids": [seed["allergen_a_id"]],
+    }])
+    assert r.status_code == 201
+    opt = r.json()["options"][0]
+    assert opt["description"] == "Refrigerante de cola, lata 350ml"
+    assert opt["sku"] == "__ord146_ref_coca_350__"
+    assert [a["id"] for a in opt["allergens"]] == [seed["allergen_a_id"]]
+
+
+async def test_criar_opcao_sem_os_tres_campos_novos_continua_minima(client, token_owner):
+    r = await _create_group(client, token_owner, options=[{"label": "Guaraná", "price_delta": 0}])
+    assert r.status_code == 201
+    opt = r.json()["options"][0]
+    assert opt["description"] is None
+    assert opt["sku"] is None
+    assert opt["allergens"] == []
+
+
+async def test_reabrir_opcao_mostra_campos_persistidos(client, seed, token_owner):
+    r = await _create_group(client, token_owner, options=[{
+        "label": "Coca-Cola", "price_delta": 0, "description": "Lata 350ml",
+        "sku": "__ord146_reabrir__", "allergen_ids": [seed["allergen_a_id"]],
+    }])
+    gid = r.json()["id"]
+    r2 = await client.get("/catalog/option-groups", headers=auth(token_owner))
+    grupo = next(g for g in r2.json()["option_groups"] if g["id"] == gid)
+    opt = grupo["options"][0]
+    assert opt["description"] == "Lata 350ml"
+    assert opt["sku"] == "__ord146_reabrir__"
+    assert [a["id"] for a in opt["allergens"]] == [seed["allergen_a_id"]]
+
+
+async def test_opcao_com_multiplos_alergenos_salva_todos(client, seed, token_owner):
+    r = await _create_group(client, token_owner, options=[{
+        "label": "Camarão com Catupiry", "price_delta": 5,
+        "allergen_ids": [seed["allergen_a_id"], seed["allergen_b_id"]],
+    }])
+    opt = r.json()["options"][0]
+    assert {a["id"] for a in opt["allergens"]} == {seed["allergen_a_id"], seed["allergen_b_id"]}
+
+
+async def test_descricao_no_limite_de_500_caracteres_e_aceita(client, seed, token_owner):
+    descricao = "x" * 500
+    r = await _create_group(client, token_owner, options=[{"label": "Coca-Cola", "price_delta": 0, "description": descricao}])
+    assert r.status_code == 201
+    assert r.json()["options"][0]["description"] == descricao
+
+
+async def test_editar_uma_opcao_preserva_descricao_sku_alergeno_das_outras(client, seed, token_owner):
+    r = await _create_group(client, token_owner, options=[
+        {"label": "Calabresa", "price_delta": 0},
+        {
+            "label": "Camarão com Catupiry", "price_delta": 5,
+            "description": "Sabor especial", "sku": "__ord146_camarao__",
+            "allergen_ids": [seed["allergen_a_id"]],
+        },
+    ])
+    gid = r.json()["id"]
+    options = r.json()["options"]
+    camarao = next(o for o in options if o["label"] == "Camarão com Catupiry")
+
+    r2 = await client.put(
+        f"/catalog/option-groups/{gid}/options",
+        json={"options": [
+            {"label": "Calabresa Especial", "price_delta": 0},
+            {
+                "label": "Camarão com Catupiry", "price_delta": 5,
+                "description": camarao["description"], "sku": camarao["sku"],
+                "allergen_ids": [a["id"] for a in camarao["allergens"]],
+            },
+        ]},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 200
+    camarao2 = next(o for o in r2.json()["options"] if o["label"] == "Camarão com Catupiry")
+    assert camarao2["description"] == "Sabor especial"
+    assert camarao2["sku"] == "__ord146_camarao__"
+    assert [a["id"] for a in camarao2["allergens"]] == [seed["allergen_a_id"]]
+
+
+async def test_sku_duplicado_na_mesma_empresa_e_rejeitado(client, seed, token_owner):
+    await _create_group(client, token_owner, name="__grupo_a__", options=[
+        {"label": "Coca-Cola", "price_delta": 0, "sku": "__ord146_dup__"},
+    ])
+    r2 = await _create_group(client, token_owner, name="__grupo_b__", options=[
+        {"label": "Coca-Cola Zero", "price_delta": 0, "sku": "__ord146_dup__"},
+    ])
+    assert r2.status_code == 400
+    assert "SKU já cadastrado" in r2.json()["detail"]
+
+
+async def test_sku_duplicado_dentro_do_mesmo_payload_e_rejeitado(client, seed, token_owner):
+    r = await _create_group(client, token_owner, options=[
+        {"label": "Coca-Cola", "price_delta": 0, "sku": "__ord146_mesmo__"},
+        {"label": "Coca-Cola Zero", "price_delta": 0, "sku": "__ord146_mesmo__"},
+    ])
+    assert r.status_code == 400
+
+
+async def test_empresa_b_nao_ve_nem_edita_alergeno_de_opcao_da_empresa_a(client, seed, token_owner, token_company_b):
+    r = await _create_group(client, token_owner, options=[{
+        "label": "Molho Branco", "price_delta": 0,
+        "sku": "__ord146_molho__", "allergen_ids": [seed["allergen_b_id"]],
+    }])
+    gid = r.json()["id"]
+
+    r2 = await client.get("/catalog/option-groups", headers=auth(token_company_b))
+    assert all(g["id"] != gid for g in r2.json()["option_groups"])
+
+    r3 = await client.put(
+        f"/catalog/option-groups/{gid}/options",
+        json={"options": [{"label": "__hack__", "price_delta": 0}]},
+        headers=auth(token_company_b),
+    )
+    assert r3.status_code == 404
+
+    r4 = await client.get("/catalog/option-groups", headers=auth(token_owner))
+    grupo = next(g for g in r4.json()["option_groups"] if g["id"] == gid)
+    assert grupo["options"][0]["sku"] == "__ord146_molho__"
+
+
+async def test_replace_completo_com_grupo_vazio_de_alergeno_novo_continua_funcionando(client, token_owner):
+    """Regressão: grupo criado antes de ORD-146 (sem os campos novos) segue
+    editável normalmente, sem exigir os campos novos no payload."""
+    r = await _create_group(client, token_owner, options=[{"label": "Coca-Cola", "price_delta": 0}])
+    gid = r.json()["id"]
+    r2 = await client.put(
+        f"/catalog/option-groups/{gid}/options",
+        json={"options": [{"label": "Coca-Cola Lata", "price_delta": 0}]},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 200
+    assert r2.json()["options"][0]["description"] is None
+    assert r2.json()["options"][0]["sku"] is None
+    assert r2.json()["options"][0]["allergens"] == []

@@ -123,6 +123,17 @@ class ProductAllergen(Base):
     product_id  = Column(Integer, ForeignKey("products.id"), primary_key=True)
     allergen_id = Column(Integer, ForeignKey("allergens.id"), primary_key=True)
 
+class OptionAllergen(Base):
+    """Mesmo padrão de ProductAllergen, mas pra Option (ORD-146) — um sabor
+    pode introduzir um alergênico que o produto-base não tem (ex.: sabor de
+    pizza com camarão). Sem ondelete=CASCADE (nenhuma FK deste banco usa) —
+    _set_option_group_options precisa deletar essas linhas explicitamente
+    antes de deletar a Option, já que o replace completo faz hard delete
+    real das opções antigas a cada save."""
+    __tablename__ = "option_allergens"
+    option_id   = Column(Integer, ForeignKey("options.id"), primary_key=True)
+    allergen_id = Column(Integer, ForeignKey("allergens.id"), primary_key=True)
+
 class OptionGroup(Base):
     """Grupo de opção (ORD-138) — variação de produto (sabor, tamanho etc.),
     reutilizável entre produtos (vínculo N:N via ProductOptionGroup), mesmo
@@ -153,6 +164,8 @@ class Option(Base):
     thumbnail_url   = Column(String(500))
     sort_order      = Column(Integer)
     active          = Column(Boolean, nullable=False, default=True)  # ORD-145 — indisponibilidade temporária (estoque/produção), sem excluir a opção
+    description     = Column(String(500))  # ORD-146 — mesmo tamanho de Product.description
+    sku             = Column(String(50))  # ORD-146 — único por empresa, validado em aplicação (ver _set_option_group_options; Option não tem company_id direto pra um UniqueConstraint de banco)
 
 class ProductOptionGroup(Base):
     """min/max_selections_override (ORD-144): permitem que o MESMO grupo
@@ -221,6 +234,15 @@ async def _set_product_allergens(db: AsyncSession, product_id: int, allergen_ids
     for allergen_id in unique_ids:
         db.add(ProductAllergen(product_id=product_id, allergen_id=allergen_id))
 
+async def _get_option_allergens(db: AsyncSession, option_id: int) -> list[dict]:
+    result = await db.execute(
+        select(Allergen)
+        .join(OptionAllergen, OptionAllergen.allergen_id == Allergen.id)
+        .filter(OptionAllergen.option_id == option_id)
+        .order_by(Allergen.name)
+    )
+    return [{"id": a.id, "code": a.code, "name": a.name, "category": a.category} for a in result.scalars().all()]
+
 async def _get_option_group_options(db: AsyncSession, option_group_id: int) -> list[dict]:
     result = await db.execute(
         select(Option).filter_by(option_group_id=option_group_id).order_by(Option.sort_order.asc(), Option.id.asc())
@@ -234,6 +256,9 @@ async def _get_option_group_options(db: AsyncSession, option_group_id: int) -> l
             "thumbnail_url": presigned_download_url(o.thumbnail_url) if o.thumbnail_url else None,
             "sort_order": o.sort_order,
             "active": o.active,
+            "description": o.description,
+            "sku": o.sku,
+            "allergens": await _get_option_allergens(db, o.id),
         }
         for o in result.scalars().all()
     ]
@@ -248,7 +273,7 @@ async def _serialize_option_group(db: AsyncSession, g: "OptionGroup") -> dict:
         "options": await _get_option_group_options(db, g.id),
     }
 
-async def _set_option_group_options(db: AsyncSession, option_group_id: int, options: list["OptionIn"]) -> None:
+async def _set_option_group_options(db: AsyncSession, option_group_id: int, company_id: int, options: list["OptionIn"]) -> None:
     """Replace completo, mesmo espírito de _set_product_allergens — remove
     todas as opções antigas do grupo e recria a partir da lista enviada.
     Efeito colateral aceito (decisão do Tech Explorer, mesmo padrão de
@@ -260,16 +285,59 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, opti
 
     active (ORD-145) precisa ser propagado explicitamente aqui — sem isso,
     toda opção voltaria a "ativa" no próximo replace completo, desfazendo
-    qualquer desativação feita via PATCH /catalog/options/{id}."""
+    qualquer desativação feita via PATCH /catalog/options/{id}.
+
+    ORD-146: SKU único por empresa é validado aqui em nível de aplicação —
+    Option não tem company_id direto (isolamento via join com OptionGroup),
+    então não dá pra usar um UniqueConstraint de banco como Product.sku tem.
+    allergen_ids é validado e persistido em OptionAllergen, que precisa ser
+    deletado explicitamente ANTES do hard delete de Option abaixo (nenhuma
+    FK deste banco usa ondelete=CASCADE — sem isso, o replace completo de
+    um grupo com opção alergênica estoura IntegrityError)."""
     if not options:
         raise HTTPException(400, detail="Grupo precisa de ao menos uma opção")
+
+    skus = [opt.sku for opt in options if opt.sku]
+    if len(skus) != len(set(skus)):
+        raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+    if skus:
+        dup_result = await db.execute(
+            select(Option.sku)
+            .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+            .filter(OptionGroup.company_id == company_id, Option.option_group_id != option_group_id, Option.sku.in_(skus))
+        )
+        if dup_result.scalars().first() is not None:
+            raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+
+    all_allergen_ids = {aid for opt in options for aid in opt.allergen_ids}
+    if all_allergen_ids:
+        found_result = await db.execute(select(Allergen.id).filter(Allergen.id.in_(all_allergen_ids)))
+        found_ids = set(found_result.scalars().all())
+        if found_ids != all_allergen_ids:
+            raise HTTPException(400, detail="allergen_ids contém id que não existe")
+
     old_result = await db.execute(select(Option).filter_by(option_group_id=option_group_id))
-    for old in old_result.scalars().all():
+    old_options = old_result.scalars().all()
+    old_ids = [old.id for old in old_options]
+    for old in old_options:
         if old.image_url: delete_object(old.image_url)
         if old.thumbnail_url: delete_object(old.thumbnail_url)
+    if old_ids:
+        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(old_ids)))
     await db.execute(delete(Option).where(Option.option_group_id == option_group_id))
+
+    new_options = []
     for index, opt in enumerate(options):
-        db.add(Option(option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index, active=opt.active))
+        option = Option(
+            option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index,
+            active=opt.active, description=opt.description, sku=opt.sku,
+        )
+        db.add(option)
+        new_options.append((option, opt.allergen_ids))
+    await db.flush()
+    for option, allergen_ids in new_options:
+        for allergen_id in set(allergen_ids):
+            db.add(OptionAllergen(option_id=option.id, allergen_id=allergen_id))
 
 async def _get_product_option_groups(db: AsyncSession, product_id: int) -> list[dict]:
     """Inclui min/max_selections_override (ORD-144) além do que
@@ -470,6 +538,9 @@ class OptionIn(BaseModel):
     label: str
     price_delta: float = 0  # acréscimo sobre o preço-base do produto, não preço absoluto — ver ORD-142
     active: bool = True  # ORD-145 — precisa vir no replace completo pra não reativar opção desativada
+    description: Optional[str] = None  # ORD-146
+    sku: Optional[str] = None  # ORD-146 — único por empresa, validado em _set_option_group_options
+    allergen_ids: list[int] = []  # ORD-146 — sempre lista completa (replace completo, não "não mexer")
 
 class OptionOut(BaseModel):
     id: int
@@ -479,6 +550,9 @@ class OptionOut(BaseModel):
     thumbnail_url: Optional[str] = None
     sort_order: Optional[int] = None
     active: bool = True
+    description: Optional[str] = None
+    sku: Optional[str] = None
+    allergens: list[AllergenOut] = []
 
 class OptionActiveIn(BaseModel):
     active: bool
@@ -1191,8 +1265,11 @@ async def create_option_group(
     )
     db.add(group)
     await db.commit(); await db.refresh(group)
-    for index, opt in enumerate(body.options):
-        db.add(Option(option_group_id=group.id, label=opt.label, price_delta=opt.price_delta, sort_order=index))
+    # ORD-146: delega pra _set_option_group_options em vez de recriar a
+    # lógica de criação — garante que description/sku/allergen_ids (e active,
+    # que já era uma lacuna daqui desde ORD-145) sejam tratados igual em
+    # criação e edição, sem duplicar a validação de SKU/alérgeno.
+    await _set_option_group_options(db, group.id, company_id, body.options)
     await db.commit()
     return await _serialize_option_group(db, group)
 
@@ -1281,7 +1358,7 @@ async def set_option_group_options(
 ):
     group = (await db.execute(select(OptionGroup).filter_by(id=option_group_id, company_id=company_id))).scalars().first()
     if not group: raise HTTPException(404)
-    await _set_option_group_options(db, option_group_id, body.options)
+    await _set_option_group_options(db, option_group_id, company_id, body.options)
     await db.commit(); await db.refresh(group)
     return await _serialize_option_group(db, group)
 
@@ -1363,6 +1440,7 @@ async def upload_option_image_endpoint(
         "id": opt.id, "label": opt.label, "price_delta": float(opt.price_delta),
         "image_url": presigned_download_url(opt.image_url), "thumbnail_url": presigned_download_url(opt.thumbnail_url),
         "sort_order": opt.sort_order, "active": opt.active,
+        "description": opt.description, "sku": opt.sku, "allergens": await _get_option_allergens(db, opt.id),
     }
 
 @app.delete(
@@ -1387,6 +1465,7 @@ async def delete_option_image(
     return {
         "id": opt.id, "label": opt.label, "price_delta": float(opt.price_delta),
         "image_url": None, "thumbnail_url": None, "sort_order": opt.sort_order, "active": opt.active,
+        "description": opt.description, "sku": opt.sku, "allergens": await _get_option_allergens(db, opt.id),
     }
 
 @app.patch(
@@ -1411,6 +1490,7 @@ async def set_option_active(
         "image_url": presigned_download_url(opt.image_url) if opt.image_url else None,
         "thumbnail_url": presigned_download_url(opt.thumbnail_url) if opt.thumbnail_url else None,
         "sort_order": opt.sort_order, "active": opt.active,
+        "description": opt.description, "sku": opt.sku, "allergens": await _get_option_allergens(db, opt.id),
     }
 
 @app.put(
