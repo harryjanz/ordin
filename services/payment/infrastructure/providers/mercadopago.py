@@ -327,13 +327,47 @@ class MPProvider(IPaymentProvider):
                     f"{self.BASE_URL}/v1/users/me",
                     headers=self._headers,
                 )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    label = data.get("email") or str(data.get("id", "ok"))
-                    return {"success": True, "detail": f"MP conectado: {label}"}
+            except Exception as exc:
+                return {"success": False, "detail": f"Erro ao conectar ao MP: {exc}"}
+
+            if resp.status_code != 200:
                 return {
                     "success": False,
                     "detail": f"Access token inválido (HTTP {resp.status_code})",
                 }
+
+            data = resp.json()
+            label = data.get("email") or str(data.get("id", "ok"))
+
+            if not terminal_ref:
+                # Sem mp_device_id configurado ainda (ou terminal só usa PIX)
+                # — nada mais a checar. Ver ORD-149.
+                return {"success": True, "detail": f"MP conectado: {label}"}
+
+            try:
+                terminals_resp = await client.get(
+                    f"{self.BASE_URL}/terminals/v1/list",
+                    headers=self._headers,
+                )
             except Exception as exc:
-                return {"success": False, "detail": f"Erro ao conectar ao MP: {exc}"}
+                return {"success": False, "detail": f"Erro ao consultar terminal no MP: {exc}"}
+
+            if terminals_resp.status_code != 200:
+                return {"success": False, "detail": "Erro ao consultar terminal no MP. Tente novamente."}
+
+            terminals = terminals_resp.json().get("data", {}).get("terminals", [])
+            device = next((t for t in terminals if t.get("id") == terminal_ref), None)
+
+            if device is None:
+                return {
+                    "success": False,
+                    "detail": "Terminal não encontrado na conta Mercado Pago — verifique o MP Device ID em Empresa > Terminais.",
+                }
+
+            if device.get("operating_mode") != "PDV":
+                return {
+                    "success": False,
+                    "detail": "Terminal fora do modo PDV — corrija em Empresa > Terminais antes de continuar.",
+                }
+
+            return {"success": True, "detail": f"MP conectado: {label} (terminal em modo PDV)"}
