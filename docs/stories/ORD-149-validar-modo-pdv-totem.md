@@ -1,6 +1,6 @@
 ---
 id: ORD-149
-status: Ready
+status: Done
 fase: null
 sprint: null
 responsavel: Backend SR
@@ -376,3 +376,11 @@ falha; `company-service` não é chamado (o `mp_device_id` já vem embutido no p
 - [x] Priorização aprovada para implementação imediata
 
 **Status: Ready** — apta para implementação.
+
+---
+
+## Done
+
+Implementado em `feature/ord-149-validar-modo-pdv-totem`, PR [#116](https://github.com/harryjanz/ordin/pull/116), mergeado em `main` (2026-09-01). 10 testes novos (6 no nível de provider, 4 no nível de endpoint, incluindo teste de regressão com config "envenenada" provando o roteamento correto de `terminal_ref`). Suíte completa do payment-service: 126/126 passando.
+
+**Status: Done.**

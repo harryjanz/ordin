@@ -1,6 +1,6 @@
 ---
 id: ORD-148
-status: Ready
+status: Done
 fase: null
 sprint: null
 responsavel: Backend SR + Frontend
@@ -463,3 +463,13 @@ no admin.
 - [x] Priorização aprovada para implementação imediata
 
 **Status: Ready** — apta para implementação.
+
+---
+
+## Done
+
+Implementado em `feature/ord-148-mp-garantir-modo-pdv`, PR [#115](https://github.com/harryjanz/ordin/pull/115), mergeado em `main` (2026-09-01). Suíte de testes: 326/326 passando (9 falhas pré-existentes em company-service, confirmadas idênticas ao baseline de `main` via comparação por `git stash`).
+
+**QA manual em ambiente real, confirmado pelo usuário (2026-09-01):** coluna "Modo PDV" testada em Empresa > Terminais com o terminal físico real (Q92, Burger House) — exibiu corretamente a tag verde "PDV". Um primeiro teste não mostrou a coluna por cache de bundle antigo no navegador; resolvido com hard refresh (ver memória `gotcha-cache-bundle-admin`).
+
+**Status: Done.**
