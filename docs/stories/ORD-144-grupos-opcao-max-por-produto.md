@@ -285,3 +285,11 @@ Checklist de saída conferido contra o conteúdo já escrito neste arquivo:
 - [x] Priorizada no sprint backlog
 
 **Status final: Ready.**
+
+---
+
+## Correção pós-implementação (02/09)
+
+Depois de testar o cenário real da pizzaria (grupo "Sabores" com override em "Pizza Broto"=1 e sem override em "Pizza Big"=4), o usuário pediu pra deixar o máximo mais visível no card do grupo — antes ele só aparecia embutido no texto do badge "Múltipla (máx. X neste produto)" e sumia de vista quando a seleção era "Única" (já que single-select tem `max=1` implícito, o texto não mostrava nada).
+
+Ajuste: o badge "Única"/"Múltipla" voltou a ser só o rótulo simples, e o valor efetivo ganhou um badge próprio, sempre visível — "Máximo neste produto: {N}" — com variant `emphasys` (destacado) quando há override configurado pra aquele produto, e `neutral` quando está usando o padrão do grupo. Dá pra diferenciar visualmente, num relance, quais produtos têm um limite customizado sem precisar abrir o editor.

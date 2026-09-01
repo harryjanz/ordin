@@ -499,7 +499,10 @@ export default function ProductEditScreen() {
                   <div className={styles.optionGroupCardHeader}>
                     <strong>{g.name}</strong>
                     <Tag variant={effectiveMin >= 1 ? "emphasys" : "neutral"}>{effectiveMin >= 1 ? "Obrigatório" : "Opcional"}</Tag>
-                    <Tag variant="neutral">{effectiveMax === 1 ? "Única" : `Múltipla (máx. ${effectiveMax} neste produto)`}</Tag>
+                    <Tag variant="neutral">{effectiveMax === 1 ? "Única" : "Múltipla"}</Tag>
+                    <Tag variant={g.max_selections_override !== null ? "emphasys" : "neutral"}>
+                      Máximo neste produto: {effectiveMax}
+                    </Tag>
                     <Button type="button" size="small" variant="secondary" onClick={() => openOverrideEditor(g)}>
                       Editar máximo neste produto
                     </Button>
