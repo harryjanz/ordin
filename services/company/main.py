@@ -6,41 +6,70 @@ import os
 import re
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
-
-import httpx
-import redis as redis_lib
 
 import bcrypt
+import httpx
+import pyotp
+import redis as redis_lib
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fastapi import FastAPI, HTTPException, Depends, Header, Query, Form, File, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import (
-    Column, Integer, String, Boolean, DateTime, JSON, Enum,
-    UniqueConstraint, select, func, or_, update, delete,
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Enum,
+    Integer,
+    String,
+    UniqueConstraint,
+    delete,
+    func,
+    or_,
+    select,
+    update,
 )
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-from config import require_env, get_cors_origins
-from domain.cnpj import normalize_cnpj, is_valid_cnpj
-from domain.address import normalize_cep, is_valid_cep, UF_VALUES, is_valid_uf
-from domain.cpf import normalize_cpf, is_valid_cpf
-from infrastructure.cnpj_lookup import lookup_cnpj
+from audit import emit_audit
+from auth import TokenPayload, get_current_user, get_setup_mfa_user
+from config import get_cors_origins, require_env
+from domain.address import UF_VALUES, is_valid_cep, is_valid_uf, normalize_cep
+from domain.cnpj import is_valid_cnpj, normalize_cnpj
+from domain.cpf import is_valid_cpf, normalize_cpf
 from infrastructure.cep_lookup import lookup_cep
-from infrastructure.contract_storage import ensure_bucket, presigned_download_url, upload_contract
+from infrastructure.cnpj_lookup import lookup_cnpj
+from infrastructure.contract_storage import (
+    ensure_bucket,
+    presigned_download_url,
+    upload_contract,
+)
 from infrastructure.video_storage import (
-    ensure_bucket as ensure_video_bucket,
-    presigned_download_url as presigned_video_url,
-    upload_video,
     delete_object as delete_video_object,
 )
-from fastapi import Request, Response
-from auth import get_current_user, get_setup_mfa_user, TokenPayload
-import pyotp
-from audit import emit_audit
+from infrastructure.video_storage import (
+    ensure_bucket as ensure_video_bucket,
+)
+from infrastructure.video_storage import (
+    presigned_download_url as presigned_video_url,
+)
+from infrastructure.video_storage import (
+    upload_video,
+)
 
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
@@ -332,34 +361,34 @@ def _require_company_admin(u: TokenPayload, company_id: int) -> None:
 class CompanyOut(BaseModel):
     id: int
     name: str
-    document: Optional[str] = None
+    document: str | None = None
     plan: str
-    payment_provider: Optional[str] = "mock"
+    payment_provider: str | None = "mock"
     active: bool
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     visual_theme: str = "ordin"
     visual_mode: str = "light"
     catalog_menu_layout: str = "horizontal"
     is_demo: bool = False
-    legal_name: Optional[str] = None
-    state_registration: Optional[str] = None
-    municipal_registration: Optional[str] = None
-    tax_regime: Optional[str] = None
-    company_size: Optional[str] = None
-    cnae_code: Optional[str] = None
-    cadastral_status: Optional[str] = None
-    zip_code: Optional[str] = None
-    street: Optional[str] = None
-    address_number: Optional[str] = None
-    complement: Optional[str] = None
-    neighborhood: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    country: Optional[str] = None
+    legal_name: str | None = None
+    state_registration: str | None = None
+    municipal_registration: str | None = None
+    tax_regime: str | None = None
+    company_size: str | None = None
+    cnae_code: str | None = None
+    cadastral_status: str | None = None
+    zip_code: str | None = None
+    street: str | None = None
+    address_number: str | None = None
+    complement: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    state: str | None = None
+    country: str | None = None
     contract_status: str = "pendente"
-    contract_sent_at: Optional[datetime] = None
-    contract_signed_at: Optional[datetime] = None
-    contract_document_url: Optional[str] = None
+    contract_sent_at: datetime | None = None
+    contract_signed_at: datetime | None = None
+    contract_document_url: str | None = None
     mfa_policy: str = "disabled"
     consumption_mode_enabled: bool = False
     fulfillment_mode: str = "por_item"
@@ -367,7 +396,7 @@ class CompanyOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-def _validate_zip_code_value(v: Optional[str]) -> Optional[str]:
+def _validate_zip_code_value(v: str | None) -> str | None:
     if v is None or not v.strip():
         return v
     normalized = normalize_cep(v)
@@ -378,26 +407,26 @@ def _validate_zip_code_value(v: Optional[str]) -> Optional[str]:
 
 class CompanyIn(BaseModel):
     name: str
-    document: Optional[str] = None
+    document: str | None = None
     plan: str = "free"
     payment_provider: str = "mock"
-    legal_name: Optional[str] = None
-    state_registration: Optional[str] = None
-    municipal_registration: Optional[str] = None
-    tax_regime: Optional[str] = None
-    company_size: Optional[str] = None
-    cnae_code: Optional[str] = None
-    zip_code: Optional[str] = None
-    street: Optional[str] = None
-    address_number: Optional[str] = None
-    complement: Optional[str] = None
-    neighborhood: Optional[str] = None
-    city: Optional[str] = None
+    legal_name: str | None = None
+    state_registration: str | None = None
+    municipal_registration: str | None = None
+    tax_regime: str | None = None
+    company_size: str | None = None
+    cnae_code: str | None = None
+    zip_code: str | None = None
+    street: str | None = None
+    address_number: str | None = None
+    complement: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
     state: str
 
     @field_validator("document")
     @classmethod
-    def validate_document(cls, v: Optional[str]) -> Optional[str]:
+    def validate_document(cls, v: str | None) -> str | None:
         if v is None or not v.strip():
             return v
         normalized = normalize_cnpj(v)
@@ -407,7 +436,7 @@ class CompanyIn(BaseModel):
 
     @field_validator("zip_code")
     @classmethod
-    def validate_zip_code(cls, v: Optional[str]) -> Optional[str]:
+    def validate_zip_code(cls, v: str | None) -> str | None:
         return _validate_zip_code_value(v)
 
     @field_validator("state")
@@ -423,31 +452,31 @@ class CompanyUpdate(BaseModel):
     # document NÃO faz parte deste schema — é imutável após a criação (ORD-061).
     # Trocar o CNPJ reabre a mesma janela de risco que a criação trata revalidando
     # na Receita a cada submit; tratado como recadastro, não como edição.
-    name: Optional[str] = None
-    plan: Optional[str] = None
-    payment_provider: Optional[str] = None
-    legal_name: Optional[str] = None
-    state_registration: Optional[str] = None
-    municipal_registration: Optional[str] = None
-    tax_regime: Optional[str] = None
-    company_size: Optional[str] = None
-    cnae_code: Optional[str] = None
-    zip_code: Optional[str] = None
-    street: Optional[str] = None
-    address_number: Optional[str] = None
-    complement: Optional[str] = None
-    neighborhood: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
+    name: str | None = None
+    plan: str | None = None
+    payment_provider: str | None = None
+    legal_name: str | None = None
+    state_registration: str | None = None
+    municipal_registration: str | None = None
+    tax_regime: str | None = None
+    company_size: str | None = None
+    cnae_code: str | None = None
+    zip_code: str | None = None
+    street: str | None = None
+    address_number: str | None = None
+    complement: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    state: str | None = None
 
     @field_validator("zip_code")
     @classmethod
-    def validate_zip_code(cls, v: Optional[str]) -> Optional[str]:
+    def validate_zip_code(cls, v: str | None) -> str | None:
         return _validate_zip_code_value(v)
 
     @field_validator("state")
     @classmethod
-    def validate_state(cls, v: Optional[str]) -> Optional[str]:
+    def validate_state(cls, v: str | None) -> str | None:
         if v is None or not v.strip():
             return v
         normalized = v.strip().upper()
@@ -469,62 +498,62 @@ class CompanyCreateOut(BaseModel):
 
 class CnpjLookupOut(BaseModel):
     found: bool
-    reason: Optional[str] = None
+    reason: str | None = None
     cadastral_status: str = "NAO_VERIFICADA"
-    legal_name: Optional[str] = None
-    trade_name: Optional[str] = None
-    zip_code: Optional[str] = None
-    street: Optional[str] = None
-    address_number: Optional[str] = None
-    complement: Optional[str] = None
-    neighborhood: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
+    legal_name: str | None = None
+    trade_name: str | None = None
+    zip_code: str | None = None
+    street: str | None = None
+    address_number: str | None = None
+    complement: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    state: str | None = None
     model_config = {"from_attributes": True}
 
 
 class CepLookupOut(BaseModel):
     found: bool
-    reason: Optional[str] = None
-    street: Optional[str] = None
-    neighborhood: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
+    reason: str | None = None
+    street: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    state: str | None = None
     model_config = {"from_attributes": True}
 
 
 class TerminalOut(BaseModel):
     id: int
     label: str
-    terminal_code: Optional[str] = None
-    tef_number: Optional[str] = None
-    tef_serial: Optional[str] = None
-    paygo_terminal_id: Optional[str] = None
-    mp_device_id: Optional[str] = None
-    environment: Optional[str] = "sandbox"
+    terminal_code: str | None = None
+    tef_number: str | None = None
+    tef_serial: str | None = None
+    paygo_terminal_id: str | None = None
+    mp_device_id: str | None = None
+    environment: str | None = "sandbox"
     active: bool = True
-    last_heartbeat: Optional[datetime] = None
+    last_heartbeat: datetime | None = None
     model_config = {"from_attributes": True}
 
 
 class TerminalIn(BaseModel):
     label: str
-    terminal_code: Optional[str] = None
-    tef_number: Optional[str] = None
-    tef_serial: Optional[str] = None
-    paygo_terminal_id: Optional[str] = None
-    mp_device_id: Optional[str] = None
+    terminal_code: str | None = None
+    tef_number: str | None = None
+    tef_serial: str | None = None
+    paygo_terminal_id: str | None = None
+    mp_device_id: str | None = None
     environment: str = "sandbox"
 
 
 class TerminalUpdate(BaseModel):
-    label: Optional[str] = None
-    tef_number: Optional[str] = None
-    tef_serial: Optional[str] = None
-    paygo_terminal_id: Optional[str] = None
-    mp_device_id: Optional[str] = None
-    environment: Optional[str] = None
-    active: Optional[bool] = None
+    label: str | None = None
+    tef_number: str | None = None
+    tef_serial: str | None = None
+    paygo_terminal_id: str | None = None
+    mp_device_id: str | None = None
+    environment: str | None = None
+    active: bool | None = None
 
 
 class TerminalListOut(BaseModel):
@@ -541,7 +570,7 @@ class UserOut(BaseModel):
     active: bool
     pending_setup: bool
     mfa_enabled: bool
-    created_at: Optional[datetime] = None
+    created_at: datetime | None = None
     # ORD-095: calculado (TrustedDevice não é atributo de User) — preenchido
     # manualmente em list_users, nunca vem de from_attributes.
     has_trusted_device: bool = False
@@ -559,9 +588,9 @@ class UserIn(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    name: Optional[str] = None
-    role: Optional[str] = Field(None, pattern="^(owner|manager|cashier)$")
-    active: Optional[bool] = None
+    name: str | None = None
+    role: str | None = Field(None, pattern="^(owner|manager|cashier)$")
+    active: bool | None = None
 
 
 class PlatformUserIn(BaseModel):
@@ -572,9 +601,9 @@ class PlatformUserIn(BaseModel):
 
 
 class PlatformUserUpdate(BaseModel):
-    name: Optional[str] = None
-    role: Optional[str] = Field(None, pattern="^(superadmin|admin)$")
-    active: Optional[bool] = None
+    name: str | None = None
+    role: str | None = Field(None, pattern="^(superadmin|admin)$")
+    active: bool | None = None
 
 
 class UserListOut(BaseModel):
@@ -628,8 +657,8 @@ class TotemVideoListOut(BaseModel):
 
 
 class TotemVideoUpdateIn(BaseModel):
-    name: Optional[str] = Field(None, max_length=100)
-    active: Optional[bool] = None
+    name: str | None = Field(None, max_length=100)
+    active: bool | None = None
 
 
 class TotemVideoReorderIn(BaseModel):
@@ -661,9 +690,9 @@ class MfaDisableIn(BaseModel):
 
 class TrustedDeviceOut(BaseModel):
     id: int
-    device_label: Optional[str] = None
-    created_at: Optional[datetime] = None
-    last_used_at: Optional[datetime] = None
+    device_label: str | None = None
+    created_at: datetime | None = None
+    last_used_at: datetime | None = None
     expires_at: datetime
     model_config = {"from_attributes": True}
 
@@ -675,10 +704,10 @@ class TrustedDeviceListOut(BaseModel):
 class PaymentConfigIn(BaseModel):
     provider: str
     environment: str
-    api_key: Optional[str] = None
-    api_secret: Optional[str] = None
-    webhook_secret: Optional[str] = None
-    extra_config: Optional[dict] = None
+    api_key: str | None = None
+    api_secret: str | None = None
+    webhook_secret: str | None = None
+    extra_config: dict | None = None
 
 
 class PaymentConfigOut(BaseModel):
@@ -688,7 +717,7 @@ class PaymentConfigOut(BaseModel):
     api_key: str = "***"
     api_secret: str = "***"
     webhook_secret: str = "***"
-    extra_config: Optional[dict] = None
+    extra_config: dict | None = None
     active: bool
     created_at: datetime
     model_config = {"from_attributes": True}
@@ -704,9 +733,9 @@ VALID_CONTACT_TYPES = {"comercial", "financeiro", "tecnico"}
 class ContactIn(BaseModel):
     contact_type: str
     name: str
-    role_title: Optional[str] = None
+    role_title: str | None = None
     email: str
-    phone: Optional[str] = None
+    phone: str | None = None
 
     @field_validator("contact_type")
     @classmethod
@@ -721,9 +750,9 @@ class ContactOut(BaseModel):
     company_id: int
     contact_type: str
     name: str
-    role_title: Optional[str] = None
+    role_title: str | None = None
     email: str
-    phone: Optional[str] = None
+    phone: str | None = None
     created_at: datetime
 
 
@@ -734,9 +763,9 @@ class ContactListOut(BaseModel):
 class LegalRepresentativeIn(BaseModel):
     name: str
     cpf: str
-    role_title: Optional[str] = None
+    role_title: str | None = None
     email: str
-    phone: Optional[str] = None
+    phone: str | None = None
 
     @field_validator("cpf")
     @classmethod
@@ -752,9 +781,9 @@ class LegalRepresentativeOut(BaseModel):
     company_id: int
     name: str
     cpf: str
-    role_title: Optional[str] = None
+    role_title: str | None = None
     email: str
-    phone: Optional[str] = None
+    phone: str | None = None
     created_at: datetime
 
 
@@ -990,11 +1019,11 @@ async def internal_get_payment_config(
 async def list_companies(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    q: Optional[str] = Query(None, description="Busca em nome fantasia ou razão social"),
-    document: Optional[str] = Query(None, description="Prefixo de CNPJ (início), com ou sem máscara"),
-    contract_status: Optional[str] = Query(None, pattern="^(pendente|enviado|assinado)$"),
-    date_from: Optional[str] = Query(None, description="Data de cadastro inicial (>=)"),
-    date_to: Optional[str] = Query(None, description="Data de cadastro final (<=)"),
+    q: str | None = Query(None, description="Busca em nome fantasia ou razão social"),
+    document: str | None = Query(None, description="Prefixo de CNPJ (início), com ou sem máscara"),
+    contract_status: str | None = Query(None, pattern="^(pendente|enviado|assinado)$"),
+    date_from: str | None = Query(None, description="Data de cadastro inicial (>=)"),
+    date_to: str | None = Query(None, description="Data de cadastro final (<=)"),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
@@ -1524,8 +1553,8 @@ async def regenerate_pin(
 )
 async def list_terminals(
     company_id: int,
-    label: Optional[str] = Query(None, min_length=1),
-    environment: Optional[str] = Query(None, pattern="^(sandbox|production)$"),
+    label: str | None = Query(None, min_length=1),
+    environment: str | None = Query(None, pattern="^(sandbox|production)$"),
     status: str = Query("active", pattern="^(active|inactive|all)$"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
@@ -1560,7 +1589,7 @@ def _validate_mp_device_format(mp_device_id: str) -> None:
 
 
 async def _check_mp_device_conflict(
-    db: AsyncSession, company_id: int, mp_device_id: str, exclude_terminal_id: Optional[int],
+    db: AsyncSession, company_id: int, mp_device_id: str, exclude_terminal_id: int | None,
 ) -> None:
     q = select(Terminal).filter_by(company_id=company_id, mp_device_id=mp_device_id, active=True)
     if exclude_terminal_id is not None:
@@ -1630,6 +1659,56 @@ async def list_mp_terminals(
             for t in mp_terminals
         ],
     }
+
+
+class MpOperatingModeIn(BaseModel):
+    device_id: str
+
+
+@app.patch(
+    "/companies/{company_id}/mp-terminals/operating-mode",
+    tags=["Terminais"],
+    summary="Corrigir terminal Point para modo PDV (ORD-148)",
+)
+async def fix_mp_operating_mode(
+    company_id: int,
+    body: MpOperatingModeIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """PATCH /terminals/v1/setup no Mercado Pago pra forçar operating_mode=PDV
+    no device informado. O terminal físico ainda precisa ser reiniciado pelo
+    admin pra a mudança ter efeito de verdade — isso é responsabilidade da UI
+    avisar, não deste endpoint."""
+    _require_company_admin(current_user, company_id)
+    co = await db.get(Company, company_id)
+    if not co or not co.active:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    cfg_result = await db.execute(
+        select(CompanyPaymentConfig).filter_by(company_id=company_id, provider="mercadopago", active=True)
+    )
+    cfg = cfg_result.scalars().first()
+    if not cfg or not cfg.api_key:
+        raise HTTPException(502, "Mercado Pago não configurado para esta empresa.")
+
+    access_token = decrypt_field(cfg.api_key)
+    mp_error = HTTPException(
+        502, "Não foi possível alterar o modo do terminal no Mercado Pago. Tente novamente ou configure manualmente."
+    )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.patch(
+                "https://api.mercadopago.com/terminals/v1/setup",
+                headers={"Authorization": f"Bearer {access_token}"},
+                json={"terminals": [{"id": body.device_id, "operating_mode": "PDV"}]},
+            )
+    except httpx.HTTPError:
+        raise mp_error
+    if resp.status_code not in (200, 201):
+        raise mp_error
+
+    return {"ok": True}
 
 
 @app.post(
@@ -1873,9 +1952,9 @@ async def list_users(
     company_id: int,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    name: Optional[str] = Query(None, min_length=1),
-    email: Optional[str] = Query(None, min_length=1),
-    role: Optional[str] = Query(None, pattern="^(owner|manager|cashier)$"),
+    name: str | None = Query(None, min_length=1),
+    email: str | None = Query(None, min_length=1),
+    role: str | None = Query(None, pattern="^(owner|manager|cashier)$"),
     status: str = Query("active", pattern="^(active|inactive|all)$"),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
@@ -2109,8 +2188,8 @@ def _require_can_grant_role(current_user: TokenPayload, role: str) -> None:
 async def list_platform_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-    name: Optional[str] = Query(None, min_length=1),
-    email: Optional[str] = Query(None, min_length=1),
+    name: str | None = Query(None, min_length=1),
+    email: str | None = Query(None, min_length=1),
     status: str = Query("active", pattern="^(active|inactive|all)$"),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
@@ -3014,7 +3093,7 @@ async def update_contract_status(
     company_id: int,
     request: Request,
     status: str = Form(...),
-    signed_document: Optional[UploadFile] = File(None),
+    signed_document: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):

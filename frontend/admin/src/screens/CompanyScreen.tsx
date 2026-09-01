@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, FormEvent } from "react";
 import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
 import { listCompanies } from "../api/companies";
+import { parseApiError } from "../lib/apiErrors";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { useStore } from "../store";
@@ -563,6 +564,38 @@ export default function CompanyScreen() {
   // texto livre de antes, com a mesma validação de formato feita no backend.
   const [mpManualMode, setMpManualMode] = useState(false);
 
+  // ORD-148: operating_mode por device MP, pra tabela principal de
+  // terminais — independente do fetchMpTerminals acima, que só roda dentro
+  // do modal de criar/editar terminal. Erro aqui é silencioso de propósito
+  // (a coluna de modo simplesmente não aparece): não é crítico pra tela
+  // carregar o resto normalmente.
+  const [mpOperatingModes, setMpOperatingModes] = useState<Record<string, string | null>>({});
+
+  async function loadMpOperatingModes() {
+    if (!companyId) return;
+    try {
+      const r = await api.get(`/companies/${companyId}/mp-terminals`);
+      if (!r.data.configured) return;
+      const modes: Record<string, string | null> = {};
+      for (const t of r.data.terminals as MpTerminal[]) modes[t.id] = t.operating_mode ?? null;
+      setMpOperatingModes(modes);
+    } catch {
+      // silencioso — ver comentário acima
+    }
+  }
+
+  async function fixOperatingMode(deviceId: string) {
+    try {
+      await api.patch(`/companies/${companyId}/mp-terminals/operating-mode`, { device_id: deviceId });
+      makeToast("success", "Modo alterado para PDV. Reinicie o terminal físico pra completar a mudança.");
+      // Pode ainda mostrar o modo antigo até o reinício físico acontecer —
+      // esperado, não é bug (ver Tech Explorer do ORD-148).
+      loadMpOperatingModes();
+    } catch (err) {
+      makeToast("error", parseApiError(err).message);
+    }
+  }
+
   // ── Users ─────────────────────────────────────────────────────────────────
   const [users, setUsers] = useState<User[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -597,6 +630,7 @@ export default function CompanyScreen() {
   useEffect(() => {
     if (!companyId) return;
     loadTerminals();
+    loadMpOperatingModes();
     terminalIsFirstRender.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId, terminalEnvironmentFilter, terminalStatusFilter]);
@@ -987,6 +1021,22 @@ export default function CompanyScreen() {
               {
                 key: "mp_device_id", header: "MP Device ID", mono: true,
                 render: (t) => t.mp_device_id || <span className={styles.muted}>—</span>,
+              },
+              {
+                key: "mp_mode", header: "Modo PDV", render: (t) => {
+                  if (!t.mp_device_id) return <span className={styles.muted}>—</span>;
+                  const mode = mpOperatingModes[t.mp_device_id];
+                  if (mode === "PDV") return <Tag variant="success">PDV</Tag>;
+                  if (mode == null) return <span className={styles.muted}>—</span>;
+                  return (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <Tag variant="warning">{mode}</Tag>
+                      <Button size="small" variant="secondary" onClick={() => fixOperatingMode(t.mp_device_id!)}>
+                        Corrigir
+                      </Button>
+                    </div>
+                  );
+                },
               },
               {
                 key: "status", header: "Status",
