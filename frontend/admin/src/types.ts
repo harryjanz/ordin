@@ -164,6 +164,15 @@ export interface Allergen {
   category: string | null;
 }
 
+// ORD-144 — min_selections_override/max_selections_override valem só pra
+// este vínculo produto↔grupo (null = sem override, usa min_selections/
+// max_selections do próprio grupo, herdados sem mudança de OptionGroup).
+// Valor efetivo é sempre override ?? padrão, calculado no cliente.
+export interface ProductOptionGroup extends OptionGroup {
+  min_selections_override: number | null;
+  max_selections_override: number | null;
+}
+
 export interface Product {
   id: number;
   company_id: number;
@@ -180,7 +189,7 @@ export interface Product {
   sku: string | null;
   sort_order: number | null;
   allergens: Allergen[];
-  option_groups: OptionGroup[];
+  option_groups: ProductOptionGroup[];
 }
 
 // ORD-125 — cardápio por horário: dias da semana (0=segunda..6=domingo,
