@@ -104,16 +104,35 @@
 }
 
 // Conteúdo do Modal de opção — sem "cartão" próprio, o Modal já fornece
-// fundo/borda/padding (mesmo padrão de CatalogScreen .modalForm).
+// fundo/borda/padding (mesmo padrão de CatalogScreen .modalForm). Com
+// Descrição/SKU/Alérgenos (ORD-146) o conteúdo cresceu demais pra empilhar
+// tudo numa coluna só — usuário pediu pra usar a largura disponível em vez
+// de rolagem (nem interna nem de página): Imagem ao lado dos campos de
+// texto, mesmo padrão sectionRow/sectionMain/sectionSide já usado em
+// ProductEditScreen pro mesmo problema (Informações básicas + Imagem).
 .modalForm {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .formTitle {
   @include font('sm-emphasys');
   margin-bottom: 4px;
+}
+
+.modalSectionRow {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.modalSectionMain,
+.modalSectionSide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .formActions {
