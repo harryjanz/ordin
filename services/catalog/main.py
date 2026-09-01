@@ -152,6 +152,7 @@ class Option(Base):
     image_url       = Column(String(500))  # key do objeto no bucket — ver infrastructure/image_storage.py
     thumbnail_url   = Column(String(500))
     sort_order      = Column(Integer)
+    active          = Column(Boolean, nullable=False, default=True)  # ORD-145 — indisponibilidade temporária (estoque/produção), sem excluir a opção
 
 class ProductOptionGroup(Base):
     """min/max_selections_override (ORD-144): permitem que o MESMO grupo
@@ -232,6 +233,7 @@ async def _get_option_group_options(db: AsyncSession, option_group_id: int) -> l
             "image_url": presigned_download_url(o.image_url) if o.image_url else None,
             "thumbnail_url": presigned_download_url(o.thumbnail_url) if o.thumbnail_url else None,
             "sort_order": o.sort_order,
+            "active": o.active,
         }
         for o in result.scalars().all()
     ]
@@ -254,7 +256,11 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, opti
     novo, a imagem de cada opção antiga é descartada do bucket junto — editar
     a lista de opções de um grupo exige re-upload de imagem depois. Se isso
     virar problema de UX real em ORD-139, é ponto pra revisar lá (endpoint
-    passaria a aceitar id por opção pra edição parcial), não nesta história."""
+    passaria a aceitar id por opção pra edição parcial), não nesta história.
+
+    active (ORD-145) precisa ser propagado explicitamente aqui — sem isso,
+    toda opção voltaria a "ativa" no próximo replace completo, desfazendo
+    qualquer desativação feita via PATCH /catalog/options/{id}."""
     if not options:
         raise HTTPException(400, detail="Grupo precisa de ao menos uma opção")
     old_result = await db.execute(select(Option).filter_by(option_group_id=option_group_id))
@@ -263,7 +269,7 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, opti
         if old.thumbnail_url: delete_object(old.thumbnail_url)
     await db.execute(delete(Option).where(Option.option_group_id == option_group_id))
     for index, opt in enumerate(options):
-        db.add(Option(option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index))
+        db.add(Option(option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index, active=opt.active))
 
 async def _get_product_option_groups(db: AsyncSession, product_id: int) -> list[dict]:
     """Inclui min/max_selections_override (ORD-144) além do que
@@ -463,6 +469,7 @@ class AllergenListOut(BaseModel):
 class OptionIn(BaseModel):
     label: str
     price_delta: float = 0  # acréscimo sobre o preço-base do produto, não preço absoluto — ver ORD-142
+    active: bool = True  # ORD-145 — precisa vir no replace completo pra não reativar opção desativada
 
 class OptionOut(BaseModel):
     id: int
@@ -471,6 +478,10 @@ class OptionOut(BaseModel):
     image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
     sort_order: Optional[int] = None
+    active: bool = True
+
+class OptionActiveIn(BaseModel):
+    active: bool
 
 class OptionGroupOut(BaseModel):
     id: int
@@ -1351,7 +1362,7 @@ async def upload_option_image_endpoint(
     return {
         "id": opt.id, "label": opt.label, "price_delta": float(opt.price_delta),
         "image_url": presigned_download_url(opt.image_url), "thumbnail_url": presigned_download_url(opt.thumbnail_url),
-        "sort_order": opt.sort_order,
+        "sort_order": opt.sort_order, "active": opt.active,
     }
 
 @app.delete(
@@ -1375,7 +1386,31 @@ async def delete_option_image(
     await db.commit(); await db.refresh(opt)
     return {
         "id": opt.id, "label": opt.label, "price_delta": float(opt.price_delta),
-        "image_url": None, "thumbnail_url": None, "sort_order": opt.sort_order,
+        "image_url": None, "thumbnail_url": None, "sort_order": opt.sort_order, "active": opt.active,
+    }
+
+@app.patch(
+    "/catalog/options/{option_id}",
+    response_model=OptionOut,
+    tags=["Catálogo"],
+    summary="Ativar/desativar uma opção (indisponibilidade temporária, ORD-145)",
+    responses={404: {"description": "Opção não encontrada"}},
+)
+async def set_option_active(
+    option_id: int,
+    body: OptionActiveIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    opt = await _get_option_scoped(db, option_id, company_id)
+    if not opt: raise HTTPException(404)
+    opt.active = body.active
+    await db.commit(); await db.refresh(opt)
+    return {
+        "id": opt.id, "label": opt.label, "price_delta": float(opt.price_delta),
+        "image_url": presigned_download_url(opt.image_url) if opt.image_url else None,
+        "thumbnail_url": presigned_download_url(opt.thumbnail_url) if opt.thumbnail_url else None,
+        "sort_order": opt.sort_order, "active": opt.active,
     }
 
 @app.put(

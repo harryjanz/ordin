@@ -504,3 +504,93 @@ async def test_vincular_desvincular_continua_funcionando_sem_mudanca_de_contrato
     r3 = await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": []}, headers=auth(token_owner))
     assert r3.status_code == 200
     assert r3.json()["option_groups"] == []  # vínculo (e override) removido por completo
+
+
+# ── ORD-145: ativar/desativar opção individual ───────────────────────────────
+
+async def test_desativar_opcao_via_patch(client, token_owner):
+    r = await _create_group(client, token_owner, options=[
+        {"label": "Coca-Cola", "price_delta": 0}, {"label": "Guaraná", "price_delta": 0},
+    ])
+    option_id = r.json()["options"][1]["id"]
+
+    r2 = await client.patch(f"/catalog/options/{option_id}", json={"active": False}, headers=auth(token_owner))
+    assert r2.status_code == 200
+    assert r2.json()["active"] is False
+
+
+async def test_reativar_opcao_via_patch(client, token_owner):
+    r = await _create_group(client, token_owner)
+    option_id = r.json()["options"][0]["id"]
+    await client.patch(f"/catalog/options/{option_id}", json={"active": False}, headers=auth(token_owner))
+
+    r2 = await client.patch(f"/catalog/options/{option_id}", json={"active": True}, headers=auth(token_owner))
+    assert r2.status_code == 200
+    assert r2.json()["active"] is True
+
+
+async def test_desativar_uma_opcao_nao_afeta_as_demais_do_grupo(client, token_owner):
+    r = await _create_group(client, token_owner, options=[
+        {"label": "Coca-Cola", "price_delta": 0}, {"label": "Fanta", "price_delta": 0}, {"label": "Guaraná", "price_delta": 0},
+    ])
+    options = r.json()["options"]
+    await client.patch(f"/catalog/options/{options[2]['id']}", json={"active": False}, headers=auth(token_owner))
+
+    r2 = await client.get("/catalog/option-groups", headers=auth(token_owner))
+    grupo = next(g for g in r2.json()["option_groups"] if g["id"] == r.json()["id"])
+    by_label = {o["label"]: o["active"] for o in grupo["options"]}
+    assert by_label["Coca-Cola"] is True
+    assert by_label["Fanta"] is True
+    assert by_label["Guaraná"] is False
+
+
+async def test_replace_completo_preserva_active_de_opcao_nao_alterada(client, token_owner):
+    r = await _create_group(client, token_owner, options=[
+        {"label": "Coca-Cola", "price_delta": 0}, {"label": "Guaraná", "price_delta": 0},
+    ])
+    gid = r.json()["id"]
+    options = r.json()["options"]
+    await client.patch(f"/catalog/options/{options[1]['id']}", json={"active": False}, headers=auth(token_owner))
+
+    # Replace completo editando só o label da primeira opção — a segunda precisa manter active=False
+    r2 = await client.put(
+        f"/catalog/option-groups/{gid}/options",
+        json={"options": [
+            {"label": "Coca-Cola Lata", "price_delta": 0, "active": True},
+            {"label": "Guaraná", "price_delta": 0, "active": False},
+        ]},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 200
+    by_label = {o["label"]: o["active"] for o in r2.json()["options"]}
+    assert by_label["Coca-Cola Lata"] is True
+    assert by_label["Guaraná"] is False
+
+
+async def test_patch_active_opcao_inexistente_retorna_404(client, token_owner):
+    r = await client.patch("/catalog/options/999999999", json={"active": False}, headers=auth(token_owner))
+    assert r.status_code == 404
+
+
+async def test_patch_active_opcao_de_outra_empresa_retorna_404(client, token_owner, token_company_b):
+    r = await _create_group(client, token_owner)
+    option_id = r.json()["options"][0]["id"]
+
+    r2 = await client.patch(f"/catalog/options/{option_id}", json={"active": False}, headers=auth(token_company_b))
+    assert r2.status_code == 404
+
+    r3 = await client.get("/catalog/option-groups", headers=auth(token_owner))
+    grupo = next(g for g in r3.json()["option_groups"] if g["id"] == r.json()["id"])
+    assert grupo["options"][0]["active"] is True  # inalterada
+
+
+async def test_criar_opcao_sem_informar_active_assume_ativo(client, token_owner):
+    r = await _create_group(client, token_owner, options=[{"label": "Coca-Cola", "price_delta": 0}])
+    assert r.json()["options"][0]["active"] is True
+
+
+async def test_listagem_de_grupos_retorna_active_em_cada_opcao(client, seed, token_owner):
+    r = await _create_group(client, token_owner)
+    r2 = await client.get("/catalog/option-groups", headers=auth(token_owner))
+    grupo = next(g for g in r2.json()["option_groups"] if g["id"] == r.json()["id"])
+    assert all("active" in o for o in grupo["options"])
