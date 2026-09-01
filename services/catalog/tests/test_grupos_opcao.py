@@ -318,3 +318,189 @@ async def test_listagem_de_categorias_nao_e_afetada(client, seed, token_owner):
 async def test_criar_grupo_role_kiosk_retorna_403(client, token_kiosk):
     r = await _create_group(client, token_kiosk)
     assert r.status_code == 403
+
+
+# ── ORD-144: override de min/max por vínculo produto-grupo ──────────────────
+
+async def test_override_so_de_maximo_mantem_minimo_no_padrao_do_grupo(client, seed, token_owner):
+    r = await _create_group(client, token_owner, min_selections=1, max_selections=4)
+    gid = r.json()["id"]
+    await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+
+    r2 = await client.patch(
+        f"/catalog/products/{seed['prod_id']}/option-groups/{gid}",
+        json={"max_selections_override": 1},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 200
+    assert r2.json() == {"min_selections_override": None, "max_selections_override": 1}
+
+
+async def test_override_de_min_e_max_juntos(client, seed, token_owner):
+    r = await _create_group(client, token_owner, min_selections=1, max_selections=4)
+    gid = r.json()["id"]
+    await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+
+    r2 = await client.patch(
+        f"/catalog/products/{seed['prod_id']}/option-groups/{gid}",
+        json={"min_selections_override": 1, "max_selections_override": 1},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 200
+    assert r2.json() == {"min_selections_override": 1, "max_selections_override": 1}
+
+
+async def test_get_produto_reflete_overrides_sem_alterar_padrao_do_grupo(client, seed, token_owner):
+    r = await _create_group(client, token_owner, min_selections=1, max_selections=4)
+    gid = r.json()["id"]
+    await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+    await client.patch(f"/catalog/products/{seed['prod_id']}/option-groups/{gid}", json={"max_selections_override": 1}, headers=auth(token_owner))
+
+    r2 = await client.get(f"/catalog/products/{seed['prod_id']}", headers=auth(token_owner))
+    grupo = next(g for g in r2.json()["option_groups"] if g["id"] == gid)
+    assert grupo["min_selections"] == 1 and grupo["max_selections"] == 4  # padrão do grupo, inalterado
+    assert grupo["max_selections_override"] == 1
+    assert grupo["min_selections_override"] is None
+
+
+async def test_restaurar_padrao_limpa_os_overrides(client, seed, token_owner):
+    r = await _create_group(client, token_owner, min_selections=1, max_selections=4)
+    gid = r.json()["id"]
+    await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+    await client.patch(f"/catalog/products/{seed['prod_id']}/option-groups/{gid}", json={"max_selections_override": 1}, headers=auth(token_owner))
+
+    r2 = await client.patch(
+        f"/catalog/products/{seed['prod_id']}/option-groups/{gid}",
+        json={"min_selections_override": None, "max_selections_override": None},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 200
+    assert r2.json() == {"min_selections_override": None, "max_selections_override": None}
+
+    r3 = await client.get(f"/catalog/products/{seed['prod_id']}", headers=auth(token_owner))
+    grupo = next(g for g in r3.json()["option_groups"] if g["id"] == gid)
+    assert grupo["max_selections_override"] is None
+
+
+async def test_cenario_pizza_mesmo_grupo_maximo_diferente_por_tamanho(client, token_owner):
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        cat = svc.Category(company_id=1, name="__pizza_cat__", active=True)
+        db.add(cat)
+        await db.flush()
+        broto = svc.Product(company_id=1, category_id=cat.id, name="__pizza_broto__", price=20.0, active=True)
+        big = svc.Product(company_id=1, category_id=cat.id, name="__pizza_big__", price=50.0, active=True)
+        db.add_all([broto, big])
+        await db.commit()
+        broto_id, big_id, cat_id = broto.id, big.id, cat.id
+
+    r = await _create_group(client, token_owner, name="__sabores_pizza__", min_selections=1, max_selections=4)
+    gid = r.json()["id"]
+    await client.put(f"/catalog/products/{broto_id}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+    await client.put(f"/catalog/products/{big_id}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+
+    await client.patch(f"/catalog/products/{broto_id}/option-groups/{gid}", json={"max_selections_override": 1}, headers=auth(token_owner))
+    await client.patch(f"/catalog/products/{big_id}/option-groups/{gid}", json={"max_selections_override": 4}, headers=auth(token_owner))
+
+    r_broto = await client.get(f"/catalog/products/{broto_id}", headers=auth(token_owner))
+    r_big = await client.get(f"/catalog/products/{big_id}", headers=auth(token_owner))
+    assert next(g for g in r_broto.json()["option_groups"] if g["id"] == gid)["max_selections_override"] == 1
+    assert next(g for g in r_big.json()["option_groups"] if g["id"] == gid)["max_selections_override"] == 4
+
+    r_groups = await client.get("/catalog/option-groups", headers=auth(token_owner))
+    assert sum(1 for g in r_groups.json()["option_groups"] if g["name"] == "__sabores_pizza__") == 1  # não duplicado
+
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        await db.execute(sa_delete(svc.ProductOptionGroup))
+        await db.execute(sa_delete(svc.Option).where(svc.Option.option_group_id == gid))
+        await db.execute(sa_delete(svc.OptionGroup).where(svc.OptionGroup.id == gid))
+        await db.execute(sa_delete(svc.Product).where(svc.Product.id.in_([broto_id, big_id])))
+        await db.execute(sa_delete(svc.Category).where(svc.Category.id == cat_id))
+        await db.commit()
+
+
+async def test_override_parcial_valida_combinacao_com_padrao_do_grupo(client, seed, token_owner):
+    r = await _create_group(client, token_owner, min_selections=1, max_selections=4)
+    gid = r.json()["id"]
+    await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+
+    r2 = await client.patch(
+        f"/catalog/products/{seed['prod_id']}/option-groups/{gid}",
+        json={"min_selections_override": 5},  # combina com max_selections=4 do padrão do grupo
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 400
+
+
+async def test_maximo_efetivo_menor_que_um_rejeitado(client, seed, token_owner):
+    r = await _create_group(client, token_owner, min_selections=1, max_selections=4)
+    gid = r.json()["id"]
+    await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+
+    r2 = await client.patch(
+        f"/catalog/products/{seed['prod_id']}/option-groups/{gid}",
+        json={"max_selections_override": 0},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 400
+
+
+async def test_patch_em_vinculo_inexistente_retorna_404(client, seed, token_owner):
+    r = await _create_group(client, token_owner)
+    gid = r.json()["id"]
+    # grupo existe, produto existe, mas NÃO estão vinculados
+    r2 = await client.patch(
+        f"/catalog/products/{seed['prod_id']}/option-groups/{gid}",
+        json={"max_selections_override": 1},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 404
+
+
+async def test_patch_em_produto_de_outra_empresa_retorna_404(client, seed, token_owner, token_company_b):
+    r = await _create_group(client, token_owner)
+    gid = r.json()["id"]
+    await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+
+    r2 = await client.patch(
+        f"/catalog/products/{seed['prod_id']}/option-groups/{gid}",
+        json={"max_selections_override": 1},
+        headers=auth(token_company_b),
+    )
+    assert r2.status_code == 404
+
+
+async def test_patch_com_grupo_de_outra_empresa_retorna_404(client, seed, token_owner, token_company_b):
+    r = await _create_group(client, token_company_b)
+    gid_b = r.json()["id"]
+    r2 = await client.patch(
+        f"/catalog/products/{seed['prod_id']}/option-groups/{gid_b}",
+        json={"max_selections_override": 1},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 404
+
+
+async def test_listagem_de_grupos_nao_expoe_campos_de_override(client, seed, token_owner):
+    r = await _create_group(client, token_owner)
+    gid = r.json()["id"]
+    await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+    await client.patch(f"/catalog/products/{seed['prod_id']}/option-groups/{gid}", json={"max_selections_override": 1}, headers=auth(token_owner))
+
+    r2 = await client.get("/catalog/option-groups", headers=auth(token_owner))
+    grupo = next(g for g in r2.json()["option_groups"] if g["id"] == gid)
+    assert "min_selections_override" not in grupo
+    assert "max_selections_override" not in grupo
+
+
+async def test_vincular_desvincular_continua_funcionando_sem_mudanca_de_contrato(client, seed, token_owner):
+    r = await _create_group(client, token_owner)
+    gid = r.json()["id"]
+    r2 = await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": [gid]}, headers=auth(token_owner))
+    assert r2.status_code == 200
+    await client.patch(f"/catalog/products/{seed['prod_id']}/option-groups/{gid}", json={"max_selections_override": 1}, headers=auth(token_owner))
+
+    r3 = await client.put(f"/catalog/products/{seed['prod_id']}/option-groups", json={"option_group_ids": []}, headers=auth(token_owner))
+    assert r3.status_code == 200
+    assert r3.json()["option_groups"] == []  # vínculo (e override) removido por completo

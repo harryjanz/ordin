@@ -11,6 +11,7 @@ import {
   InputBase,
   Modal,
   NumberInput,
+  NumberSpinInput,
   Tag,
   TagInput,
   TextArea,
@@ -24,7 +25,8 @@ import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
-import type { Allergen, Category, OptionGroup, Product, ProductMenuRef } from "../types";
+import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
+import type { Allergen, Category, OptionGroup, Product, ProductMenuRef, ProductOptionGroup } from "../types";
 import styles from "./ProductEditScreen.module.scss";
 
 const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
@@ -63,7 +65,7 @@ interface EditProdState {
   sku: string;
   tags: string[];
   allergen_ids: string[];
-  option_groups: OptionGroup[];
+  option_groups: ProductOptionGroup[];
 }
 
 // ORD-136 — edição de produto sai do modal (espaço comprometido, mais
@@ -97,6 +99,13 @@ export default function ProductEditScreen() {
   const [selectedExistingIds, setSelectedExistingIds] = useState<number[]>([]);
   const [linkSaving, setLinkSaving] = useState(false);
   const [linkError, setLinkError] = useState("");
+
+  // ── Override de máximo por produto (ORD-144) ─────────────────────────────
+  // Só o máximo é editável na UI — o mínimo fica API-only (não há caso de
+  // uso real hoje pra customizar o mínimo por produto, ver Tech Explorer).
+  const [overrideGroupId, setOverrideGroupId] = useState<number | null>(null);
+  const [overrideDraft, setOverrideDraft] = useState<number | null>(null);
+  const [overrideSaving, setOverrideSaving] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -229,6 +238,57 @@ export default function ProductEditScreen() {
       await persistOptionGroupIds(linkedIds.filter((id) => id !== groupId));
     } catch {
       makeToast("error", "Erro ao desvincular grupo de opção.");
+    }
+  }
+
+  function openOverrideEditor(g: ProductOptionGroup) {
+    setOverrideGroupId(g.id);
+    setOverrideDraft(g.max_selections_override ?? g.max_selections);
+  }
+
+  function closeOverrideEditor() {
+    setOverrideGroupId(null);
+  }
+
+  async function saveOverride() {
+    if (overrideGroupId === null || !editProd) return;
+    setOverrideSaving(true);
+    try {
+      const r = await api.patch(
+        `/catalog/products/${editProd.id}/option-groups/${overrideGroupId}`,
+        { max_selections_override: overrideDraft },
+        catalogParams(),
+      );
+      setEditProd((prev) => (prev ? {
+        ...prev,
+        option_groups: prev.option_groups.map((g) => (g.id === overrideGroupId ? { ...g, ...r.data } : g)),
+      } : prev));
+      setOverrideGroupId(null);
+    } catch (err) {
+      makeToast("error", parseApiError(err).message || "Erro ao salvar máximo do produto.");
+    } finally {
+      setOverrideSaving(false);
+    }
+  }
+
+  async function restoreOverrideDefault() {
+    if (overrideGroupId === null || !editProd) return;
+    setOverrideSaving(true);
+    try {
+      const r = await api.patch(
+        `/catalog/products/${editProd.id}/option-groups/${overrideGroupId}`,
+        { min_selections_override: null, max_selections_override: null },
+        catalogParams(),
+      );
+      setEditProd((prev) => (prev ? {
+        ...prev,
+        option_groups: prev.option_groups.map((g) => (g.id === overrideGroupId ? { ...g, ...r.data } : g)),
+      } : prev));
+      setOverrideGroupId(null);
+    } catch (err) {
+      makeToast("error", parseApiError(err).message || "Erro ao restaurar padrão.");
+    } finally {
+      setOverrideSaving(false);
     }
   }
 
@@ -431,23 +491,30 @@ export default function ProductEditScreen() {
           <div className={styles.menusInfo}>Nenhum grupo de opção vinculado.</div>
         ) : (
           <div className={styles.optionGroupCards}>
-            {editProd.option_groups.map((g) => (
-              <div key={g.id} className={styles.optionGroupCard}>
-                <div className={styles.optionGroupCardHeader}>
-                  <strong>{g.name}</strong>
-                  <Tag variant={g.min_selections >= 1 ? "emphasys" : "neutral"}>{g.min_selections >= 1 ? "Obrigatório" : "Opcional"}</Tag>
-                  <Tag variant="neutral">{g.max_selections === 1 ? "Única" : "Múltipla"}</Tag>
-                  <Button type="button" size="small" variant="secondary" style={{ color: "var(--error-base)", marginLeft: "auto" }} onClick={() => unlinkOptionGroup(g.id)}>
-                    Desvincular
-                  </Button>
+            {editProd.option_groups.map((g) => {
+              const effectiveMin = g.min_selections_override ?? g.min_selections;
+              const effectiveMax = g.max_selections_override ?? g.max_selections;
+              return (
+                <div key={g.id} className={styles.optionGroupCard}>
+                  <div className={styles.optionGroupCardHeader}>
+                    <strong>{g.name}</strong>
+                    <Tag variant={effectiveMin >= 1 ? "emphasys" : "neutral"}>{effectiveMin >= 1 ? "Obrigatório" : "Opcional"}</Tag>
+                    <Tag variant="neutral">{effectiveMax === 1 ? "Única" : `Múltipla (máx. ${effectiveMax} neste produto)`}</Tag>
+                    <Button type="button" size="small" variant="secondary" onClick={() => openOverrideEditor(g)}>
+                      Editar máximo neste produto
+                    </Button>
+                    <Button type="button" size="small" variant="secondary" style={{ color: "var(--error-base)", marginLeft: "auto" }} onClick={() => unlinkOptionGroup(g.id)}>
+                      Desvincular
+                    </Button>
+                  </div>
+                  <div className={styles.optionPills}>
+                    {g.options.map((o) => (
+                      <Tag key={o.id} variant="neutral">{o.label}{o.price_delta > 0 ? ` +${o.price_delta.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}</Tag>
+                    ))}
+                  </div>
                 </div>
-                <div className={styles.optionPills}>
-                  {g.options.map((o) => (
-                    <Tag key={o.id} variant="neutral">{o.label}{o.price_delta > 0 ? ` +${o.price_delta.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}</Tag>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -487,6 +554,26 @@ export default function ProductEditScreen() {
           <div className={styles.formActions}>
             <Button type="button" onClick={linkExisting} disabled={selectedExistingIds.length === 0 || linkSaving} loading={linkSaving}>Vincular</Button>
             <Button type="button" variant="secondary" onClick={closeOptionModal}>Cancelar</Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={overrideGroupId !== null} width={420} onClose={closeOverrideEditor} onBackdropClick={closeOverrideEditor} onCloseButtonClick={closeOverrideEditor}>
+        <div className={styles.modalForm}>
+          <div className={styles.formTitle}>Máximo neste produto</div>
+          <NumberSpinInput
+            typeable
+            step={1}
+            minValue={MAX_SELECTIONS_MIN}
+            maxValue={MAX_SELECTIONS_MAX}
+            helperMessage="Vale só para este produto — não altera o padrão do grupo em Catálogo > Opções"
+            value={overrideDraft ?? MAX_SELECTIONS_MIN}
+            onChange={(value?: number) => setOverrideDraft(value ?? null)}
+          />
+          <div className={styles.formActions}>
+            <Button type="button" onClick={saveOverride} loading={overrideSaving}>Salvar</Button>
+            <Button type="button" variant="secondary" onClick={restoreOverrideDefault} loading={overrideSaving}>Restaurar padrão</Button>
+            <Button type="button" variant="secondary" onClick={closeOverrideEditor}>Cancelar</Button>
           </div>
         </div>
       </Modal>

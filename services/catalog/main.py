@@ -154,9 +154,17 @@ class Option(Base):
     sort_order      = Column(Integer)
 
 class ProductOptionGroup(Base):
+    """min/max_selections_override (ORD-144): permitem que o MESMO grupo
+    (ex.: "Sabores") seja vinculado a produtos diferentes com um limite de
+    seleção diferente por produto (ex.: pizza Broto = até 1 sabor, Big = até
+    4) — sem duplicar o grupo. NULL = sem override, usa o padrão do próprio
+    OptionGroup. Ver Tech Explorer de ORD-144 pra decisão de não reaproveitar
+    min_selections/max_selections do grupo pra isso."""
     __tablename__ = "product_option_groups"
-    product_id      = Column(Integer, ForeignKey("products.id"), primary_key=True)
-    option_group_id = Column(Integer, ForeignKey("option_groups.id"), primary_key=True)
+    product_id                = Column(Integer, ForeignKey("products.id"), primary_key=True)
+    option_group_id           = Column(Integer, ForeignKey("option_groups.id"), primary_key=True)
+    min_selections_override   = Column(Integer, nullable=True)
+    max_selections_override   = Column(Integer, nullable=True)
 
 class Menu(Base):
     """Cardápio por horário (ORD-124/125) — dias da semana + janela de
@@ -258,13 +266,24 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, opti
         db.add(Option(option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index))
 
 async def _get_product_option_groups(db: AsyncSession, product_id: int) -> list[dict]:
+    """Inclui min/max_selections_override (ORD-144) além do que
+    _serialize_option_group já monta — só faz sentido no contexto de UM
+    produto, por isso não faz parte do dict genérico do grupo."""
     result = await db.execute(
-        select(OptionGroup)
+        select(OptionGroup, ProductOptionGroup)
         .join(ProductOptionGroup, ProductOptionGroup.option_group_id == OptionGroup.id)
         .filter(ProductOptionGroup.product_id == product_id)
         .order_by(OptionGroup.name)
     )
-    return [await _serialize_option_group(db, g) for g in result.scalars().all()]
+    rows = result.all()
+    out = []
+    for g, link in rows:
+        serialized = await _serialize_option_group(db, g)
+        serialized["min_selections_override"] = link.min_selections_override
+        serialized["max_selections_override"] = link.max_selections_override
+        out.append(serialized)
+    return out
+
 
 async def _set_product_option_groups(db: AsyncSession, product_id: int, company_id: int, option_group_ids: list[int]) -> None:
     """Replace completo — mesmo padrão de _set_product_allergens, mas
@@ -511,6 +530,30 @@ class OptionGroupReorderIn(BaseModel):
 class ProductOptionGroupsIn(BaseModel):
     option_group_ids: list[int]
 
+class ProductOptionGroupOut(OptionGroupOut):
+    """Só usado dentro de ProductOut.option_groups — min_selections/
+    max_selections continuam sendo o PADRÃO do grupo (herdado de
+    OptionGroupOut, sem mudança); os dois campos abaixo são o override
+    específico deste vínculo produto↔grupo (ORD-144), ou null se não
+    configurado. O valor EFETIVO (override ?? padrão) é calculado no
+    cliente — não duplicamos essa conta aqui pra não ter duas fontes de
+    verdade. GET /catalog/option-groups (fora do contexto de produto)
+    continua usando OptionGroupOut puro, sem estes campos."""
+    min_selections_override: Optional[int] = None
+    max_selections_override: Optional[int] = None
+
+class ProductOptionGroupOverrideIn(BaseModel):
+    """Os dois campos são independentes e opcionais — omitido mantém o
+    valor atual do vínculo, `null` explícito limpa o override (restaura o
+    padrão do grupo). Por isso o endpoint lê com model_dump(exclude_unset=True),
+    nunca exclude_none — ver Tech Explorer de ORD-144."""
+    min_selections_override: Optional[int] = None
+    max_selections_override: Optional[int] = None
+
+class ProductOptionGroupOverrideOut(BaseModel):
+    min_selections_override: Optional[int] = None
+    max_selections_override: Optional[int] = None
+
 class ProductOut(BaseModel):
     id: int
     category_id: Optional[int] = None
@@ -526,7 +569,7 @@ class ProductOut(BaseModel):
     sku: Optional[str] = None
     sort_order: Optional[int] = None
     allergens: list[AllergenOut] = []
-    option_groups: list[OptionGroupOut] = []
+    option_groups: list[ProductOptionGroupOut] = []
 
 class ProductListOut(BaseModel):
     products: list[ProductOut]
@@ -1357,6 +1400,47 @@ async def set_product_option_groups(
     await _set_product_option_groups(db, product_id, company_id, body.option_group_ids)
     await db.commit(); await db.refresh(p)
     return await _serialize_product(db, p)
+
+@app.patch(
+    "/catalog/products/{product_id}/option-groups/{option_group_id}",
+    response_model=ProductOptionGroupOverrideOut,
+    tags=["Catálogo"],
+    summary="Definir override de min/max de seleção pra um vínculo produto-grupo (ORD-144)",
+    responses={
+        400: {"description": "par efetivo (override combinado com o padrão do grupo) inválido"},
+        404: {"description": "Produto, grupo, ou vínculo entre eles não encontrado"},
+    },
+)
+async def set_product_option_group_override(
+    product_id: int,
+    option_group_id: int,
+    body: ProductOptionGroupOverrideIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    product = (await db.execute(select(Product.id).filter_by(id=product_id, company_id=company_id, deleted=False))).scalars().first()
+    if not product: raise HTTPException(404)
+    group = (await db.execute(select(OptionGroup).filter_by(id=option_group_id, company_id=company_id))).scalars().first()
+    if not group: raise HTTPException(404)
+    link = (await db.execute(
+        select(ProductOptionGroup).filter_by(product_id=product_id, option_group_id=option_group_id)
+    )).scalars().first()
+    if not link: raise HTTPException(404)
+
+    # exclude_unset (não exclude_none!) — omitido mantém o valor atual do
+    # vínculo, null explícito limpa o override. Ver Tech Explorer ORD-144.
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(link, field, value)
+
+    effective_min = link.min_selections_override if link.min_selections_override is not None else group.min_selections
+    effective_max = link.max_selections_override if link.max_selections_override is not None else group.max_selections
+    if effective_max < 1:
+        raise HTTPException(400, detail="max_selections deve ser ao menos 1")
+    if effective_min > effective_max:
+        raise HTTPException(400, detail="min_selections não pode ser maior que max_selections")
+
+    await db.commit(); await db.refresh(link)
+    return {"min_selections_override": link.min_selections_override, "max_selections_override": link.max_selections_override}
 
 def _parse_time(value: str):
     from datetime import time
