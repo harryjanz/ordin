@@ -23,6 +23,7 @@ import {
 } from "design-system";
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
@@ -233,11 +234,15 @@ export default function ProductEditScreen() {
     }
   }
 
+  const [unlinkConfirm, setUnlinkConfirm] = useState<ProductOptionGroup | null>(null);
+
   async function unlinkOptionGroup(groupId: number) {
     try {
       await persistOptionGroupIds(linkedIds.filter((id) => id !== groupId));
     } catch {
       makeToast("error", "Erro ao desvincular grupo de opção.");
+    } finally {
+      setUnlinkConfirm(null);
     }
   }
 
@@ -506,7 +511,7 @@ export default function ProductEditScreen() {
                     <Button type="button" size="small" variant="secondary" onClick={() => openOverrideEditor(g)}>
                       Editar máximo neste produto
                     </Button>
-                    <Button type="button" size="small" variant="secondary" style={{ color: "var(--error-base)", marginLeft: "auto" }} onClick={() => unlinkOptionGroup(g.id)}>
+                    <Button type="button" size="small" variant="secondary" style={{ color: "var(--error-base)", marginLeft: "auto" }} onClick={() => setUnlinkConfirm(g)}>
                       Desvincular
                     </Button>
                   </div>
@@ -580,6 +585,19 @@ export default function ProductEditScreen() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={unlinkConfirm !== null}
+        title="Desvincular grupo de opção"
+        message={unlinkConfirm
+          ? `Desvincular "${unlinkConfirm.name}" deste produto? As opções deixam de aparecer pra quem comprar "${editProd.name}". O grupo continua na biblioteca (Catálogo > Opções) e pode ser vinculado de novo, mas o máximo customizado aqui pra este produto será perdido.`
+          : ""}
+        confirmLabel="Desvincular"
+        alertVariant="warning"
+        alertIcon="alert-triangle"
+        onConfirm={() => unlinkConfirm && unlinkOptionGroup(unlinkConfirm.id)}
+        onCancel={() => setUnlinkConfirm(null)}
+      />
     </div>
   );
 }
