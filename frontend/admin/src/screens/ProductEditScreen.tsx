@@ -27,7 +27,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
-import type { Allergen, Category, OptionGroup, Product, ProductMenuRef, ProductOptionGroup } from "../types";
+import type { Allergen, Category, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup } from "../types";
 import styles from "./ProductEditScreen.module.scss";
 
 const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
@@ -235,6 +235,33 @@ export default function ProductEditScreen() {
   }
 
   const [unlinkConfirm, setUnlinkConfirm] = useState<ProductOptionGroup | null>(null);
+
+  // ── Ativar/desativar opção individual (ORD-145) ──────────────────────────
+  // Pill de opção nunca edita label/preço (isso é exclusivo de Catálogo >
+  // Opções, ORD-139) — só alterna active, via o mesmo PATCH cirúrgico.
+  // Correção pós-implementação: ativar também passou a pedir confirmação,
+  // não só desativar — mesmo estado cobre os dois sentidos.
+  const [optionToggleTarget, setOptionToggleTarget] = useState<{ groupId: number; option: OptionGroupOption; active: boolean } | null>(null);
+
+  async function setOptionActive(groupId: number, optionId: number, active: boolean) {
+    try {
+      const r = await api.patch(`/catalog/options/${optionId}`, { active }, catalogParams());
+      setEditProd((prev) => (prev ? {
+        ...prev,
+        option_groups: prev.option_groups.map((g) => (g.id !== groupId ? g : {
+          ...g,
+          options: g.options.map((o) => (o.id === optionId ? { ...o, active: r.data.active } : o)),
+        })),
+      } : prev));
+    } catch {
+      makeToast("error", "Erro ao atualizar status da opção.");
+    }
+  }
+
+  async function confirmOptionToggle() {
+    if (optionToggleTarget) await setOptionActive(optionToggleTarget.groupId, optionToggleTarget.option.id, optionToggleTarget.active);
+    setOptionToggleTarget(null);
+  }
 
   async function unlinkOptionGroup(groupId: number) {
     try {
@@ -517,7 +544,16 @@ export default function ProductEditScreen() {
                   </div>
                   <div className={styles.optionPills}>
                     {g.options.map((o) => (
-                      <Tag key={o.id} variant="neutral">{o.label}{o.price_delta > 0 ? ` +${o.price_delta.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}</Tag>
+                      <span
+                        key={o.id}
+                        style={{ cursor: "pointer", opacity: o.active ? 1 : 0.55 }}
+                        title={o.active ? "Clique para desativar (indisponibilidade temporária)" : "Clique para reativar"}
+                        onClick={() => setOptionToggleTarget({ groupId: g.id, option: o, active: !o.active })}
+                      >
+                        <Tag variant={o.active ? "neutral" : "error"}>
+                          {o.label}{o.price_delta > 0 ? ` +${o.price_delta.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}` : ""}{!o.active ? " · indisponível" : ""}
+                        </Tag>
+                      </span>
                     ))}
                   </div>
                 </div>
@@ -597,6 +633,21 @@ export default function ProductEditScreen() {
         alertIcon="alert-triangle"
         onConfirm={() => unlinkConfirm && unlinkOptionGroup(unlinkConfirm.id)}
         onCancel={() => setUnlinkConfirm(null)}
+      />
+
+      <ConfirmDialog
+        open={optionToggleTarget !== null}
+        title={optionToggleTarget?.active ? "Ativar opção" : "Desativar opção"}
+        message={
+          optionToggleTarget
+            ? (optionToggleTarget.active
+              ? `Ativar "${optionToggleTarget.option.label}"? Ela volta a aparecer como selecionável neste produto.`
+              : `Desativar "${optionToggleTarget.option.label}"? Ela para de aparecer como selecionável, mas continua cadastrada e pode ser reativada a qualquer momento.`)
+            : ""
+        }
+        confirmLabel={optionToggleTarget?.active ? "Ativar" : "Desativar"}
+        onConfirm={confirmOptionToggle}
+        onCancel={() => setOptionToggleTarget(null)}
       />
     </div>
   );

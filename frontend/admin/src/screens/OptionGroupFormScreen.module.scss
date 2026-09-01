@@ -3,7 +3,7 @@
 .page {
   padding: 32px;
   color: var(--a-text);
-  max-width: 760px;
+  max-width: 1100px;
 }
 
 .header {
@@ -90,6 +90,19 @@
   flex-shrink: 0;
 }
 
+// Miniatura + label na mesma célula (em vez de coluna própria de imagem) —
+// pedido do usuário: sem coluna extra, o texto de opção fica colado ao ícone
+// de arrastar, usando o espaço que antes ficava vazio entre os dois.
+.optionLabelCell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.optionLabel {
+  @include font('base-emphasys');
+}
+
 // Conteúdo do Modal de opção — sem "cartão" próprio, o Modal já fornece
 // fundo/borda/padding (mesmo padrão de CatalogScreen .modalForm).
 .modalForm {
@@ -129,4 +142,14 @@
   object-fit: cover;
   @include rounded('default');
   border: 1px solid var(--a-border);
+}
+
+// A linha de opção ganhou coluna de Status + 3 ações (Editar/Ativar-
+// Desativar/Remover, ORD-145) — mais larga que o card em telas estreitas.
+// Scroll próprio em vez de cortar botão silenciosamente.
+// Rede de segurança pra telas estreitas — com a página em 1100px (igual
+// ProductEditScreen) a tabela cabe sem apertar, isso só entra em jogo
+// abaixo disso.
+.tableScroll {
+  overflow-x: auto;
 }

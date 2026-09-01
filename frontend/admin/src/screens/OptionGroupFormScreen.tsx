@@ -9,12 +9,14 @@ import {
   NumberSpinInput,
   RadioButton,
   RadioGroup,
+  Tag,
   Upload,
   makeToast,
   type UploadFile,
 } from "design-system";
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
+import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
@@ -40,6 +42,7 @@ interface OptionRow {
   thumbnail_url: string | null;
   pendingFile: File | null;
   pendingPreviewUrl: string | null;
+  active: boolean;
 }
 
 let newRowSeq = 0;
@@ -93,6 +96,7 @@ export default function OptionGroupFormScreen() {
         setRows(g.options.map((o) => ({
           key: `existing-${o.id}`, id: o.id, label: o.label, price_delta: o.price_delta,
           image_url: o.image_url, thumbnail_url: o.thumbnail_url, pendingFile: null, pendingPreviewUrl: null,
+          active: o.active,
         })));
         setOriginalRows(g.options.map((o) => ({ id: o.id, label: o.label, price_delta: o.price_delta, image_url: o.image_url })));
       } catch {
@@ -130,6 +134,33 @@ export default function OptionGroupFormScreen() {
       if (row?.pendingPreviewUrl) URL.revokeObjectURL(row.pendingPreviewUrl);
       return prev.filter((r) => r.key !== key);
     });
+  }
+
+  // ── Ativar/desativar opção (ORD-145) ─────────────────────────────────────
+  // Opção já existente (tem id): PATCH cirúrgico na hora, sem esperar o
+  // Salvar do grupo — mesmo padrão de imagem de opção e do override do
+  // ORD-144. Opção nova (ainda não salva): só estado local, vai junto no
+  // POST/PUT quando o grupo for salvo.
+  // Correção pós-implementação (ORD-145): ativar também passou a pedir
+  // confirmação, não só desativar — mesmo estado cobre os dois sentidos.
+  const [toggleConfirm, setToggleConfirm] = useState<{ row: OptionRow; active: boolean } | null>(null);
+
+  async function setRowActive(row: OptionRow, active: boolean) {
+    if (row.id === null) {
+      updateRow(row.key, { active });
+      return;
+    }
+    try {
+      const r = await api.patch(`/catalog/options/${row.id}`, { active }, catalogParams());
+      updateRow(row.key, { active: r.data.active });
+    } catch {
+      makeToast("error", "Erro ao atualizar status da opção.");
+    }
+  }
+
+  async function confirmToggle() {
+    if (toggleConfirm) await setRowActive(toggleConfirm.row, toggleConfirm.active);
+    setToggleConfirm(null);
   }
 
   // ── Modal de opção (adicionar/editar) ───────────────────────────────────
@@ -229,6 +260,7 @@ export default function OptionGroupFormScreen() {
       setRows((prev) => [...prev, {
         key, id: null, label: draftLabel.trim(), price_delta: draftPrice ?? 0,
         image_url: null, thumbnail_url: null, pendingFile: draftPendingFile, pendingPreviewUrl: draftPendingPreviewUrl,
+        active: true,
       }]);
     } else {
       updateRow(editingRowKey, {
@@ -263,7 +295,7 @@ export default function OptionGroupFormScreen() {
     setFormError("");
     try {
       const { min_selections, max_selections } = advancedMinMax ?? radiosToMinMax(radios, rows.length, maxSelections);
-      const optionsPayload = rows.map((r) => ({ label: r.label.trim(), price_delta: r.price_delta ?? 0 }));
+      const optionsPayload = rows.map((r) => ({ label: r.label.trim(), price_delta: r.price_delta ?? 0, active: r.active }));
 
       let groupId = editingGroupId;
       let savedOptions: { id: number }[] | null = null;
@@ -394,6 +426,7 @@ export default function OptionGroupFormScreen() {
           <Alert variant="warning" text="Salvar vai exigir reenviar as imagens das opções que não foram alteradas agora." fullWidth />
         )}
 
+        <div className={styles.tableScroll}>
         <Table
           rowKey={(r: OptionRow) => r.key}
           emptyMessage="Nenhuma opção adicionada."
@@ -401,23 +434,34 @@ export default function OptionGroupFormScreen() {
           onRowClick={(r: OptionRow) => openEditOptionModal(r)}
           columns={[
             {
-              key: "image", header: "", render: (r: OptionRow) => (
-                (r.thumbnail_url ?? r.pendingPreviewUrl) ? (
-                  <img src={r.thumbnail_url ?? r.pendingPreviewUrl!} alt={r.label} className={styles.rowThumb} />
-                ) : (
-                  <span className={styles.rowThumbPlaceholder} />
-                )
+              key: "label", header: "Opção", render: (r: OptionRow) => (
+                <div className={styles.optionLabelCell}>
+                  {(r.thumbnail_url ?? r.pendingPreviewUrl) ? (
+                    <img src={r.thumbnail_url ?? r.pendingPreviewUrl!} alt={r.label} className={styles.rowThumb} />
+                  ) : (
+                    <span className={styles.rowThumbPlaceholder} />
+                  )}
+                  <span className={styles.optionLabel}>{r.label}</span>
+                </div>
               ),
             },
-            { key: "label", header: "Opção", render: (r: OptionRow) => r.label },
             {
               key: "price", header: "Acréscimo",
               render: (r: OptionRow) => (r.price_delta ?? 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
             },
             {
+              key: "status", header: "Status",
+              render: (r: OptionRow) => <Tag variant={r.active ? "success" : "error"}>{r.active ? "Ativo" : "Inativo"}</Tag>,
+            },
+            {
               key: "action", header: "", render: (r: OptionRow) => (
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }} onClick={(e) => e.stopPropagation()}>
                   <Button size="small" variant="secondary" onClick={() => openEditOptionModal(r)}>Editar</Button>
+                  {r.active ? (
+                    <Button size="small" variant="secondary" onClick={() => setToggleConfirm({ row: r, active: false })}>Desativar</Button>
+                  ) : (
+                    <Button size="small" variant="secondary" onClick={() => setToggleConfirm({ row: r, active: true })}>Ativar</Button>
+                  )}
                   <Button size="small" variant="secondary" style={{ color: "var(--error-base)" }} onClick={() => removeRow(r.key)}>Remover</Button>
                 </div>
               ),
@@ -425,7 +469,23 @@ export default function OptionGroupFormScreen() {
           ]}
           rows={rows}
         />
+        </div>
       </div>
+
+      <ConfirmDialog
+        open={toggleConfirm !== null}
+        title={toggleConfirm?.active ? "Ativar opção" : "Desativar opção"}
+        message={
+          toggleConfirm
+            ? (toggleConfirm.active
+              ? `Ativar "${toggleConfirm.row.label}"? Ela volta a aparecer como selecionável no produto.`
+              : `Desativar "${toggleConfirm.row.label}"? Ela para de aparecer como selecionável, mas continua cadastrada e pode ser reativada a qualquer momento.`)
+            : ""
+        }
+        confirmLabel={toggleConfirm?.active ? "Ativar" : "Desativar"}
+        onConfirm={confirmToggle}
+        onCancel={() => setToggleConfirm(null)}
+      />
 
       <Modal
         open={optionModalOpen}

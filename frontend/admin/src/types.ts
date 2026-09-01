@@ -220,6 +220,7 @@ export interface OptionGroupOption {
   image_url: string | null;
   thumbnail_url: string | null;
   sort_order: number | null;
+  active: boolean;
 }
 
 export interface OptionGroup {
