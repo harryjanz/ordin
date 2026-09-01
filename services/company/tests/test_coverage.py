@@ -701,6 +701,103 @@ async def test_dir_list_mp_terminals_empresa_de_outro_token_retorna_403(db_sessi
     await _cleanup_seed(db_session, co_id)
 
 
+# ── fix_mp_operating_mode (ORD-148) ────────────────────────────────────────────
+
+async def test_dir_fix_mp_operating_mode_sucesso(db_session):
+    import main as svc
+    from main import MpOperatingModeIn
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        db.add(svc.CompanyPaymentConfig(
+            company_id=co_id, provider="mercadopago", environment="production", active=True,
+            api_key=svc.encrypt_field("APP_USR-fake-token"),
+        ))
+        await db.commit()
+    with respx.mock:
+        route = respx.patch("https://api.mercadopago.com/terminals/v1/setup").mock(
+            return_value=httpx.Response(200, json={"terminals": [{"id": "PAX_Q92__888", "operating_mode": "PDV"}]})
+        )
+        async with db_session() as db:
+            result = await svc.fix_mp_operating_mode(
+                co_id, MpOperatingModeIn(device_id="PAX_Q92__888"), db, _user("owner", co_id))
+    assert result == {"ok": True}
+    assert route.called
+    import json as _json
+    assert _json.loads(route.calls[0].request.content) == {
+        "terminals": [{"id": "PAX_Q92__888", "operating_mode": "PDV"}]
+    }
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_fix_mp_operating_mode_sem_config_mp_retorna_502(db_session):
+    import main as svc
+    from main import MpOperatingModeIn
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.fix_mp_operating_mode(
+                co_id, MpOperatingModeIn(device_id="PAX_Q92__888"), db, _user("owner", co_id))
+        assert exc.value.status_code == 502
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_fix_mp_operating_mode_falha_mp_retorna_502_e_nao_altera_nada(db_session):
+    import main as svc
+    from main import MpOperatingModeIn
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        db.add(svc.CompanyPaymentConfig(
+            company_id=co_id, provider="mercadopago", environment="production", active=True,
+            api_key=svc.encrypt_field("APP_USR-fake-token"),
+        ))
+        await db.commit()
+    with respx.mock:
+        respx.patch("https://api.mercadopago.com/terminals/v1/setup").mock(
+            return_value=httpx.Response(400, json={"message": "invalid device id"})
+        )
+        async with db_session() as db:
+            with pytest.raises(HTTPException) as exc:
+                await svc.fix_mp_operating_mode(
+                    co_id, MpOperatingModeIn(device_id="PAX_Q92__888"), db, _user("owner", co_id))
+            assert exc.value.status_code == 502
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_fix_mp_operating_mode_empresa_inexistente_retorna_404(db_session):
+    import main as svc
+    from main import MpOperatingModeIn
+    async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.fix_mp_operating_mode(
+                999999, MpOperatingModeIn(device_id="PAX_Q92__888"), db, _user("admin", 999999))
+        assert exc.value.status_code == 404
+
+
+async def test_dir_fix_mp_operating_mode_role_sem_permissao_retorna_403(db_session):
+    import main as svc
+    from main import MpOperatingModeIn
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.fix_mp_operating_mode(
+                co_id, MpOperatingModeIn(device_id="PAX_Q92__888"), db, _user("cashier", co_id))
+        assert exc.value.status_code == 403
+    await _cleanup_seed(db_session, co_id)
+
+
+async def test_dir_fix_mp_operating_mode_empresa_de_outro_token_retorna_403(db_session):
+    """Isolamento multi-tenant: admin de uma empresa não corrige terminal MP de outra."""
+    import main as svc
+    from main import MpOperatingModeIn
+    co_id, t_id, u_id = await _create_seed(db_session)
+    async with db_session() as db:
+        with pytest.raises(HTTPException) as exc:
+            await svc.fix_mp_operating_mode(
+                co_id, MpOperatingModeIn(device_id="PAX_Q92__888"), db, _user("owner", company_id=co_id + 1))
+        assert exc.value.status_code == 403
+    await _cleanup_seed(db_session, co_id)
+
+
 # ── delete_terminal (linhas 663-667) ──────────────────────────────────────────
 
 async def test_dir_delete_terminal(db_session):

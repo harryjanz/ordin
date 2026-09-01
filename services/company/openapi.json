@@ -94,6 +94,42 @@
               ],
               "title": "Contract Status"
             }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Data de cadastro inicial (>=)",
+              "title": "Date From"
+            },
+            "description": "Data de cadastro inicial (>=)"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Data de cadastro final (<=)",
+              "title": "Date To"
+            },
+            "description": "Data de cadastro final (<=)"
           }
         ],
         "responses": {
@@ -453,6 +489,443 @@
         }
       }
     },
+    "/companies/{company_id}/behavior": {
+      "patch": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Atualizar comportamento do totem (ORD-108)",
+        "operationId": "update_behavior_companies__company_id__behavior_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BehaviorIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/totem-videos": {
+      "post": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Enviar vídeo de modo espera do totem (ORD-115)",
+        "operationId": "upload_totem_video_companies__company_id__totem_videos_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_totem_video_companies__company_id__totem_videos_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotemVideoOut"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Formato de arquivo não aceito (só MP4)"
+          },
+          "413": {
+            "description": "Arquivo maior que 500 MB"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Listar vídeos de modo espera do totem, ativos e inativos (gestão)",
+        "operationId": "list_totem_videos_companies__company_id__totem_videos_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotemVideoListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/totem-videos/active": {
+      "get": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Listar vídeos ativos de modo espera do totem (consumido pelo totem)",
+        "operationId": "list_active_totem_videos_companies__company_id__totem_videos_active_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotemVideoListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/totem-videos/{video_id}": {
+      "patch": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Renomear e/ou ativar/desativar vídeo de modo espera do totem",
+        "operationId": "update_totem_video_companies__company_id__totem_videos__video_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Video Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TotemVideoUpdateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotemVideoOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Excluir vídeo de modo espera do totem",
+        "operationId": "delete_totem_video_companies__company_id__totem_videos__video_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "video_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Video Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/totem-videos/reorder": {
+      "put": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Reordenar vídeos de modo espera do totem",
+        "description": "Rota registrada antes de /totem-videos/{video_id} de propósito: caso\ncontrário o path param capturaria \"reorder\" como video_id — mesmo\ncuidado do /catalog/products/reorder no catalog-service.",
+        "operationId": "reorder_totem_videos_companies__company_id__totem_videos_reorder_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TotemVideoReorderIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "algum video_id não pertence à empresa informada"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/security": {
+      "put": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Definir política de duplo fator (MFA) da empresa",
+        "operationId": "update_security_companies__company_id__security_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecurityIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/companies/{company_id}/regenerate-pin": {
       "post": {
         "tags": [
@@ -520,6 +993,51 @@
             "schema": {
               "type": "integer",
               "title": "Company Id"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Label"
+            }
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(sandbox|production)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Environment"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(active|inactive|all)$",
+              "default": "active",
+              "title": "Status"
             }
           },
           {
@@ -609,6 +1127,108 @@
                 "schema": {
                   "$ref": "#/components/schemas/TerminalOut"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/mp-terminals": {
+      "get": {
+        "tags": [
+          "Terminais"
+        ],
+        "summary": "Listar terminais Point da conta Mercado Pago da empresa (ORD-133)",
+        "description": "Consulta GET /terminals/v1/list na conta MP da empresa e anota, pra\ncada device, se já está em uso por outro terminal ativo — usado pelo\nselect de MP Device ID em Empresa > Terminais.",
+        "operationId": "list_mp_terminals_companies__company_id__mp_terminals_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/mp-terminals/operating-mode": {
+      "patch": {
+        "tags": [
+          "Terminais"
+        ],
+        "summary": "Corrigir terminal Point para modo PDV (ORD-148)",
+        "description": "PATCH /terminals/v1/setup no Mercado Pago pra forçar operating_mode=PDV\nno device informado. O terminal físico ainda precisa ser reiniciado pelo\nadmin pra a mudança ter efeito de verdade — isso é responsabilidade da UI\navisar, não deste endpoint.",
+        "operationId": "fix_mp_operating_mode_companies__company_id__mp_terminals_operating_mode_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MpOperatingModeIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -787,6 +1407,46 @@
         }
       }
     },
+    "/users/forgot-password": {
+      "post": {
+        "tags": [
+          "Usuários"
+        ],
+        "summary": "Pedir redefinição de senha por e-mail",
+        "description": "Endpoint público, com rate limit. Sempre responde com sucesso genérico, exista ou não o e-mail — não revela enumeração de contas.",
+        "operationId": "forgot_password_users_forgot_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/companies/{company_id}/users": {
       "get": {
         "tags": [
@@ -830,6 +1490,68 @@
               "minimum": 1,
               "default": 50,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Email"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(owner|manager|cashier)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(active|inactive|all)$",
+              "default": "active",
+              "title": "Status"
             }
           }
         ],
@@ -1011,6 +1733,898 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/users/{user_id}/resend-invite": {
+      "post": {
+        "tags": [
+          "Usuários"
+        ],
+        "summary": "Reenviar convite de definição de senha",
+        "operationId": "resend_invite_companies__company_id__users__user_id__resend_invite_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/users/{user_id}/send-password-reset": {
+      "post": {
+        "tags": [
+          "Usuários"
+        ],
+        "summary": "Enviar redefinição de senha (disparo administrativo)",
+        "operationId": "send_password_reset_admin_companies__company_id__users__user_id__send_password_reset_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/platform-users": {
+      "get": {
+        "tags": [
+          "Usuários da Plataforma"
+        ],
+        "summary": "Listar usuários da plataforma (superadmin/admin)",
+        "operationId": "list_platform_users_platform_users_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Skip"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Name"
+            }
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Email"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(active|inactive|all)$",
+              "default": "active",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Usuários da Plataforma"
+        ],
+        "summary": "Convidar usuário da plataforma",
+        "operationId": "create_platform_user_platform_users_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformUserIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/platform-users/{user_id}": {
+      "put": {
+        "tags": [
+          "Usuários da Plataforma"
+        ],
+        "summary": "Editar usuário da plataforma (role / ativo)",
+        "operationId": "update_platform_user_platform_users__user_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformUserUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Usuários da Plataforma"
+        ],
+        "summary": "Desativar usuário da plataforma",
+        "operationId": "delete_platform_user_platform_users__user_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/platform-users/{user_id}/resend-invite": {
+      "post": {
+        "tags": [
+          "Usuários da Plataforma"
+        ],
+        "summary": "Reenviar convite de definição de senha",
+        "operationId": "resend_platform_invite_platform_users__user_id__resend_invite_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/platform-users/{user_id}/send-password-reset": {
+      "post": {
+        "tags": [
+          "Usuários da Plataforma"
+        ],
+        "summary": "Enviar redefinição de senha (disparo administrativo)",
+        "operationId": "send_password_reset_platform_platform_users__user_id__send_password_reset_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/platform-users/{user_id}/mfa/reset": {
+      "post": {
+        "tags": [
+          "Usuários da Plataforma"
+        ],
+        "summary": "Desativar o duplo fator de outro usuário da plataforma (recuperação assistida)",
+        "operationId": "reset_platform_user_mfa_platform_users__user_id__mfa_reset_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/me/mfa/status": {
+      "get": {
+        "tags": [
+          "MFA"
+        ],
+        "summary": "Status do próprio duplo fator e política de MFA da empresa",
+        "operationId": "mfa_status_users_me_mfa_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaStatusOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/users/me/mfa/setup": {
+      "post": {
+        "tags": [
+          "MFA"
+        ],
+        "summary": "Iniciar ativação de duplo fator (gera segredo pendente + QR)",
+        "operationId": "mfa_setup_users_me_mfa_setup_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaSetupOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/users/me/mfa/confirm": {
+      "post": {
+        "tags": [
+          "MFA"
+        ],
+        "summary": "Confirmar ativação de duplo fator com o primeiro código gerado",
+        "operationId": "mfa_confirm_users_me_mfa_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaConfirmIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MfaConfirmOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/users/me/mfa/disable": {
+      "post": {
+        "tags": [
+          "MFA"
+        ],
+        "summary": "Desativar o próprio duplo fator (reautenticação por senha)",
+        "operationId": "mfa_disable_users_me_mfa_disable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaDisableIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/companies/{company_id}/users/{user_id}/mfa/reset": {
+      "post": {
+        "tags": [
+          "MFA"
+        ],
+        "summary": "Desativar o duplo fator de outro usuário da empresa (recuperação assistida)",
+        "operationId": "mfa_reset_companies__company_id__users__user_id__mfa_reset_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/users/{user_id}/trusted-devices": {
+      "delete": {
+        "tags": [
+          "MFA"
+        ],
+        "summary": "Revogar todos os dispositivos confiáveis de um usuário da empresa",
+        "operationId": "revoke_user_trusted_devices_companies__company_id__users__user_id__trusted_devices_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/me/trusted-devices": {
+      "get": {
+        "tags": [
+          "MFA"
+        ],
+        "summary": "Listar dispositivos confiáveis do próprio usuário",
+        "operationId": "list_trusted_devices_users_me_trusted_devices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustedDeviceListOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/users/me/trusted-devices/{device_id}": {
+      "delete": {
+        "tags": [
+          "MFA"
+        ],
+        "summary": "Revogar um dispositivo confiável do próprio usuário",
+        "operationId": "revoke_trusted_device_users_me_trusted_devices__device_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "device_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Device Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/invite-status": {
+      "get": {
+        "tags": [
+          "Usuários"
+        ],
+        "summary": "Verificar se um link de convite ainda é válido, sem consumi-lo",
+        "description": "Endpoint público — usado pela tela de definir senha para avisar de cara se o link já foi usado ou expirou, em vez de só falhar na submissão. Não revela qual dos dois motivos (usado vs. expirado vs. inexistente) é o caso, mesma cautela do complete-registration.",
+        "operationId": "invite_status_users_invite_status_get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteStatusOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/complete-registration": {
+      "post": {
+        "tags": [
+          "Usuários"
+        ],
+        "summary": "Concluir cadastro definindo a senha (link do e-mail de convite)",
+        "description": "Endpoint público — protegido pelo próprio token (uso único, expira em 24h, alta entropia), não por JWT. É a porta de entrada de um usuário que ainda não tem conta.",
+        "operationId": "complete_registration_users_complete_registration_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteRegistrationIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -1657,6 +3271,62 @@
         }
       }
     },
+    "/companies/{company_id}/panels/approve": {
+      "post": {
+        "tags": [
+          "Terminais"
+        ],
+        "summary": "Aprovar pareamento de painel de retirada por código (ORD-119)",
+        "description": "Mesmo mecanismo de código do pareamento de totem (approve_device acima),\nreaproveitando o /auth/device/challenge e /auth/device/status genéricos —\nsó sem terminal (o painel não é um ponto de venda). O campo \"kind\":\"panel\"\nno payload do Redis é o que diferencia os dois fluxos pro auth-service na\nhora de emitir o JWT (role \"painel\" em vez de \"kiosk\", sem claim de\nterminal).",
+        "operationId": "approve_panel_companies__company_id__panels_approve_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PanelApproveIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -1690,6 +3360,11 @@
           "mode": {
             "type": "string",
             "title": "Mode"
+          },
+          "menu_layout": {
+            "type": "string",
+            "title": "Menu Layout",
+            "default": "horizontal"
           }
         },
         "type": "object",
@@ -1698,6 +3373,29 @@
           "mode"
         ],
         "title": "AppearanceIn"
+      },
+      "BehaviorIn": {
+        "properties": {
+          "consumption_mode_enabled": {
+            "type": "boolean",
+            "title": "Consumption Mode Enabled"
+          },
+          "fulfillment_mode": {
+            "type": "string",
+            "title": "Fulfillment Mode",
+            "default": "por_item"
+          },
+          "prep_urgency_minutes": {
+            "type": "integer",
+            "title": "Prep Urgency Minutes",
+            "default": 10
+          }
+        },
+        "type": "object",
+        "required": [
+          "consumption_mode_enabled"
+        ],
+        "title": "BehaviorIn"
       },
       "Body_update_contract_status_companies__company_id__contract_status_patch": {
         "properties": {
@@ -1723,6 +3421,26 @@
           "status"
         ],
         "title": "Body_update_contract_status_companies__company_id__contract_status_patch"
+      },
+      "Body_upload_totem_video_companies__company_id__totem_videos_post": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Name"
+          },
+          "video": {
+            "type": "string",
+            "format": "binary",
+            "title": "Video"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "video"
+        ],
+        "title": "Body_upload_totem_video_companies__company_id__totem_videos_post"
       },
       "CepLookupOut": {
         "properties": {
@@ -2120,12 +3838,20 @@
           "total": {
             "type": "integer",
             "title": "Total"
+          },
+          "summary": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Summary"
           }
         },
         "type": "object",
         "required": [
           "companies",
-          "total"
+          "total",
+          "summary"
         ],
         "title": "CompanyListOut"
       },
@@ -2191,6 +3917,16 @@
             "type": "string",
             "title": "Visual Mode",
             "default": "light"
+          },
+          "catalog_menu_layout": {
+            "type": "string",
+            "title": "Catalog Menu Layout",
+            "default": "horizontal"
+          },
+          "is_demo": {
+            "type": "boolean",
+            "title": "Is Demo",
+            "default": false
           },
           "legal_name": {
             "anyOf": [
@@ -2396,6 +4132,26 @@
               }
             ],
             "title": "Contract Document Url"
+          },
+          "mfa_policy": {
+            "type": "string",
+            "title": "Mfa Policy",
+            "default": "disabled"
+          },
+          "consumption_mode_enabled": {
+            "type": "boolean",
+            "title": "Consumption Mode Enabled",
+            "default": false
+          },
+          "fulfillment_mode": {
+            "type": "string",
+            "title": "Fulfillment Mode",
+            "default": "por_item"
+          },
+          "prep_urgency_minutes": {
+            "type": "integer",
+            "title": "Prep Urgency Minutes",
+            "default": 10
           }
         },
         "type": "object",
@@ -2589,6 +4345,24 @@
         "type": "object",
         "title": "CompanyUpdate"
       },
+      "CompleteRegistrationIn": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "password"
+        ],
+        "title": "CompleteRegistrationIn"
+      },
       "ContactIn": {
         "properties": {
           "contact_type": {
@@ -2742,6 +4516,19 @@
         ],
         "title": "DeviceApproveIn"
       },
+      "ForgotPasswordIn": {
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "title": "ForgotPasswordIn"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2772,6 +4559,19 @@
           "status"
         ],
         "title": "HealthOut"
+      },
+      "InviteStatusOut": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "title": "InviteStatusOut"
       },
       "LegalRepresentativeIn": {
         "properties": {
@@ -2879,6 +4679,115 @@
         ],
         "title": "LegalRepresentativeOut"
       },
+      "MfaConfirmIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "MfaConfirmIn"
+      },
+      "MfaConfirmOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "backup_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Backup Codes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "backup_codes"
+        ],
+        "title": "MfaConfirmOut"
+      },
+      "MfaDisableIn": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "MfaDisableIn"
+      },
+      "MfaSetupOut": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "title": "Secret"
+          },
+          "provisioning_uri": {
+            "type": "string",
+            "title": "Provisioning Uri"
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret",
+          "provisioning_uri"
+        ],
+        "title": "MfaSetupOut"
+      },
+      "MfaStatusOut": {
+        "properties": {
+          "mfa_enabled": {
+            "type": "boolean",
+            "title": "Mfa Enabled"
+          },
+          "mfa_policy": {
+            "type": "string",
+            "title": "Mfa Policy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mfa_enabled",
+          "mfa_policy"
+        ],
+        "title": "MfaStatusOut"
+      },
+      "MpOperatingModeIn": {
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "title": "Device Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "device_id"
+        ],
+        "title": "MpOperatingModeIn"
+      },
+      "PanelApproveIn": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "PanelApproveIn"
+      },
       "PaymentConfigIn": {
         "properties": {
           "provider": {
@@ -2910,6 +4819,17 @@
               }
             ],
             "title": "Api Secret"
+          },
+          "webhook_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Secret"
           },
           "extra_config": {
             "anyOf": [
@@ -2970,6 +4890,11 @@
             "title": "Api Secret",
             "default": "***"
           },
+          "webhook_secret": {
+            "type": "string",
+            "title": "Webhook Secret",
+            "default": "***"
+          },
           "extra_config": {
             "anyOf": [
               {
@@ -3001,6 +4926,70 @@
         ],
         "title": "PaymentConfigOut"
       },
+      "PlatformUserIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "role": {
+            "type": "string",
+            "pattern": "^(superadmin|admin)$",
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "email",
+          "role"
+        ],
+        "title": "PlatformUserIn"
+      },
+      "PlatformUserUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(superadmin|admin)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          }
+        },
+        "type": "object",
+        "title": "PlatformUserUpdate"
+      },
       "RegeneratePinOut": {
         "properties": {
           "pin": {
@@ -3013,6 +5002,19 @@
           "pin"
         ],
         "title": "RegeneratePinOut"
+      },
+      "SecurityIn": {
+        "properties": {
+          "mfa_policy": {
+            "type": "string",
+            "title": "Mfa Policy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mfa_policy"
+        ],
+        "title": "SecurityIn"
       },
       "TerminalIn": {
         "properties": {
@@ -3277,10 +5279,180 @@
               }
             ],
             "title": "Environment"
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
           }
         },
         "type": "object",
         "title": "TerminalUpdate"
+      },
+      "TotemVideoListOut": {
+        "properties": {
+          "videos": {
+            "items": {
+              "$ref": "#/components/schemas/TotemVideoOut"
+            },
+            "type": "array",
+            "title": "Videos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "videos"
+        ],
+        "title": "TotemVideoListOut"
+      },
+      "TotemVideoOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "video_url": {
+            "type": "string",
+            "title": "Video Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "active",
+          "video_url"
+        ],
+        "title": "TotemVideoOut"
+      },
+      "TotemVideoReorderIn": {
+        "properties": {
+          "video_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Video Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "video_ids"
+        ],
+        "title": "TotemVideoReorderIn"
+      },
+      "TotemVideoUpdateIn": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          }
+        },
+        "type": "object",
+        "title": "TotemVideoUpdateIn"
+      },
+      "TrustedDeviceListOut": {
+        "properties": {
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/TrustedDeviceOut"
+            },
+            "type": "array",
+            "title": "Devices"
+          }
+        },
+        "type": "object",
+        "required": [
+          "devices"
+        ],
+        "title": "TrustedDeviceListOut"
+      },
+      "TrustedDeviceOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "device_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Label"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "expires_at"
+        ],
+        "title": "TrustedDeviceOut"
       },
       "UserIn": {
         "properties": {
@@ -3292,12 +5464,9 @@
             "type": "string",
             "title": "Email"
           },
-          "password": {
-            "type": "string",
-            "title": "Password"
-          },
           "role": {
             "type": "string",
+            "pattern": "^(owner|manager|cashier)$",
             "title": "Role",
             "default": "cashier"
           }
@@ -3305,8 +5474,7 @@
         "type": "object",
         "required": [
           "name",
-          "email",
-          "password"
+          "email"
         ],
         "title": "UserIn"
       },
@@ -3357,6 +5525,14 @@
             "type": "boolean",
             "title": "Active"
           },
+          "pending_setup": {
+            "type": "boolean",
+            "title": "Pending Setup"
+          },
+          "mfa_enabled": {
+            "type": "boolean",
+            "title": "Mfa Enabled"
+          },
           "created_at": {
             "anyOf": [
               {
@@ -3368,6 +5544,11 @@
               }
             ],
             "title": "Created At"
+          },
+          "has_trusted_device": {
+            "type": "boolean",
+            "title": "Has Trusted Device",
+            "default": false
           }
         },
         "type": "object",
@@ -3377,16 +5558,30 @@
           "name",
           "email",
           "role",
-          "active"
+          "active",
+          "pending_setup",
+          "mfa_enabled"
         ],
         "title": "UserOut"
       },
       "UserUpdate": {
         "properties": {
-          "role": {
+          "name": {
             "anyOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(owner|manager|cashier)$"
               },
               {
                 "type": "null"
@@ -3466,6 +5661,14 @@
     {
       "name": "Pagamento",
       "description": "Configuração de provider TEF/PIX por empresa (owner/superadmin)."
+    },
+    {
+      "name": "MFA",
+      "description": "Duplo fator de autenticação (TOTP) — setup pessoal e recuperação assistida."
+    },
+    {
+      "name": "Usuários da Plataforma",
+      "description": "CRUD separado pra superadmin/admin (equipe da Ordin, não de cliente) — ver ORD-093."
     }
   ]
 }
