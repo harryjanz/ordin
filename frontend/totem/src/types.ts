@@ -58,6 +58,11 @@ export interface ComboItemRef {
 
 export interface Combo {
   id: number;
+  // ORD-112 — categoria em que o combo foi alocado no admin. Decisão
+  // revisada em 2026-09-02: o combo só aparece nessa categoria específica no
+  // totem, nunca numa seção "Destaque" global — null nunca aparece em
+  // nenhuma categoria.
+  category_id: number | null;
   name: string;
   description: string | null;
   price: number;

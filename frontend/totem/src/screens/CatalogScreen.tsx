@@ -108,6 +108,13 @@ export default function CatalogScreen({
   const count = cart.reduce((s, i) => s + i.qty, 0);
   const getQty = useCallback((key: string) => cart.find((i) => i.key === key)?.qty ?? 0, [cart]);
 
+  // ORD-150 — combo só aparece na categoria em que foi alocado (decisão
+  // revisada em 2026-09-02). O upsell (handleAddProduct abaixo) continua
+  // checando TODOS os combos ativos, não só os da categoria atual — a oferta
+  // de upsell é sobre o produto escolhido, não sobre onde o combo aparece
+  // listado.
+  const combosForActiveCat = activeCat ? combos.filter((c) => c.category_id === activeCat.id) : [];
+
   function addProductToCart(p: Product) {
     onAdd({ key: `product:${p.id}`, kind: "product", id: p.id, name: p.name, price: p.price, qty: 1 });
   }
@@ -257,16 +264,22 @@ export default function CatalogScreen({
           alignContent: "start",
           overflowY: "auto",
         }}>
-          {/* ORD-150 — combos ativos, seção "Destaque" fixa no topo,
-              independente da categoria selecionada. Card visualmente
-              diferenciado do produto avulso: fundo em gradiente + selo
-              "COMBO" + preço com economia visível sem abrir nada. */}
-          {combos.length > 0 && (
+          {/* ORD-150 — decisão revisada (2026-09-02): combo só aparece na
+              categoria em que foi alocado (category_id, ORD-112), não numa
+              seção "Destaque" global. Isso já respeita o contexto de
+              cardápio de graça: activeCat só existe entre as categorias que
+              o backend já filtrou por janela de horário (ORD-127); categoria
+              fora da janela nunca vira activeCat, e o combo alocado nela
+              simplesmente não aparece. Combo sem category_id não aparece em
+              nenhuma categoria. Card visualmente diferenciado do produto
+              avulso: fundo em gradiente + selo "COMBO" + preço com economia
+              visível sem abrir nada. */}
+          {activeCat && combosForActiveCat.length > 0 && (
             <>
               <div style={{ gridColumn: "1/-1", fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.label, color: T.muted, textTransform: "uppercase", letterSpacing: "0.5px" }}>
                 Destaque
               </div>
-              {combos.map((c) => {
+              {combosForActiveCat.map((c) => {
                 const comboQty = getQty(`combo:${c.id}`);
                 const sumAvulso = c.items.reduce((s, i) => s + i.price, 0);
                 const savings = sumAvulso - c.price;
@@ -632,47 +645,65 @@ export default function CatalogScreen({
       )}
 
       {/* Modal de upsell (ORD-150) — interrompe a adição do produto avulso,
-          decisão validada com o usuário: não é um banner discreto. */}
+          decisão validada com o usuário: não é um banner discreto.
+          Correção pós-QA (2026-09-02): centralizado na tela (não mais um
+          bottom sheet, que ficava pouco visível), maior, com badge corrigido
+          — usava `color: T.btn` sobre `background: T.catActive`, par que só
+          funciona por acaso em alguns temas; catActive/catText já são o par
+          contraste-garantido usado em todo o resto do arquivo (ex.: pill de
+          categoria ativa) e é o que devia ter sido usado aqui desde o início. */}
       {upsell && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-          <div onClick={() => setUpsell(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)" }} />
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div onClick={() => setUpsell(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)" }} />
           <div style={{
-            position: "relative", width: "min(560px, 100%)",
-            background: T.surface, borderRadius: "24px 24px 0 0",
-            padding: 32, display: "flex", flexDirection: "column", gap: 16,
-            boxShadow: "0 -12px 40px rgba(0,0,0,0.25)",
+            position: "relative", width: "min(640px, 100%)", maxHeight: "88vh", overflowY: "auto",
+            background: T.surface, borderRadius: RADIUS.lg,
+            padding: "40px 40px 32px", display: "flex", flexDirection: "column", gap: 20,
+            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
+            border: `1.5px solid ${T.border}`,
           }}>
+            <button
+              onClick={() => setUpsell(null)}
+              style={{
+                position: "absolute", top: 16, right: 16, width: 44, height: 44, borderRadius: "50%",
+                background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.text,
+                fontSize: FONT.subtitle, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              ✕
+            </button>
             <span style={{
-              alignSelf: "flex-start", fontFamily: FONT_B, fontSize: FONT.label, fontWeight: 800,
-              color: T.btn, background: T.catActive, borderRadius: RADIUS.pill, padding: "4px 14px",
+              alignSelf: "flex-start", fontFamily: FONT_B, fontSize: FONT.body, fontWeight: 800,
+              color: T.catText, background: T.catActive, borderRadius: RADIUS.pill, padding: "6px 18px",
               textTransform: "uppercase", letterSpacing: "0.5px",
             }}>
-              Combo disponível
+              🎉 Combo disponível
             </span>
-            <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.subtitle, lineHeight: 1.3 }}>
+            <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.headlineLg, lineHeight: 1.2, paddingRight: 40 }}>
               Leve o {upsell.combo.name}
               {upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price > 0 && (
                 <> e economize {fmt(upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price)}</>
               )}
             </div>
-            <div style={{ background: T.numBg, borderRadius: RADIUS.lg, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ background: T.numBg, borderRadius: RADIUS.lg, padding: "18px 22px", display: "flex", flexDirection: "column", gap: 10 }}>
               {upsell.combo.items.map((i) => (
-                <div key={i.product_id} style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT_B, fontSize: FONT.label, color: T.muted }}>
+                <div key={i.product_id} style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT_B, fontSize: FONT.bodyLg, color: T.muted }}>
                   <span>{i.name}</span>
                   <span>incluso</span>
                 </div>
               ))}
-              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body, color: T.text, paddingTop: 6, borderTop: `1px dashed ${T.borderNeutral}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text, paddingTop: 10, borderTop: `1px dashed ${T.borderNeutral}` }}>
                 <span>{upsell.combo.name}</span>
                 <span>{fmt(upsell.combo.price)}</span>
               </div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
               <button
                 onClick={() => { addComboToCart(upsell.combo); setUpsell(null); }}
                 style={{
-                  minHeight: 64, borderRadius: RADIUS.pill, background: T.btn, color: T.btnText,
-                  border: "none", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body, cursor: "pointer", boxShadow: T.glow,
+                  minHeight: 76, borderRadius: RADIUS.pill, background: T.btn, color: T.btnText,
+                  border: "none", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, cursor: "pointer", boxShadow: T.glow,
                 }}
               >
                 Sim, quero o combo
@@ -680,7 +711,7 @@ export default function CatalogScreen({
               <button
                 onClick={() => { addProductToCart(upsell.product); setUpsell(null); }}
                 style={{
-                  minHeight: 64, borderRadius: RADIUS.pill, background: T.numBg, color: T.text,
+                  minHeight: 68, borderRadius: RADIUS.pill, background: T.numBg, color: T.text,
                   border: `1px solid ${T.borderNeutral}`, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body, cursor: "pointer",
                 }}
               >

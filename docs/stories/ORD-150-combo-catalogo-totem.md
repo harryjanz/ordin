@@ -413,4 +413,26 @@ teste (não afeta dado de produção).
 - Confirmado o ponto em aberto da Tech Explorer: `PaymentScreen.tsx` não precisa de explosão de
   combo porque `payment-service` nunca lê o campo `items` — simplificação real, não suposição.
 
+**Correção pós-QA do usuário (2026-09-02):** três ajustes pedidos depois de ver a implementação
+rodando de verdade:
+1. **Combo restrito à categoria alocada** — decisão original desta Tech Explorer (seção
+   "Destaque" fixa, independente da categoria) foi revertida a pedido do usuário: o combo só
+   aparece na categoria em que foi alocado (`category_id`, ORD-112). Isso já respeita o contexto
+   de cardápio (ORD-127) de graça — `activeCat` só existe entre categorias que o backend já
+   filtrou por janela de horário, então um combo alocado numa categoria fora da janela some
+   junto. Combo sem `category_id` não aparece em nenhuma categoria.
+2. **Modal de upsell centralizado e maior** — era um bottom sheet, ficava pouco visível; virou
+   um diálogo centralizado na tela, maior, com botão de fechar explícito.
+3. **Bug de contraste no badge "Combo disponível"** — usava `color: T.btn` sobre
+   `background: T.catActive`, par que só tem contraste garantido em alguns temas (ex.: tema
+   "ordin"); no tema real da Burger House ("bk", Laranja Grelhado) o texto ficava quase
+   invisível. Corrigido para `color: T.catText`, o par de contraste que o próprio tema já
+   declara para `catActive` (mesmo padrão já usado na pill de categoria ativa). Confirmado
+   visualmente no tema "bk" depois da correção.
+
+Reteste manual completo depois da correção, na Burger House real (empresa 1, tema "bk"):
+combo real "Combo Bacon Smash Duplo" (e outros combos reais cadastrados pelo usuário) aparecendo
+corretamente só na categoria "Combos", sem aparecer em "Lanches"; modal de upsell centralizado
+com contraste correto ao adicionar "Bacon Smash Duplo" avulso.
+
 **Status: Done.**
