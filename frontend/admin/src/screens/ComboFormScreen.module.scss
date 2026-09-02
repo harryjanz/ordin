@@ -1,0 +1,185 @@
+@import 'design-system/dist/core/scss/styles';
+
+.page {
+  padding: 32px;
+  color: var(--a-text);
+  max-width: 1100px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.h1 {
+  @include font('xl');
+}
+
+.headerActions {
+  display: flex;
+  gap: 12px;
+}
+
+.alertBox {
+  margin-bottom: 16px;
+}
+
+.panel {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+  @include padding('l', 'xl', 'l', 'xl');
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.formRow {
+  display: flex;
+  flex-direction: row;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.formRowField {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.formLabel {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+}
+
+.muted {
+  color: rgba(var(--a-text-rgb), 0.5);
+}
+
+// Busca por nome + categoria — decisão validada com o usuário em 2026-09-01:
+// mostra só resultados filtrados, nunca a lista inteira do catálogo (ao
+// contrário do padrão de checkbox multiseleção já usado em
+// ProductEditScreen pra vincular grupos de opção).
+// Grid, não flex — Dropdown/InputBase têm width:100% no próprio root, o que
+// quebra flex:1 (o filho vira flex-basis:auto = 100% do container e engole
+// o resto da linha). Mesmo padrão de .filterBar (grid + minmax) já usado no
+// resto da tela, que não sofre desse problema.
+.searchRow {
+  display: grid;
+  grid-template-columns: 1fr 200px;
+  gap: 12px;
+  align-items: end;
+}
+
+.searchRowField {
+  min-width: 0;
+}
+
+.searchResults {
+  border: 1px dashed var(--a-border);
+  border-radius: 12px;
+  min-height: 48px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.searchEmpty {
+  padding: 14px;
+  text-align: center;
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.5);
+}
+
+.searchResultRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--a-border);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.searchResultInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+// Lista separada dos produtos já adicionados ao combo — nunca se mistura
+// com os resultados de busca acima, pra não virar uma lista única gigante
+// pra marcar (o que o usuário apontou como ruim de usar na v1 anterior).
+.comboItemsBox {
+  border: 1px solid var(--a-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.comboItemRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--a-border);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.removeBtn {
+  border: none;
+  background: transparent;
+  color: rgba(var(--a-text-rgb), 0.4);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 6px;
+
+  &:hover {
+    color: var(--error-base);
+    background: rgba(var(--a-text-rgb), 0.06);
+  }
+}
+
+.summaryBox {
+  border: 1px solid var(--success-base);
+  background: var(--success-light);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.summaryBoxWarn {
+  border-color: var(--error-base);
+  background: var(--error-light);
+}
+
+.summaryRow {
+  display: flex;
+  justify-content: space-between;
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.7);
+}
+
+.summaryTotal {
+  @include font('sm-emphasys');
+  color: var(--a-text);
+}
+
+.summaryNote {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+}

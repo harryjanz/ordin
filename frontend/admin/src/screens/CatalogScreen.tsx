@@ -20,7 +20,7 @@ import ConfirmDialog, { type ConfirmDialogProps } from "../components/ConfirmDia
 import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useStore } from "../store";
-import type { Category, Company, Menu, OptionGroup, Product } from "../types";
+import type { Category, Combo, Company, Menu, OptionGroup, Product } from "../types";
 import styles from "./CatalogScreen.module.scss";
 
 // Variant semântica por tag conhecida — o resto cai no default (neutral).
@@ -115,8 +115,8 @@ export default function CatalogScreen() {
   // "categories". ?tab= preserva de qual aba o usuário saiu.
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const initialTab = tabParam === "products" || tabParam === "menus" || tabParam === "options" ? tabParam : "categories";
-  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus" | "options">(initialTab);
+  const initialTab = tabParam === "products" || tabParam === "menus" || tabParam === "options" || tabParam === "combos" ? tabParam : "categories";
+  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus" | "options" | "combos">(initialTab);
 
   const [confirmState, setConfirmState] = useState<{
     message: string;
@@ -551,6 +551,86 @@ export default function CatalogScreen() {
     });
   }
 
+  // ── Combos (ORD-112) ────────────────────────────────────────────────────
+  const [combos, setCombos] = useState<Combo[]>([]);
+  const [errCombos, setErrCombos] = useState<string | null>(null);
+  const [comboNameFilter, setComboNameFilter] = useState("");
+  const comboRequestId = useRef(0);
+
+  async function loadCombos() {
+    if (!hasCompanyContext) return;
+    const thisRequest = ++comboRequestId.current;
+    try {
+      const r = await api.get("/catalog/combos", catalogParams({ include_inactive: true }));
+      if (thisRequest !== comboRequestId.current) return; // resposta obsoleta, ignorar
+      setCombos(r.data.combos ?? r.data);
+      setErrCombos(null);
+    } catch {
+      if (thisRequest !== comboRequestId.current) return;
+      setErrCombos("Erro ao carregar combos.");
+    }
+  }
+
+  useEffect(() => {
+    if (!hasCompanyContext) { setCombos([]); return; }
+    loadCombos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCompanyContext, companyId]);
+
+  const filteredCombos = combos.filter((c) => {
+    if (comboNameFilter && !c.name.toLowerCase().includes(comboNameFilter.toLowerCase())) return false;
+    return true;
+  });
+
+  function clearComboFilters() {
+    setComboNameFilter("");
+  }
+
+  // Combo tem PUT próprio de edição (replace completo dos produtos
+  // componentes), então ativar/desativar sem reabrir o formulário inteiro
+  // usa um PATCH dedicado — mesmo racional do PATCH de Option (ORD-145), não
+  // o padrão de Category/Product (cujo PUT simples não mexe em lista filha).
+  function deactivateCombo(id: number, name: string) {
+    setConfirmState({
+      message: `Desativar o combo "${name}"? Ele some do totem, mas continua cadastrado e pode ser reativado a qualquer momento.`,
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          await api.patch(`/catalog/combos/${id}`, { active: false }, catalogParams());
+          loadCombos();
+        } catch (err) {
+          makeToast("error", parseApiError(err).message);
+        }
+      },
+    });
+  }
+
+  async function activateCombo(id: number) {
+    try {
+      await api.patch(`/catalog/combos/${id}`, { active: true }, catalogParams());
+      loadCombos();
+    } catch (err) {
+      makeToast("error", parseApiError(err).message);
+    }
+  }
+
+  function deleteComboPermanently(id: number, name: string) {
+    setConfirmState({
+      message: `Excluir definitivamente o combo "${name}"? Essa ação NÃO pode ser desfeita. Pedidos já feitos com esse combo não são afetados.`,
+      alertVariant: "warning",
+      alertIcon: "alert-triangle",
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          await api.delete(`/catalog/combos/${id}`, catalogParams());
+          loadCombos();
+        } catch (err) {
+          makeToast("error", parseApiError(err).message);
+        }
+      },
+    });
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.title}>Catálogo</div>
@@ -577,6 +657,7 @@ export default function CatalogScreen() {
           <Tab value="products" label="Produtos" totalizer={products.length} />
           <Tab value="menus" label="Cardápios" totalizer={menus.length} />
           <Tab value="options" label="Opções" totalizer={optionGroups.length} />
+          <Tab value="combos" label="Combos" totalizer={combos.length} />
         </Tabs>
       </div>
 
@@ -936,6 +1017,84 @@ export default function CatalogScreen() {
               },
             ]}
             rows={filteredOptionGroups}
+          />
+        </>
+      )}
+
+      {/* ── Combos (ORD-112) ── */}
+      {activeTab === "combos" && (
+        <>
+          {errCombos && (
+            <div className={styles.errorRow}>
+              <span className={styles.muted}>{errCombos}</span>
+              <Button size="small" variant="secondary" onClick={loadCombos}>Tentar novamente</Button>
+            </div>
+          )}
+
+          <div className={styles.filterBar}>
+            <InputBase
+              label="Combo"
+              placeholder="Buscar por nome…"
+              value={comboNameFilter}
+              onChange={(e) => setComboNameFilter(e.target.value)}
+            />
+            <Button type="button" variant="secondary" onClick={clearComboFilters}>Limpar filtros</Button>
+            <Button type="button" onClick={() => navigate("/catalog/combos/new")}>+ Novo combo</Button>
+          </div>
+
+          <Table
+            variant="compact"
+            rowKey={(c: Combo) => c.id}
+            emptyMessage="Nenhum combo encontrado."
+            columns={[
+              { key: "name", header: "Combo", render: (c: Combo) => c.name },
+              {
+                key: "category", header: "Categoria",
+                render: (c: Combo) => (
+                  <span className={styles.muted}>
+                    {c.category_id ? (categories.find((cat) => cat.id === c.category_id)?.name ?? "—") : "—"}
+                  </span>
+                ),
+              },
+              {
+                key: "products", header: "Produtos",
+                render: (c: Combo) => (
+                  <span className={styles.muted}>{c.items.map((i) => i.name).join(", ")}</span>
+                ),
+              },
+              {
+                key: "price", header: "Preço",
+                render: (c: Combo) => c.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+              },
+              {
+                key: "savings", header: "Economia",
+                render: (c: Combo) => {
+                  const sum = c.items.reduce((s, i) => s + i.price, 0);
+                  const savings = sum - c.price;
+                  return savings.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+                },
+              },
+              {
+                key: "status", header: "Status",
+                render: (c: Combo) => <Tag variant={c.active ? "success" : "error"}>{c.active ? "Ativo" : "Inativo"}</Tag>,
+              },
+              {
+                key: "action", header: "", render: (c: Combo) => (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <Button size="small" variant="secondary" onClick={() => navigate(`/catalog/combos/${c.id}/edit`)}>Editar</Button>
+                    {c.active ? (
+                      <Button size="small" variant="secondary" onClick={() => deactivateCombo(c.id, c.name)}>Desativar</Button>
+                    ) : (
+                      <Button size="small" variant="secondary" onClick={() => activateCombo(c.id)}>Ativar</Button>
+                    )}
+                    <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deleteComboPermanently(c.id, c.name)}>
+                      Excluir
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+            rows={filteredCombos}
           />
         </>
       )}

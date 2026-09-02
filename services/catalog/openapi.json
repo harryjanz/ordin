@@ -12,7 +12,7 @@
           "Catálogo"
         ],
         "summary": "Listar categorias do cardápio",
-        "description": "Retorna categorias da empresa autenticada. Por padrão só as ativas\n(usado pelo totem); `include_inactive=true` também traz as desativadas\n(usado pela gestão de catálogo no admin). Categorias excluídas\ndefinitivamente (`deleted=True`) nunca aparecem, nem com include_inactive.",
+        "description": "Retorna categorias da empresa (própria, ou informada via company_id\npra superadmin/admin). Por padrão só as ativas (usado pelo totem);\n`include_inactive=true` também traz as desativadas (usado pela gestão de\ncatálogo no admin). Categorias excluídas definitivamente (`deleted=True`)\nnunca aparecem, nem com include_inactive.",
         "operationId": "list_categories_catalog_categories_get",
         "security": [
           {
@@ -28,6 +28,22 @@
               "type": "boolean",
               "default": false,
               "title": "Include Inactive"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
             }
           }
         ],
@@ -63,6 +79,24 @@
         "security": [
           {
             "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
           }
         ],
         "requestBody": {
@@ -105,7 +139,7 @@
           "Catálogo"
         ],
         "summary": "Listar produtos do cardápio",
-        "description": "Retorna produtos da empresa. Filtrável por `category_id`. Por padrão só\nprodutos ativos (usado pelo totem); `include_inactive=true` também traz os\ndesativados (usado pela gestão de catálogo no admin). Produtos excluídos\ndefinitivamente (`deleted=True`) nunca aparecem, nem com include_inactive.",
+        "description": "Retorna produtos da empresa (própria, ou informada via company_id pra\nsuperadmin/admin). Filtrável por `category_id`. Por padrão só produtos\nativos (usado pelo totem); `include_inactive=true` também traz os\ndesativados (usado pela gestão de catálogo no admin). Produtos excluídos\ndefinitivamente (`deleted=True`) nunca aparecem, nem com include_inactive.",
         "operationId": "list_products_catalog_products_get",
         "security": [
           {
@@ -137,6 +171,22 @@
               "type": "boolean",
               "default": false,
               "title": "Include Inactive"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
             }
           }
         ],
@@ -172,6 +222,24 @@
         "security": [
           {
             "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
           }
         ],
         "requestBody": {
@@ -233,6 +301,22 @@
               "type": "integer",
               "title": "Product Id"
             }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
           }
         ],
         "responses": {
@@ -280,6 +364,22 @@
             "schema": {
               "type": "integer",
               "title": "Product Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
             }
           }
         ],
@@ -353,6 +453,22 @@
               "default": false,
               "title": "Permanent"
             }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
           }
         ],
         "responses": {
@@ -402,6 +518,67 @@
         ]
       }
     },
+    "/catalog/categories/reorder": {
+      "put": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Reordenar categorias",
+        "description": "Rota registrada antes de /catalog/categories/{category_id} de propósito:\ncaso contrário o path param capturaria \"reorder\" como category_id (mesmo\nracional de /catalog/products/reorder).",
+        "operationId": "reorder_categories_catalog_categories_reorder_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryReorderIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "algum id não pertence à empresa"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/catalog/categories/{category_id}": {
       "put": {
         "tags": [
@@ -422,6 +599,22 @@
             "schema": {
               "type": "integer",
               "title": "Category Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
             }
           }
         ],
@@ -492,6 +685,22 @@
               "default": false,
               "title": "Permanent"
             }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
           }
         ],
         "responses": {
@@ -522,15 +731,38 @@
         "summary": "Reordenar produtos de uma categoria",
         "description": "Rota registrada antes de /catalog/products/{product_id} de propósito:\ncaso contrário o path param capturaria \"reorder\" como product_id.",
         "operationId": "reorder_products_catalog_products_reorder_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ReorderIn"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "204": {
@@ -549,12 +781,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/catalog/products/{product_id}/image": {
@@ -577,6 +804,22 @@
             "schema": {
               "type": "integer",
               "title": "Product Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
             }
           }
         ],
@@ -638,6 +881,22 @@
               "type": "integer",
               "title": "Product Id"
             }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
           }
         ],
         "responses": {
@@ -647,6 +906,1539 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProductOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Produto não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/option-groups": {
+      "post": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Criar grupo de opção",
+        "operationId": "create_option_group_catalog_option_groups_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionGroupIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionGroupOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Listar grupos de opção da empresa",
+        "operationId": "list_option_groups_catalog_option_groups_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionGroupListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/option-groups/{option_group_id}/options/reorder": {
+      "put": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Reordenar as opções de um grupo",
+        "operationId": "reorder_options_catalog_option_groups__option_group_id__options_reorder_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "option_group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Option Group Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionGroupReorderIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "400": {
+            "description": "option_ids não corresponde exatamente às opções do grupo"
+          },
+          "404": {
+            "description": "Grupo não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/option-groups/{option_group_id}": {
+      "put": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Editar grupo de opção",
+        "operationId": "update_option_group_catalog_option_groups__option_group_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "option_group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Option Group Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionGroupUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionGroupOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "min_selections/max_selections inválidos"
+          },
+          "404": {
+            "description": "Grupo não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Excluir grupo de opção",
+        "operationId": "delete_option_group_catalog_option_groups__option_group_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "option_group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Option Group Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Grupo não encontrado"
+          },
+          "409": {
+            "description": "Grupo vinculado a um ou mais produtos"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/option-groups/{option_group_id}/options": {
+      "put": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Substituir a lista de opções de um grupo (replace completo)",
+        "operationId": "set_option_group_options_catalog_option_groups__option_group_id__options_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "option_group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Option Group Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionGroupOptionsIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionGroupOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Grupo não encontrado"
+          },
+          "422": {
+            "description": "lista de opções vazia"
+          }
+        }
+      }
+    },
+    "/catalog/options/{option_id}/image": {
+      "post": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Enviar imagem de uma opção (gera também o thumbnail)",
+        "operationId": "upload_option_image_endpoint_catalog_options__option_id__image_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "option_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Option Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_option_image_endpoint_catalog_options__option_id__image_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Opção não encontrada"
+          },
+          "415": {
+            "description": "Formato de arquivo não aceito (só jpg/png)"
+          },
+          "413": {
+            "description": "Arquivo maior que 2 MB"
+          },
+          "422": {
+            "description": "Arquivo não é uma imagem válida"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Remover imagem de uma opção",
+        "operationId": "delete_option_image_catalog_options__option_id__image_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "option_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Option Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Opção não encontrada"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/options/{option_id}": {
+      "patch": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Ativar/desativar uma opção (indisponibilidade temporária, ORD-145)",
+        "operationId": "set_option_active_catalog_options__option_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "option_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Option Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OptionActiveIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OptionOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Opção não encontrada"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/products/{product_id}/option-groups": {
+      "put": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Vincular grupos de opção a um produto (replace completo)",
+        "operationId": "set_product_option_groups_catalog_products__product_id__option_groups_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductOptionGroupsIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "option_group_ids contém id que não existe ou não pertence à empresa"
+          },
+          "404": {
+            "description": "Produto não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/products/{product_id}/option-groups/{option_group_id}": {
+      "patch": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Definir override de min/max de seleção pra um vínculo produto-grupo (ORD-144)",
+        "operationId": "set_product_option_group_override_catalog_products__product_id__option_groups__option_group_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "option_group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Option Group Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductOptionGroupOverrideIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductOptionGroupOverrideOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "par efetivo (override combinado com o padrão do grupo) inválido"
+          },
+          "404": {
+            "description": "Produto, grupo, ou vínculo entre eles não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/combos": {
+      "post": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Criar combo/bundle",
+        "operationId": "create_combo_catalog_combos_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComboIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "menos de 2 produtos componentes (após remover duplicados), ou preço sem economia real"
+          },
+          "404": {
+            "description": "algum product_id não existe, não pertence à empresa, ou está inativo"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Listar combos da empresa",
+        "description": "Por padrão só combos ativos (usado por ORD-150 no totem);\ninclude_inactive=true também traz os desativados (usado pela gestão de\ncatálogo no admin). Combos excluídos definitivamente (deleted=True)\nnunca aparecem, nem com include_inactive. Filtrável por category_id,\nmesmo padrão de /catalog/products.",
+        "operationId": "list_combos_catalog_combos_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "category_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category Id"
+            }
+          },
+          {
+            "name": "include_inactive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Inactive"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/combos/{combo_id}": {
+      "put": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Editar combo (replace completo dos produtos componentes)",
+        "operationId": "update_combo_catalog_combos__combo_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "combo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Combo Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComboIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "menos de 2 produtos componentes (após remover duplicados), ou preço sem economia real"
+          },
+          "404": {
+            "description": "Combo não encontrado, ou algum product_id não existe/não pertence à empresa"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Ativar/desativar um combo sem reeditar o resto dos dados",
+        "operationId": "set_combo_active_catalog_combos__combo_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "combo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Combo Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComboActiveIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Combo não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Excluir definitivamente um combo",
+        "description": "Exclusão definitiva (deleted=True) — nunca afeta pedidos já feitos,\nporque OrderItem/Ticket guardam nome/preço congelados, sem referenciar\ncombo_id (ver Tech Explorer). combo_items não precisa de delete\nexplícito antes: nenhuma FK aqui usa ondelete=CASCADE, mas como o combo\né soft-deleted (não um DELETE FROM real), as linhas de combo_items\nseguem existindo sem problema — ficam órfãs, mas nunca são lidas de\nnovo, porque toda consulta já filtra pelo pai (deleted=False).",
+        "operationId": "delete_combo_catalog_combos__combo_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "combo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Combo Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Combo não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/menus": {
+      "post": {
+        "tags": [
+          "Cardápios"
+        ],
+        "summary": "Criar cardápio por horário",
+        "operationId": "create_menu_catalog_menus_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Cardápios"
+        ],
+        "summary": "Listar cardápios da empresa",
+        "operationId": "list_menus_catalog_menus_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/menus/{menu_id}": {
+      "put": {
+        "tags": [
+          "Cardápios"
+        ],
+        "summary": "Editar cardápio",
+        "operationId": "update_menu_catalog_menus__menu_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "menu_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Menu Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Cardápio não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Cardápios"
+        ],
+        "summary": "Remover cardápio",
+        "description": "Hard delete — Menu não é referenciado por venda nenhuma, ver\ndocstring do model. Remove os vínculos de composição junto, sem deixar\nlixo órfão nas tabelas de junção.",
+        "operationId": "delete_menu_catalog_menus__menu_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "menu_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Menu Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Cardápio não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/menus/{menu_id}/composition": {
+      "put": {
+        "tags": [
+          "Cardápios"
+        ],
+        "summary": "Definir a composição do cardápio (categorias inteiras e/ou produtos avulsos)",
+        "operationId": "set_menu_composition_catalog_menus__menu_id__composition_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "menu_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Menu Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MenuCompositionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MenuOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "category_ids/product_ids contém id que não existe ou não pertence à empresa"
+          },
+          "404": {
+            "description": "Cardápio não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/products/{product_id}/menus": {
+      "get": {
+        "tags": [
+          "Cardápios"
+        ],
+        "summary": "Listar a quais cardápios um produto pertence (direto ou via categoria)",
+        "operationId": "get_product_menus_catalog_products__product_id__menus_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductMenusOut"
                 }
               }
             }
@@ -741,6 +2533,20 @@
         ],
         "title": "AllergenOut"
       },
+      "Body_upload_option_image_endpoint_catalog_options__option_id__image_post": {
+        "properties": {
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "title": "Image"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "title": "Body_upload_option_image_endpoint_catalog_options__option_id__image_post"
+      },
       "Body_upload_product_image_endpoint_catalog_products__product_id__image_post": {
         "properties": {
           "image": {
@@ -797,6 +2603,17 @@
           "active": {
             "type": "boolean",
             "title": "Active"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
           }
         },
         "type": "object",
@@ -806,6 +2623,22 @@
           "active"
         ],
         "title": "CategoryOut"
+      },
+      "CategoryReorderIn": {
+        "properties": {
+          "category_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Category Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "category_ids"
+        ],
+        "title": "CategoryReorderIn"
       },
       "CategoryUpdate": {
         "properties": {
@@ -834,6 +2667,164 @@
         },
         "type": "object",
         "title": "CategoryUpdate"
+      },
+      "ComboActiveIn": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active"
+        ],
+        "title": "ComboActiveIn"
+      },
+      "ComboIn": {
+        "properties": {
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "product_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Product Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "price",
+          "product_ids"
+        ],
+        "title": "ComboIn"
+      },
+      "ComboItemOut": {
+        "properties": {
+          "product_id": {
+            "type": "integer",
+            "title": "Product Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "product_id",
+          "name",
+          "price"
+        ],
+        "title": "ComboItemOut"
+      },
+      "ComboListOut": {
+        "properties": {
+          "combos": {
+            "items": {
+              "$ref": "#/components/schemas/ComboOut"
+            },
+            "type": "array",
+            "title": "Combos"
+          }
+        },
+        "type": "object",
+        "required": [
+          "combos"
+        ],
+        "title": "ComboListOut"
+      },
+      "ComboOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ComboItemOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "price",
+          "active"
+        ],
+        "title": "ComboOut"
       },
       "HTTPValidationError": {
         "properties": {
@@ -865,6 +2856,548 @@
           "status"
         ],
         "title": "HealthOut"
+      },
+      "MenuCategoryRef": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "MenuCategoryRef"
+      },
+      "MenuCompositionIn": {
+        "properties": {
+          "category_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Category Ids",
+            "default": []
+          },
+          "product_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Product Ids",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "MenuCompositionIn"
+      },
+      "MenuIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "weekdays": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Weekdays"
+          },
+          "start_time": {
+            "type": "string",
+            "title": "Start Time"
+          },
+          "end_time": {
+            "type": "string",
+            "title": "End Time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "weekdays",
+          "start_time",
+          "end_time"
+        ],
+        "title": "MenuIn"
+      },
+      "MenuListOut": {
+        "properties": {
+          "menus": {
+            "items": {
+              "$ref": "#/components/schemas/MenuOut"
+            },
+            "type": "array",
+            "title": "Menus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "menus"
+        ],
+        "title": "MenuListOut"
+      },
+      "MenuOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "weekdays": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Weekdays"
+          },
+          "start_time": {
+            "type": "string",
+            "title": "Start Time"
+          },
+          "end_time": {
+            "type": "string",
+            "title": "End Time"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/MenuCategoryRef"
+            },
+            "type": "array",
+            "title": "Categories",
+            "default": []
+          },
+          "products": {
+            "items": {
+              "$ref": "#/components/schemas/MenuProductRef"
+            },
+            "type": "array",
+            "title": "Products",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "weekdays",
+          "start_time",
+          "end_time",
+          "active"
+        ],
+        "title": "MenuOut"
+      },
+      "MenuProductRef": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "MenuProductRef"
+      },
+      "MenuUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "weekdays": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekdays"
+          },
+          "start_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time"
+          },
+          "end_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Time"
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          }
+        },
+        "type": "object",
+        "title": "MenuUpdate"
+      },
+      "OptionActiveIn": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active"
+        ],
+        "title": "OptionActiveIn"
+      },
+      "OptionGroupIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "min_selections": {
+            "type": "integer",
+            "title": "Min Selections",
+            "default": 1
+          },
+          "max_selections": {
+            "type": "integer",
+            "title": "Max Selections",
+            "default": 1
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/OptionIn"
+            },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "options"
+        ],
+        "title": "OptionGroupIn"
+      },
+      "OptionGroupListOut": {
+        "properties": {
+          "option_groups": {
+            "items": {
+              "$ref": "#/components/schemas/OptionGroupOut"
+            },
+            "type": "array",
+            "title": "Option Groups"
+          }
+        },
+        "type": "object",
+        "required": [
+          "option_groups"
+        ],
+        "title": "OptionGroupListOut"
+      },
+      "OptionGroupOptionsIn": {
+        "properties": {
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/OptionIn"
+            },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "type": "object",
+        "required": [
+          "options"
+        ],
+        "title": "OptionGroupOptionsIn"
+      },
+      "OptionGroupOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "min_selections": {
+            "type": "integer",
+            "title": "Min Selections"
+          },
+          "max_selections": {
+            "type": "integer",
+            "title": "Max Selections"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/OptionOut"
+            },
+            "type": "array",
+            "title": "Options",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "min_selections",
+          "max_selections",
+          "active"
+        ],
+        "title": "OptionGroupOut"
+      },
+      "OptionGroupReorderIn": {
+        "properties": {
+          "option_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Option Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "option_ids"
+        ],
+        "title": "OptionGroupReorderIn"
+      },
+      "OptionGroupUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "min_selections": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Selections"
+          },
+          "max_selections": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Selections"
+          }
+        },
+        "type": "object",
+        "title": "OptionGroupUpdate"
+      },
+      "OptionIn": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "price_delta": {
+            "type": "number",
+            "title": "Price Delta",
+            "default": 0
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": true
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "allergen_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Allergen Ids",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "title": "OptionIn"
+      },
+      "OptionOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "price_delta": {
+            "type": "number",
+            "title": "Price Delta"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active",
+            "default": true
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "sku": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sku"
+          },
+          "allergens": {
+            "items": {
+              "$ref": "#/components/schemas/AllergenOut"
+            },
+            "type": "array",
+            "title": "Allergens",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "price_delta"
+        ],
+        "title": "OptionOut"
       },
       "ProductIn": {
         "properties": {
@@ -982,6 +3515,188 @@
           "products"
         ],
         "title": "ProductListOut"
+      },
+      "ProductMenuRef": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "via_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Via Category"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ProductMenuRef"
+      },
+      "ProductMenusOut": {
+        "properties": {
+          "menus": {
+            "items": {
+              "$ref": "#/components/schemas/ProductMenuRef"
+            },
+            "type": "array",
+            "title": "Menus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "menus"
+        ],
+        "title": "ProductMenusOut"
+      },
+      "ProductOptionGroupOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "min_selections": {
+            "type": "integer",
+            "title": "Min Selections"
+          },
+          "max_selections": {
+            "type": "integer",
+            "title": "Max Selections"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/OptionOut"
+            },
+            "type": "array",
+            "title": "Options",
+            "default": []
+          },
+          "min_selections_override": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Selections Override"
+          },
+          "max_selections_override": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Selections Override"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "min_selections",
+          "max_selections",
+          "active"
+        ],
+        "title": "ProductOptionGroupOut",
+        "description": "Só usado dentro de ProductOut.option_groups — min_selections/\nmax_selections continuam sendo o PADRÃO do grupo (herdado de\nOptionGroupOut, sem mudança); os dois campos abaixo são o override\nespecífico deste vínculo produto↔grupo (ORD-144), ou null se não\nconfigurado. O valor EFETIVO (override ?? padrão) é calculado no\ncliente — não duplicamos essa conta aqui pra não ter duas fontes de\nverdade. GET /catalog/option-groups (fora do contexto de produto)\ncontinua usando OptionGroupOut puro, sem estes campos."
+      },
+      "ProductOptionGroupOverrideIn": {
+        "properties": {
+          "min_selections_override": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Selections Override"
+          },
+          "max_selections_override": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Selections Override"
+          }
+        },
+        "type": "object",
+        "title": "ProductOptionGroupOverrideIn",
+        "description": "Os dois campos são independentes e opcionais — omitido mantém o\nvalor atual do vínculo, `null` explícito limpa o override (restaura o\npadrão do grupo). Por isso o endpoint lê com model_dump(exclude_unset=True),\nnunca exclude_none — ver Tech Explorer de ORD-144."
+      },
+      "ProductOptionGroupOverrideOut": {
+        "properties": {
+          "min_selections_override": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Selections Override"
+          },
+          "max_selections_override": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Selections Override"
+          }
+        },
+        "type": "object",
+        "title": "ProductOptionGroupOverrideOut"
+      },
+      "ProductOptionGroupsIn": {
+        "properties": {
+          "option_group_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Option Group Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "option_group_ids"
+        ],
+        "title": "ProductOptionGroupsIn"
       },
       "ProductOut": {
         "properties": {
@@ -1110,6 +3825,14 @@
             },
             "type": "array",
             "title": "Allergens",
+            "default": []
+          },
+          "option_groups": {
+            "items": {
+              "$ref": "#/components/schemas/ProductOptionGroupOut"
+            },
+            "type": "array",
+            "title": "Option Groups",
             "default": []
           }
         },
@@ -1309,6 +4032,10 @@
     {
       "name": "Catálogo",
       "description": "Catálogo de produtos e categorias da empresa autenticada. Todos os endpoints são filtrados automaticamente por `company_id` do JWT — nunca é possível acessar o catálogo de outra empresa."
+    },
+    {
+      "name": "Cardápios",
+      "description": "Cardápios por horário (ORD-124/125) — janelas de dia da semana + horário, compostos por categorias inteiras e/ou produtos avulsos. Produto vinculado a pelo menos um cardápio deixa de ser sempre-visível e passa a aparecer só na união das janelas ativas (regra de visibilidade em si é ORD-127, ainda não implementada aqui — esta versão é só o CRUD)."
     }
   ]
 }
