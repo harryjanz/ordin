@@ -1,6 +1,6 @@
 ---
 id: ORD-150
-status: Tech Explorer
+status: Done
 fase: 6
 sprint: null
 responsavel: Frontend
@@ -333,8 +333,84 @@ vão continuar recebendo (nenhuma mudança de contrato).
   `company_id`/autenticação, só consome um endpoint já existente e monta payloads que
   order-service/payment-service já aceitam.
 
+### Validação do ponto em aberto — campo `discount`
+Confirmado em 2026-09-02, lendo `services/order/main.py` e `frontend/totem/src/App.tsx`: o
+campo `discount` não tem nenhum uso concorrente hoje — o totem sempre envia `discount: 0`, não
+existe cupom nem desconto manual em nenhuma tela. Fecha o risco levantado nesta Tech Explorer:
+a economia do combo pode reaproveitar esse campo sem conflito, sem precisar de um
+`combo_discount` dedicado.
+
 ---
 
-## Próximos passos
-Tech Explorer fechado em 2026-09-01 — aguardando revisão do usuário antes de avançar pro
-**Ready**. Bloqueada por [[ORD-112]] até o `GET /catalog/combos` existir de verdade.
+## Ready
+
+### Checklist de entrada
+
+**Explorer (PM + Produto)**
+- [x] História no formato Como/Quero/Para
+- [x] Contexto e motivação documentados (depende de [[ORD-112]] já `Done`)
+- [x] Fluxo principal passo a passo
+- [x] Dependências identificadas ([[ORD-112]], já mergeável — backend e admin prontos)
+- [x] Wireframe descrito (protótipo validado, parte do fluxo do totem)
+- [x] Critérios de aceite funcionais escritos
+
+**QA Explorer (QA)**
+- [x] Happy path em Gherkin (exibição no catálogo, aceitar/recusar upsell, ticket+desconto)
+- [x] Cenários de borda (produto fora de combo, combo inativo, sobreposição de combos)
+- [x] Cenários de erro (falha ao carregar combos não quebra o catálogo)
+- [x] Isolamento multi-tenant incluído (combo de outra empresa não aparece)
+- [x] Cenários de regressão (pedido sem combo, catálogo sem combo cadastrado)
+- [x] Cenários aprovados pelo PM
+
+**Tech Explorer (Frontend)**
+- [x] Serviços impactados documentados (frontend/totem apenas — order/payment/catalog
+      inalterados)
+- [x] Nenhum endpoint novo — consome `GET /catalog/combos` já implementado em [[ORD-112]]
+- [x] Migrations: nenhuma
+- [x] Eventos de fila: N/A
+- [x] Estimativa definida (5 pontos, só frontend)
+- [x] Riscos identificados com mitigação (colisão de ID no carrinho, reaproveitamento de
+      `discount` — validado sem conflito, arredondamento de centavos, sobreposição de combos)
+
+**Aprovação final**
+- [x] Time (usuário) aprovou avançar pra implementação — "agora devemos ir para o 150" /
+      "vez do totem" (2026-09-02)
+- [x] Estimativa acordada (5 pontos)
+- [x] Sem bloqueios não resolvidos — ponto em aberto do `discount` validado sem conflito
+- [x] Priorização aprovada para implementação imediata
+
+**Status: Ready** — apta para implementação.
+
+---
+
+## Done
+
+Implementado em `feature/ord-150-combo-catalogo-totem` (branch criada a partir de
+`feature/ord-112-combo-cadastro-admin`, já com o backend de combo pronto). `frontend/totem`:
+`types.ts` (`Combo`/`ComboItemRef`, `CartItem` com `kind`/`key`), `store.ts` (agrupamento do
+carrinho por `key`, não mais `id`), `CatalogScreen.tsx` (seção "Destaque", modal de upsell,
+stepper de combo), `App.tsx` (explosão do combo em itens reais + `discount` ao montar
+`POST /orders`). `PaymentScreen.tsx` não precisou de nenhuma mudança — confirmado lendo
+`services/payment/main.py` que `items` do `PaymentIn` nunca é lido em lugar nenhum do backend,
+só `amount` importa pro pagamento (achado que simplificou o escopo real da implementação).
+Build limpo (`tsc && vite build`), zero erros de TypeScript.
+
+**QA manual em ambiente real, ciclo completo testado no navegador (2026-09-02):** combo real
+exibido na seção "Destaque" com preço/economia corretos; clicar em "Adicionar" num produto
+componente disparou o modal de upsell; "Sim, quero o combo" adicionou o combo (não o produto)
+ao carrinho, com tag "COMBO" visível na linha do carrinho; pedido finalizado de verdade
+confirmou no banco do order-service a explosão correta — 2 `order_items` com preço avulso real
+(`unit_price` de cada componente, não dividido), `discount=2.00` batendo exatamente com a
+economia do combo, e 2 tickets gerados (um por componente), balcão sem nenhuma diferença de
+fluxo. Teste feito na empresa Pasta & Co com um combo temporário criado e removido só para o
+teste (não afeta dado de produção).
+
+**Achados durante o QA manual:**
+- Terminal 1 da Burger House (produção, Mercado Pago) está com o access token inválido
+  (`Access token inválido HTTP 404`), bloqueando o teste de conexão do setup do totem — **achado
+  não relacionado a esta história**, sinalizado para o usuário investigar separadamente
+  (possível expiração de credencial).
+- Confirmado o ponto em aberto da Tech Explorer: `PaymentScreen.tsx` não precisa de explosão de
+  combo porque `payment-service` nunca lê o campo `items` — simplificação real, não suposição.
+
+**Status: Done.**

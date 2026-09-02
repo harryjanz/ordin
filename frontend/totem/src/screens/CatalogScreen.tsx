@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import api from "../api";
 import type { Theme } from "../themes";
-import type { Category, Product, CartItem } from "../types";
+import type { Category, Product, CartItem, Combo } from "../types";
 import { RADIUS, FONT } from "../scale";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -20,8 +20,8 @@ interface Props {
   // (sidebar), útil pra empresas com muitas categorias.
   menuLayout: "horizontal" | "vertical";
   cart: CartItem[];
-  onAdd: (p: Product) => void;
-  onRemove: (id: number) => void;
+  onAdd: (item: CartItem) => void;
+  onRemove: (key: string) => void;
   onCheckout: () => void;
   onHome: () => void;
 }
@@ -35,6 +35,20 @@ export default function CatalogScreen({
   const [cartOpen, setCartOpen] = useState(false);
   const [loadingCat, setLoadingCat] = useState(true);
   const [loadingProds, setLoadingProds] = useState(false);
+
+  // ORD-150 — combos ativos da empresa. Falha na chamada não quebra o resto
+  // do catálogo (mesmo padrão de erro silencioso do refreshCatalog abaixo) —
+  // só a seção "Destaque" some, produtos/categorias continuam funcionando.
+  const [combos, setCombos] = useState<Combo[]>([]);
+  const loadCombos = useCallback(() => {
+    return api.get("/catalog/combos").then((r) => { setCombos(r.data.combos ?? []); }).catch(() => null);
+  }, []);
+
+  // Modal de upsell (ORD-150) — decisão validada com o usuário: interrompe a
+  // adição do produto avulso, não é um banner discreto. Só dispara na
+  // primeira unidade (getQty === 0); incrementar um produto já no carrinho
+  // via stepper não repete a pergunta a cada unidade.
+  const [upsell, setUpsell] = useState<{ combo: Combo; product: Product } | null>(null);
 
   const isVertical = menuLayout === "vertical";
 
@@ -77,12 +91,13 @@ export default function CatalogScreen({
 
   useEffect(() => {
     refreshCatalog();
-  }, [refreshCatalog]);
+    loadCombos();
+  }, [refreshCatalog, loadCombos]);
 
   useEffect(() => {
-    const iv = setInterval(() => { refreshCatalog({ silent: true }); }, POLL_INTERVAL_MS);
+    const iv = setInterval(() => { refreshCatalog({ silent: true }); loadCombos(); }, POLL_INTERVAL_MS);
     return () => clearInterval(iv);
-  }, [refreshCatalog]);
+  }, [refreshCatalog, loadCombos]);
 
   useEffect(() => {
     if (!activeCat) { setProducts([]); return; }
@@ -91,7 +106,26 @@ export default function CatalogScreen({
 
   const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const count = cart.reduce((s, i) => s + i.qty, 0);
-  const getQty = useCallback((id: number) => cart.find((i) => i.id === id)?.qty ?? 0, [cart]);
+  const getQty = useCallback((key: string) => cart.find((i) => i.key === key)?.qty ?? 0, [cart]);
+
+  function addProductToCart(p: Product) {
+    onAdd({ key: `product:${p.id}`, kind: "product", id: p.id, name: p.name, price: p.price, qty: 1 });
+  }
+
+  function addComboToCart(c: Combo) {
+    onAdd({ key: `combo:${c.id}`, kind: "combo", id: c.id, name: c.name, price: c.price, qty: 1, comboItems: c.items });
+  }
+
+  // Decisão validada com o usuário: se o produto for componente de mais de
+  // um combo ativo, oferece só o primeiro (ordenado por id, já vem assim do
+  // backend) — comportamento simplificado, não ideal, mas previsível.
+  function handleAddProduct(p: Product) {
+    const combo = getQty(`product:${p.id}`) === 0
+      ? combos.find((c) => c.items.some((i) => i.product_id === p.id))
+      : undefined;
+    if (combo) setUpsell({ combo, product: p });
+    else addProductToCart(p);
+  }
 
   // Categorias — mesmo conteúdo nos dois modos, só o container/botão mudam
   // de faixa horizontal pra coluna lateral.
@@ -223,6 +257,85 @@ export default function CatalogScreen({
           alignContent: "start",
           overflowY: "auto",
         }}>
+          {/* ORD-150 — combos ativos, seção "Destaque" fixa no topo,
+              independente da categoria selecionada. Card visualmente
+              diferenciado do produto avulso: fundo em gradiente + selo
+              "COMBO" + preço com economia visível sem abrir nada. */}
+          {combos.length > 0 && (
+            <>
+              <div style={{ gridColumn: "1/-1", fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.label, color: T.muted, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                Destaque
+              </div>
+              {combos.map((c) => {
+                const comboQty = getQty(`combo:${c.id}`);
+                const sumAvulso = c.items.reduce((s, i) => s + i.price, 0);
+                const savings = sumAvulso - c.price;
+                return (
+                  <div
+                    key={`combo-${c.id}`}
+                    style={{
+                      background: `linear-gradient(155deg, ${T.catActive}, ${T.surface})`,
+                      border: `1.5px solid ${T.btn}`,
+                      borderRadius: RADIUS.lg,
+                      display: "flex",
+                      flexDirection: "column",
+                      overflow: "hidden",
+                      boxShadow: T.cardShadow,
+                      padding: 16,
+                      gap: 8,
+                      position: "relative",
+                    }}
+                  >
+                    <span style={{
+                      position: "absolute", top: 14, right: 14,
+                      background: T.btn, color: T.btnText,
+                      fontFamily: FONT_B, fontSize: FONT.caption, fontWeight: 800,
+                      borderRadius: RADIUS.pill, padding: "3px 10px", textTransform: "uppercase", letterSpacing: "0.5px",
+                    }}>
+                      Combo
+                    </span>
+                    <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.body, paddingRight: 60 }}>
+                      {c.name}
+                    </div>
+                    <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, lineHeight: 1.4 }}>
+                      {c.items.map((i) => i.name).join(" + ")}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.bodyLg }}>{fmt(c.price)}</span>
+                      <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, textDecoration: "line-through" }}>{fmt(sumAvulso)}</span>
+                      {savings > 0 && (
+                        <span style={{ fontFamily: FONT_B, color: "#1c8a53", background: "#e4f6ec", fontSize: FONT.caption, fontWeight: 700, borderRadius: RADIUS.pill, padding: "2px 10px" }}>
+                          economize {fmt(savings)}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ marginTop: 4 }}>
+                      {comboQty > 0 ? (
+                        <div style={{ display: "flex", alignItems: "center", background: T.numBg, border: `1px solid ${T.border}`, borderRadius: RADIUS.pill, overflow: "hidden" }}>
+                          <button onClick={() => onRemove(`combo:${c.id}`)} style={{ width: 52, height: 52, background: "none", border: "none", color: T.roxo, fontSize: FONT.title, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
+                          <span style={{ flex: 1, textAlign: "center", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text }}>{comboQty}</span>
+                          <button onClick={() => addComboToCart(c)} style={{ width: 52, height: 52, background: "none", border: "none", color: T.roxo, fontSize: FONT.title, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => addComboToCart(c)}
+                          style={{
+                            width: "100%", minHeight: 52, borderRadius: RADIUS.pill,
+                            background: T.btn, color: T.btnText, border: "none",
+                            fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body,
+                            cursor: "pointer", boxShadow: T.glow,
+                          }}
+                        >
+                          Adicionar combo
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
           {loadingProds ? (
             <div style={{ color: T.muted, gridColumn: "1/-1", fontSize: FONT.bodyLg, padding: "48px 0", textAlign: "center", fontFamily: FONT_B }}>
               Carregando produtos…
@@ -232,7 +345,7 @@ export default function CatalogScreen({
               Nenhum produto disponível.
             </div>
           ) : products.map((p, i) => {
-            const qty = getQty(p.id);
+            const qty = getQty(`product:${p.id}`);
             const gradient = i % 2 === 0 ? T.placeholderA : T.placeholderB;
             return (
               <div
@@ -330,7 +443,7 @@ export default function CatalogScreen({
                       overflow: "hidden",
                     }}>
                       <button
-                        onClick={() => onRemove(p.id)}
+                        onClick={() => onRemove(`product:${p.id}`)}
                         style={{
                           width: 52, height: 52,
                           background: "none", border: "none",
@@ -348,7 +461,7 @@ export default function CatalogScreen({
                         {qty}
                       </span>
                       <button
-                        onClick={() => onAdd(p)}
+                        onClick={() => addProductToCart(p)}
                         style={{
                           width: 52, height: 52,
                           background: "none", border: "none",
@@ -365,7 +478,7 @@ export default function CatalogScreen({
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span style={{ fontFamily: FONT_B, fontSize: FONT.label, color: T.muted }}>Toque para adicionar</span>
                       <button
-                        onClick={() => onAdd(p)}
+                        onClick={() => handleAddProduct(p)}
                         style={{
                           width: 52, height: 52, borderRadius: "50%",
                           background: T.btn, color: T.btnText,
@@ -465,12 +578,22 @@ export default function CatalogScreen({
             ) : (
               <>
                 {cart.map((item) => (
-                  <div key={item.id} style={{
+                  <div key={item.key} style={{
                     display: "flex", alignItems: "center", gap: 16,
                     padding: "16px 0", borderBottom: `1px solid ${T.borderNeutral}`,
                   }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: FONT.bodyLg }}>{item.name}</div>
+                      <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: FONT.bodyLg, display: "flex", alignItems: "center", gap: 8 }}>
+                        {item.name}
+                        {item.kind === "combo" && (
+                          <span style={{
+                            fontFamily: FONT_B, fontSize: FONT.caption, fontWeight: 700, color: "#fff",
+                            background: T.roxo, borderRadius: RADIUS.pill, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.3px",
+                          }}>
+                            Combo
+                          </span>
+                        )}
+                      </div>
                       <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body, marginTop: 4 }}>
                         {fmt(item.price)} × {item.qty}
                       </div>
@@ -479,8 +602,8 @@ export default function CatalogScreen({
                       {fmt(item.price * item.qty)}
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => onRemove(item.id)} style={{ background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.roxo, borderRadius: RADIUS.sm, width: 44, height: 44, cursor: "pointer", fontSize: FONT.subtitle, fontWeight: 700 }}>−</button>
-                      <button onClick={() => onAdd(item)} style={{ background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.roxo, borderRadius: RADIUS.sm, width: 44, height: 44, cursor: "pointer", fontSize: FONT.subtitle, fontWeight: 700 }}>+</button>
+                      <button onClick={() => onRemove(item.key)} style={{ background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.roxo, borderRadius: RADIUS.sm, width: 44, height: 44, cursor: "pointer", fontSize: FONT.subtitle, fontWeight: 700 }}>−</button>
+                      <button onClick={() => onAdd({ ...item, qty: 1 })} style={{ background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.roxo, borderRadius: RADIUS.sm, width: 44, height: 44, cursor: "pointer", fontSize: FONT.subtitle, fontWeight: 700 }}>+</button>
                     </div>
                   </div>
                 ))}
@@ -504,6 +627,66 @@ export default function CatalogScreen({
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de upsell (ORD-150) — interrompe a adição do produto avulso,
+          decisão validada com o usuário: não é um banner discreto. */}
+      {upsell && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={() => setUpsell(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)" }} />
+          <div style={{
+            position: "relative", width: "min(560px, 100%)",
+            background: T.surface, borderRadius: "24px 24px 0 0",
+            padding: 32, display: "flex", flexDirection: "column", gap: 16,
+            boxShadow: "0 -12px 40px rgba(0,0,0,0.25)",
+          }}>
+            <span style={{
+              alignSelf: "flex-start", fontFamily: FONT_B, fontSize: FONT.label, fontWeight: 800,
+              color: T.btn, background: T.catActive, borderRadius: RADIUS.pill, padding: "4px 14px",
+              textTransform: "uppercase", letterSpacing: "0.5px",
+            }}>
+              Combo disponível
+            </span>
+            <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.subtitle, lineHeight: 1.3 }}>
+              Leve o {upsell.combo.name}
+              {upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price > 0 && (
+                <> e economize {fmt(upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price)}</>
+              )}
+            </div>
+            <div style={{ background: T.numBg, borderRadius: RADIUS.lg, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+              {upsell.combo.items.map((i) => (
+                <div key={i.product_id} style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT_B, fontSize: FONT.label, color: T.muted }}>
+                  <span>{i.name}</span>
+                  <span>incluso</span>
+                </div>
+              ))}
+              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body, color: T.text, paddingTop: 6, borderTop: `1px dashed ${T.borderNeutral}` }}>
+                <span>{upsell.combo.name}</span>
+                <span>{fmt(upsell.combo.price)}</span>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button
+                onClick={() => { addComboToCart(upsell.combo); setUpsell(null); }}
+                style={{
+                  minHeight: 64, borderRadius: RADIUS.pill, background: T.btn, color: T.btnText,
+                  border: "none", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body, cursor: "pointer", boxShadow: T.glow,
+                }}
+              >
+                Sim, quero o combo
+              </button>
+              <button
+                onClick={() => { addProductToCart(upsell.product); setUpsell(null); }}
+                style={{
+                  minHeight: 64, borderRadius: RADIUS.pill, background: T.numBg, color: T.text,
+                  border: `1px solid ${T.borderNeutral}`, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body, cursor: "pointer",
+                }}
+              >
+                Não, só {upsell.product.name}
+              </button>
+            </div>
           </div>
         </div>
       )}
