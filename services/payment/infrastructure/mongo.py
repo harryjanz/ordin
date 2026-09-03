@@ -18,7 +18,9 @@ def _get_client():
         import motor.motor_asyncio
         _client = motor.motor_asyncio.AsyncIOMotorClient(mongo_url)
         return _client
-    except Exception as exc:
+    # ORD-156 — captura ampla intencional: MongoDB é só trilha de auditoria,
+    # nunca pode derrubar o fluxo de pagamento por não estar disponível.
+    except Exception as exc:  # noqa: BLE001
         logger.error("MongoDB: falha ao criar cliente — %s", exc)
         return None
 
@@ -31,7 +33,8 @@ async def save_audit(document: dict) -> None:
         mongo_db = os.getenv("MONGO_DB", "ordin_audit")
         document.setdefault("created_at", datetime.utcnow().isoformat())
         await client[mongo_db].payment_events.insert_one(document)
-    except Exception as exc:
+    # ORD-156 — mesmo motivo acima: salvar auditoria é best-effort.
+    except Exception as exc:  # noqa: BLE001
         logger.error(
             "MongoDB: falha ao salvar audit — transaction_id=%s order_ref=%s — %s",
             document.get("transaction_id"), document.get("order_ref"), exc,

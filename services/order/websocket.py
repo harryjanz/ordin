@@ -29,7 +29,10 @@ class ConnectionManager:
         dead = []
         for ws in list(self._conns.get(cid,[])):
             try: await ws.send_text(payload)
-            except: dead.append(ws)
+            # ORD-156 — captura ampla intencional: fan-out pra várias
+            # conexões, uma falha de envio numa (conexão já fechada, etc.)
+            # não pode interromper o broadcast pras outras.
+            except Exception: dead.append(ws)  # noqa: BLE001
         for ws in dead: self.disconnect(ws, cid)
 
 manager = ConnectionManager()

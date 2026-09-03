@@ -77,7 +77,10 @@ class PayGoProvider(IPaymentProvider):
                     json=body,
                     headers=self._headers(),
                 )
-            except Exception as exc:
+            # ORD-156 — captura ampla intencional: qualquer falha de rede/
+            # parsing na chamada ao PayGo vira transação recusada, mesmo
+            # racional do provider Mercado Pago (ver mercadopago.py).
+            except Exception as exc:  # noqa: BLE001
                 return TransactionResult(
                     status=TransactionStatus.refused,
                     error_message=f"Falha ao conectar ao PayGo: {exc}",
@@ -116,7 +119,9 @@ class PayGoProvider(IPaymentProvider):
                         params={**self._params(), "intencaoVendaId": intencao_id},
                         headers=self._headers(),
                     )
-                except Exception as exc:
+                # ORD-156 — captura ampla intencional: poll em loop, mesmo
+                # racional do MP Point.
+                except Exception as exc:  # noqa: BLE001
                     logger.warning("PayGo poll error: %s", exc)
                     continue
 
@@ -215,7 +220,9 @@ class PayGoProvider(IPaymentProvider):
                     json=body,
                     headers=self._headers(),
                 )
-            except Exception as exc:
+            # ORD-156 — captura ampla intencional: teste de conexão só
+            # reporta sucesso/falha, mesmo racional do MP Point.
+            except Exception as exc:  # noqa: BLE001
                 return {"success": False, "detail": f"Falha ao conectar ao PayGo: {exc}"}
 
             if resp.status_code != 200:
@@ -244,7 +251,12 @@ class PayGoProvider(IPaymentProvider):
                         return {"success": True, "detail": f"Máquina respondeu (NSU cancelado, status {status_id})"}
                     if status_id == 0:
                         continue
-                except Exception:
+                # ORD-156 — captura ampla intencional: poll com prazo
+                # limitado (deadline de 25s acima) e sleep a cada iteração
+                # — uma falha pontual não pode abortar a espera da máquina.
+                # Sem log aqui de propósito: o loop já roda a cada 2s por
+                # até 25s, logar toda tentativa falha vira ruído.
+                except Exception:  # noqa: BLE001, S112
                     continue
 
             # Timeout — tenta cancelar mesmo assim

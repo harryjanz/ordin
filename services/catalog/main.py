@@ -1469,7 +1469,10 @@ async def upload_product_image_endpoint(
     pillow_format = "JPEG" if ext == "jpg" else "PNG"
     try:
         thumb_content = _make_thumbnail(content, pillow_format)
-    except Exception:
+    # ORD-156 — captura ampla intencional: Pillow levanta vários tipos de
+    # exceção diferentes pra imagem corrompida/inválida (UnidentifiedImageError,
+    # OSError, etc.) — todos viram o mesmo 422 pro cliente.
+    except Exception:  # noqa: BLE001
         raise HTTPException(422, detail="Arquivo não é uma imagem válida")
 
     # Remove os objetos antigos primeiro pra não deixar lixo órfão no bucket
@@ -1688,7 +1691,10 @@ async def upload_option_image_endpoint(
     pillow_format = "JPEG" if ext == "jpg" else "PNG"
     try:
         thumb_content = _make_thumbnail(content, pillow_format)
-    except Exception:
+    # ORD-156 — captura ampla intencional: Pillow levanta vários tipos de
+    # exceção diferentes pra imagem corrompida/inválida (UnidentifiedImageError,
+    # OSError, etc.) — todos viram o mesmo 422 pro cliente.
+    except Exception:  # noqa: BLE001
         raise HTTPException(422, detail="Arquivo não é uma imagem válida")
 
     if opt.image_url: delete_object(opt.image_url)
@@ -2006,7 +2012,10 @@ async def upload_combo_image_endpoint(
     pillow_format = "JPEG" if ext == "jpg" else "PNG"
     try:
         thumb_content = _make_thumbnail(content, pillow_format)
-    except Exception:
+    # ORD-156 — captura ampla intencional: Pillow levanta vários tipos de
+    # exceção diferentes pra imagem corrompida/inválida (UnidentifiedImageError,
+    # OSError, etc.) — todos viram o mesmo 422 pro cliente.
+    except Exception:  # noqa: BLE001
         raise HTTPException(422, detail="Arquivo não é uma imagem válida")
 
     if combo.image_url: delete_object(combo.image_url)

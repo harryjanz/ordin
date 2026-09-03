@@ -378,3 +378,54 @@ Verificação seguindo à risca o plano de mitigação da Fase 2 (ver Riscos):
 - Erros restantes (148) são exatamente as categorias previstas pra Fase 3
   (`RUF059` 107, `BLE001` 30, `E722`/`SIM102` 3+3, resto 4) — nenhuma categoria nova surgiu do
   auto-fix em si.
+
+## Validação (Fase 3 — revisão manual, 2026-09-03)
+
+`ruff check services/` — **148 → 0 erros** (859 → 0 desde o início da história, 100%). Toda
+correção revisada individualmente, categoria por categoria, sem fix cego:
+
+- **`RUF059` (107, unused-unpacked-variable)** — confirmado antes de tocar: as 107 ocorrências
+  estão só em 2 arquivos de teste (`company/tests/test_coverage.py` 86,
+  `order/tests/test_coverage.py` 21), zero em código de produção. Fix mecânico (prefixar com
+  `_`) aplicado com `--unsafe-fixes` seguro por estar 100% escopado a fixtures de teste.
+- **`BLE001` (30, blind-except) — a categoria de maior risco da história.** Cada ocorrência
+  revisada individualmente, decisão registrada inline no código (comentário `# ORD-156 —
+  captura ampla intencional: ...` explicando o porquê) em vez de estreitar tipo de exceção sem
+  certeza:
+  - **3 estreitadas de verdade** (as únicas onde havia certeza total do tipo de erro possível):
+    parse de JSON de webhook (`_json.JSONDecodeError`/`UnicodeDecodeError` — 2 em
+    `payment/main.py`, 1 em `mercadopago.py`).
+  - **27 documentadas com `# noqa: BLE001`**, sem mudar o tipo de exceção capturada — todas são
+    fronteiras de resiliência legítimas (chamada de rede a provider externo, poller de
+    background, handler de webhook, auditoria best-effort) onde estreitar "no escuro" correria
+    o risco exatamente descrito nos Riscos: mascarar um erro real do provider como exceção não
+    tratada. Maior concentração em `payment-service` (24: 11 `main.py`, 7 `mercadopago.py`, 4
+    `paygo.py`, 2 `mongo.py`) — todas envolvendo reembolso/pagamento/webhook revisadas com
+    atenção redobrada, confirmando em cada uma que o fallback (`success: False`,
+    `status=refused`, log + continue) é o resultado seguro/conservador, nunca um sucesso
+    silencioso mascarando falha.
+  - Único ponto onde o comportamento mudou de verdade (não só documentação): `_notify_order`
+    em `payment/main.py` tinha `except Exception: pass` — silêncio total, sem log. Adicionado
+    `logger.warning(...)` (só isso, sem mudar o `except`/controle de fluxo) — achado ao revisar
+    o padrão S110/BLE001 desta história; falha de notificação ao order-service agora fica
+    visível em log, antes desaparecia sem rastro.
+- **`E722`/bare-except (3)** — todos narrowed pra `except Exception:` com `# noqa: BLE001`
+  (mesmo racional: QR de ticket físico malformado, broadcast de WebSocket com conexão morta,
+  healthcheck de Redis — todos precisam continuar capturando amplo, só formalizando o tipo).
+- **`SIM102`/`SIM117` (4, if/with aninhado)** — puro reagrupamento sintático
+  (`if A: if B:` → `if A and B:`), incluindo as 2 ocorrências em `payment/main.py` que validam
+  prazo de cancelamento/reembolso — testes que exercitam diretamente essa lógica (prazo
+  vencido/dentro do prazo) confirmados passando sem mudança de resultado.
+- **`PLW1508`/`UP007` (2, cosméticos)** — default de `os.getenv` de int pra string
+  (`int(os.getenv(..., 60))` → `int(os.getenv(..., "60"))`, mesmo resultado) e
+  `Union[X, Y]` → `X | Y` no `response_model` do endpoint de login (único uso de `Union` no
+  arquivo, import removido).
+
+Validação final idêntica ao padrão das Fases 1-2: suíte de testes dos 5 serviços com **contagem
+exatamente igual à baseline** (auth 31/31, company 335/335 com as mesmas 9 falhas
+pré-existentes, catalog 185/185, order 58/58, payment 126/126 — os testes de prazo de reembolso
+que exercitam diretamente a lógica reescrita em `SIM102` passando sem alteração) + `docker
+compose up` real dos 5 com `GET /health` 200.
+
+**Ruff zerado.** Falta só a Fase 4 (medir `mypy`, hoje nunca avaliado porque o CI não chega lá) —
+checkpoint com o usuário antes de prosseguir.

@@ -397,9 +397,8 @@ async def collect_ticket(
     fica marcada com `collection_method="manual"` e gera evento de auditoria.
     """
     collection_method = "qr" if body.qr_data is not None else "manual"
-    if body.qr_data is not None:
-        if not _verify_qr(body.qr_data) or body.qr_data.split("|")[0] != ticket_code:
-            raise HTTPException(400, detail="QR inválido")
+    if body.qr_data is not None and (not _verify_qr(body.qr_data) or body.qr_data.split("|")[0] != ticket_code):
+        raise HTTPException(400, detail="QR inválido")
     result = await db.execute(
         select(Ticket, OrderItem.product_name)
         .join(OrderItem, OrderItem.id == Ticket.order_item_id)

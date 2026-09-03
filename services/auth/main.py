@@ -3,7 +3,6 @@ import json
 import os
 import secrets
 from datetime import datetime, timedelta
-from typing import Union
 
 import httpx
 import redis
@@ -49,7 +48,7 @@ def reset_rate_limit(ip, key):
 DB_URL           = require_env("DB_URL")
 SECRET           = require_env("JWT_SECRET")
 ALGO             = "HS256"
-ACCESS_EX        = int(os.getenv("JWT_ACCESS_EXP_MINUTES", 60))
+ACCESS_EX        = int(os.getenv("JWT_ACCESS_EXP_MINUTES", "60"))
 COMPANY_SVC      = require_env("COMPANY_SERVICE_URL")
 INTERNAL_SECRET  = require_env("INTERNAL_SECRET")
 INTERNAL_HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
@@ -284,7 +283,7 @@ async def _issue_login_tokens(u: dict, request: Request, actor: str, db: AsyncSe
 
 @app.post(
     "/auth/login",
-    response_model=Union[TokenOut, MfaRequiredOut],
+    response_model=TokenOut | MfaRequiredOut,
     tags=["Autenticação"],
     summary="Login de administrador ou operador",
     responses={
@@ -429,7 +428,11 @@ async def logout(body: RefreshReq, request: Request, db: AsyncSession = Depends(
         payload = jwt.decode(body.refresh_token, SECRET, algorithms=[ALGO], options={"verify_exp": False})
         actor = payload.get("sub")
         company_id = payload.get("company")
-    except Exception:
+    # ORD-156 — captura ampla intencional: decode aqui é só pra enriquecer o
+    # log de auditoria (a revogação em si já aconteceu acima, por hash) —
+    # token expirado/malformado não pode impedir o logout, só perde o
+    # actor/company_id do log.
+    except Exception:  # noqa: BLE001
         actor = None
         company_id = None
     emit_audit("logout", request,
@@ -520,5 +523,7 @@ async def device_status(code: str = Query(..., description="Código de 6 caracte
 @app.get("/health", response_model=HealthOut, tags=["Autenticação"], summary="Healthcheck")
 def health():
     try: redis_ok = redis_client.ping()
-    except: redis_ok = False
+    # ORD-156 — captura ampla intencional: healthcheck só reporta se o redis
+    # respondeu, qualquer erro vira "não respondeu".
+    except Exception: redis_ok = False  # noqa: BLE001
     return {"service":"auth","status":"ok","redis":redis_ok}

@@ -36,7 +36,10 @@ def verify_qr_data(qr_string: str):
         data = json.loads(qr_string)
         if not hmac.compare_digest(data.get("sig",""), _sign(data)): return None
         return {"ticket_code":data["id"],"order_ref":data["ref"]}
-    except: return None
+    # ORD-156 — captura ampla intencional: QR escaneado de ticket físico
+    # pode vir malformado/adulterado de várias formas (JSON inválido, campo
+    # faltando) — qualquer uma vira "QR inválido" (None), não exceção.
+    except Exception: return None  # noqa: BLE001
 
 def generate_qr_png_b64(data: str, size: int = 200) -> str:
     qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,box_size=10,border=3)

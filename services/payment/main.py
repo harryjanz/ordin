@@ -100,7 +100,10 @@ async def _publish(event: str, payload: dict) -> None:
         return
     try:
         await _broker.publish(event, payload)
-    except Exception as exc:
+    # ORD-156 — captura ampla intencional: publicar evento é best-effort,
+    # não pode derrubar o fluxo principal de pagamento por causa de uma
+    # falha de broker (rede, serialização, o que for).
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Broker: falha ao publicar %s — %s", event, exc)
 
 
@@ -112,8 +115,12 @@ async def _notify_order(order_ref: str, status: str) -> None:
                 json={"status": status},
                 headers=INTERNAL_HEADERS,
             )
-    except Exception:
-        pass
+    # ORD-156 — mesmo motivo do _publish acima: notificação best-effort pro
+    # order-service, não pode quebrar o fluxo de pagamento. Logar em vez de
+    # engolir silenciosamente (achado ao revisar S110/BLE001 desta história —
+    # antes não logava nada, dificultando investigar falha de sincronização).
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Notify order-service falhou (%s -> %s): %s", order_ref, status, exc)
 
 
 async def _get_terminal_config(terminal_id: int) -> dict:
@@ -149,7 +156,11 @@ async def _get_mp_webhook_secret(company_id: int) -> tuple[bool, str | None]:
         if resp.status_code != 200:
             return False, None
         return True, resp.json().get("webhook_secret")
-    except Exception as exc:
+    # ORD-156 — captura ampla intencional: busca best-effort do secret pra
+    # validar assinatura de webhook; qualquer falha (rede, resposta
+    # inesperada do company-service) deve cair no caminho "sem secret", não
+    # derrubar o handler de webhook.
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Erro ao buscar webhook_secret da empresa %s: %s", company_id, exc)
         return False, None
 
@@ -857,9 +868,8 @@ async def cancel_payment(
         raise HTTPException(400, "Transação Mercado Pago já aprovada — use POST /payments/{tx_id}/refund")
 
     # Validação de data para PayGo
-    if tx.provider == "paygo":
-        if tx.created_at and tx.created_at.date() != datetime.utcnow().date():
-            raise HTTPException(422, "Cancelamento PayGo permitido apenas no mesmo dia")
+    if tx.provider == "paygo" and tx.created_at and tx.created_at.date() != datetime.utcnow().date():
+        raise HTTPException(422, "Cancelamento PayGo permitido apenas no mesmo dia")
 
     tx.status = "cancelled"
     tx.cancelled_at = datetime.utcnow()
@@ -885,7 +895,11 @@ async def cancel_payment(
             )
         except HTTPException:
             pass
-        except Exception as exc:
+        # ORD-156 — captura ampla intencional: cancelamento no provider é
+        # best-effort aqui (a transação já está sendo cancelada do nosso
+        # lado independente do resultado) — qualquer falha do provider não
+        # pode impedir o cancelamento local.
+        except Exception as exc:  # noqa: BLE001
             logger.warning("PayGo cancel error: %s", exc)
 
     await _notify_order(tx.order_ref, "cancelled")
@@ -970,9 +984,8 @@ async def refund_payment(
     # uma tabela genérica aqui), evita chamada desnecessária ao Mercado Pago
     # quando já sabemos que vai ser recusado. Ver ORD-147.
     limit_days = provider.refund_window_days(tx.method)
-    if limit_days is not None and tx.created_at:
-        if (datetime.utcnow() - tx.created_at).days > limit_days:
-            raise HTTPException(422, f"Prazo de reembolso expirado — {tx.provider} aceita até {limit_days} dias da aprovação")
+    if limit_days is not None and tx.created_at and (datetime.utcnow() - tx.created_at).days > limit_days:
+        raise HTTPException(422, f"Prazo de reembolso expirado — {tx.provider} aceita até {limit_days} dias da aprovação")
 
     refund_result = await provider.refund_transaction(provider_transaction_id=tx.provider_transaction_id)
 
@@ -1137,7 +1150,10 @@ async def get_payment_status(
                     elif mp_status in ("cancelled", "rejected"):
                         tx.status = "cancelled" if mp_status == "cancelled" else "refused"
                         await db.commit()
-        except Exception as exc:
+        # ORD-156 — captura ampla intencional: poller de background, uma
+        # falha numa iteração (rede, resposta inesperada da API do MP) não
+        # pode derrubar o loop — só loga e tenta de novo na próxima.
+        except Exception as exc:  # noqa: BLE001
             logger.warning("MP status poll error: %s", exc)
 
     return {
@@ -1245,7 +1261,11 @@ async def _mp_fetch_and_update(tx: Transaction, payment_id: str, db: AsyncSessio
             elif mp_status in ("cancelled", "rejected") and tx.status not in ("approved", "cancelled", "refused"):
                 tx.status = "cancelled" if mp_status == "cancelled" else "refused"
                 await db.commit()
-    except Exception as exc:
+    # ORD-156 — captura ampla intencional: handler de webhook precisa
+    # sempre responder (ver docstring do endpoint — provider reentrega se
+    # não for 200), então qualquer erro interno vira log em vez de exceção
+    # não tratada.
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Webhook _mp_fetch_and_update error: %s", exc)
 
 
@@ -1294,7 +1314,9 @@ async def _mp_order_fetch_and_update(tx: Transaction, order_id: str, db: AsyncSe
             elif order_status in ("failed", "canceled", "expired") and tx.status not in ("approved", "cancelled", "refused"):
                 tx.status = "cancelled" if order_status == "canceled" else "refused"
                 await db.commit()
-    except Exception as exc:
+    # ORD-156 — mesmo motivo do _mp_fetch_and_update acima: handler de
+    # webhook não pode propagar exceção não tratada.
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Webhook _mp_order_fetch_and_update error: %s", exc)
 
 
@@ -1339,7 +1361,10 @@ async def _handle_mp_notification(payload: dict, company_id: int) -> None:
                 "data_id": data_id, "signature_valid": True, "correlated": tx is not None,
                 "payload": payload,
             })
-        except Exception as exc:
+        # ORD-156 — captura ampla intencional: já processou o pagamento
+        # (ponto crítico), essa parte final é só correlação/auditoria — não
+        # pode falhar o webhook por um erro aqui.
+        except Exception as exc:  # noqa: BLE001
             logger.warning("Webhook MP handler error: %s", exc)
 
 
@@ -1390,7 +1415,7 @@ async def payment_webhook_mercadopago(
             # (pode ser tentativa de forjar notificação de pagamento).
             try:
                 payload_invalido = _json.loads(body)
-            except Exception:
+            except (_json.JSONDecodeError, UnicodeDecodeError):
                 payload_invalido = {"raw": body.decode(errors="replace")}
             await save_audit({
                 "event": "webhook_received", "provider": "mercadopago",
@@ -1404,7 +1429,7 @@ async def payment_webhook_mercadopago(
 
     try:
         payload = _json.loads(body)
-    except Exception:
+    except (_json.JSONDecodeError, UnicodeDecodeError):
         return {"ok": True}
 
     logger.info("Webhook MP recebido: empresa=%s type=%s", company_id, payload.get("type"))
@@ -1429,7 +1454,7 @@ async def payment_webhook_paygo(request: Request):
     body = await request.body()
     try:
         payload = _json.loads(body)
-    except Exception:
+    except (_json.JSONDecodeError, UnicodeDecodeError):
         return {"ok": True}
     # PayGo notifica via callback configurado no request de pagamento.
     # Estrutura do payload a confirmar com ControlPay — implementar quando disponível.

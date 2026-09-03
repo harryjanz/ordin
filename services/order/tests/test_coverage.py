@@ -248,7 +248,7 @@ async def test_dir_create_order(db_session):
 
 async def test_dir_list_orders(db_session):
     import main as svc
-    order_id, oi_id, t_id = await _create_order(db_session)
+    _order_id, _oi_id, _t_id = await _create_order(db_session)
     async with db_session() as db:
         result = await svc.list_orders(db=db, current_user=_user("owner", 1))
     assert "orders" in result
@@ -258,7 +258,7 @@ async def test_dir_list_orders(db_session):
 
 async def test_dir_list_orders_com_status(db_session):
     import main as svc
-    order_id, oi_id, t_id = await _create_order(db_session)
+    _order_id, _oi_id, _t_id = await _create_order(db_session)
     async with db_session() as db:
         result = await svc.list_orders(status="pending", db=db, current_user=_user("owner", 1))
     assert "orders" in result
@@ -470,7 +470,7 @@ async def test_dir_list_orders_summary_ignora_filtro_de_status(db_session):
 
 async def test_dir_update_status(db_session):
     import main as svc
-    order_id, oi_id, t_id = await _create_order(db_session)
+    _order_id, _oi_id, _t_id = await _create_order(db_session)
     async with db_session() as db:
         result = await svc.update_status("ORD-COV01", {"status": "cancelled"},
                                           db, _user("owner", 1))
@@ -488,7 +488,7 @@ async def test_dir_update_status_inexistente(db_session):
 
 async def test_dir_list_order_tickets(db_session):
     import main as svc
-    order_id, oi_id, t_id = await _create_order(db_session)
+    _order_id, _oi_id, _t_id = await _create_order(db_session)
     async with db_session() as db:
         result = await svc.list_order_tickets("ORD-COV01", db, _user("owner", 1))
     assert "tickets" in result
@@ -505,7 +505,7 @@ async def test_dir_list_order_tickets_inexistente(db_session):
 
 async def test_dir_internal_update_status(db_session):
     import main as svc
-    order_id, oi_id, t_id = await _create_order(db_session, company_id=1)
+    _order_id, _oi_id, _t_id = await _create_order(db_session, company_id=1)
     async with db_session() as db:
         result = await svc.internal_update_status("ORD-COV01", {"status": "paid"}, db, None)
     assert result["status"] == "paid"
@@ -533,7 +533,7 @@ async def test_dir_collect_ticket_inexistente(db_session):
 async def test_dir_collect_ticket_qr_invalido(db_session):
     import main as svc
     from main import CollectIn
-    order_id, oi_id, t_id = await _create_order(db_session)
+    _order_id, _oi_id, _t_id = await _create_order(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.collect_ticket(
@@ -550,7 +550,7 @@ async def test_dir_collect_ticket_valido(db_session):
 
     import main as svc
     from main import CollectIn
-    order_id, oi_id, t_id = await _create_order(db_session)
+    _order_id, _oi_id, _t_id = await _create_order(db_session)
     parts = ["TICK0001", "X-Burger", "ORD-COV01", "2024-01-01T00:00:00"]
     payload = "|".join(parts)
     sig = hmaclib.new(svc.QR_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
