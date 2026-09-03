@@ -1,3 +1,13 @@
+---
+id: ORD-146
+status: Done
+fase: 6
+sprint: null
+responsavel: Backend SR
+estimativa: 5 pontos (3 backend + 2 frontend)
+tipo: feature
+---
+
 # ORD-146 — Grupos de opção: descrição, SKU e alérgenos em `Option`
 
 ## Descrição

@@ -1,6 +1,6 @@
 ---
 id: ORD-139
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Frontend
