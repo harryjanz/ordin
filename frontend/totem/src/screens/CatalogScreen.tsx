@@ -194,12 +194,16 @@ export default function CatalogScreen({
       let next: number[];
       if (current.includes(optionId)) {
         next = current.filter((id) => id !== optionId);
-      } else if (max === 1) {
-        next = [optionId]; // seleção única — escolher outra substitui
       } else if (current.length < max) {
         next = [...current, optionId];
       } else {
-        next = current; // no limite — novo toque não faz nada (sem substituição automática)
+        // ORD-141 (correção pós-QA) — no limite (inclusive seleção única,
+        // max=1), tocar numa opção nova troca a mais antiga automaticamente
+        // em vez de exigir desmarcar antes. Sem isso o cliente que já
+        // escolheu "Guaraná" e quer trocar pra "Coca-Cola" precisava de 2
+        // toques (desmarcar, depois marcar) em vez de 1 — feedback direto
+        // do usuário testando manualmente.
+        next = [...current.slice(1), optionId];
       }
       return { ...prev, selections: { ...prev.selections, [groupId]: next } };
     });
@@ -833,20 +837,17 @@ export default function CatalogScreen({
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {g.options.filter((o) => o.active).map((o) => {
                       const isSelected = selected.includes(o.id);
-                      const atMax = !isSelected && selected.length >= max;
                       return (
                         <button
                           key={o.id}
-                          disabled={atMax}
                           onClick={() => toggleOption(g.id, o.id, max)}
                           style={{
                             display: "flex", alignItems: "center", gap: 16,
-                            padding: 12, borderRadius: RADIUS.lg, cursor: atMax ? "default" : "pointer",
+                            padding: 12, borderRadius: RADIUS.lg, cursor: "pointer",
                             background: isSelected ? T.catActive : T.numBg,
                             color: isSelected ? T.catText : T.text,
                             border: `1.5px solid ${isSelected ? T.catActive : T.borderNeutral}`,
-                            opacity: atMax ? 0.45 : 1,
-                            fontFamily: FONT_B, fontWeight: 700, fontSize: FONT.body,
+                            fontFamily: FONT_B, fontWeight: 700, fontSize: FONT.subtitle,
                             textAlign: "left",
                           }}
                         >
@@ -877,7 +878,7 @@ export default function CatalogScreen({
                               mostrar "R$ 0,00", que soaria como cobrança dupla. */}
                           {o.price_delta > 0 && (
                             <span style={{
-                              fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body,
+                              fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
                               color: isSelected ? T.catText : T.priceColor,
                             }}>
                               +{fmt(o.price_delta)}

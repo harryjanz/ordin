@@ -422,3 +422,35 @@ Validado de novo no navegador: dessa vez todas as 4 opções do grupo "Sabores d
 foto real (job de seed automático de imagens do catalog-service preencheu as 3 que faltavam, sem
 ação manual) — miniaturas nítidas de cada lata de refrigerante, modal com espaço confortável,
 seleção e total (R$ 6,90 → R$ 9,40) continuam funcionando sem regressão.
+
+### Correção pós-QA do usuário, rodada 3 (2026-09-03)
+
+Bug real de UX achado testando manualmente: uma vez que o grupo atingia o máximo de seleções
+(inclusive seleção única, `max=1`), as demais opções ficavam com `disabled` — pra trocar de
+escolha, o cliente precisava primeiro tocar na opção já marcada pra desmarcar, só então tocar na
+nova. Dois toques pra uma ação que devia ser uma só, e pior em seleção múltipla (`max>1`, ex.
+pizza 2 sabores) — usuário destacou esse caso explicitamente.
+
+`toggleOption` reescrita: ao tocar numa opção nova estando no limite, a seleção mais antiga do
+grupo é removida automaticamente e a nova entra no lugar (`[...current.slice(1), optionId]`), sem
+exigir nenhuma ação manual de desmarcar antes. `max=1` já se comporta como caso particular dessa
+mesma regra (troca direta) — código que tratava `max===1` como caso especial foi removido junto
+com o `disabled`/opacidade que não fazem mais sentido (nenhuma opção fica realmente bloqueada
+agora).
+
+Validado no navegador nos dois casos:
+- Seleção única ("Sabores de bebida"): Guaraná selecionado, toque direto em Coca-Cola troca em 1
+  toque (Guaraná desmarca sozinho, total volta de R$ 9,40 pra R$ 6,90).
+- Seleção múltipla (`max=2`, testado com grupo "Pizzas Tradicionais" vinculado temporariamente a
+  um produto só pra este teste, depois desvinculado): Margherita + Calabresa selecionadas (no
+  limite), toque em Portuguesa remove a mais antiga (Margherita) automaticamente e mantém
+  Calabresa + Portuguesa — exatamente 2 seleções, sem passo extra.
+
+### Correção pós-QA do usuário, rodada 4 (2026-09-03)
+
+Rótulo da opção e preço adicional ainda pareciam pequenos pro usuário. Ambos passaram de
+`FONT.body` (14px) pra `FONT.subtitle` (20px) — mesmo tamanho já usado pro preço de item no
+carrinho (`CatalogScreen.tsx`, linha do total por item), mantendo consistência com o resto do
+arquivo em vez de inventar um tamanho novo. Validado no navegador: "Guaraná Antarctica" e
+"+R$ 2,50" bem mais legíveis, sem quebrar o layout do modal (760px de largura já dava folga o
+suficiente da correção da rodada 2).
