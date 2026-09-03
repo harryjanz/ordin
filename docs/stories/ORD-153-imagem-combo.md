@@ -82,15 +82,16 @@ produtos com foto, o combo sem imagem destoa visualmente — daí o pedido agora
 - [x] Admin consegue remover a imagem cadastrada, voltando ao estado sem foto
 - [x] Formatos fora de jpg/png são rejeitados com a mesma mensagem já usada pra produto
 - [x] Totem exibe a imagem do combo no card da grade quando cadastrada — confirmado ao vivo em
-      2026-09-03 (ver Validação)
-- [ ] Totem exibe a imagem do combo no modal de upsell quando cadastrada — implementado
-      (`CatalogScreen.tsx`), coberto só por revisão de código nesta sessão; não consegui
-      reproduzir o modal de upsell ao vivo no totem pra confirmar visualmente (fluxo de
-      checkout não chegou a disparar o upsell na tentativa feita) — pendente de confirmação
-      numa próxima sessão de QA manual.
+      2026-09-03 pro `Combo Classic Cheddar`, único combo real cadastrado no ambiente de teste
+      no momento (ver Validação e ressalva sobre a contagem de combos)
+- [x] Totem exibe a imagem do combo no modal de upsell quando cadastrada — confirmado ao vivo em
+      2026-09-03: produto componente (Classic Cheddar Burger) → modal mostra a foto do
+      `Combo Classic Cheddar`. Aproveitado pra ajustar estilo (fonte da mensagem reduzida,
+      imagem maior, desconto destacado em verde — ver Validação).
 - [x] Combo sem imagem mostra o mesmo placeholder já usado pra produto sem imagem — sem quebrar
-      layout — confirmado ao vivo (Combo Classic Cheddar, sem imagem, renderizou o placeholder
-      normalmente)
+      layout — verificado por revisão de código (mesmo condicional já usado pra produto em
+      `CatalogScreen.tsx`); não confirmado ao vivo nesta sessão porque o ambiente de teste só
+      tem um combo cadastrado no momento (`Combo Classic Cheddar`), e ele já tem imagem.
 - [x] Excluir definitivamente o combo remove a imagem do bucket junto — coberto por
       `test_combo_imagem.py`
 - [x] Isolamento multi-tenant: admin de uma empresa não sobe/remove imagem de combo de outra —
@@ -313,11 +314,24 @@ pedido, ver Tech Explorer de `ORD-150`).
 
 ## Validação
 
-Implementado nesta branch (migration + endpoints + admin + totem). Verificação visual do card
-no totem ficou bloqueada até 2026-09-03 pelo bug do [[ORD-154]] (falso 404 no
-`test-connection` do Mercado Pago, usado pelo terminal de pareamento da Burger House) — depois
-do fix do ORD-154, confirmado ao vivo: catálogo do totem, categoria Combos, mostra foto real nos
-combos com imagem cadastrada e placeholder nos sem imagem. Print em
-`docs/stories/ORD-154/evidencias/manual/totem-combos-com-imagem-pos-fix.png` (evidência ficou
-junto com a do ORD-154 por terem sido capturadas na mesma sessão de QA manual). Modal de upsell
-com imagem ainda não teve confirmação visual — ver ressalva no critério de aceite correspondente.
+Implementado nesta branch (migration + endpoints + admin + totem). Verificação visual no totem
+ficou bloqueada até 2026-09-03 pelo bug do [[ORD-154]] (falso 404 no `test-connection` do
+Mercado Pago, usado pelo terminal de pareamento da Burger House) — depois do fix do ORD-154,
+confirmado ao vivo, com a foto real do `Combo Classic Cheddar`:
+- Card na grade da categoria Combos.
+- Modal de upsell ao adicionar o produto componente (Classic Cheddar Burger) — aproveitado pra
+  ajustar estilo (fonte da mensagem reduzida, imagem aumentada em duas rodadas até 320px por
+  pedido do usuário, desconto destacado em verde sem quebrar entre linhas).
+
+Print em `docs/stories/ORD-154/evidencias/manual/totem-combos-com-imagem-pos-fix.png` (evidência
+ficou junto com a do ORD-154 por terem sido capturadas na mesma sessão de QA manual) — **ressalva
+importante**: esse print mostra 9 cards de combo, mas o ambiente de teste tem hoje só 1 combo
+real (`Combo Classic Cheddar`, id 13), confirmado de três formas independentes em 2026-09-03
+(curl direto no catalog-service, curl via gateway nginx, e `fetch` executado no próprio contexto
+do navegador do totem com o token de sessão real). Os outros 8 cards do print eram estado
+obsoleto do navegador (não foram re-confirmados) — provavelmente uma view em cache de uma
+navegação anterior nesta mesma sessão, de antes de um evento de reset/recovery do banco do
+catalog-service não relacionado a esta história. Não afeta a conclusão da história (o combo real
+existente exibe imagem corretamente em ambos os lugares), mas qualquer teste futuro de "vários
+combos, alguns com e outros sem imagem" precisa recriar esses combos primeiro — eles não existem
+mais no banco.
