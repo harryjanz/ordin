@@ -503,6 +503,22 @@ async def _cascade_deactivate_combos(db: AsyncSession, affected: list[tuple[int,
             update(Combo).where(Combo.id.in_([cid for cid, _ in affected])).values(active=False)
         )
 
+async def _inactive_combos_for_product(db: AsyncSession, company_id: int, product_id: int) -> list[tuple[int, str]]:
+    """ORD-152: contraparte não-bloqueante de _check_combo_deactivation —
+    ao ativar um produto, sugere (sem forçar) reativar os combos inativos
+    que o têm como componente. Nunca levanta exceção; quem chama decide o
+    que fazer com a lista."""
+    rows = (await db.execute(
+        select(Combo.id, Combo.name)
+        .join(ComboItem, ComboItem.combo_id == Combo.id)
+        .filter(
+            ComboItem.product_id == product_id,
+            Combo.company_id == company_id,
+            Combo.active == False, Combo.deleted == False,  # noqa: E712
+        )
+    )).all()
+    return [(cid, name) for cid, name in rows]
+
 async def _resolve_menu_composition(db: AsyncSession, menu_id: int) -> dict:
     cat_result = await db.execute(
         select(Category.id, Category.name)
@@ -758,6 +774,10 @@ class ProductOptionGroupOverrideOut(BaseModel):
     min_selections_override: Optional[int] = None
     max_selections_override: Optional[int] = None
 
+class ComboSummaryOut(BaseModel):
+    id: int
+    name: str
+
 class ProductOut(BaseModel):
     id: int
     category_id: Optional[int] = None
@@ -774,6 +794,10 @@ class ProductOut(BaseModel):
     sort_order: Optional[int] = None
     allergens: list[AllergenOut] = []
     option_groups: list[ProductOptionGroupOut] = []
+    # ORD-152: só populado por update_product() ao ativar o produto — os
+    # demais endpoints que retornam ProductOut (list/get/create) deixam no
+    # default vazio, sem custo de consulta extra.
+    inactive_combos: list[ComboSummaryOut] = []
 
 class ProductListOut(BaseModel):
     products: list[ProductOut]
@@ -1305,7 +1329,11 @@ async def update_product(
         await _set_product_allergens(db, p.id, body.allergen_ids)
         await db.commit()
     await db.refresh(p)
-    return await _serialize_product(db, p)
+    out = await _serialize_product(db, p)
+    if body.active is True:
+        inactive_combos = await _inactive_combos_for_product(db, company_id, product_id)
+        out["inactive_combos"] = [{"id": cid, "name": name} for cid, name in inactive_combos]
+    return out
 
 @app.delete(
     "/catalog/products/{product_id}",

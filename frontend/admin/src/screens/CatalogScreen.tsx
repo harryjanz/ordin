@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Alert,
   Button,
+  Checkbox,
   CurrencyInput,
   Dropdown,
   InputBase,
@@ -123,6 +124,14 @@ export default function CatalogScreen() {
     onConfirm: () => void;
     alertVariant?: ConfirmDialogProps["alertVariant"];
     alertIcon?: string;
+  } | null>(null);
+
+  // ORD-152: sugestão (não bloqueante) de reativar combos que ficaram
+  // inativos quando o produto foi desativado — separado do confirmState
+  // porque aqui a confirmação tem uma lista de checkbox, não é binária.
+  const [suggestCombos, setSuggestCombos] = useState<{
+    combos: { id: number; name: string }[];
+    selected: Set<number>;
   } | null>(null);
 
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
@@ -471,9 +480,38 @@ export default function CatalogScreen() {
     });
   }
 
+  // ORD-152: ativar o produto nunca é bloqueado — a resposta pode trazer
+  // combos que ficaram inativos e que agora podem voltar a ser vendidos.
+  // Sugestão opt-in: cada combo já vem marcado, o admin decide o que confirmar.
   async function activateProduct(id: number) {
-    await api.put(`/catalog/products/${id}`, { active: true }, catalogParams());
+    const r = await api.put(`/catalog/products/${id}`, { active: true }, catalogParams());
     loadProducts();
+    const combos = r.data.inactive_combos as { id: number; name: string }[];
+    if (combos?.length) {
+      setSuggestCombos({ combos, selected: new Set(combos.map((c) => c.id)) });
+    }
+  }
+
+  async function confirmSuggestedCombos() {
+    if (!suggestCombos) return;
+    const toActivate = suggestCombos.combos.filter((c) => suggestCombos.selected.has(c.id));
+    setSuggestCombos(null);
+    const results = await Promise.allSettled(
+      toActivate.map((c) => api.patch(`/catalog/combos/${c.id}`, { active: true }, catalogParams())),
+    );
+    const failed = results
+      .map((r, i) => ({ r, combo: toActivate[i] }))
+      .filter(({ r }) => r.status === "rejected");
+    const activatedCount = toActivate.length - failed.length;
+    if (activatedCount > 0) {
+      makeToast("success", `${activatedCount} combo(s) reativado(s).`);
+    }
+    for (const { r, combo } of failed) {
+      const err = (r as PromiseRejectedResult).reason;
+      makeToast("error", `"${combo.name}": ${parseApiError(err).message}`);
+    }
+    loadProducts();
+    loadCombos();
   }
 
   function categoryName(id: number): string {
@@ -1160,6 +1198,32 @@ export default function CatalogScreen() {
         onConfirm={() => confirmState?.onConfirm()}
         onCancel={() => setConfirmState(null)}
       />
+
+      <ConfirmDialog
+        open={!!suggestCombos}
+        message="Este produto é componente de combo(s) que ficaram inativos. Reativar junto?"
+        confirmLabel="Reativar selecionados"
+        cancelLabel="Agora não"
+        onConfirm={confirmSuggestedCombos}
+        onCancel={() => setSuggestCombos(null)}
+      >
+        {suggestCombos?.combos.map((c) => (
+          <Checkbox
+            key={c.id}
+            id={`suggest-combo-${c.id}`}
+            label={c.name}
+            checked={suggestCombos.selected.has(c.id)}
+            onChange={(checked) =>
+              setSuggestCombos((prev) => {
+                if (!prev) return prev;
+                const selected = new Set(prev.selected);
+                if (checked) selected.add(c.id); else selected.delete(c.id);
+                return { ...prev, selected };
+              })
+            }
+          />
+        ))}
+      </ConfirmDialog>
 
       <Modal
         open={!!previewImage}

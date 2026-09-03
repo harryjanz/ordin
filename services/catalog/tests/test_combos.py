@@ -333,9 +333,77 @@ async def test_reativar_produto_nao_reativa_combo_automaticamente(client, seed, 
     r2 = await client.put(f"/catalog/products/{seed['burger_id']}", json={"active": True}, headers=auth(token_owner))
     assert r2.status_code == 200
     assert r2.json()["active"] is True
+    # ORD-152: reativar o produto não reativa o combo sozinho, mas a resposta
+    # já sugere o combo pra reativação manual do admin
+    assert [c["id"] for c in r2.json()["inactive_combos"]] == [combo_id]
     r3 = await client.get("/catalog/combos?include_inactive=true", headers=auth(token_owner))
     combo = next(c for c in r3.json()["combos"] if c["id"] == combo_id)
     assert combo["active"] is False
+
+
+# ── ORD-152: sugerir reativação de combos ao ativar produto ─────────────────
+
+async def test_ativar_produto_sem_combo_inativo_nao_sugere_nada(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed, product_ids=[seed["burger_id"], seed["fries_id"]])
+    assert r.status_code == 201
+    await client.put(f"/catalog/products/{seed['soda_id']}", json={"active": False}, headers=auth(token_owner))
+    r2 = await client.put(f"/catalog/products/{seed['soda_id']}", json={"active": True}, headers=auth(token_owner))
+    assert r2.status_code == 200
+    assert r2.json()["inactive_combos"] == []
+
+
+async def test_ativar_produto_vinculado_a_multiplos_combos_inativos_lista_todos(client, seed, token_owner):
+    r1 = await _create_combo(client, token_owner, seed, name="__combo_a__",
+                              product_ids=[seed["burger_id"], seed["fries_id"]])
+    r2 = await _create_combo(client, token_owner, seed, name="__combo_b__", price=28.0,
+                              product_ids=[seed["burger_id"], seed["soda_id"]])
+    combo_a_id, combo_b_id = r1.json()["id"], r2.json()["id"]
+    await client.put(
+        f"/catalog/products/{seed['burger_id']}",
+        json={"active": False, "confirm_deactivate_combos": True},
+        headers=auth(token_owner),
+    )
+    r3 = await client.put(f"/catalog/products/{seed['burger_id']}", json={"active": True}, headers=auth(token_owner))
+    assert r3.status_code == 200
+    ids = {c["id"] for c in r3.json()["inactive_combos"]}
+    assert ids == {combo_a_id, combo_b_id}
+
+
+async def test_combo_excluido_definitivamente_nunca_aparece_na_sugestao(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    combo_id = r.json()["id"]
+    await client.put(
+        f"/catalog/products/{seed['burger_id']}",
+        json={"active": False, "confirm_deactivate_combos": True},
+        headers=auth(token_owner),
+    )
+    await client.delete(f"/catalog/combos/{combo_id}", headers=auth(token_owner))
+    r2 = await client.put(f"/catalog/products/{seed['burger_id']}", json={"active": True}, headers=auth(token_owner))
+    assert r2.status_code == 200
+    assert combo_id not in {c["id"] for c in r2.json()["inactive_combos"]}
+
+
+async def test_admin_reativa_so_o_combo_escolhido(client, seed, token_owner):
+    """Simula o frontend: sugestão traz 2 combos, admin desmarca um e só
+    confirma o outro via PATCH — mesmo endpoint do ORD-112/151."""
+    r1 = await _create_combo(client, token_owner, seed, name="__combo_a__",
+                              product_ids=[seed["burger_id"], seed["fries_id"]])
+    r2 = await _create_combo(client, token_owner, seed, name="__combo_b__", price=28.0,
+                              product_ids=[seed["burger_id"], seed["soda_id"]])
+    combo_a_id, combo_b_id = r1.json()["id"], r2.json()["id"]
+    await client.put(
+        f"/catalog/products/{seed['burger_id']}",
+        json={"active": False, "confirm_deactivate_combos": True},
+        headers=auth(token_owner),
+    )
+    await client.put(f"/catalog/products/{seed['burger_id']}", json={"active": True}, headers=auth(token_owner))
+
+    r3 = await client.patch(f"/catalog/combos/{combo_a_id}", json={"active": True}, headers=auth(token_owner))
+    assert r3.status_code == 200
+    r4 = await client.get("/catalog/combos?include_inactive=true", headers=auth(token_owner))
+    combos_by_id = {c["id"]: c for c in r4.json()["combos"]}
+    assert combos_by_id[combo_a_id]["active"] is True
+    assert combos_by_id[combo_b_id]["active"] is False
 
 
 # Botão "Desativar" do admin usa DELETE (não PUT) — mesma regra precisa valer lá.

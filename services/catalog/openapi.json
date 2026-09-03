@@ -2843,6 +2843,24 @@
         ],
         "title": "ComboOut"
       },
+      "ComboSummaryOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ComboSummaryOut"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3850,6 +3868,14 @@
             },
             "type": "array",
             "title": "Option Groups",
+            "default": []
+          },
+          "inactive_combos": {
+            "items": {
+              "$ref": "#/components/schemas/ComboSummaryOut"
+            },
+            "type": "array",
+            "title": "Inactive Combos",
             "default": []
           }
         },
