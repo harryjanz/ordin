@@ -486,3 +486,34 @@ per-serviço) confirmando os mesmos 289 antes de aplicar no workflow.
 **Fase 4 encerrada — medição feita, decisão tomada, CI corrigido pra refletir a realidade sem
 travar o pipeline.** ORD-156 completa: ruff 859→0, mypy nunca-rodava→289 medidos e registrados
 como débito conhecido (não meta desta história).
+
+## Achado adicional — job "Testes + cobertura" nunca tinha rodado de verdade (2026-09-03)
+
+Ao abrir o PR com `ruff` zerado, o `lint` job passou pela primeira vez na história deste
+repositório — e isso destravou o job `test` (`needs: lint`) a rodar de verdade pela primeira vez
+também. Ele quebrou com **45 erros de coleta**, mesma causa raiz do achado 1 da Fase 4: `pytest
+services/` (uma chamada só) colide em nomes de arquivo de teste duplicados entre serviços
+(`test_coverage.py`, `test_isolation.py`, etc. existem idênticos em `auth/company/catalog/
+order/payment`, sem `__init__.py` isolando pacote). Fora de escopo original do ORD-156 (é sobre
+lint/type, não sobre execução de teste), mas deixado sem correção o PR ficaria com CI vermelho
+por um bug que ele não causou — checkpoint com o usuário, decisão: corrigir agora, mesmo padrão
+de fix já aplicado ao mypy.
+
+Corrigido em duas partes no `test` job de `.github/workflows/ci.yml`:
+- **Coleta:** loop `pytest services/$svc` por serviço em vez de uma chamada combinada, com
+  `--cov=services --cov-append --cov-report=` acumulando cobertura entre as 6 chamadas e
+  `coverage report --fail-under=40` no final — mantém o gate de 40% combinado idêntico ao
+  original, só muda como a coleta é isolada.
+- **Dependências:** achado 2 adicional — o step `Install dependencies` só instalava o
+  `services/requirements.txt` compartilhado, que não cobre `boto3` (company/catalog, usado pra
+  S3) nem `aiosmtplib` (notification, usado pro provider SMTP) — cada serviço tem seu próprio
+  `requirements.txt` com extras. Sem isso o notification-service quebrava 100% dos testes
+  (`ModuleNotFoundError: aiosmtplib`). Corrigido instalando o `requirements.txt` de cada um dos 6
+  serviços (`auth company catalog order payment notification`) antes de rodar os testes.
+
+Validado localmente em container `python:3.12-slim` limpo com o ambiente exato do CI (mesmas env
+vars do `test` job, MySQL/Redis via rede) reproduzindo: **auth 31/31, company 335/335 (9 falhas
+pré-existentes — mesmas já documentadas na Fase 3, não introduzidas por este achado), catalog
+185/185, order 58/58, payment 126/126, notification 8/8**, cobertura total 73% (gate 40%). As 9
+falhas de `company` são pré-existentes e já estavam registradas na Validação da Fase 3 — não são
+regressão deste achado.
