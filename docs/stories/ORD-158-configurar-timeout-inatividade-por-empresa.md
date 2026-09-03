@@ -306,3 +306,27 @@ Nenhum além dos já listados (`auth` só por causa do filtro de schema no parea
   ~10s de inatividade (60s − 50s de aviso), com contagem regressiva correta — confirmando que o
   totem usa o valor configurado, não mais os 3min/20s fixos do ORD-155. Restaurei a Burger House
   pro default real (5min/30s) depois do teste.
+
+## Correção pós-lançamento — mousemove/scroll não resetavam o timer (2026-09-03)
+
+Usuário reportou, testando manualmente numa sessão posterior (durante validação do ORD-141),
+que o aviso "insistia em aparecer mesmo com atividade no navegador". Investigado com
+`console.log` temporário instrumentando `touch()` e o cálculo de `idle` — confirmado que
+`touch()` disparava corretamente a cada **clique** real (sem bug nenhum aí). A causa raiz: o
+listener de atividade (`App.tsx`) só escuta `click`, `touchstart` e `keydown` — **não**
+`scroll`/`wheel`/`mousemove`. Testando no navegador com mouse (não num touchscreen real), rolar
+o catálogo ou só mover o cursor por cima dos cards sem clicar em nada não conta como atividade,
+então o timer segue contando e o aviso aparece mesmo com o cliente "ali", só sem tocar em nada
+clicável.
+
+Corrigido: `scroll`/`wheel` adicionados à mesma lista de `click`/`touchstart`/`keydown`;
+`mousemove` adicionado separadamente com throttle de 1s (senão dispara a cada pixel de
+movimento, gerando `touch()` — e o re-render de toda a `App` que isso causa, já que `useStore()`
+é chamado sem seletor — a uma taxa desnecessária). `mousemove` nunca dispara em touchscreen
+real, mas não atrapalha deixar registrado — é só um listener a mais que nunca é acionado lá.
+
+Validado: com timeout curto de teste (1min/50s = 10s de graça), 18s de puro movimento de mouse
+sem nenhum clique não disparou mais o aviso (antes da correção, disparava por volta dos 10-13s
+mesmo com cliques reais acontecendo, porque o teste original só simulava clique, nunca scroll/
+hover — o gap ficou invisível até testar com mouse de verdade). Config revertida pro default
+(5min/30s) depois da validação, mesmo ritual da validação original acima.

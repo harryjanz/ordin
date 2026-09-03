@@ -102,12 +102,30 @@ export default function App() {
       }
     }, 500);
 
+    // Investigação (2026-09-03) — instrumentado com console.log temporário e
+    // confirmado que touch() disparava corretamente a cada clique real; o
+    // "timer insiste em aparecer" que o usuário via testando no navegador
+    // era rolagem/hover de mouse sem clicar em nada — click/touchstart/
+    // keydown não cobrem isso. scroll/wheel/mousemove adicionados (mousemove
+    // com throttle de 1s, senão dispara a cada pixel e o touch() vira
+    // trabalho desperdiçado); mousemove não existe em touchscreen real, mas
+    // não faz mal deixar — só nunca dispara lá.
+    let lastMouseMoveTouch = 0;
     const handler = () => touch();
-    ["click", "touchstart", "keydown"].forEach((ev) => window.addEventListener(ev, handler));
+    const throttledMouseHandler = () => {
+      const now = Date.now();
+      if (now - lastMouseMoveTouch > 1000) {
+        lastMouseMoveTouch = now;
+        touch();
+      }
+    };
+    ["click", "touchstart", "keydown", "scroll", "wheel"].forEach((ev) => window.addEventListener(ev, handler));
+    window.addEventListener("mousemove", throttledMouseHandler);
 
     return () => {
       clearInterval(interval);
-      ["click", "touchstart", "keydown"].forEach((ev) => window.removeEventListener(ev, handler));
+      ["click", "touchstart", "keydown", "scroll", "wheel"].forEach((ev) => window.removeEventListener(ev, handler));
+      window.removeEventListener("mousemove", throttledMouseHandler);
     };
   }, [screen, inactivityTimeoutMs, inactivityWarnSec]);
 
