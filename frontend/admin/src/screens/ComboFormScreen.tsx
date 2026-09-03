@@ -347,17 +347,19 @@ export default function ComboFormScreen() {
           )}
           {comboItems.map((i) => (
             <div key={i.product_id} className={styles.comboItemRow}>
-              <div className={styles.searchResultInfo}>
+              <div className={styles.comboItemInfo}>
                 <span>{i.name}</span>
                 <span className={styles.muted}>{i.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
               </div>
-              <Checkbox
-                id={`combo-item-upsell-${i.product_id}`}
-                label="Indica este combo"
-                checked={i.triggers_upsell}
-                onChange={(checked) => setItemTriggersUpsell(i.product_id, checked)}
-              />
-              <button type="button" className={styles.removeBtn} onClick={() => removeFromCombo(i.product_id)} title="Remover do combo">✕</button>
+              <div className={styles.comboItemActions}>
+                <Checkbox
+                  id={`combo-item-upsell-${i.product_id}`}
+                  label="Indica este combo"
+                  checked={i.triggers_upsell}
+                  onChange={(checked) => setItemTriggersUpsell(i.product_id, checked)}
+                />
+                <button type="button" className={styles.removeBtn} onClick={() => removeFromCombo(i.product_id)} title="Remover do combo">✕</button>
+              </div>
             </div>
           ))}
         </div>

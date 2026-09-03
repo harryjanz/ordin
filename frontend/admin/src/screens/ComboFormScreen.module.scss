@@ -148,13 +148,33 @@
 .comboItemRow {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 16px;
   padding: 10px 14px;
   border-bottom: 1px solid var(--a-border);
 
   &:last-child {
     border-bottom: none;
   }
+}
+
+// ORD-157 (addendum) — flex: 1 absorve a largura variável do nome/preço,
+// empurrando .comboItemActions sempre pro mesmo lugar (colado à direita),
+// em vez do checkbox flutuar em posições diferentes por linha (o que
+// justify-content: space-between causava antes, um problema de UX
+// apontado pelo usuário — cada linha tinha um nome de tamanho diferente).
+.comboItemInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.comboItemActions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
 }
 
 .removeBtn {
