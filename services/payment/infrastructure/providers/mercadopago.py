@@ -321,41 +321,32 @@ class MPProvider(IPaymentProvider):
         return 180 if method == "pix" else 90
 
     async def test_connection(self, terminal_ref: str) -> dict:
+        # ORD-154 — usa /terminals/v1/list tanto pra validar o token quanto
+        # pra localizar o terminal. /v1/users/me (usado antes) só aceita
+        # token de usuário pessoal via OAuth, não credencial Application/POS
+        # (a usada aqui), e sempre retornava 404 mascarando um token válido.
         async with httpx.AsyncClient(timeout=10) as client:
-            try:
-                resp = await client.get(
-                    f"{self.BASE_URL}/v1/users/me",
-                    headers=self._headers,
-                )
-            except Exception as exc:
-                return {"success": False, "detail": f"Erro ao conectar ao MP: {exc}"}
-
-            if resp.status_code != 200:
-                return {
-                    "success": False,
-                    "detail": f"Access token inválido (HTTP {resp.status_code})",
-                }
-
-            data = resp.json()
-            label = data.get("email") or str(data.get("id", "ok"))
-
-            if not terminal_ref:
-                # Sem mp_device_id configurado ainda (ou terminal só usa PIX)
-                # — nada mais a checar. Ver ORD-149.
-                return {"success": True, "detail": f"MP conectado: {label}"}
-
             try:
                 terminals_resp = await client.get(
                     f"{self.BASE_URL}/terminals/v1/list",
                     headers=self._headers,
                 )
             except Exception as exc:
-                return {"success": False, "detail": f"Erro ao consultar terminal no MP: {exc}"}
+                return {"success": False, "detail": f"Erro ao conectar ao MP: {exc}"}
 
             if terminals_resp.status_code != 200:
-                return {"success": False, "detail": "Erro ao consultar terminal no MP. Tente novamente."}
+                return {
+                    "success": False,
+                    "detail": f"Access token inválido (HTTP {terminals_resp.status_code})",
+                }
 
             terminals = terminals_resp.json().get("data", {}).get("terminals", [])
+
+            if not terminal_ref:
+                # Sem mp_device_id configurado ainda (ou terminal só usa PIX)
+                # — token já validado acima, nada mais a checar. Ver ORD-149.
+                return {"success": True, "detail": "MP conectado"}
+
             device = next((t for t in terminals if t.get("id") == terminal_ref), None)
 
             if device is None:
@@ -370,4 +361,4 @@ class MPProvider(IPaymentProvider):
                     "detail": "Terminal fora do modo PDV — corrija em Empresa > Terminais antes de continuar.",
                 }
 
-            return {"success": True, "detail": f"MP conectado: {label} (terminal em modo PDV)"}
+            return {"success": True, "detail": "MP conectado (terminal em modo PDV)"}
