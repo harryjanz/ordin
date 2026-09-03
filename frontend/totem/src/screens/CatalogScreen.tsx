@@ -294,54 +294,75 @@ export default function CatalogScreen({
                       flexDirection: "column",
                       overflow: "hidden",
                       boxShadow: T.cardShadow,
-                      padding: 16,
-                      gap: 8,
                       position: "relative",
                     }}
                   >
-                    <span style={{
-                      position: "absolute", top: 14, right: 14,
-                      background: T.btn, color: T.btnText,
-                      fontFamily: FONT_B, fontSize: FONT.caption, fontWeight: 800,
-                      borderRadius: RADIUS.pill, padding: "3px 10px", textTransform: "uppercase", letterSpacing: "0.5px",
-                    }}>
-                      Combo
-                    </span>
-                    <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.body, paddingRight: 60 }}>
-                      {c.name}
-                    </div>
-                    <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, lineHeight: 1.4 }}>
-                      {c.items.map((i) => i.name).join(" + ")}
-                    </div>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.bodyLg }}>{fmt(c.price)}</span>
-                      <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, textDecoration: "line-through" }}>{fmt(sumAvulso)}</span>
-                      {savings > 0 && (
-                        <span style={{ fontFamily: FONT_B, color: "#1c8a53", background: "#e4f6ec", fontSize: FONT.caption, fontWeight: 700, borderRadius: RADIUS.pill, padding: "2px 10px" }}>
-                          economize {fmt(savings)}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ marginTop: 4 }}>
-                      {comboQty > 0 ? (
-                        <div style={{ display: "flex", alignItems: "center", background: T.numBg, border: `1px solid ${T.border}`, borderRadius: RADIUS.pill, overflow: "hidden" }}>
-                          <button onClick={() => onRemove(`combo:${c.id}`)} style={{ width: 52, height: 52, background: "none", border: "none", color: T.roxo, fontSize: FONT.title, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
-                          <span style={{ flex: 1, textAlign: "center", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text }}>{comboQty}</span>
-                          <button onClick={() => addComboToCart(c)} style={{ width: 52, height: 52, background: "none", border: "none", color: T.roxo, fontSize: FONT.title, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
-                        </div>
+                    {/* ORD-153 — mesma área de imagem do card de produto
+                        (altura menor, 140 vs 180, porque o combo já tem mais
+                        conteúdo de texto embaixo); placeholder com o mesmo
+                        emoji quando não tem imagem cadastrada. */}
+                    <div style={{ position: "relative", width: "100%", height: 140, flexShrink: 0 }}>
+                      {c.image_url ? (
+                        <img src={c.image_url} alt={c.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                       ) : (
-                        <button
-                          onClick={() => addComboToCart(c)}
-                          style={{
-                            width: "100%", minHeight: 52, borderRadius: RADIUS.pill,
-                            background: T.btn, color: T.btnText, border: "none",
-                            fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body,
-                            cursor: "pointer", boxShadow: T.glow,
-                          }}
-                        >
-                          Adicionar combo
-                        </button>
+                        <div style={{
+                          width: "100%",
+                          height: "100%",
+                          background: T.placeholderA,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: FONT.headlineLg,
+                        }}>
+                          🍽️
+                        </div>
                       )}
+                      <span style={{
+                        position: "absolute", top: 14, right: 14,
+                        background: T.btn, color: T.btnText,
+                        fontFamily: FONT_B, fontSize: FONT.caption, fontWeight: 800,
+                        borderRadius: RADIUS.pill, padding: "3px 10px", textTransform: "uppercase", letterSpacing: "0.5px",
+                      }}>
+                        Combo
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 16 }}>
+                      <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.body }}>
+                        {c.name}
+                      </div>
+                      <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, lineHeight: 1.4 }}>
+                        {c.items.map((i) => i.name).join(" + ")}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.bodyLg }}>{fmt(c.price)}</span>
+                        <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, textDecoration: "line-through" }}>{fmt(sumAvulso)}</span>
+                        {savings > 0 && (
+                          <span style={{ fontFamily: FONT_B, color: "#1c8a53", background: "#e4f6ec", fontSize: FONT.caption, fontWeight: 700, borderRadius: RADIUS.pill, padding: "2px 10px" }}>
+                            economize {fmt(savings)}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ marginTop: 4 }}>
+                        {comboQty > 0 ? (
+                          <div style={{ display: "flex", alignItems: "center", background: T.numBg, border: `1px solid ${T.border}`, borderRadius: RADIUS.pill, overflow: "hidden" }}>
+                            <button onClick={() => onRemove(`combo:${c.id}`)} style={{ width: 52, height: 52, background: "none", border: "none", color: T.roxo, fontSize: FONT.title, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
+                            <span style={{ flex: 1, textAlign: "center", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text }}>{comboQty}</span>
+                            <button onClick={() => addComboToCart(c)} style={{ width: 52, height: 52, background: "none", border: "none", color: T.roxo, fontSize: FONT.title, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => addComboToCart(c)}
+                            style={{
+                              width: "100%", minHeight: 52, borderRadius: RADIUS.pill,
+                              background: T.btn, color: T.btnText, border: "none",
+                              fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body,
+                              cursor: "pointer", boxShadow: T.glow,
+                            }}
+                          >
+                            Adicionar combo
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -680,10 +701,25 @@ export default function CatalogScreen({
             }}>
               🎉 Combo disponível
             </span>
-            <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.headlineLg, lineHeight: 1.2, paddingRight: 40 }}>
+            {/* ORD-153 — só renderiza se tiver imagem; sem placeholder aqui
+                (diferente do card na grade) porque o modal já funciona bem
+                só com texto — combo sem foto não perde nada essencial. */}
+            {upsell.combo.image_url && (
+              <img
+                src={upsell.combo.image_url}
+                alt={upsell.combo.name}
+                style={{ width: "100%", height: 320, objectFit: "cover", borderRadius: RADIUS.lg, display: "block" }}
+              />
+            )}
+            <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
               Leve o {upsell.combo.name}
               {upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price > 0 && (
-                <> e economize {fmt(upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price)}</>
+                <>
+                  {" "}e{" "}
+                  <span style={{ color: "#1c8a53", background: "#e4f6ec", borderRadius: RADIUS.pill, padding: "2px 12px", whiteSpace: "nowrap", display: "inline-block" }}>
+                    economize {fmt(upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price)}
+                  </span>
+                </>
               )}
             </div>
             <div style={{ background: T.numBg, borderRadius: RADIUS.lg, padding: "18px 22px", display: "flex", flexDirection: "column", gap: 10 }}>

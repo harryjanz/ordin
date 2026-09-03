@@ -260,6 +260,8 @@ export interface Combo {
   description: string | null;
   price: number;
   active: boolean;
+  image_url: string | null;
+  thumbnail_url: string | null;
   items: ComboItem[];
 }
 

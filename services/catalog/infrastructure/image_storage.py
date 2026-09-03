@@ -94,6 +94,28 @@ def upload_option_thumbnail(option_group_id: int, option_id: int, ext: str, cont
     return key
 
 
+def _combo_image_key(combo_id: int, ext: str, thumb: bool) -> str:
+    """ORD-153: sem category_id no caminho (diferente de produto) — Combo
+    pode não ter categoria vinculada, e a chave não precisa dela pra ser
+    única."""
+    suffix = "[thumb]" if thumb else ""
+    return f"combos/combo-{combo_id}{suffix}.{ext}"
+
+
+def upload_combo_image(combo_id: int, ext: str, content: bytes) -> str:
+    """Sobe a imagem original de um combo (ORD-153) e retorna a key (não a URL) pra persistir no banco."""
+    key = _combo_image_key(combo_id, ext, thumb=False)
+    _client().put_object(Bucket=_S3_BUCKET, Key=key, Body=content)
+    return key
+
+
+def upload_combo_thumbnail(combo_id: int, ext: str, content: bytes) -> str:
+    """Sobe o thumbnail de um combo e retorna a key (não a URL) pra persistir no banco."""
+    key = _combo_image_key(combo_id, ext, thumb=True)
+    _client().put_object(Bucket=_S3_BUCKET, Key=key, Body=content)
+    return key
+
+
 def delete_object(key: str) -> None:
     """Remove um objeto do bucket. Idempotente — não falha se a key já não existir."""
     try:
