@@ -708,7 +708,7 @@ export default function CatalogScreen({
               <img
                 src={upsell.combo.image_url}
                 alt={upsell.combo.name}
-                style={{ width: "100%", height: 260, objectFit: "cover", borderRadius: RADIUS.lg, display: "block" }}
+                style={{ width: "100%", height: 320, objectFit: "cover", borderRadius: RADIUS.lg, display: "block" }}
               />
             )}
             <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
