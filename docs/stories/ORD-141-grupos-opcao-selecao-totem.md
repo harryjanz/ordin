@@ -386,3 +386,28 @@ de demo) e seleção múltipla (`max_selections > 1`, ex. pizza 2 sabores — gr
 existe mas sem produto vinculado). Lógica desses dois casos é a mesma já exercitada (mesmas
 funções `toggleOption`/`confirmOptionModal`/`canConfirmOptionModal`), só não foi clicada na tela —
 registrado aqui por transparência, não bloqueia o fechamento da história.
+
+### Correção pós-QA do usuário (2026-09-03)
+
+Testando manualmente, o usuário apontou 2 problemas reais no modal (nenhum dos dois coberto pelos
+cenários do QA Explorer, que focaram em comportamento, não em apresentação visual):
+
+1. **Preço adicional e total não ficavam evidentes.** O `price_delta` de cada opção já era exibido,
+   mas sem destaque (mesmo peso visual do resto do texto) e **não havia nenhum total visível** —
+   o cliente via "+R$ 2,50" numa opção mas não tinha como saber quanto o produto ficava no fim.
+   Corrigido: preço adicional agora usa `T.priceColor` em negrito (mesmo tom usado pro preço do
+   produto em todo o resto do catálogo) e some quando `price_delta = 0` (evita "+R$ 0,00", que
+   soaria como cobrança dupla do sabor padrão); adicionado rodapé "Total" recalculado em tempo
+   real (`optionModalTotal`, preço-base + soma dos deltas selecionados) e "A partir de {preço
+   base}" abaixo do nome do produto no topo do modal.
+2. **Opção com foto cadastrada não tinha layout que suportasse imagem.** O modal original só
+   renderizava `label` + `price_delta` em texto puro — nenhuma leitura de `image_url`/
+   `thumbnail_url`, mesmo esses campos já existindo no tipo e vindo preenchidos da API (ORD-138).
+   Corrigido: cada opção ganhou uma miniatura 56×56 à esquerda do rótulo (mesmo padrão de
+   placeholder com emoji do card de combo, ORD-153, quando a opção não tem foto cadastrada).
+
+Validado com dado real: `price_delta=2,50` setado em "Guaraná Antarctica" e foto real enviada pra
+"Coca-Cola" (`PUT /catalog/option-groups/50/options` + `POST /catalog/options/113/image`) — modal
+mostra a foto da Coca-Cola, placeholder 🍽️ nas opções sem foto, "+R$ 2,50" em destaque no Guaraná,
+e o Total atualiza de R$ 6,90 pra R$ 9,40 ao selecionar — confirmado também no carrinho e no total
+final do pedido.

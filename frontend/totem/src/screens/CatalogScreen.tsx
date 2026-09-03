@@ -234,6 +234,18 @@ export default function CatalogScreen({
       })
     : false;
 
+  // ORD-141 (correção pós-QA do usuário) — preço-base + soma dos deltas
+  // já selecionados, recalculado a cada seleção/desmarcação. Sem isso o
+  // cliente só via o acréscimo de cada opção isolado, nunca quanto o
+  // produto ficava no total — feedback explícito de precisar ficar visível.
+  const optionModalTotal = optionModal
+    ? optionModal.product.price + selectableOptionGroups(optionModal.product).reduce(
+        (sum, g) => sum + (optionModal.selections[g.id] ?? []).reduce(
+          (s, optId) => s + (g.options.find((o) => o.id === optId)?.price_delta ?? 0), 0,
+        ), 0,
+      )
+    : 0;
+
   // Categorias — mesmo conteúdo nos dois modos, só o container/botão mudam
   // de faixa horizontal pra coluna lateral.
   const categoriesContent = loadingCat ? (
@@ -796,8 +808,13 @@ export default function CatalogScreen({
             >
               ✕
             </button>
-            <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
-              {optionModal.product.name}
+            <div>
+              <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
+                {optionModal.product.name}
+              </div>
+              <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, marginTop: 4 }}>
+                A partir de {fmt(optionModal.product.price)}
+              </div>
             </div>
             {selectableOptionGroups(optionModal.product).map((g) => {
               const min = g.min_selections_override ?? g.min_selections;
@@ -821,17 +838,48 @@ export default function CatalogScreen({
                           disabled={atMax}
                           onClick={() => toggleOption(g.id, o.id, max)}
                           style={{
-                            display: "flex", justifyContent: "space-between", alignItems: "center",
-                            padding: "16px 20px", borderRadius: RADIUS.lg, cursor: atMax ? "default" : "pointer",
+                            display: "flex", alignItems: "center", gap: 14,
+                            padding: 10, borderRadius: RADIUS.lg, cursor: atMax ? "default" : "pointer",
                             background: isSelected ? T.catActive : T.numBg,
                             color: isSelected ? T.catText : T.text,
                             border: `1.5px solid ${isSelected ? T.catActive : T.borderNeutral}`,
                             opacity: atMax ? 0.45 : 1,
                             fontFamily: FONT_B, fontWeight: 700, fontSize: FONT.body,
+                            textAlign: "left",
                           }}
                         >
-                          <span>{o.label}</span>
-                          <span>{o.price_delta > 0 ? `+${fmt(o.price_delta)}` : ""}</span>
+                          {/* ORD-141 (correção pós-QA) — opção com foto cadastrada
+                              (ORD-138) precisa de layout que caiba a imagem, não só
+                              o rótulo em texto puro. Placeholder com emoji quando
+                              não tem imagem, mesmo padrão do card de combo (ORD-153). */}
+                          <div style={{ width: 56, height: 56, flexShrink: 0, borderRadius: RADIUS.sm, overflow: "hidden" }}>
+                            {o.thumbnail_url || o.image_url ? (
+                              <img
+                                src={o.thumbnail_url ?? o.image_url ?? undefined}
+                                alt={o.label}
+                                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                              />
+                            ) : (
+                              <div style={{
+                                width: "100%", height: "100%", background: T.placeholderA,
+                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: FONT.subtitle,
+                              }}>
+                                🍽️
+                              </div>
+                            )}
+                          </div>
+                          <span style={{ flex: 1 }}>{o.label}</span>
+                          {/* Preço adicional em destaque — some quando delta=0
+                              (sabor padrão, incluído no preço-base) em vez de
+                              mostrar "R$ 0,00", que soaria como cobrança dupla. */}
+                          {o.price_delta > 0 && (
+                            <span style={{
+                              fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body,
+                              color: isSelected ? T.catText : T.priceColor,
+                            }}>
+                              +{fmt(o.price_delta)}
+                            </span>
+                          )}
                         </button>
                       );
                     })}
@@ -839,6 +887,10 @@ export default function CatalogScreen({
                 </div>
               );
             })}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", paddingTop: 12, borderTop: `1px dashed ${T.borderNeutral}` }}>
+              <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.bodyLg, fontWeight: 600 }}>Total</span>
+              <span style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 900, fontSize: FONT.title }}>{fmt(optionModalTotal)}</span>
+            </div>
             <button
               onClick={confirmOptionModal}
               disabled={!canConfirmOptionModal}
