@@ -1,7 +1,10 @@
 import os
 from datetime import datetime, timedelta
 
-os.environ.setdefault("DB_URL", "sqlite+aiosqlite:///:memory:")
+# Força SQLite in-memory sempre, mesmo se DB_URL já vier setada no ambiente
+# (ex: dentro do container do serviço, onde o docker-compose injeta a URL do
+# banco de dev real). setdefault() não bastava — ver services/catalog/conftest.py.
+os.environ["DB_URL"] = "sqlite+aiosqlite:///:memory:"
 os.environ.setdefault("JWT_SECRET", "test-secret-ci")
 os.environ.setdefault("JWT_ACCESS_EXP_MINUTES", "60")
 os.environ.setdefault("INTERNAL_SECRET", "test-internal-ci")
