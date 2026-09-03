@@ -27,8 +27,8 @@ interface TotemStore {
   setCompany: (c: CompanyInfo) => void;
   setTerminal: (t: TerminalInfo) => void;
   setScreen: (s: Screen) => void;
-  addToCart: (p: CartItem) => void;
-  removeFromCart: (id: number) => void;
+  addToCart: (item: CartItem) => void;
+  removeFromCart: (key: string) => void;
   setCpf: (c: string | null) => void;
   setConsumptionType: (c: ConsumptionType) => void;
   setCompletedOrder: (o: CompletedOrder) => void;
@@ -72,21 +72,25 @@ export const useStore = create<TotemStore>()(
       setCompletedOrder: (completedOrder) => set({ completedOrder }),
       touch: () => set({ lastActivity: Date.now() }),
 
-      addToCart: (product) =>
+      // ORD-150 — agrupa por `key` (`product:<id>`/`combo:<id>`), nunca por
+      // `id` sozinho: combo.id e product.id são sequências independentes no
+      // catalog-service, poderiam colidir e fundir itens diferentes numa
+      // única linha do carrinho.
+      addToCart: (item) =>
         set((s) => {
-          const existing = s.cart.find((i) => i.id === product.id);
+          const existing = s.cart.find((i) => i.key === item.key);
           if (existing) {
-            return { cart: s.cart.map((i) => i.id === product.id ? { ...i, qty: i.qty + 1 } : i) };
+            return { cart: s.cart.map((i) => i.key === item.key ? { ...i, qty: i.qty + item.qty } : i) };
           }
-          return { cart: [...s.cart, { ...product, qty: 1 }] };
+          return { cart: [...s.cart, item] };
         }),
 
-      removeFromCart: (id) =>
+      removeFromCart: (key) =>
         set((s) => {
-          const item = s.cart.find((i) => i.id === id);
+          const item = s.cart.find((i) => i.key === key);
           if (!item) return {};
-          if (item.qty === 1) return { cart: s.cart.filter((i) => i.id !== id) };
-          return { cart: s.cart.map((i) => i.id === id ? { ...i, qty: i.qty - 1 } : i) };
+          if (item.qty === 1) return { cart: s.cart.filter((i) => i.key !== key) };
+          return { cart: s.cart.map((i) => i.key === key ? { ...i, qty: i.qty - 1 } : i) };
         }),
 
       newOrder: () =>

@@ -16,6 +16,8 @@ from infrastructure.image_storage import (
     delete_object,
     ensure_bucket,
     presigned_download_url,
+    upload_combo_image,
+    upload_combo_thumbnail,
     upload_option_image,
     upload_option_thumbnail,
     upload_product_image,
@@ -179,6 +181,42 @@ class ProductOptionGroup(Base):
     option_group_id           = Column(Integer, ForeignKey("option_groups.id"), primary_key=True)
     min_selections_override   = Column(Integer, nullable=True)
     max_selections_override   = Column(Integer, nullable=True)
+
+class Combo(Base):
+    """Combo/bundle (ORD-112) — conjunto de produtos existentes vendido com
+    preço próprio, menor que a soma dos avulsos. Mesmo padrão de soft-delete
+    duplo de Category/Product: `active` reversível (Ativar/Desativar rápido,
+    sem reeditar o resto), `deleted` irreversível (exclusão definitiva —
+    nunca reaparece em nenhuma consulta, mas a linha continua no banco).
+    Excluir um combo não afeta pedidos já feitos: OrderItem/Ticket guardam
+    nome/preço de cada produto componente congelados no momento da compra,
+    nunca referenciam combo_id (ver Tech Explorer de ORD-150). category_id
+    é opcional, mesmo padrão de Product — vincula o combo a uma categoria
+    existente da empresa (correção pós-implementação: planejado desde o
+    início, tinha sido cortado por engano na Tech Explorer original).
+    image_url/thumbnail_url adicionados no ORD-153 — o Explorer original do
+    ORD-112 não tinha pedido imagem própria, mas ficou visualmente ruim no
+    totem ao lado de produtos com foto."""
+    __tablename__ = "combos"
+    id             = Column(Integer, primary_key=True)
+    company_id     = Column(Integer, nullable=False, index=True)
+    category_id    = Column(Integer, ForeignKey("categories.id"))
+    name           = Column(String(120), nullable=False)
+    description    = Column(String(500))
+    price          = Column(Numeric(10, 2), nullable=False)
+    active         = Column(Boolean, nullable=False, default=True)
+    deleted        = Column(Boolean, nullable=False, default=False)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    image_url      = Column(String(255), nullable=True)
+    thumbnail_url  = Column(String(255), nullable=True)
+
+class ComboItem(Base):
+    """Sem company_id próprio — isolamento via join com Combo, mesmo padrão
+    de Option/OptionGroup. Sem sort_order/quantity nesta v1: ordem segue a
+    inserção e cada componente entra com 1 unidade (ver Tech Explorer)."""
+    __tablename__ = "combo_items"
+    combo_id   = Column(Integer, ForeignKey("combos.id"), primary_key=True)
+    product_id = Column(Integer, ForeignKey("products.id"), primary_key=True)
 
 class Menu(Base):
     """Cardápio por horário (ORD-124/125) — dias da semana + janela de
@@ -383,6 +421,111 @@ async def _get_option_scoped(db: AsyncSession, option_id: int, company_id: int) 
         .filter(Option.id == option_id, OptionGroup.company_id == company_id)
     )
     return result.scalars().first()
+
+async def _serialize_combo(db: AsyncSession, c: "Combo") -> dict:
+    """`items` vem denormalizado (nome/preço do produto no momento da
+    consulta, via JOIN com products) — mesmo padrão de option_groups
+    aninhado dentro de ProductOut. Formato pensado pra ORD-150 conseguir
+    renderizar o card do combo e checar sobreposição sem chamada extra."""
+    result = await db.execute(
+        select(Product.id, Product.name, Product.price)
+        .join(ComboItem, ComboItem.product_id == Product.id)
+        .filter(ComboItem.combo_id == c.id)
+    )
+    items = [{"product_id": pid, "name": name, "price": float(price)} for pid, name, price in result.all()]
+    return {
+        "id": c.id,
+        "category_id": c.category_id,
+        "name": c.name,
+        "description": c.description,
+        "price": float(c.price),
+        "active": c.active,
+        "image_url": presigned_download_url(c.image_url) if c.image_url else None,
+        "thumbnail_url": presigned_download_url(c.thumbnail_url) if c.thumbnail_url else None,
+        "items": items,
+    }
+
+async def _validate_combo_category(db: AsyncSession, company_id: int, category_id: Optional[int]) -> None:
+    """Mesma validação já usada em create_product — categoria precisa
+    existir, pertencer à empresa e estar ativa/não-excluída."""
+    if category_id is None:
+        return
+    cat = (await db.execute(
+        select(Category).filter_by(id=category_id, company_id=company_id, active=True, deleted=False)
+    )).scalars().first()
+    if not cat:
+        raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
+
+async def _validate_combo_products(db: AsyncSession, company_id: int, product_ids: list[int], price: float) -> None:
+    """Fecha os pontos que o Explorer deixou em aberto: mínimo de 2
+    componentes, todo product_id precisa ser da empresa/ativo/não-excluído,
+    e o preço do combo precisa gerar economia real frente à soma dos
+    avulsos — mesma regra já validada no client (protótipo), replicada
+    aqui como fonte de verdade."""
+    unique_ids = set(product_ids)
+    if len(unique_ids) < 2:
+        raise HTTPException(400, detail="Combo precisa de ao menos 2 produtos componentes")
+    result = await db.execute(
+        select(Product.id, Product.price).filter(
+            Product.id.in_(unique_ids), Product.company_id == company_id,
+            Product.active == True, Product.deleted == False,  # noqa: E712
+        )
+    )
+    rows = result.all()
+    found_ids = {pid for pid, _ in rows}
+    if found_ids != unique_ids:
+        raise HTTPException(404, detail="Algum product_id não existe, não pertence à empresa, ou está inativo")
+    total_avulso = sum(float(p) for _, p in rows)
+    if price >= total_avulso:
+        raise HTTPException(400, detail="Preço do combo precisa ser menor que a soma dos itens avulsos")
+
+async def _check_combo_deactivation(
+    db: AsyncSession, company_id: int, product_id: int, confirmed: bool,
+) -> list[tuple[int, str]]:
+    """ORD-151: desativar um produto componente de combo ativo (via PUT
+    active=false ou via DELETE sem permanent=true — os dois caminhos que o
+    admin usa pra desativar um produto) exige confirmação explícita, senão
+    o combo fica ativo apontando pra um produto que não aparece mais avulso.
+    Retorna os combos ativos afetados (lista vazia se não houver vínculo);
+    levanta 409 se houver vínculo e ainda não tiver confirmação. Mesmo
+    padrão de detail como string simples já usado em delete_option_group()
+    pra vínculo ativo."""
+    rows = (await db.execute(
+        select(Combo.id, Combo.name)
+        .join(ComboItem, ComboItem.combo_id == Combo.id)
+        .filter(
+            ComboItem.product_id == product_id,
+            Combo.company_id == company_id,
+            Combo.active == True, Combo.deleted == False,  # noqa: E712
+        )
+    )).all()
+    affected = [(cid, name) for cid, name in rows]
+    if affected and not confirmed:
+        names = ", ".join(name for _, name in affected)
+        raise HTTPException(409, detail=f"Produto vinculado ao(s) combo(s) ativo(s): {names}")
+    return affected
+
+async def _cascade_deactivate_combos(db: AsyncSession, affected: list[tuple[int, str]]) -> None:
+    if affected:
+        await db.execute(
+            update(Combo).where(Combo.id.in_([cid for cid, _ in affected])).values(active=False)
+        )
+
+async def _inactive_combos_for_product(db: AsyncSession, company_id: int, product_id: int) -> list[tuple[int, str]]:
+    """ORD-152: contraparte não-bloqueante de _check_combo_deactivation —
+    ao ativar um produto, sugere (sem forçar) reativar os combos inativos
+    que o têm como componente. Nunca levanta exceção; quem chama decide o
+    que fazer com a lista."""
+    rows = (await db.execute(
+        select(Combo.id, Combo.name)
+        .join(ComboItem, ComboItem.combo_id == Combo.id)
+        .filter(
+            ComboItem.product_id == product_id,
+            Combo.company_id == company_id,
+            Combo.active == False, Combo.deleted == False,  # noqa: E712
+        )
+    )).all()
+    return [(cid, name) for cid, name in rows]
 
 async def _resolve_menu_composition(db: AsyncSession, menu_id: int) -> dict:
     cat_result = await db.execute(
@@ -639,6 +782,10 @@ class ProductOptionGroupOverrideOut(BaseModel):
     min_selections_override: Optional[int] = None
     max_selections_override: Optional[int] = None
 
+class ComboSummaryOut(BaseModel):
+    id: int
+    name: str
+
 class ProductOut(BaseModel):
     id: int
     category_id: Optional[int] = None
@@ -655,6 +802,10 @@ class ProductOut(BaseModel):
     sort_order: Optional[int] = None
     allergens: list[AllergenOut] = []
     option_groups: list[ProductOptionGroupOut] = []
+    # ORD-152: só populado por update_product() ao ativar o produto — os
+    # demais endpoints que retornam ProductOut (list/get/create) deixam no
+    # default vazio, sem custo de consulta extra.
+    inactive_combos: list[ComboSummaryOut] = []
 
 class ProductListOut(BaseModel):
     products: list[ProductOut]
@@ -688,6 +839,9 @@ class ProductUpdate(BaseModel):
     calories: Optional[int] = None
     sku: Optional[str] = None
     allergen_ids: Optional[list[int]] = None
+    # ORD-151: precisa vir True pra confirmar a desativação em cascata dos
+    # combos ativos vinculados — ver update_product().
+    confirm_deactivate_combos: Optional[bool] = None
 
     @field_validator("price")
     @classmethod
@@ -761,6 +915,49 @@ class ProductMenuRef(BaseModel):
 
 class ProductMenusOut(BaseModel):
     menus: list[ProductMenuRef]
+
+class ComboItemOut(BaseModel):
+    product_id: int
+    name: str
+    price: float
+
+class ComboOut(BaseModel):
+    id: int
+    category_id: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    price: float
+    active: bool
+    image_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    items: list[ComboItemOut] = []
+
+class ComboListOut(BaseModel):
+    combos: list[ComboOut]
+
+class ComboIn(BaseModel):
+    category_id: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    price: float
+    product_ids: list[int]
+
+    @field_validator("price")
+    @classmethod
+    def price_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("Preço deve ser positivo")
+        return v
+
+    @field_validator("product_ids")
+    @classmethod
+    def at_least_two_products(cls, v: list[int]) -> list[int]:
+        if len(set(v)) < 2:
+            raise ValueError("Combo precisa de ao menos 2 produtos componentes")
+        return v
+
+class ComboActiveIn(BaseModel):
+    active: bool
 
 class HealthOut(BaseModel):
     service: str
@@ -1121,8 +1318,18 @@ async def update_product(
         )).scalars().first()
         if not cat:
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
-    for field, value in body.model_dump(exclude_none=True, exclude={"allergen_ids"}).items():
+
+    affected_combos: list[tuple[int, str]] = []
+    if body.active is False:
+        affected_combos = await _check_combo_deactivation(
+            db, company_id, product_id, confirmed=bool(body.confirm_deactivate_combos)
+        )
+
+    for field, value in body.model_dump(
+        exclude_none=True, exclude={"allergen_ids", "confirm_deactivate_combos"}
+    ).items():
         setattr(p, field, value)
+    await _cascade_deactivate_combos(db, affected_combos)
     try:
         await db.commit()
     except IntegrityError:
@@ -1132,28 +1339,42 @@ async def update_product(
         await _set_product_allergens(db, p.id, body.allergen_ids)
         await db.commit()
     await db.refresh(p)
-    return await _serialize_product(db, p)
+    out = await _serialize_product(db, p)
+    if body.active is True:
+        inactive_combos = await _inactive_combos_for_product(db, company_id, product_id)
+        out["inactive_combos"] = [{"id": cid, "name": name} for cid, name in inactive_combos]
+    return out
 
 @app.delete(
     "/catalog/products/{product_id}",
     status_code=204,
     tags=["Catálogo"],
     summary="Desativar ou excluir definitivamente um produto",
-    responses={404: {"description": "Produto não encontrado"}},
+    responses={
+        404: {"description": "Produto não encontrado"},
+        409: {"description": "Produto vinculado a combo(s) ativo(s) — envie confirm_deactivate_combos=true"},
+    },
 )
 async def delete_product(
     product_id: int,
     permanent: bool = False,
+    confirm_deactivate_combos: bool = False,
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id_write),
 ):
     """Por padrão só desativa (`active=False`), reversível via PUT com
     `active: true`. Com `permanent=true`, marca `deleted=True` — ação
     irreversível, nunca mais aparece em nenhuma consulta, mas continua no
-    banco (vínculo com vendas já realizadas). Também remove a imagem do bucket."""
+    banco (vínculo com vendas já realizadas). Também remove a imagem do bucket.
+    ORD-151: os dois caminhos desativam o produto (`active=False`) — se ele
+    for componente de combo ativo, exige `confirm_deactivate_combos=true`,
+    senão retorna 409 (mesma regra de update_product())."""
     result = await db.execute(select(Product).filter_by(id=product_id, company_id=company_id, deleted=False))
     p = result.scalars().first()
     if not p: raise HTTPException(404)
+    affected_combos = await _check_combo_deactivation(
+        db, company_id, product_id, confirmed=confirm_deactivate_combos
+    )
     if permanent:
         if p.image_url: delete_object(p.image_url)
         if p.thumbnail_url: delete_object(p.thumbnail_url)
@@ -1161,6 +1382,7 @@ async def delete_product(
         p.active = False
     else:
         p.active = False
+    await _cascade_deactivate_combos(db, affected_combos)
     await db.commit()
 
 def _make_thumbnail(content: bytes, pillow_format: str) -> bytes:
@@ -1556,6 +1778,222 @@ async def set_product_option_group_override(
 
     await db.commit(); await db.refresh(link)
     return {"min_selections_override": link.min_selections_override, "max_selections_override": link.max_selections_override}
+
+@app.post(
+    "/catalog/combos",
+    status_code=201,
+    response_model=ComboOut,
+    tags=["Catálogo"],
+    summary="Criar combo/bundle",
+    responses={
+        400: {"description": "menos de 2 produtos componentes (após remover duplicados), ou preço sem economia real"},
+        404: {"description": "algum product_id não existe, não pertence à empresa, ou está inativo"},
+    },
+)
+async def create_combo(
+    body: ComboIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    await _validate_combo_products(db, company_id, body.product_ids, body.price)
+    await _validate_combo_category(db, company_id, body.category_id)
+    combo = Combo(
+        company_id=company_id, category_id=body.category_id,
+        name=body.name, description=body.description, price=body.price,
+    )
+    db.add(combo)
+    await db.flush()
+    for product_id in set(body.product_ids):
+        db.add(ComboItem(combo_id=combo.id, product_id=product_id))
+    await db.commit(); await db.refresh(combo)
+    return await _serialize_combo(db, combo)
+
+@app.get(
+    "/catalog/combos",
+    response_model=ComboListOut,
+    tags=["Catálogo"],
+    summary="Listar combos da empresa",
+)
+async def list_combos(
+    category_id: Optional[int] = None,
+    include_inactive: bool = False,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id),
+):
+    """Por padrão só combos ativos (usado por ORD-150 no totem);
+    include_inactive=true também traz os desativados (usado pela gestão de
+    catálogo no admin). Combos excluídos definitivamente (deleted=True)
+    nunca aparecem, nem com include_inactive. Filtrável por category_id,
+    mesmo padrão de /catalog/products."""
+    q = select(Combo).filter_by(company_id=company_id, deleted=False)
+    if not include_inactive:
+        q = q.filter_by(active=True)
+    if category_id:
+        q = q.filter_by(category_id=category_id)
+    q = q.order_by(Combo.id.asc())
+    result = await db.execute(q)
+    combos = result.scalars().all()
+    return {"combos": [await _serialize_combo(db, c) for c in combos]}
+
+@app.put(
+    "/catalog/combos/{combo_id}",
+    response_model=ComboOut,
+    tags=["Catálogo"],
+    summary="Editar combo (replace completo dos produtos componentes)",
+    responses={
+        400: {"description": "menos de 2 produtos componentes (após remover duplicados), ou preço sem economia real"},
+        404: {"description": "Combo não encontrado, ou algum product_id não existe/não pertence à empresa"},
+    },
+)
+async def update_combo(
+    combo_id: int,
+    body: ComboIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    combo = (await db.execute(select(Combo).filter_by(id=combo_id, company_id=company_id, deleted=False))).scalars().first()
+    if not combo: raise HTTPException(404)
+    await _validate_combo_products(db, company_id, body.product_ids, body.price)
+    await _validate_combo_category(db, company_id, body.category_id)
+    combo.category_id = body.category_id
+    combo.name = body.name
+    combo.description = body.description
+    combo.price = body.price
+    await db.execute(delete(ComboItem).where(ComboItem.combo_id == combo_id))
+    for product_id in set(body.product_ids):
+        db.add(ComboItem(combo_id=combo_id, product_id=product_id))
+    await db.commit(); await db.refresh(combo)
+    return await _serialize_combo(db, combo)
+
+@app.patch(
+    "/catalog/combos/{combo_id}",
+    response_model=ComboOut,
+    tags=["Catálogo"],
+    summary="Ativar/desativar um combo sem reeditar o resto dos dados",
+    responses={
+        404: {"description": "Combo não encontrado"},
+        409: {"description": "Ativar recusado: algum produto componente está inativo"},
+    },
+)
+async def set_combo_active(
+    combo_id: int,
+    body: ComboActiveIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """ORD-151: complemento simétrico da checagem em update_product/
+    delete_product — aquela impede desativar produto sem avisar sobre o
+    combo; esta impede ativar o combo enquanto algum componente segue
+    inativo (reproduziria a mesma inconsistência pelo lado contrário).
+    Sem confirmação/cascata aqui — reativar produtos em massa sem o admin
+    pedir explicitamente seria um efeito colateral grande demais; o combo
+    só reativa depois que os componentes já estiverem ativos de novo."""
+    combo = (await db.execute(select(Combo).filter_by(id=combo_id, company_id=company_id, deleted=False))).scalars().first()
+    if not combo: raise HTTPException(404)
+    if body.active:
+        inactive = (await db.execute(
+            select(Product.name)
+            .join(ComboItem, ComboItem.product_id == Product.id)
+            .filter(ComboItem.combo_id == combo_id, Product.active == False)  # noqa: E712
+        )).scalars().all()
+        if inactive:
+            raise HTTPException(409, detail=f"Produto(s) inativo(s) no combo: {', '.join(inactive)}")
+    combo.active = body.active
+    await db.commit(); await db.refresh(combo)
+    return await _serialize_combo(db, combo)
+
+@app.delete(
+    "/catalog/combos/{combo_id}",
+    status_code=204,
+    tags=["Catálogo"],
+    summary="Excluir definitivamente um combo",
+    responses={404: {"description": "Combo não encontrado"}},
+)
+async def delete_combo(
+    combo_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """Exclusão definitiva (deleted=True) — nunca afeta pedidos já feitos,
+    porque OrderItem/Ticket guardam nome/preço congelados, sem referenciar
+    combo_id (ver Tech Explorer). combo_items não precisa de delete
+    explícito antes: nenhuma FK aqui usa ondelete=CASCADE, mas como o combo
+    é soft-deleted (não um DELETE FROM real), as linhas de combo_items
+    seguem existindo sem problema — ficam órfãs, mas nunca são lidas de
+    novo, porque toda consulta já filtra pelo pai (deleted=False)."""
+    combo = (await db.execute(select(Combo).filter_by(id=combo_id, company_id=company_id, deleted=False))).scalars().first()
+    if not combo: raise HTTPException(404)
+    if combo.image_url: delete_object(combo.image_url)
+    if combo.thumbnail_url: delete_object(combo.thumbnail_url)
+    combo.deleted = True
+    combo.active = False
+    await db.commit()
+
+@app.post(
+    "/catalog/combos/{combo_id}/image",
+    response_model=ComboOut,
+    tags=["Catálogo"],
+    summary="Enviar imagem de um combo (gera também o thumbnail)",
+    responses={
+        404: {"description": "Combo não encontrado"},
+        415: {"description": "Formato de arquivo não aceito (só jpg/png)"},
+        413: {"description": "Arquivo maior que 2 MB"},
+        422: {"description": "Arquivo não é uma imagem válida"},
+    },
+)
+async def upload_combo_image_endpoint(
+    combo_id: int,
+    image: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """ORD-153: mesma validação de upload_product_image_endpoint, exceto que
+    não exige category_id — a chave no bucket não depende de categoria."""
+    combo = (await db.execute(select(Combo).filter_by(id=combo_id, company_id=company_id, deleted=False))).scalars().first()
+    if not combo: raise HTTPException(404)
+
+    ext = _IMAGE_CONTENT_TYPES.get(image.content_type)
+    if not ext:
+        raise HTTPException(415, detail="Formato de arquivo não aceito — envie jpg ou png")
+
+    content = await image.read()
+    if len(content) > _IMAGE_MAX_BYTES:
+        raise HTTPException(413, detail=f"Arquivo maior que {_IMAGE_MAX_BYTES // (1024 * 1024)} MB")
+
+    pillow_format = "JPEG" if ext == "jpg" else "PNG"
+    try:
+        thumb_content = _make_thumbnail(content, pillow_format)
+    except Exception:
+        raise HTTPException(422, detail="Arquivo não é uma imagem válida")
+
+    if combo.image_url: delete_object(combo.image_url)
+    if combo.thumbnail_url: delete_object(combo.thumbnail_url)
+
+    combo.image_url = upload_combo_image(combo.id, ext, content)
+    combo.thumbnail_url = upload_combo_thumbnail(combo.id, ext, thumb_content)
+    await db.commit(); await db.refresh(combo)
+    return await _serialize_combo(db, combo)
+
+@app.delete(
+    "/catalog/combos/{combo_id}/image",
+    response_model=ComboOut,
+    tags=["Catálogo"],
+    summary="Remover a imagem de um combo",
+    responses={404: {"description": "Combo não encontrado"}},
+)
+async def delete_combo_image(
+    combo_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    combo = (await db.execute(select(Combo).filter_by(id=combo_id, company_id=company_id, deleted=False))).scalars().first()
+    if not combo: raise HTTPException(404)
+    if combo.image_url: delete_object(combo.image_url)
+    if combo.thumbnail_url: delete_object(combo.thumbnail_url)
+    combo.image_url = None
+    combo.thumbnail_url = None
+    await db.commit(); await db.refresh(combo)
+    return await _serialize_combo(db, combo)
 
 def _parse_time(value: str):
     from datetime import time

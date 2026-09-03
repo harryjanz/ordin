@@ -990,9 +990,6 @@ async def test_test_connection_mercadopago_usa_mp_device_id_nao_paygo_terminal_i
         respx.get(f"{_company_url()}/internal/terminals/1").mock(
             return_value=httpx.Response(200, json=terminal_cfg)
         )
-        respx.get("https://api.mercadopago.com/v1/users/me").mock(
-            return_value=httpx.Response(200, json={"email": "loja@teste.com"})
-        )
         respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
             return_value=httpx.Response(200, json={
                 "data": {"terminals": [{"id": "PAX_REAL__123", "operating_mode": "PDV"}]}
@@ -1009,9 +1006,6 @@ async def test_test_connection_mercadopago_terminal_fora_do_pdv(client, token_ki
     with respx.mock:
         respx.get(f"{_company_url()}/internal/terminals/1").mock(
             return_value=httpx.Response(200, json=_MP_TERMINAL_CONFIG)
-        )
-        respx.get("https://api.mercadopago.com/v1/users/me").mock(
-            return_value=httpx.Response(200, json={"email": "loja@teste.com"})
         )
         respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
             return_value=httpx.Response(200, json={

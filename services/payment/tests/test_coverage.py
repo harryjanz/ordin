@@ -413,16 +413,18 @@ async def test_paygo_provider_refund_transaction_nao_implementado():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# infrastructure/providers/mercadopago.py — ORD-149 (test_connection valida modo PDV)
+# infrastructure/providers/mercadopago.py — ORD-149/ORD-154 (test_connection)
 # ═══════════════════════════════════════════════════════════════════════════════
+# ORD-154: /v1/users/me foi removido — não é aceito por credencial tipo
+# Application/POS (usada por este provider), só por token de usuário pessoal
+# via OAuth, e sempre retornava 404 mascarando um token válido. A validação
+# de token e a busca de terminal agora usam a mesma chamada a
+# /terminals/v1/list.
 
-async def test_mp_provider_test_connection_token_invalido_nao_chama_terminals_list():
-    """Token inválido continua com a mensagem já existente, sem sequer tentar
-    consultar terminals/v1/list — nenhuma rota extra é mockada, então se o
-    código chamar mesmo assim o respx derruba o teste."""
+async def test_mp_provider_test_connection_token_invalido():
     provider = _mp_provider()
     with respx.mock:
-        respx.get("https://api.mercadopago.com/v1/users/me").mock(
+        respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
             return_value=httpx.Response(401)
         )
         result = await provider.test_connection(terminal_ref="PAX_Q92__999")
@@ -432,23 +434,19 @@ async def test_mp_provider_test_connection_token_invalido_nao_chama_terminals_li
 
 async def test_mp_provider_test_connection_sem_terminal_ref_sucesso():
     """Sem mp_device_id configurado (ou terminal só PIX) — sucesso só com
-    base no token, mesmo comportamento de antes desta história."""
+    base no token, sem tentar localizar um device específico."""
     provider = _mp_provider()
     with respx.mock:
-        respx.get("https://api.mercadopago.com/v1/users/me").mock(
-            return_value=httpx.Response(200, json={"email": "loja@teste.com"})
+        respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
+            return_value=httpx.Response(200, json={"data": {"terminals": []}})
         )
         result = await provider.test_connection(terminal_ref="")
     assert result["success"] is True
-    assert "loja@teste.com" in result["detail"]
 
 
 async def test_mp_provider_test_connection_terminal_em_pdv_sucesso():
     provider = _mp_provider()
     with respx.mock:
-        respx.get("https://api.mercadopago.com/v1/users/me").mock(
-            return_value=httpx.Response(200, json={"email": "loja@teste.com"})
-        )
         respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
             return_value=httpx.Response(200, json={
                 "data": {"terminals": [{"id": "PAX_Q92__999", "operating_mode": "PDV"}]}
@@ -462,9 +460,6 @@ async def test_mp_provider_test_connection_terminal_em_pdv_sucesso():
 async def test_mp_provider_test_connection_terminal_fora_do_pdv():
     provider = _mp_provider()
     with respx.mock:
-        respx.get("https://api.mercadopago.com/v1/users/me").mock(
-            return_value=httpx.Response(200, json={"email": "loja@teste.com"})
-        )
         respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
             return_value=httpx.Response(200, json={
                 "data": {"terminals": [{"id": "PAX_Q92__999", "operating_mode": "STANDALONE"}]}
@@ -480,9 +475,6 @@ async def test_mp_provider_test_connection_terminal_nao_encontrado():
     diferentes (device errado/removido vs. reconfigurar o terminal)."""
     provider = _mp_provider()
     with respx.mock:
-        respx.get("https://api.mercadopago.com/v1/users/me").mock(
-            return_value=httpx.Response(200, json={"email": "loja@teste.com"})
-        )
         respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
             return_value=httpx.Response(200, json={"data": {"terminals": []}})
         )
@@ -495,15 +487,12 @@ async def test_mp_provider_test_connection_terminal_nao_encontrado():
 async def test_mp_provider_test_connection_falha_rede_terminals_list():
     provider = _mp_provider()
     with respx.mock:
-        respx.get("https://api.mercadopago.com/v1/users/me").mock(
-            return_value=httpx.Response(200, json={"email": "loja@teste.com"})
-        )
         respx.get("https://api.mercadopago.com/terminals/v1/list").mock(
             side_effect=httpx.ConnectError("boom")
         )
         result = await provider.test_connection(terminal_ref="PAX_Q92__999")
     assert result["success"] is False
-    assert "Erro ao consultar terminal" in result["detail"]
+    assert "Erro ao conectar ao MP" in result["detail"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

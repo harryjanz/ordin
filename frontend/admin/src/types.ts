@@ -243,6 +243,28 @@ export interface ProductMenuRef {
   via_category: string | null;
 }
 
+// ORD-112 — combo/bundle: conjunto de produtos existentes vendido com preço
+// próprio. `items` vem denormalizado (nome/preço do produto no momento da
+// consulta) — pensado pra ORD-150 renderizar o combo no totem sem chamada
+// extra; o admin reaproveita o mesmo formato.
+export interface ComboItem {
+  product_id: number;
+  name: string;
+  price: number;
+}
+
+export interface Combo {
+  id: number;
+  category_id: number | null;
+  name: string;
+  description: string | null;
+  price: number;
+  active: boolean;
+  image_url: string | null;
+  thumbnail_url: string | null;
+  items: ComboItem[];
+}
+
 export interface Order {
   order_ref: string;
   status: string;

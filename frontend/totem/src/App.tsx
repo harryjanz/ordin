@@ -15,7 +15,7 @@ import PaymentScreen from "./screens/PaymentScreen";
 import PIXPaymentScreen from "./screens/PIXPaymentScreen";
 import SuccessScreen from "./screens/SuccessScreen";
 import { useState } from "react";
-import type { CompanyInfo, TerminalInfo, Product, CompletedOrder, ConsumptionType } from "./types";
+import type { CompanyInfo, TerminalInfo, CartItem, CompletedOrder, ConsumptionType } from "./types";
 
 class PixErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   constructor(props: { children: ReactNode }) {
@@ -42,8 +42,8 @@ class PixErrorBoundary extends Component<{ children: ReactNode }, { error: strin
   }
 }
 
-const INACTIVITY_TIMEOUT_MS = 120_000;
-const INACTIVITY_WARN_SEC   = 10;
+const INACTIVITY_TIMEOUT_MS = 180_000;
+const INACTIVITY_WARN_SEC   = 20;
 
 export default function App() {
   const {
@@ -119,9 +119,29 @@ export default function App() {
   async function handleCpfDone(c: string | null, consumptionTypeOverride?: ConsumptionType | null, pickupName?: string | null) {
     setCpf(c);
     try {
+      // ORD-150 — combo explode em N itens normais (preço real de cada
+      // componente, igual um produto avulso) e a economia vira o `discount`
+      // do pedido — campo já existente, sem migration no order-service (ver
+      // achado técnico da Tech Explorer). Arredonda a economia POR UNIDADE
+      // antes de multiplicar por qty, senão pedidos com 2+ do mesmo combo
+      // podem fechar com 1 centavo de diferença.
+      const items: { product_id: number; name: string; qty: number; unit_price: number }[] = [];
+      let comboDiscount = 0;
+      for (const line of cart) {
+        if (line.kind === "combo" && line.comboItems) {
+          const comboSum = line.comboItems.reduce((s, ci) => s + ci.price, 0);
+          const savingsPerUnit = Math.round((comboSum - line.price) * 100) / 100;
+          comboDiscount += savingsPerUnit * line.qty;
+          for (const ci of line.comboItems) {
+            items.push({ product_id: ci.product_id, name: `${ci.name} (${line.name})`, qty: line.qty, unit_price: ci.price });
+          }
+        } else {
+          items.push({ product_id: line.id, name: line.name, qty: line.qty, unit_price: line.price });
+        }
+      }
       const res = await api.post("/orders", {
-        items: cart.map((i) => ({ product_id: i.id, name: i.name, qty: i.qty, unit_price: i.price })),
-        discount: 0,
+        items,
+        discount: comboDiscount,
         cpf: c || null,
         consumption_type: consumptionTypeOverride !== undefined ? consumptionTypeOverride : consumptionType,
         pickup_name: pickupName || null,
@@ -249,7 +269,7 @@ export default function App() {
           companyName={company?.name ?? ""}
           menuLayout={company?.catalog_menu_layout ?? "horizontal"}
           cart={cart}
-          onAdd={(p: Product) => addToCart({ ...p, qty: 1 })}
+          onAdd={(item: CartItem) => addToCart(item)}
           onRemove={removeFromCart}
           onCheckout={() => {
             if (company?.consumption_mode_enabled) setScreen("consumption");

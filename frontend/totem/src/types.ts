@@ -46,8 +46,48 @@ export interface Product {
   tags?: string[] | null;
 }
 
-export interface CartItem extends Product {
+// ORD-150 — combo/bundle: conjunto de produtos existentes vendido com preço
+// próprio. `items` vem denormalizado do catalog-service (nome/preço reais no
+// momento da consulta) — usado tanto pro card do catálogo quanto pra checar
+// se um produto avulso é componente de algum combo ativo (upsell).
+export interface ComboItemRef {
+  product_id: number;
+  name: string;
+  price: number;
+}
+
+export interface Combo {
+  id: number;
+  // ORD-112 — categoria em que o combo foi alocado no admin. Decisão
+  // revisada em 2026-09-02: o combo só aparece nessa categoria específica no
+  // totem, nunca numa seção "Destaque" global — null nunca aparece em
+  // nenhuma categoria.
+  category_id: number | null;
+  name: string;
+  description: string | null;
+  price: number;
+  // ORD-153 — imagem do combo (opcional; card e upsell caem no placeholder
+  // padrão, mesmo comportamento de produto sem imagem, quando ausente).
+  image_url: string | null;
+  thumbnail_url: string | null;
+  items: ComboItemRef[];
+}
+
+// `key` distingue produto de combo no carrinho (`product:<id>` ou
+// `combo:<id>`) — combo.id e product.id são sequências independentes no
+// catalog-service, então dois itens diferentes podem ter o mesmo `id`
+// numérico. Nunca usar `id` sozinho como chave de agrupamento do carrinho.
+export interface CartItem {
+  key: string;
+  kind: "product" | "combo";
+  id: number;
+  name: string;
+  price: number;
   qty: number;
+  // Só presente quando kind === "combo" — usado pra explodir o combo em
+  // itens reais (com preço avulso de cada um) na hora de montar o pedido,
+  // ver App.tsx/handleCpfDone.
+  comboItems?: ComboItemRef[];
 }
 
 export interface Ticket {
