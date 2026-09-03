@@ -91,15 +91,31 @@ class Order(Base):
 
 class OrderItem(Base):
     __tablename__ = "order_items"
-    id           = Column(Integer, primary_key=True)
-    order_id     = Column(Integer, ForeignKey("orders.id"), nullable=False)
-    product_id   = Column(Integer, nullable=False)
-    product_name = Column(String(120), nullable=False)
-    unit_price   = Column(Numeric(10,2), nullable=False)
-    quantity     = Column(Integer, nullable=False, default=1)
-    subtotal     = Column(Numeric(10,2), nullable=False)
-    order        = relationship("Order", back_populates="items")
-    tickets      = relationship("Ticket", back_populates="item", cascade="all, delete")
+    id              = Column(Integer, primary_key=True)
+    order_id        = Column(Integer, ForeignKey("orders.id"), nullable=False)
+    product_id      = Column(Integer, nullable=False)
+    product_name    = Column(String(120), nullable=False)
+    unit_price      = Column(Numeric(10,2), nullable=False)
+    quantity        = Column(Integer, nullable=False, default=1)
+    subtotal        = Column(Numeric(10,2), nullable=False)
+    order           = relationship("Order", back_populates="items")
+    tickets         = relationship("Ticket", back_populates="item", cascade="all, delete")
+    selected_options = relationship("OrderItemOption", cascade="all, delete")
+
+class OrderItemOption(Base):
+    """ORD-142 — opção de grupo de opção (ORD-137/138) escolhida pro item no
+    totem. Denormalizado (nome do grupo/opção, não FK pro catalog-service) —
+    mesmo racional de OrderItem.product_name: o catálogo pode mudar ou a
+    opção pode ser excluída depois, o pedido precisa continuar mostrando
+    exatamente o que foi vendido naquele momento. 1:N porque grupo de
+    seleção múltipla (max_selections>1) manda mais de uma opção pro mesmo
+    item (ex.: pizza com 2 sabores)."""
+    __tablename__ = "order_item_options"
+    id            = Column(Integer, primary_key=True)
+    order_item_id = Column(Integer, ForeignKey("order_items.id"), nullable=False, index=True)
+    group_name    = Column(String(80), nullable=False)
+    option_label  = Column(String(80), nullable=False)
+    price_delta   = Column(Numeric(10,2), nullable=False, default=0)
 
 class Ticket(Base):
     __tablename__ = "tickets"
@@ -126,11 +142,19 @@ async def get_db():
 
 # ── Request schemas ───────────────────────────────────────────────────────────
 
+class SelectedOptionIn(BaseModel):
+    group_name: str
+    option_label: str
+    price_delta: float = 0
+
 class ItemIn(BaseModel):
     product_id: int
     name: str
     qty: int
     unit_price: float
+    # ORD-142 — opção(ões) de grupo de opção escolhida(s) no totem (ORD-141).
+    # Vazio pra item sem grupo vinculado, mesmo comportamento de hoje.
+    selected_options: list[SelectedOptionIn] = []
 
 class OrderIn(BaseModel):
     items: list[ItemIn]
@@ -175,6 +199,11 @@ class OrderListOut(BaseModel):
     total: int
     summary: dict[str, OrderStatusSummaryItem]
 
+class SelectedOptionOut(BaseModel):
+    group_name: str
+    option_label: str
+    price_delta: float
+
 class TicketOut(BaseModel):
     ticket_code: str
     qr_data: str
@@ -184,6 +213,8 @@ class TicketOut(BaseModel):
     collected_at: str | None = None
     collected_by: str | None = None
     collection_method: str | None = None
+    # ORD-142 — vazio pra ticket de item sem grupo de opção vinculado.
+    selected_options: list[SelectedOptionOut] = []
 
 class TicketListOut(BaseModel):
     order_ref: str
@@ -349,6 +380,9 @@ async def create_order(
                        product_name=item.name, unit_price=item.unit_price,
                        quantity=item.qty, subtotal=item.unit_price*item.qty)
         db.add(oi); await db.flush()
+        for opt in item.selected_options:
+            db.add(OrderItemOption(order_item_id=oi.id, group_name=opt.group_name,
+                                   option_label=opt.option_label, price_delta=opt.price_delta))
         for u in range(1, item.qty+1):
             code = _gen_code()
             ts   = datetime.utcnow().isoformat()
@@ -812,12 +846,23 @@ async def list_order_tickets(
     tickets = [row[0] for row in rows]
     order_qr_data = rows[0][1]
     col = sum(1 for t in tickets if t.status=="collected")
+    # ORD-142 — uma query batelada por order_item_id (não uma por ticket) pra
+    # trazer as opções escolhidas de cada item.
+    opts_result = await db.execute(
+        select(OrderItemOption).where(OrderItemOption.order_item_id.in_({t.order_item_id for t in tickets}))
+    )
+    opts_by_item: dict[int, list] = {}
+    for o in opts_result.scalars().all():
+        opts_by_item.setdefault(o.order_item_id, []).append(
+            {"group_name": o.group_name, "option_label": o.option_label, "price_delta": float(o.price_delta)}
+        )
     return {"order_ref":order_ref,"progress":f"{col}/{len(tickets)}","order_qr_data":order_qr_data,
             "tickets":[{"ticket_code":t.ticket_code,"qr_data":t.qr_data,"status":t.status,
                         "unit_number":t.unit_number,"total_units":t.total_units,
                         "collected_at":t.collected_at.isoformat() if t.collected_at else None,
                         "collected_by":t.collected_by,
-                        "collection_method":t.collection_method} for t in tickets]}
+                        "collection_method":t.collection_method,
+                        "selected_options":opts_by_item.get(t.order_item_id, [])} for t in tickets]}
 
 @app.patch("/internal/orders/{order_ref}/status", include_in_schema=False)
 async def internal_update_status(

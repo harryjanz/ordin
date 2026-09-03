@@ -1,6 +1,6 @@
 ---
 id: ORD-142
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Backend
@@ -300,3 +300,28 @@ por pedido, sem custo de performance relevante.
 - [x] Priorizada no sprint backlog
 
 **Status final: Ready.**
+
+## Validação (implementação, 2026-09-03)
+
+Implementado exatamente conforme o Tech Explorer, sem desvio:
+- Tabela `order_item_options` (migration `20260903_1900_order_item_options.py`), relacionamento
+  `OrderItem.selected_options` (cascade delete).
+- `ItemIn.selected_options` (novo, default `[]`) e `TicketOut.selected_options` (novo, default
+  `[]`) — aditivos, sem quebrar payload existente.
+- `create_order` persiste as opções no mesmo loop de criação do `OrderItem`, antes da geração dos
+  tickets. `list_order_tickets` busca as opções em uma única query batelada por `order_item_id`
+  (não uma por ticket).
+
+Testes novos (`services/order/tests/test_ord142_orderitem_opcao.py`, 6 casos — mesmos cenários do
+QA Explorer): seleção única, seleção múltipla, múltiplos itens com opções independentes, item sem
+opção (regressão), fórmula de total inalterada, isolamento multi-tenant (usando token não-admin
+de empresa B — `token_company_b` do conftest é role `admin`, que **bypassa** o filtro de tenant
+por design/ORD-093, então não serve pra esse cenário; token `owner` de empresa B construído à
+parte no teste). `pytest services/order` → **64 passed** (58 baseline + 6 novos), zero regressão.
+
+Validado ponta a ponta contra o container real (`docker compose build/up order-service`, MySQL de
+verdade, não sqlite): migration aplicada limpa (`20260824_2100 → 20260903_1900`), `POST /orders`
+com opção seguido de `GET /orders/{ref}/tickets` retornando a opção persistida corretamente.
+`openapi.json` regenerado (também trouxe de volta drift pré-existente não relacionado a esta
+história — endpoints de `prep-stats`/ORD-119 nunca tinham sido regenerados; correção incidental,
+não intencional desta história).
