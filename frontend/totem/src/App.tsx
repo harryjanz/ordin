@@ -42,8 +42,8 @@ class PixErrorBoundary extends Component<{ children: ReactNode }, { error: strin
   }
 }
 
-const INACTIVITY_TIMEOUT_MS = 120_000;
-const INACTIVITY_WARN_SEC   = 10;
+const INACTIVITY_TIMEOUT_MS = 180_000;
+const INACTIVITY_WARN_SEC   = 20;
 
 export default function App() {
   const {
