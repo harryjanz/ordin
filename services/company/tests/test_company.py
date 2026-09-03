@@ -1,12 +1,15 @@
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
-import bcrypt
 from datetime import datetime, timedelta
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy import delete as sa_delete, select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+import bcrypt
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete as sa_delete
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _make_token(role: str, company_id: int) -> str:
@@ -334,7 +337,7 @@ async def test_internal_get_payment_config_secret_errado_retorna_403(client, see
 # ── Encryption helpers ────────────────────────────────────────────────────────
 
 def test_encrypt_decrypt_field():
-    from main import encrypt_field, decrypt_field
+    from main import decrypt_field, encrypt_field
     plaintext = "minha-chave-secreta"
     encrypted = encrypt_field(plaintext)
     assert encrypted.startswith("enc:")

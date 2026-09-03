@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
-
 from domain.interfaces.payment_provider import IPaymentProvider
 from domain.schemas import (
     ProviderConfig,

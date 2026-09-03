@@ -14,12 +14,16 @@ import sys
 
 sys.path.insert(0, ".")
 
-from sqlalchemy import delete  # noqa: E402
-
-from main import (  # noqa: E402
-    AsyncSessionLocal, Company, Terminal, User,
-    CompanyContact, CompanyLegalRepresentative, CompanyPaymentConfig,
+from main import (
+    AsyncSessionLocal,
+    Company,
+    CompanyContact,
+    CompanyLegalRepresentative,
+    CompanyPaymentConfig,
+    Terminal,
+    User,
 )
+from sqlalchemy import delete
 
 _SEED_IDS = {1, 2, 3}  # Burger House, Pasta & Co, Sweet Corner — init.sql, nunca apagar
 

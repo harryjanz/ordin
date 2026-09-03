@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -341,7 +342,7 @@ async def test_empresa_nao_edita_combo_de_outra_empresa(client, seed, token_owne
         headers=auth(token_company_b),
     )
     assert r2.status_code == 404
-    r3 = await client.get(f"/catalog/combos?include_inactive=true", headers=auth(token_owner))
+    r3 = await client.get("/catalog/combos?include_inactive=true", headers=auth(token_owner))
     combo = next(c for c in r3.json()["combos"] if c["id"] == combo_id)
     assert combo["name"] == "__combo_classico__"
 

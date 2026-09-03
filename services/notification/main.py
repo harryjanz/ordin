@@ -1,11 +1,10 @@
 import os
 import secrets
 
-from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel
-
 from config import require_env
+from fastapi import Depends, FastAPI, Header, HTTPException
 from infrastructure.provider_factory import get_email_provider
+from pydantic import BaseModel
 
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
 EMAIL_PROVIDER  = os.getenv("EMAIL_PROVIDER", "smtp")

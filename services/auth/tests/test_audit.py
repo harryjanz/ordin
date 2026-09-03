@@ -1,11 +1,14 @@
-import sys, os, json
+import json
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import httpx
 import pytest
 import respx
-import httpx
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest.fixture
@@ -108,8 +111,9 @@ async def test_pin_login_success_emite_audit(client, capsys):
 
 # CA-001: logout é logado (usa token gerado localmente, sem inserir no DB)
 async def test_logout_emite_audit(client, capsys):
-    import main as svc
     from datetime import timedelta
+
+    import main as svc
     fake_refresh = svc.make_token(
         {"sub": "2", "type": "refresh", "company": 1, "role": "admin"},
         timedelta(days=7),

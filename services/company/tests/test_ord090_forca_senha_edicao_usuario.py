@@ -104,11 +104,12 @@ async def empresa_com_convite(client):
 
 
 async def _criar_convite(client, empresa_com_convite, nome_sufixo):
-    import main as svc
-    import respx
-    import httpx
     import json as jsonlib
     from urllib.parse import parse_qs, urlparse
+
+    import httpx
+    import main as svc
+    import respx
 
     with respx.mock:
         route = respx.post(f"{svc.NOTIFICATION_SERVICE_URL}/internal/send-invite").mock(
@@ -177,8 +178,9 @@ async def test_complete_registration_bloqueia_reuso_do_token(client, empresa_com
 
 
 async def test_invite_status_token_expirado(client, empresa_com_convite):
-    import main as svc
     from datetime import datetime, timedelta
+
+    import main as svc
 
     raw_token = await _criar_convite(client, empresa_com_convite, "StatusExpirado")
     token_hash = svc.hashlib.sha256(raw_token.encode()).hexdigest()

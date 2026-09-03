@@ -3,19 +3,22 @@ Testes de cobertura que usam chamadas diretas às funções endpoint (sem ASGI t
 Chamadas diretas fazem coverage.py rastrear linhas pós-`await` que o ASGITransport não cobre.
 Testes HTTP (via client) cobrem routing/auth; testes diretos cobrem a lógica de negócio.
 """
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
+from datetime import datetime, timedelta
+
 import bcrypt
 import httpx
+import pytest
 import respx
-from datetime import datetime, timedelta
 from fastapi import HTTPException
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy import delete as sa_delete, select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -132,8 +135,9 @@ async def _cleanup_seed(SessionLocal, co_id):
 
 def test_encryption_key_sem_configuracao():
     """Linha 47: encrypt_field retorna plaintext quando key is None."""
-    import main as svc
     from unittest.mock import patch
+
+    import main as svc
     with patch.object(svc, '_encryption_key', return_value=None):
         result = svc.encrypt_field("minha-senha")
     assert result == "minha-senha"
@@ -141,8 +145,9 @@ def test_encryption_key_sem_configuracao():
 
 def test_decrypt_enc_sem_key_levanta_runtime_error():
     """Linha 59: decrypt_field levanta RuntimeError quando key é None mas valor tem enc:."""
-    import main as svc
     from unittest.mock import patch
+
+    import main as svc
     with patch.object(svc, '_encryption_key', return_value=None):
         with pytest.raises(RuntimeError, match="CREDENTIAL_ENCRYPTION_KEY"):
             svc.decrypt_field("enc:YWJj")

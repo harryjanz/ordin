@@ -1,16 +1,36 @@
-from fastapi import FastAPI, HTTPException, Depends, Header, Request
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, ForeignKey, select, func
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import DeclarativeBase, relationship
-from pydantic import BaseModel
-from typing import List, Optional
+import hashlib
+import hmac as hmaclib
+import random
+import secrets
+import string
 from datetime import datetime, timedelta, timezone
-import random, string, secrets, hmac as hmaclib, hashlib
-from config import require_env, get_cors_origins
-from auth import get_current_user, TokenPayload
+
 from audit import emit_audit
-from websocket import ws_router, broadcast_order_created, broadcast_ticket_collected, broadcast_order_completed, broadcast_order_paid, broadcast_order_ready
+from auth import TokenPayload, get_current_user
+from config import get_cors_origins, require_env
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    func,
+    select,
+)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, relationship
+from websocket import (
+    broadcast_order_completed,
+    broadcast_order_created,
+    broadcast_order_paid,
+    broadcast_order_ready,
+    broadcast_ticket_collected,
+    ws_router,
+)
 
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")
@@ -113,18 +133,18 @@ class ItemIn(BaseModel):
     unit_price: float
 
 class OrderIn(BaseModel):
-    items: List[ItemIn]
-    cpf: Optional[str] = None
+    items: list[ItemIn]
+    cpf: str | None = None
     discount: float = 0
-    consumption_type: Optional[str] = None
-    pickup_name: Optional[str] = None
+    consumption_type: str | None = None
+    pickup_name: str | None = None
 
 class CollectIn(BaseModel):
     # ORD-123 — collected_by deixou de vir do cliente: era uma string livre
     # sem validação, inútil pra auditoria. Passa a ser sempre derivado de
     # current_user.sub (JWT) direto no handler.
-    collection_device: Optional[str] = None
-    qr_data: Optional[str] = None  # opcional durante grace period (Sprint 4 remove a exceção)
+    collection_device: str | None = None
+    qr_data: str | None = None  # opcional durante grace period (Sprint 4 remove a exceção)
 
 # ── Response schemas ──────────────────────────────────────────────────────────
 
@@ -139,9 +159,9 @@ class OrderListItem(BaseModel):
     total: float
     company_id: int
     terminal_id: int
-    cpf: Optional[str] = None
-    consumption_type: Optional[str] = None
-    pickup_name: Optional[str] = None
+    cpf: str | None = None
+    consumption_type: str | None = None
+    pickup_name: str | None = None
     created_at: str
     tickets_total: int
     tickets_collected: int
@@ -161,9 +181,9 @@ class TicketOut(BaseModel):
     status: str
     unit_number: int
     total_units: int
-    collected_at: Optional[str] = None
-    collected_by: Optional[str] = None
-    collection_method: Optional[str] = None
+    collected_at: str | None = None
+    collected_by: str | None = None
+    collection_method: str | None = None
 
 class TicketListOut(BaseModel):
     order_ref: str
@@ -171,14 +191,14 @@ class TicketListOut(BaseModel):
     tickets: list[TicketOut]
     # ORD-118 — QR do pedido inteiro, sempre presente; quem decide se
     # imprime/usa é o frontend, com base no fulfillment_mode da empresa.
-    order_qr_data: Optional[str] = None
+    order_qr_data: str | None = None
 
 class CollectOut(BaseModel):
     ok: bool
     ticket_code: str
     order_ref: str
     collected_at: str
-    collected_by: Optional[str] = None
+    collected_by: str | None = None
     order_completed: bool
     progress: str
 
@@ -186,7 +206,7 @@ class OrderCollectOut(BaseModel):
     ok: bool
     order_ref: str
     collected_at: str
-    collected_by: Optional[str] = None
+    collected_by: str | None = None
     progress: str
 
 class OrderStatusOut(BaseModel):
@@ -205,14 +225,14 @@ class PrepStatsHourItem(BaseModel):
 
 class PrepStatsOut(BaseModel):
     count: int
-    avg_prep_minutes: Optional[float] = None
-    by_hour: List[PrepStatsHourItem]
+    avg_prep_minutes: float | None = None
+    by_hour: list[PrepStatsHourItem]
     # ORD-119 (melhorias de UX 2026-08-24) — mesmo padrão de comparação de
     # período já usado em payments_analytics (services/payment/main.py):
     # janela anterior de mesma duração, imediatamente antes da atual.
-    avg_prep_minutes_prev: Optional[float] = None
-    change_pct: Optional[float] = None
-    peak_hour_prev: Optional[PrepStatsHourItem] = None
+    avg_prep_minutes_prev: float | None = None
+    change_pct: float | None = None
+    peak_hour_prev: PrepStatsHourItem | None = None
 
 class HealthOut(BaseModel):
     service: str
@@ -359,7 +379,7 @@ async def collect_ticket(
     body: CollectIn,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
-    x_device_id: Optional[str] = Header(default=None),
+    x_device_id: str | None = Header(default=None),
     # Tipo precisa ficar "Request" puro (não Optional[Request]) pro FastAPI
     # reconhecer e injetar automaticamente — Optional[] faz cair na validação
     # normal de campo Pydantic, que não sabe lidar com o tipo do Starlette.
@@ -450,7 +470,7 @@ async def collect_order(
     body: CollectIn,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
-    x_device_id: Optional[str] = Header(default=None),
+    x_device_id: str | None = Header(default=None),
     request: Request = None,
 ):
     """
@@ -542,9 +562,9 @@ async def mark_order_ready(
     summary="Tempo médio de preparo e relatório de gargalo por hora (ORD-119)",
 )
 async def prep_stats(
-    company_id: Optional[int] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
+    company_id: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
@@ -632,14 +652,14 @@ async def prep_stats(
     summary="Listar pedidos da empresa",
 )
 async def list_orders(
-    status: Optional[str] = None,
-    order_ref: Optional[str] = None,
-    cpf: Optional[str] = None,
-    company_id: Optional[int] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    hour_from: Optional[str] = None,
-    hour_to: Optional[str] = None,
+    status: str | None = None,
+    order_ref: str | None = None,
+    cpf: str | None = None,
+    company_id: int | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    hour_from: str | None = None,
+    hour_to: str | None = None,
     limit: int = 50,
     skip: int = 0,
     db: AsyncSession = Depends(get_db),

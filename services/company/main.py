@@ -11,7 +11,13 @@ import bcrypt
 import httpx
 import pyotp
 import redis as redis_lib
+from audit import emit_audit
+from auth import TokenPayload, get_current_user, get_setup_mfa_user
+from config import get_cors_origins, require_env
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from domain.address import UF_VALUES, is_valid_cep, is_valid_uf, normalize_cep
+from domain.cnpj import is_valid_cnpj, normalize_cnpj
+from domain.cpf import is_valid_cpf, normalize_cpf
 from fastapi import (
     Depends,
     FastAPI,
@@ -25,32 +31,6 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import (
-    JSON,
-    Boolean,
-    Column,
-    DateTime,
-    Enum,
-    Integer,
-    String,
-    UniqueConstraint,
-    delete,
-    func,
-    or_,
-    select,
-    update,
-)
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
-
-from audit import emit_audit
-from auth import TokenPayload, get_current_user, get_setup_mfa_user
-from config import get_cors_origins, require_env
-from domain.address import UF_VALUES, is_valid_cep, is_valid_uf, normalize_cep
-from domain.cnpj import is_valid_cnpj, normalize_cnpj
-from domain.cpf import is_valid_cpf, normalize_cpf
 from infrastructure.cep_lookup import lookup_cep
 from infrastructure.cnpj_lookup import lookup_cnpj
 from infrastructure.contract_storage import (
@@ -70,6 +50,25 @@ from infrastructure.video_storage import (
 from infrastructure.video_storage import (
     upload_video,
 )
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Enum,
+    Integer,
+    String,
+    UniqueConstraint,
+    delete,
+    func,
+    or_,
+    select,
+    update,
+)
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 DB_URL          = require_env("DB_URL")
 INTERNAL_SECRET = require_env("INTERNAL_SECRET")

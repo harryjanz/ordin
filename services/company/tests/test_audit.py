@@ -1,12 +1,16 @@
-import sys, os, json
+import json
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
-import bcrypt
 from datetime import datetime, timedelta
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy import delete as sa_delete, select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+
+import bcrypt
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete as sa_delete
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _make_token(role: str, company_id: int) -> str:

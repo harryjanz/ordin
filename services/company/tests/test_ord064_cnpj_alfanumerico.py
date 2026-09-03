@@ -15,11 +15,10 @@ from datetime import datetime, timedelta
 import httpx
 import pytest
 import respx
+from domain.cnpj import is_alphanumeric_cnpj, is_valid_cnpj
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-from domain.cnpj import is_alphanumeric_cnpj, is_valid_cnpj
 
 
 def _make_token(role: str, company_id: int) -> str:

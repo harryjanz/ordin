@@ -20,7 +20,6 @@ import logging
 from dataclasses import dataclass, replace
 
 import httpx
-
 from domain.cnpj import is_alphanumeric_cnpj
 
 logger = logging.getLogger(__name__)

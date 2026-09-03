@@ -1,4 +1,6 @@
-import os, sys
+import os
+import sys
+
 os.environ.setdefault("DB_URL", "mysql+pymysql://placeholder:placeholder@localhost/fk_auth")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("JWT_SECRET", "placeholder")
@@ -7,11 +9,13 @@ os.environ.setdefault("INTERNAL_SECRET", "placeholder")
 os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000")
 
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
+
 from alembic import context
+from sqlalchemy import engine_from_config, pool
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from main import Base
 from config import require_env
+from main import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", require_env("DB_URL").replace("mysql+aiomysql://", "mysql+pymysql://"))

@@ -3,15 +3,17 @@
 # Eventos: ticket.collected | order.completed | order.created
 # URL: ws://host:8004/ws/orders?company_id=1
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
-from typing import Dict, List
-import asyncio, json, logging
+import asyncio
+import json
+import logging
+
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger("ws")
 ws_router = APIRouter()
 
 class ConnectionManager:
-    def __init__(self): self._conns: Dict[int,List[WebSocket]] = {}
+    def __init__(self): self._conns: dict[int,list[WebSocket]] = {}
 
     async def connect(self, ws: WebSocket, cid: int):
         await ws.accept()

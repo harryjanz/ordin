@@ -347,3 +347,34 @@ Implementada só a Fase 1 nesta rodada (config-only, zero mudança de código de
   pytest fora da seção `[tool.pytest.ini_options]` (intocada) — mudança de config de lint não
   tem como afetar comportamento de serviço em produção. `docker compose up` dos 5 serviços seguiu
   rodando sem qualquer rebuild necessário (nenhum arquivo de serviço mudou).
+
+## Validação (Fase 2 — auto-fix, 2026-09-03)
+
+`ruff check services/ --fix` aplicado nas categorias auto-corrigíveis
+(I001/UP045/UP006/UP035/UP037/F401/F541/RUF100): **497 → 148 erros** (859 → 148 desde o início da
+história, −83%). 120 arquivos tocados nos 5 serviços — só reordenação/split de import e sintaxe
+equivalente (`Optional[X]` → `X | None`, etc.), nenhuma mudança de lógica.
+
+Verificação seguindo à risca o plano de mitigação da Fase 2 (ver Riscos):
+- **Os 7 `F401` (import não usado) revisados individualmente** antes de aceitar — todos
+  genuinamente mortos (`string` em `auth/main.py`, `sqlalchemy.select` em 2 arquivos de teste,
+  `unittest.mock.MagicMock`/`patch` em 2 arquivos de teste). Nenhum caso de import mantido só
+  por efeito colateral de registro (ex: model pra `Base.metadata`).
+- **Checado que a reordenação de import não introduz dependência de ordem** — `config.py` e
+  `audit.py` (shared, importados nos 5 serviços) não têm código de nível de módulo, só funções;
+  o único código de módulo com efeito colateral real (`redis_client = redis.from_url(...)` em
+  `auth/main.py`) continua depois de todo o bloco de imports, como já era.
+- **Suíte de testes por serviço, em ambiente limpo, comparando exatamente com a baseline
+  pré-fix** (não só "os testes passam", mas "a mesma contagem de antes"):
+  - `auth`: 31/31 (idêntico)
+  - `company`: 335/335, mesmas 9 falhas pré-existentes já confirmadas antes desta história
+  - `catalog`: 185/185 (idêntico)
+  - `order`: 58/58 (idêntico)
+  - `payment`: 126/126 (idêntico)
+- **`docker compose up` real dos 5 serviços** (não só pytest, per o risco documentado de
+  import-time silenciosamente não coberto por teste) — todos subiram com
+  "Application startup complete", sem crash loop, migrations aplicadas normalmente, e
+  `GET /health` retornou 200 nos 5 (`localhost:8001-8005`).
+- Erros restantes (148) são exatamente as categorias previstas pra Fase 3
+  (`RUF059` 107, `BLE001` 30, `E722`/`SIM102` 3+3, resto 4) — nenhuma categoria nova surgiu do
+  auto-fix em si.

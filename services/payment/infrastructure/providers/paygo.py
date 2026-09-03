@@ -4,7 +4,6 @@ from datetime import datetime
 from decimal import Decimal
 
 import httpx
-
 from domain.interfaces.payment_provider import IPaymentProvider
 from domain.schemas import (
     PROVIDER_BASE_URLS,

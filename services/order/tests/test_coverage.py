@@ -3,13 +3,16 @@ Testes de cobertura para order service.
 Usa chamadas diretas às funções endpoint para cobrir linhas pós-`await`.
 Testa também qr_generator.py e websocket.py.
 """
-import sys, os, json
+import json
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import delete as sa_delete
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _user(role="owner", company_id=1, terminal_id=None):
@@ -106,6 +109,7 @@ def test_verify_qr_data_json_invalido():
 
 def test_generate_qr_png_b64():
     import base64
+
     from qr_generator import build_qr_data, generate_qr_png_b64
     qr = build_qr_data("T001", "ORD-001")
     result = generate_qr_png_b64(qr)
@@ -127,8 +131,9 @@ def test_generate_qr_svg():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def test_connection_manager_connect_broadcast_disconnect():
+    from unittest.mock import AsyncMock
+
     from websocket import ConnectionManager
-    from unittest.mock import AsyncMock, MagicMock
     mgr = ConnectionManager()
     ws = AsyncMock()
     await mgr.connect(ws, 1)
@@ -146,8 +151,9 @@ async def test_connection_manager_broadcast_sem_conexoes():
 
 async def test_connection_manager_broadcast_ws_morto():
     """Quando ws.send_text levanta exceção, deve remover a conexão morta."""
-    from websocket import ConnectionManager
     from unittest.mock import AsyncMock
+
+    from websocket import ConnectionManager
     mgr = ConnectionManager()
     ws = AsyncMock()
     ws.send_text.side_effect = Exception("conexão fechada")
@@ -157,8 +163,9 @@ async def test_connection_manager_broadcast_ws_morto():
 
 
 async def test_broadcast_ticket_collected():
+    from unittest.mock import AsyncMock, patch
+
     from websocket import broadcast_ticket_collected, manager
-    from unittest.mock import patch, AsyncMock
     with patch.object(manager, 'broadcast', new_callable=AsyncMock) as mock_broadcast:
         await broadcast_ticket_collected(1, "T001", "ORD-001", "X-Burger", "1/1", "operador")
     mock_broadcast.assert_called_once()
@@ -168,8 +175,9 @@ async def test_broadcast_ticket_collected():
 
 
 async def test_broadcast_order_completed():
+    from unittest.mock import AsyncMock, patch
+
     from websocket import broadcast_order_completed, manager
-    from unittest.mock import patch, AsyncMock
     with patch.object(manager, 'broadcast', new_callable=AsyncMock) as mock_broadcast:
         await broadcast_order_completed(1, "ORD-001")
     mock_broadcast.assert_called_once()
@@ -177,8 +185,9 @@ async def test_broadcast_order_completed():
 
 
 async def test_broadcast_order_created():
+    from unittest.mock import AsyncMock, patch
+
     from websocket import broadcast_order_created, manager
-    from unittest.mock import patch, AsyncMock
     with patch.object(manager, 'broadcast', new_callable=AsyncMock) as mock_broadcast:
         await broadcast_order_created(1, "ORD-001", 25.90, "Terminal 1")
     mock_broadcast.assert_called_once()
@@ -202,8 +211,10 @@ def test_verify_qr_invalido():
 
 
 def test_verify_qr_valido():
+    import hashlib
+    import hmac as hmaclib
+
     import main as svc
-    import hmac as hmaclib, hashlib
     parts = ["TICK0001", "X-Burger", "ORD-001", "2024-01-01"]
     payload = "|".join(parts)
     sig = hmaclib.new(svc.QR_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
@@ -217,7 +228,7 @@ def test_verify_qr_valido():
 
 async def test_dir_create_order(db_session):
     import main as svc
-    from main import OrderIn, ItemIn
+    from main import ItemIn, OrderIn
     body = OrderIn(items=[ItemIn(product_id=1, name="X-Burger", qty=2, unit_price=25.90)])
     result = await svc.create_order(body, db_session(), _user("kiosk", 1, terminal_id=1))
     assert "order_ref" in result
@@ -346,6 +357,7 @@ async def test_dir_list_orders_filtro_status_paid(db_session):
 
 async def test_dir_list_orders_periodo(db_session):
     from datetime import datetime
+
     import main as svc
     refs = ["ORD-COVPER01", "ORD-COVPER02"]
     await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 1, 10, 0))
@@ -363,6 +375,7 @@ async def test_dir_list_orders_faixa_horario_com_data(db_session):
     """Faixa de horário aplica sobre o período, em qualquer dia dele — caso
     de uso: cliente sem o número do pedido, lembra o horário aproximado."""
     from datetime import datetime
+
     import main as svc
     refs = ["ORD-COVHOR01", "ORD-COVHOR02", "ORD-COVHOR03"]
     await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 1, 12, 0))
@@ -383,6 +396,7 @@ async def test_dir_list_orders_faixa_horario_ignorada_sem_data_from(db_session):
     """hour_from/hour_to só têm efeito com date_from setado (mesma trava do
     frontend, campo desabilitado até "De" ser preenchido)."""
     from datetime import datetime
+
     import main as svc
     refs = ["ORD-COVHORX1", "ORD-COVHORX2"]
     await _mk_bare_order(db_session, refs[0], company_id=ISOLATED_CO, created_at=datetime(2026, 8, 1, 12, 0))
@@ -531,9 +545,11 @@ async def test_dir_collect_ticket_qr_invalido(db_session):
 
 
 async def test_dir_collect_ticket_valido(db_session):
+    import hashlib
+    import hmac as hmaclib
+
     import main as svc
     from main import CollectIn
-    import hmac as hmaclib, hashlib
     order_id, oi_id, t_id = await _create_order(db_session)
     parts = ["TICK0001", "X-Burger", "ORD-COV01", "2024-01-01T00:00:00"]
     payload = "|".join(parts)

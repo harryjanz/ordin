@@ -5,12 +5,19 @@
 #
 # requirements: qrcode[pil]==7.4.2  Pillow==10.3.0
 
-import qrcode, io, base64, json, hashlib, hmac, os
-from qrcode.image.styledpil import StyledPilImage
-from qrcode.image.styles.moduledrawers import RoundedModuleDrawer
+import base64
+import hashlib
+import hmac
+import io
+import json
+import os
+from datetime import datetime
+
+import qrcode
 import qrcode.image.svg
 from PIL import Image
-from datetime import datetime
+from qrcode.image.styledpil import StyledPilImage
+from qrcode.image.styles.moduledrawers import RoundedModuleDrawer
 
 QR_SECRET = os.getenv("QR_SECRET","qr-secret-troque-em-producao")
 

@@ -1,15 +1,21 @@
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, Header
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, select, update
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import DeclarativeBase
-from pydantic import BaseModel
-from typing import Optional, Union
+import hashlib
+import json
+import os
+import secrets
 from datetime import datetime, timedelta
-from jose import jwt, JWTError
-import hashlib, json, os, secrets, redis, httpx, string
-from config import require_env, get_cors_origins
+from typing import Union
+
+import httpx
+import redis
 from audit import emit_audit
+from config import get_cors_origins, require_env
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from jose import JWTError, jwt
+from pydantic import BaseModel
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 redis_client = redis.from_url(require_env("REDIS_URL"), decode_responses=True)
 RATE_MAX             = 5
@@ -116,8 +122,8 @@ class CompanyInfo(BaseModel):
 class TerminalInfo(BaseModel):
     id: int
     label: str
-    tef_number: Optional[str] = None
-    payment_provider: Optional[str] = None
+    tef_number: str | None = None
+    payment_provider: str | None = None
 
 class TokenOut(BaseModel):
     access_token: str
@@ -126,7 +132,7 @@ class TokenOut(BaseModel):
     # ORD-092: presente só quando o login terminou com "confiar neste
     # dispositivo" marcado — frontend guarda numa chave de localStorage à
     # parte, que sobrevive a logout (é sobre o navegador, não a sessão).
-    device_token: Optional[str] = None
+    device_token: str | None = None
 
 class MfaRequiredOut(BaseModel):
     # ORD-088: retornado no lugar de TokenOut quando o usuário tem TOTP ativo
@@ -147,8 +153,8 @@ class KioskTokenOut(BaseModel):
 class AvailableTerminalInfo(BaseModel):
     id: int
     label: str
-    terminal_code: Optional[str] = None
-    tef_number: Optional[str] = None
+    terminal_code: str | None = None
+    tef_number: str | None = None
 
 class ValidatePinOut(BaseModel):
     ok: bool
@@ -170,10 +176,10 @@ class DeviceChallengeOut(BaseModel):
 
 class DeviceStatusOut(BaseModel):
     status: str
-    access_token: Optional[str] = None
-    token_type: Optional[str] = None
-    company: Optional[CompanyInfo] = None
-    terminal: Optional[TerminalInfo] = None
+    access_token: str | None = None
+    token_type: str | None = None
+    company: CompanyInfo | None = None
+    terminal: TerminalInfo | None = None
 
 # ── App ───────────────────────────────────────────────────────────────────────
 

@@ -1,4 +1,5 @@
 import logging
+
 from domain.interfaces.message_broker import IMessageBroker
 
 logger = logging.getLogger(__name__)

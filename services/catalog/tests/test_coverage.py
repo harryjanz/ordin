@@ -2,13 +2,15 @@
 Testes de cobertura para paths não cobertos pelos outros test files.
 Usa function-scoped fixtures com engine patching para evitar colisão de event loops.
 """
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy import delete as sa_delete, select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete as sa_delete
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest.fixture
@@ -197,7 +199,7 @@ async def test_admin_sem_company_id_retorna_400(client, token_admin):
 
 
 async def test_superadmin_com_company_id_ve_categorias_da_empresa(client, seed, token_superadmin):
-    r = await client.get(f"/catalog/categories?company_id=1&include_inactive=true", headers=auth(token_superadmin))
+    r = await client.get("/catalog/categories?company_id=1&include_inactive=true", headers=auth(token_superadmin))
     assert r.status_code == 200
     names = [c["name"] for c in r.json()["categories"]]
     assert "__cov_cat__" in names

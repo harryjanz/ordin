@@ -4,8 +4,8 @@ Revision ID: bbb004
 Revises: bbb003
 Create Date: 2026-06-11 10:00:00.000000
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "bbb004"
 down_revision = "bbb003"
