@@ -2081,6 +2081,146 @@
         }
       }
     },
+    "/catalog/combos/{combo_id}/image": {
+      "post": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Enviar imagem de um combo (gera também o thumbnail)",
+        "description": "ORD-153: mesma validação de upload_product_image_endpoint, exceto que\nnão exige category_id — a chave no bucket não depende de categoria.",
+        "operationId": "upload_combo_image_endpoint_catalog_combos__combo_id__image_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "combo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Combo Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_combo_image_endpoint_catalog_combos__combo_id__image_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Combo não encontrado"
+          },
+          "415": {
+            "description": "Formato de arquivo não aceito (só jpg/png)"
+          },
+          "413": {
+            "description": "Arquivo maior que 2 MB"
+          },
+          "422": {
+            "description": "Arquivo não é uma imagem válida"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Catálogo"
+        ],
+        "summary": "Remover a imagem de um combo",
+        "operationId": "delete_combo_image_catalog_combos__combo_id__image_delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "combo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Combo Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComboOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Combo não encontrado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/catalog/menus": {
       "post": {
         "tags": [
@@ -2550,6 +2690,20 @@
         ],
         "title": "AllergenOut"
       },
+      "Body_upload_combo_image_endpoint_catalog_combos__combo_id__image_post": {
+        "properties": {
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "title": "Image"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image"
+        ],
+        "title": "Body_upload_combo_image_endpoint_catalog_combos__combo_id__image_post"
+      },
       "Body_upload_option_image_endpoint_catalog_options__option_id__image_post": {
         "properties": {
           "image": {
@@ -2824,6 +2978,28 @@
           "active": {
             "type": "boolean",
             "title": "Active"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "thumbnail_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail Url"
           },
           "items": {
             "items": {

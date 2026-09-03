@@ -1,12 +1,27 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, CurrencyInput, Dropdown, InputBase, Tag, type DropdownOptions } from "design-system";
+import {
+  Alert,
+  Button,
+  CurrencyInput,
+  Dropdown,
+  InputBase,
+  Tag,
+  Upload,
+  UploadListFiles,
+  type DropdownOptions,
+  type UploadFile,
+} from "design-system";
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import type { Category, Combo, ComboItem, Product } from "../types";
 import styles from "./ComboFormScreen.module.scss";
+
+// ORD-153 — mesmo limite/formato já validado em ProductEditScreen.
+const IMAGE_MAX_SIZE_MB = 2;
+const IMAGE_TYPES = ["image/jpeg", "image/png"];
 
 // ORD-112 — tela dedicada de criação/edição de combo, espelha
 // OptionGroupFormScreen (H1, Breadcrumb, Voltar/Salvar). Diferente do padrão
@@ -30,6 +45,15 @@ export default function ComboFormScreen() {
   const [comboItems, setComboItems] = useState<ComboItem[]>([]);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // ORD-153 — imagem do combo. Só disponível depois do combo já existir
+  // (mesma restrição implícita de ProductEditScreen, que também só faz
+  // upload num registro já criado) — em "novo combo" mostra um aviso pra
+  // salvar antes, em vez de tentar mandar pra um id que ainda não existe.
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
+  const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -65,6 +89,8 @@ export default function ComboFormScreen() {
         setPrice(c.price);
         setComboCategoryId(c.category_id !== null ? String(c.category_id) : "");
         setComboItems(c.items);
+        setImageUrl(c.image_url);
+        setThumbnailUrl(c.thumbnail_url);
       } catch {
         if (!cancelled) setLoadError("Erro ao carregar combo.");
       } finally {
@@ -105,6 +131,33 @@ export default function ComboFormScreen() {
 
   function removeFromCombo(productId: number) {
     setComboItems((prev) => prev.filter((i) => i.product_id !== productId));
+  }
+
+  async function handleImageFiles(files: UploadFile[]) {
+    const picked = files[0];
+    if (editingComboId === null || !picked) return;
+    if (picked.status === "error-read") {
+      setUploadFiles([picked]);
+      return;
+    }
+    setUploadFiles([{ ...picked, status: "loading" }]);
+    try {
+      const formData = new FormData();
+      formData.append("image", picked.file);
+      const r = await api.post(`/catalog/combos/${editingComboId}/image`, formData, catalogParams());
+      setImageUrl(r.data.image_url);
+      setThumbnailUrl(r.data.thumbnail_url);
+      setUploadFiles([]);
+    } catch {
+      setUploadFiles([{ ...picked, status: "error-send" }]);
+    }
+  }
+
+  async function removeComboImage() {
+    if (editingComboId === null) return;
+    const r = await api.delete(`/catalog/combos/${editingComboId}/image`, catalogParams());
+    setImageUrl(r.data.image_url);
+    setThumbnailUrl(r.data.thumbnail_url);
   }
 
   const sumAvulso = comboItems.reduce((s, i) => s + i.price, 0);
@@ -193,6 +246,39 @@ export default function ComboFormScreen() {
       </div>
 
       <div className={styles.panel}>
+        <h2 className={styles.h2}>Imagem</h2>
+        {editingComboId === null ? (
+          <div className={styles.searchEmpty}>Salve o combo primeiro para poder adicionar uma imagem.</div>
+        ) : thumbnailUrl ? (
+          <div className={styles.imagePreview}>
+            <img
+              src={thumbnailUrl}
+              alt={name}
+              className={styles.thumbnailImg}
+              onClick={() => setPreviewImage({ url: imageUrl ?? thumbnailUrl, alt: name })}
+            />
+            <Button type="button" size="small" variant="secondary" onClick={removeComboImage}>
+              Remover imagem
+            </Button>
+          </div>
+        ) : (
+          <>
+            <Upload
+              fullWidth
+              maxFileSize={IMAGE_MAX_SIZE_MB}
+              multipleFiles={false}
+              types={IMAGE_TYPES}
+              showMaxFileSize={false}
+              helperMessage="JPG ou PNG, até 2 MB"
+              errorMessage="Envie um arquivo JPG ou PNG de até 2 MB"
+              onCallbackUpload={handleImageFiles}
+            />
+            <UploadListFiles items={uploadFiles} removable={false} />
+          </>
+        )}
+      </div>
+
+      <div className={styles.panel}>
         <div className={styles.formLabel}>Buscar produto pra adicionar</div>
         <div className={styles.searchRow}>
           <div className={styles.searchRowField}>
@@ -262,6 +348,12 @@ export default function ComboFormScreen() {
           </div>
         </div>
       </div>
+
+      {previewImage && (
+        <div className={styles.previewOverlay} onClick={() => setPreviewImage(null)}>
+          <img src={previewImage.url} alt={previewImage.alt} className={styles.previewImage} />
+        </div>
+      )}
     </div>
   );
 }

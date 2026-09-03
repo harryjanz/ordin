@@ -19,6 +19,12 @@
   @include font('xl');
 }
 
+// ORD-153 — título de seção dentro de um .panel, mesmo padrão de
+// ProductEditScreen (.h2) pra dar hierarquia visual à seção "Imagem".
+.h2 {
+  @include font('l-emphasys');
+}
+
 .headerActions {
   display: flex;
   gap: 12px;
@@ -182,4 +188,38 @@
 .summaryNote {
   @include font('xs');
   color: rgba(var(--a-text-rgb), 0.5);
+}
+
+// ORD-153 — imagem do combo, mesmo estilo já validado em
+// ProductEditScreen.module.scss (thumbnail clicável + lightbox simples).
+.imagePreview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.thumbnailImg {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  @include rounded('default');
+  border: 1px solid var(--a-border);
+  cursor: pointer;
+}
+
+.previewOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  cursor: zoom-out;
+}
+
+.previewImage {
+  max-width: 80vw;
+  max-height: 80vh;
+  object-fit: contain;
 }

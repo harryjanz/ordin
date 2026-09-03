@@ -66,6 +66,10 @@ export interface Combo {
   name: string;
   description: string | null;
   price: number;
+  // ORD-153 — imagem do combo (opcional; card e upsell caem no placeholder
+  // padrão, mesmo comportamento de produto sem imagem, quando ausente).
+  image_url: string | null;
+  thumbnail_url: string | null;
   items: ComboItemRef[];
 }
 
