@@ -1,6 +1,7 @@
 from domain.interfaces.email_provider import IEmailProvider
-from infrastructure.providers.smtp_provider import SMTPEmailProvider
+
 from infrastructure.providers.ses_provider import SESEmailProvider
+from infrastructure.providers.smtp_provider import SMTPEmailProvider
 
 
 def get_email_provider(name: str) -> IEmailProvider:

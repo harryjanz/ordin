@@ -20,7 +20,6 @@ import logging
 from dataclasses import dataclass, replace
 
 import httpx
-
 from domain.cnpj import is_alphanumeric_cnpj
 
 logger = logging.getLogger(__name__)
@@ -135,7 +134,9 @@ async def _fetch(url: str, cnpj: str, parse, body_is_error=None) -> CnpjLookupRe
                 return None
             return CnpjLookupResult(found=False, reason="cnpj_not_found")
         return parse(data)
-    except Exception as exc:
+    # ORD-156 — mesmo motivo do cep_lookup: consulta best-effort a API
+    # externa de CNPJ.
+    except Exception as exc:  # noqa: BLE001
         logger.warning("%s: falha na consulta de CNPJ — %s", url, exc)
         return None
 

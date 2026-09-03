@@ -1,10 +1,12 @@
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete as sa_delete
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest.fixture
@@ -105,7 +107,8 @@ async def test_sem_token_retorna_401(client):
 # CA-006: criação vincula company_id do JWT
 async def test_create_categoria_vincula_company_do_jwt(client, token_owner):
     import main as svc
-    from sqlalchemy import select, delete as sa_del
+    from sqlalchemy import delete as sa_del
+    from sqlalchemy import select
     r = await client.post(
         "/catalog/categories",
         json={"name": "__iso_create_test__"},

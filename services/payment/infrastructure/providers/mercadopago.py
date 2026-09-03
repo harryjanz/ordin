@@ -1,11 +1,11 @@
 import asyncio
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
-
 from domain.interfaces.payment_provider import IPaymentProvider
 from domain.schemas import (
     ProviderConfig,
@@ -95,7 +95,11 @@ class MPProvider(IPaymentProvider):
                     headers={**self._headers, "X-Idempotency-Key": f"{order_ref}-{uuid.uuid4()}"},
                     json=body,
                 )
-            except Exception as exc:
+            # ORD-156 — captura ampla intencional: qualquer falha de rede/
+            # parsing na chamada ao MP vira transação recusada, não exceção
+            # não tratada (httpx tem várias subclasses de erro de conexão;
+            # não vale a pena listar uma por uma aqui).
+            except Exception as exc:  # noqa: BLE001
                 return TransactionResult(
                     status=TransactionStatus.refused,
                     error_message=f"Falha ao conectar ao MP Point: {exc}",
@@ -128,7 +132,9 @@ class MPProvider(IPaymentProvider):
                         headers=self._headers,
                     )
                     poll_data = poll.json()
-                except Exception as exc:
+                # ORD-156 — captura ampla intencional: poll em loop, uma
+                # falha numa iteração não pode derrubar o polling inteiro.
+                except Exception as exc:  # noqa: BLE001
                     logger.warning("MP Point poll error: %s", exc)
                     continue
 
@@ -209,7 +215,10 @@ class MPProvider(IPaymentProvider):
                         headers={**self._headers, "X-Idempotency-Key": idempotency_key},
                         json=body,
                     )
-                except Exception as exc:
+                # ORD-156 — captura ampla intencional: retry loop, uma
+                # falha de conexão numa tentativa não pode abortar as
+                # próximas.
+                except Exception as exc:  # noqa: BLE001
                     last_error = str(exc)
                     logger.warning("MP PIX attempt %d connect error: %s", attempt + 1, exc)
                     continue
@@ -275,7 +284,10 @@ class MPProvider(IPaymentProvider):
                         },
                     )
                     return resp.status_code in (200, 201)
-                except Exception:
+                # ORD-156 — captura ampla intencional: cancelamento
+                # best-effort no provider, falha de rede aqui só reporta
+                # "não cancelou", não propaga.
+                except Exception:  # noqa: BLE001
                     return False
         # PIX pending — let it expire (has date_of_expiration set at creation)
         return True
@@ -299,12 +311,16 @@ class MPProvider(IPaymentProvider):
                     },
                     json={},  # sem amount/body = reembolso total, conforme doc oficial do MP
                 )
-            except Exception as exc:
+            # ORD-156 — captura ampla intencional e conservadora: código
+            # financeiro (reembolso) — qualquer falha de rede vira
+            # `success=False` explícito, nunca um reembolso silenciosamente
+            # tratado como bem-sucedido.
+            except Exception as exc:  # noqa: BLE001
                 return RefundResult(success=False, error_message=str(exc))
 
         try:
             body = resp.json() if resp.content else None
-        except Exception:
+        except json.JSONDecodeError:
             body = None
 
         if resp.status_code in (200, 201):
@@ -331,7 +347,10 @@ class MPProvider(IPaymentProvider):
                     f"{self.BASE_URL}/terminals/v1/list",
                     headers=self._headers,
                 )
-            except Exception as exc:
+            # ORD-156 — captura ampla intencional: teste de conexão só
+            # reporta sucesso/falha pro admin, qualquer erro de rede vira
+            # "success: False" explícito (mesmo racional do ORD-154).
+            except Exception as exc:  # noqa: BLE001
                 return {"success": False, "detail": f"Erro ao conectar ao MP: {exc}"}
 
             if terminals_resp.status_code != 200:

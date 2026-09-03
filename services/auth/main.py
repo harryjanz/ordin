@@ -1,15 +1,20 @@
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, Query, Header
-from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, select, update
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import DeclarativeBase
-from pydantic import BaseModel
-from typing import Optional, Union
+import hashlib
+import json
+import os
+import secrets
 from datetime import datetime, timedelta
-from jose import jwt, JWTError
-import hashlib, json, os, secrets, redis, httpx, string
-from config import require_env, get_cors_origins
+
+import httpx
+import redis
 from audit import emit_audit
+from config import get_cors_origins, require_env
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from jose import JWTError, jwt
+from pydantic import BaseModel
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 redis_client = redis.from_url(require_env("REDIS_URL"), decode_responses=True)
 RATE_MAX             = 5
@@ -43,7 +48,7 @@ def reset_rate_limit(ip, key):
 DB_URL           = require_env("DB_URL")
 SECRET           = require_env("JWT_SECRET")
 ALGO             = "HS256"
-ACCESS_EX        = int(os.getenv("JWT_ACCESS_EXP_MINUTES", 60))
+ACCESS_EX        = int(os.getenv("JWT_ACCESS_EXP_MINUTES", "60"))
 COMPANY_SVC      = require_env("COMPANY_SERVICE_URL")
 INTERNAL_SECRET  = require_env("INTERNAL_SECRET")
 INTERNAL_HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
@@ -116,8 +121,8 @@ class CompanyInfo(BaseModel):
 class TerminalInfo(BaseModel):
     id: int
     label: str
-    tef_number: Optional[str] = None
-    payment_provider: Optional[str] = None
+    tef_number: str | None = None
+    payment_provider: str | None = None
 
 class TokenOut(BaseModel):
     access_token: str
@@ -126,7 +131,7 @@ class TokenOut(BaseModel):
     # ORD-092: presente só quando o login terminou com "confiar neste
     # dispositivo" marcado — frontend guarda numa chave de localStorage à
     # parte, que sobrevive a logout (é sobre o navegador, não a sessão).
-    device_token: Optional[str] = None
+    device_token: str | None = None
 
 class MfaRequiredOut(BaseModel):
     # ORD-088: retornado no lugar de TokenOut quando o usuário tem TOTP ativo
@@ -147,8 +152,8 @@ class KioskTokenOut(BaseModel):
 class AvailableTerminalInfo(BaseModel):
     id: int
     label: str
-    terminal_code: Optional[str] = None
-    tef_number: Optional[str] = None
+    terminal_code: str | None = None
+    tef_number: str | None = None
 
 class ValidatePinOut(BaseModel):
     ok: bool
@@ -170,10 +175,10 @@ class DeviceChallengeOut(BaseModel):
 
 class DeviceStatusOut(BaseModel):
     status: str
-    access_token: Optional[str] = None
-    token_type: Optional[str] = None
-    company: Optional[CompanyInfo] = None
-    terminal: Optional[TerminalInfo] = None
+    access_token: str | None = None
+    token_type: str | None = None
+    company: CompanyInfo | None = None
+    terminal: TerminalInfo | None = None
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
@@ -278,7 +283,7 @@ async def _issue_login_tokens(u: dict, request: Request, actor: str, db: AsyncSe
 
 @app.post(
     "/auth/login",
-    response_model=Union[TokenOut, MfaRequiredOut],
+    response_model=TokenOut | MfaRequiredOut,
     tags=["Autenticação"],
     summary="Login de administrador ou operador",
     responses={
@@ -423,7 +428,11 @@ async def logout(body: RefreshReq, request: Request, db: AsyncSession = Depends(
         payload = jwt.decode(body.refresh_token, SECRET, algorithms=[ALGO], options={"verify_exp": False})
         actor = payload.get("sub")
         company_id = payload.get("company")
-    except Exception:
+    # ORD-156 — captura ampla intencional: decode aqui é só pra enriquecer o
+    # log de auditoria (a revogação em si já aconteceu acima, por hash) —
+    # token expirado/malformado não pode impedir o logout, só perde o
+    # actor/company_id do log.
+    except Exception:  # noqa: BLE001
         actor = None
         company_id = None
     emit_audit("logout", request,
@@ -514,5 +523,7 @@ async def device_status(code: str = Query(..., description="Código de 6 caracte
 @app.get("/health", response_model=HealthOut, tags=["Autenticação"], summary="Healthcheck")
 def health():
     try: redis_ok = redis_client.ping()
-    except: redis_ok = False
+    # ORD-156 — captura ampla intencional: healthcheck só reporta se o redis
+    # respondeu, qualquer erro vira "não respondeu".
+    except Exception: redis_ok = False  # noqa: BLE001
     return {"service":"auth","status":"ok","redis":redis_ok}

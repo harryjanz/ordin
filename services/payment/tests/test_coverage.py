@@ -2,17 +2,22 @@
 Testes de cobertura para payment service.
 Usa chamadas diretas e unit tests para cobrir infraestrutura e lógica de negócio.
 """
-import sys, os, json
+import json
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
-import httpx
-import respx
 from decimal import Decimal
-from fastapi import HTTPException
-from sqlalchemy import delete as sa_delete, select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+import pytest
+import respx
+from fastapi import HTTPException
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _user(role="owner", company_id=1, terminal_id=None):
@@ -41,18 +46,18 @@ async def db_session():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def test_get_provider_mock():
+    from domain.schemas import ProviderConfig
     from infrastructure.factory import get_provider
     from infrastructure.providers.mock import MockProvider
-    from domain.schemas import ProviderConfig
     config = ProviderConfig(provider="mock", environment="sandbox")
     provider = get_provider(config)
     assert isinstance(provider, MockProvider)
 
 
 def test_get_provider_paygo():
+    from domain.schemas import ProviderConfig
     from infrastructure.factory import get_provider
     from infrastructure.providers.paygo import PayGoProvider
-    from domain.schemas import ProviderConfig
     config = ProviderConfig(provider="paygo", environment="sandbox",
                             api_key="k", api_secret="s")
     provider = get_provider(config)
@@ -60,8 +65,8 @@ def test_get_provider_paygo():
 
 
 def test_get_provider_desconhecido():
-    from infrastructure.factory import get_provider
     from domain.schemas import ProviderConfig
+    from infrastructure.factory import get_provider
     config = ProviderConfig(provider="unknown", environment="sandbox")
     with pytest.raises(ValueError, match="não implementado"):
         get_provider(config)
@@ -72,9 +77,10 @@ def test_get_provider_desconhecido():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def test_mock_provider_aprovado():
-    from infrastructure.providers.mock import MockProvider
-    from domain.schemas import TransactionStatus
     import random
+
+    from domain.schemas import TransactionStatus
+    from infrastructure.providers.mock import MockProvider
     provider = MockProvider()
     with patch.object(random, 'random', return_value=0.01):
         result = await provider.create_transaction(
@@ -86,9 +92,10 @@ async def test_mock_provider_aprovado():
 
 
 async def test_mock_provider_recusado():
-    from infrastructure.providers.mock import MockProvider
-    from domain.schemas import TransactionStatus
     import random
+
+    from domain.schemas import TransactionStatus
+    from infrastructure.providers.mock import MockProvider
     provider = MockProvider()
     with patch.object(random, 'random', return_value=0.99):
         result = await provider.create_transaction(
@@ -110,8 +117,8 @@ async def test_mock_provider_cancel():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _mp_provider():
-    from infrastructure.providers.mercadopago import MPProvider
     from domain.schemas import ProviderConfig
+    from infrastructure.providers.mercadopago import MPProvider
     return MPProvider(ProviderConfig(provider="mercadopago", environment="sandbox", api_key="TEST-token"))
 
 
@@ -405,8 +412,8 @@ async def test_paygo_provider_refund_transaction_nao_implementado():
     """PayGo não tem reembolso via API nesta história — nunca é chamado na
     prática (o endpoint só roteia refund pra provider mercadopago), mas a
     interface exige a implementação."""
-    from infrastructure.providers.paygo import PayGoProvider
     from domain.schemas import ProviderConfig
+    from infrastructure.providers.paygo import PayGoProvider
     provider = PayGoProvider(ProviderConfig(provider="paygo", environment="sandbox", api_key="k", api_secret="s"))
     with pytest.raises(NotImplementedError):
         await provider.refund_transaction("qualquer-id")
@@ -821,7 +828,9 @@ def test_verify_mp_signature_manifest_correto():
     Usa um secret de teste (não o real) + valores reais capturados via ngrok
     inspector numa cobrança de cartão de verdade nesta sessão (data.id,
     x-request-id e ts não são segredos, só identificadores da notificação)."""
-    import hmac, hashlib
+    import hashlib
+    import hmac
+
     import main as svc
 
     secret = "test-webhook-secret-nao-eh-o-real"
@@ -840,7 +849,9 @@ def test_verify_mp_signature_usa_data_id_da_query_nao_o_request_id_sozinho():
     'id:' do manifest (sem 'request-id:' e sem o data.id de verdade) — um
     v1 calculado com o data.id de verdade não deve bater se o código
     voltar a ignorar esse campo."""
-    import hmac, hashlib
+    import hashlib
+    import hmac
+
     import main as svc
 
     secret = "test-webhook-secret-nao-eh-o-real"

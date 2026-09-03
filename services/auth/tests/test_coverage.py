@@ -4,15 +4,18 @@ Testes de cobertura para paths não cobertos pelos outros test files.
 - Rate limit exceeded (linhas 31-33)
 - Health check redis down (linha 300)
 """
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from unittest.mock import MagicMock, patch
+
+import httpx
 import pytest
 import respx
-import httpx
-from unittest.mock import patch, MagicMock
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest.fixture

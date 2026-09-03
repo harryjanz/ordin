@@ -1,5 +1,4 @@
 import boto3
-
 from domain.interfaces.email_provider import IEmailProvider
 
 

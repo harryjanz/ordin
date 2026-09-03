@@ -9,8 +9,8 @@ state: VARCHAR(2) -> ENUM das 27 UFs, NOT NULL. As 3 empresas seed não tinham
 endereço cadastrado (state NULL) — backfill para 'SP' (dado fictício de demo)
 antes de aplicar a constraint, senão o ALTER falha com NULL existente.
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "20260806_1400"
 down_revision = "20260806_1300"

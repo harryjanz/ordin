@@ -13,7 +13,8 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from moto import mock_aws
 from PIL import Image
-from sqlalchemy import delete as sa_delete, select
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 

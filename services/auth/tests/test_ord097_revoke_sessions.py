@@ -1,9 +1,11 @@
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest.fixture
@@ -28,8 +30,9 @@ def _internal_headers():
 
 
 async def test_revoke_sessions_revoga_todos_os_refresh_tokens_do_usuario(client):
-    import main as svc
     from datetime import datetime, timedelta
+
+    import main as svc
     async with svc.AsyncSessionLocal() as db:
         db.add_all([
             svc.RefreshToken(user_id=9001, token_hash="a" * 64, revoked=False,

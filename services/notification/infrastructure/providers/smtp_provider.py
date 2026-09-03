@@ -1,6 +1,6 @@
-import aiosmtplib
 from email.message import EmailMessage
 
+import aiosmtplib
 from domain.interfaces.email_provider import IEmailProvider
 
 

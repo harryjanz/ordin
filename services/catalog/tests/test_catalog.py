@@ -1,13 +1,15 @@
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest.fixture(scope="module")
 async def client():
-    from main import app, Base, engine
+    from main import Base, app, engine
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:

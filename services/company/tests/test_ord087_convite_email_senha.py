@@ -53,8 +53,8 @@ async def empresa(client):
     """Empresa isolada (prefixo TOKEN) — cada teste cria seu(s) próprio(s)
     usuário(s) via endpoint público de verdade, não inserção direta no ORM,
     porque o próprio fluxo de convite é o que está sendo testado."""
-    import main as svc
     import bcrypt
+    import main as svc
     pin_hash = bcrypt.hashpw(b"1234", bcrypt.gensalt(4)).decode()
     async with svc.AsyncSessionLocal() as db:
         co = svc.Company(

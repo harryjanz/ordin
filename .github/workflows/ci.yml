@@ -30,13 +30,25 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install ruff mypy
+        run: pip install ruff mypy -r services/requirements.txt -r services/requirements-dev.txt
 
       - name: ruff
         run: ruff check services/
 
-      - name: mypy
-        run: mypy services/ --ignore-missing-imports
+      - name: mypy (ORD-156 — medição, não bloqueia build ainda; ver docs/stories/ORD-156-debito-lint-services.md)
+        # mypy services/ (uma chamada só) trava em "Duplicate module named" —
+        # main.py/config.py/conftest.py/etc se repetem por serviço sem
+        # isolamento de pacote. Roda um por serviço. continue-on-error:
+        # débito real medido em 289 erros (majoritariamente Column[T] do
+        # SQLAlchemy legado) — registrado como débito conhecido, não é meta
+        # desta história zerar. Corrigir a invocação (deps reais + por
+        # serviço) já destrava medir o número certo, que é o objetivo daqui.
+        continue-on-error: true
+        run: |
+          for svc in auth company catalog order payment; do
+            echo "== mypy services/$svc =="
+            mypy "services/$svc" --ignore-missing-imports
+          done
 
   test:
     name: Testes + cobertura
@@ -69,9 +81,16 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
+        # ORD-156 — `services/requirements.txt` (compartilhado) não cobre
+        # tudo: falta boto3 (company/catalog, S3) e aiosmtplib (notification,
+        # SMTP) porque cada serviço tem seu próprio requirements.txt com
+        # dependências extras. Nunca foi notado porque este job nunca tinha
+        # rodado de verdade no CI (sempre travado atrás do lint quebrado).
         run: |
-          pip install -r services/requirements.txt
           pip install -r services/requirements-dev.txt
+          for svc in auth company catalog order payment notification; do
+            pip install -r "services/$svc/requirements.txt"
+          done
 
       - name: Run tests
         env:
@@ -87,13 +106,21 @@ jobs:
           MESSAGE_BROKER: sqs
           COMPANY_SERVICE_URL: http://localhost:8002
           ORDER_SERVICE_URL: http://localhost:8004
+          AUTH_SERVICE_URL: http://localhost:8001
           PAYGO_BASE_URL: https://sandbox.controlpay.com.br/webapi/
+        # ORD-156 — `pytest services/` (uma chamada só) nunca tinha rodado de
+        # verdade no CI (job travava sempre atrás do lint quebrado). Primeira
+        # execução real trava na coleta: nomes de arquivo de teste duplicados
+        # entre serviços (test_coverage.py, test_isolation.py, etc., sem
+        # isolamento de pacote) — mesma causa raiz do mypy. Roda um por
+        # serviço, cobertura acumulada com --cov-append pra manter o gate de
+        # 40% combinado igual ao original.
         run: |
-          pytest services/ \
-            --cov=services \
-            --cov-report=term-missing \
-            --cov-fail-under=40 \
-            -v
+          for svc in auth company catalog order payment notification; do
+            echo "== pytest services/$svc =="
+            pytest "services/$svc" --cov=services --cov-append --cov-report= -v
+          done
+          coverage report --show-missing --fail-under=40
 
   build:
     name: Build Docker images

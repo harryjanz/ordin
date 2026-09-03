@@ -1,6 +1,7 @@
 import os
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 
 # Env vars globais para todos os serviços — devem ser setadas antes de qualquer import de main.py
 os.environ.setdefault("DB_URL", "mysql+aiomysql://root:test_root@localhost:3306/fk_test")

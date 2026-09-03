@@ -2,6 +2,38 @@
 asyncio_mode = "auto"
 testpaths = ["services"]
 
+[tool.ruff.lint]
+# ORD-156 — naive-UTC é convenção deliberada do projeto: toda coluna DateTime
+# do schema (Alembic, nos 5 serviços) é naive, e todo datetime.utcnow() no
+# código representa UTC por convenção da aplicação, não por acaso. Migrar
+# pra timezone-aware exigiria tocar toda coluna de todo serviço por pouco
+# ganho real — risco desproporcional pra um projeto que já é consistente
+# (nunca mistura naive com aware).
+ignore = ["DTZ001", "DTZ003", "DTZ007"]
+
+[tool.ruff.lint.flake8-bugbear]
+# ORD-156 — B008 sinaliza corretamente chamada-em-default como bug em
+# geral, mas Depends(...)/Query(...)/etc é o jeito idiomático do FastAPI de
+# injetar dependência, não o bug que a regra existe pra pegar. Lista
+# explícita (não um ignore geral de B008) — continua pegando um
+# def f(x=[]) de verdade, que aí sim é bug.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Query", "fastapi.Body", "fastapi.File",
+    "fastapi.Form", "fastapi.Path", "fastapi.Header", "fastapi.Cookie",
+    "fastapi.Security",
+]
+
+[tool.mypy]
+ignore_missing_imports = true
+# ORD-156 (Fase 4) — mypy nunca tinha rodado de verdade no CI (o job para
+# no ruff antes de chegar aqui). Primeira execução real trava de cara:
+# `mypy services/` sem isolamento de pacote trata migrations de serviços
+# diferentes com o mesmo nome de arquivo (padrão de data do Alembic, ex.
+# 20260611_0900_initial_schema.py em auth E catalog) como módulo
+# duplicado. Migration é código gerado/scaffolding do Alembic, não lógica
+# de negócio — mesmo racional de já excluir de `[tool.coverage.run]`.
+exclude = ["migrations/"]
+
 [tool.coverage.run]
 omit = [
     "*/migrations/*",

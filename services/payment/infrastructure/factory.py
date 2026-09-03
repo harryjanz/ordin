@@ -1,5 +1,6 @@
 from domain.interfaces.payment_provider import IPaymentProvider
 from domain.schemas import ProviderConfig
+
 from infrastructure.providers.mercadopago import MPProvider
 from infrastructure.providers.mock import MockProvider
 from infrastructure.providers.paygo import PayGoProvider

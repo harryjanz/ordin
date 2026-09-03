@@ -1,17 +1,11 @@
 import io
-
-from fastapi import FastAPI, File, HTTPException, Depends, UploadFile, status
-from fastapi.middleware.cors import CORSMiddleware
-from PIL import Image
-from sqlalchemy import Column, Integer, String, Numeric, Boolean, DateTime, Time, ForeignKey, JSON, Text, UniqueConstraint, select, update, delete, func
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import DeclarativeBase
-from pydantic import BaseModel, field_validator, model_validator
-from typing import Optional
 from datetime import datetime
-from config import require_env, get_cors_origins
-from auth import get_current_user, TokenPayload
+from typing import Optional
+
+from auth import TokenPayload, get_current_user
+from config import get_cors_origins, require_env
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
 from infrastructure.image_storage import (
     delete_object,
     ensure_bucket,
@@ -23,6 +17,28 @@ from infrastructure.image_storage import (
     upload_product_image,
     upload_product_thumbnail,
 )
+from PIL import Image
+from pydantic import BaseModel, field_validator, model_validator
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    Time,
+    UniqueConstraint,
+    delete,
+    func,
+    select,
+    update,
+)
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 # ── Upload de imagem de produto ──────────────────────────────────────────────
 
@@ -45,7 +61,7 @@ def require_write_role(current_user: TokenPayload = Depends(get_current_user)) -
 # list_orders, aqui é sempre edição de uma empresa por vez). Owner/manager
 # continuam restritos à própria empresa, parâmetro company_id é ignorado
 # nesse caso (mesmo padrão dos outros serviços).
-def _resolve_company_id(company_id: Optional[int], current_user: TokenPayload) -> int:
+def _resolve_company_id(company_id: int | None, current_user: TokenPayload) -> int:
     if current_user.role in ("superadmin", "admin"):
         if not company_id:
             raise HTTPException(400, detail="Parâmetro company_id é obrigatório para superadmin/admin")
@@ -53,13 +69,13 @@ def _resolve_company_id(company_id: Optional[int], current_user: TokenPayload) -
     return current_user.company_id
 
 async def resolve_company_id(
-    company_id: Optional[int] = None,
+    company_id: int | None = None,
     current_user: TokenPayload = Depends(get_current_user),
 ) -> int:
     return _resolve_company_id(company_id, current_user)
 
 async def resolve_company_id_write(
-    company_id: Optional[int] = None,
+    company_id: int | None = None,
     current_user: TokenPayload = Depends(require_write_role),
 ) -> int:
     return _resolve_company_id(company_id, current_user)
@@ -459,7 +475,7 @@ async def _serialize_combo(db: AsyncSession, c: "Combo") -> dict:
         "items": items,
     }
 
-async def _validate_combo_category(db: AsyncSession, company_id: int, category_id: Optional[int]) -> None:
+async def _validate_combo_category(db: AsyncSession, company_id: int, category_id: int | None) -> None:
     """Mesma validação já usada em create_product — categoria precisa
     existir, pertencer à empresa e estar ativa/não-excluída."""
     if category_id is None:
@@ -482,7 +498,7 @@ async def _validate_combo_products(db: AsyncSession, company_id: int, product_id
     result = await db.execute(
         select(Product.id, Product.price).filter(
             Product.id.in_(unique_ids), Product.company_id == company_id,
-            Product.active == True, Product.deleted == False,  # noqa: E712
+            Product.active == True, Product.deleted == False,
         )
     )
     rows = result.all()
@@ -510,7 +526,7 @@ async def _check_combo_deactivation(
         .filter(
             ComboItem.product_id == product_id,
             Combo.company_id == company_id,
-            Combo.active == True, Combo.deleted == False,  # noqa: E712
+            Combo.active == True, Combo.deleted == False,
         )
     )).all()
     affected = [(cid, name) for cid, name in rows]
@@ -536,7 +552,7 @@ async def _inactive_combos_for_product(db: AsyncSession, company_id: int, produc
         .filter(
             ComboItem.product_id == product_id,
             Combo.company_id == company_id,
-            Combo.active == False, Combo.deleted == False,  # noqa: E712
+            Combo.active == False, Combo.deleted == False,
         )
     )).all()
     return [(cid, name) for cid, name in rows]
@@ -545,13 +561,13 @@ async def _resolve_menu_composition(db: AsyncSession, menu_id: int) -> dict:
     cat_result = await db.execute(
         select(Category.id, Category.name)
         .join(MenuCategory, MenuCategory.category_id == Category.id)
-        .filter(MenuCategory.menu_id == menu_id, Category.deleted == False)  # noqa: E712
+        .filter(MenuCategory.menu_id == menu_id, Category.deleted == False)
         .order_by(Category.name)
     )
     prod_result = await db.execute(
         select(Product.id, Product.name)
         .join(MenuProduct, MenuProduct.product_id == Product.id)
-        .filter(MenuProduct.menu_id == menu_id, Product.deleted == False)  # noqa: E712
+        .filter(MenuProduct.menu_id == menu_id, Product.deleted == False)
         .order_by(Product.name)
     )
     return {
@@ -579,7 +595,7 @@ async def _set_menu_composition(db: AsyncSession, menu_id: int, company_id: int,
     unique_cat_ids = set(category_ids)
     if unique_cat_ids:
         result = await db.execute(
-            select(Category.id).filter(Category.id.in_(unique_cat_ids), Category.company_id == company_id, Category.deleted == False)  # noqa: E712
+            select(Category.id).filter(Category.id.in_(unique_cat_ids), Category.company_id == company_id, Category.deleted == False)
         )
         found = set(result.scalars().all())
         if found != unique_cat_ids:
@@ -588,7 +604,7 @@ async def _set_menu_composition(db: AsyncSession, menu_id: int, company_id: int,
     unique_prod_ids = set(product_ids)
     if unique_prod_ids:
         result = await db.execute(
-            select(Product.id).filter(Product.id.in_(unique_prod_ids), Product.company_id == company_id, Product.deleted == False)  # noqa: E712
+            select(Product.id).filter(Product.id.in_(unique_prod_ids), Product.company_id == company_id, Product.deleted == False)
         )
         found = set(result.scalars().all())
         if found != unique_prod_ids:
@@ -624,7 +640,7 @@ async def _menus_by_category(db: AsyncSession, company_id: int) -> dict[int, lis
         .join(Menu, Menu.id == MenuCategory.menu_id)
         .filter(Menu.company_id == company_id)
     )
-    out: dict[int, list["Menu"]] = {}
+    out: dict[int, list[Menu]] = {}
     for category_id, menu in result.all():
         out.setdefault(category_id, []).append(menu)
     return out
@@ -635,7 +651,7 @@ async def _menus_by_product(db: AsyncSession, company_id: int) -> dict[int, list
         .join(Menu, Menu.id == MenuProduct.menu_id)
         .filter(Menu.company_id == company_id)
     )
-    out: dict[int, list["Menu"]] = {}
+    out: dict[int, list[Menu]] = {}
     for product_id, menu in result.all():
         out.setdefault(product_id, []).append(menu)
     return out
@@ -667,7 +683,7 @@ class CategoryOut(BaseModel):
     id: int
     name: str
     active: bool
-    sort_order: Optional[int] = None
+    sort_order: int | None = None
 
 class CategoryListOut(BaseModel):
     categories: list[CategoryOut]
@@ -676,8 +692,8 @@ class CategoryIn(BaseModel):
     name: str
 
 class CategoryUpdate(BaseModel):
-    name: Optional[str] = None
-    active: Optional[bool] = None
+    name: str | None = None
+    active: bool | None = None
 
 class CategoryReorderIn(BaseModel):
     category_ids: list[int]
@@ -686,7 +702,7 @@ class AllergenOut(BaseModel):
     id: int
     code: str
     name: str
-    category: Optional[str] = None
+    category: str | None = None
 
 class AllergenListOut(BaseModel):
     allergens: list[AllergenOut]
@@ -695,20 +711,20 @@ class OptionIn(BaseModel):
     label: str
     price_delta: float = 0  # acréscimo sobre o preço-base do produto, não preço absoluto — ver ORD-142
     active: bool = True  # ORD-145 — precisa vir no replace completo pra não reativar opção desativada
-    description: Optional[str] = None  # ORD-146
-    sku: Optional[str] = None  # ORD-146 — único por empresa, validado em _set_option_group_options
+    description: str | None = None  # ORD-146
+    sku: str | None = None  # ORD-146 — único por empresa, validado em _set_option_group_options
     allergen_ids: list[int] = []  # ORD-146 — sempre lista completa (replace completo, não "não mexer")
 
 class OptionOut(BaseModel):
     id: int
     label: str
     price_delta: float
-    image_url: Optional[str] = None
-    thumbnail_url: Optional[str] = None
-    sort_order: Optional[int] = None
+    image_url: str | None = None
+    thumbnail_url: str | None = None
+    sort_order: int | None = None
     active: bool = True
-    description: Optional[str] = None
-    sku: Optional[str] = None
+    description: str | None = None
+    sku: str | None = None
     allergens: list[AllergenOut] = []
 
 class OptionActiveIn(BaseModel):
@@ -752,9 +768,9 @@ class OptionGroupIn(BaseModel):
         return self
 
 class OptionGroupUpdate(BaseModel):
-    name: Optional[str] = None
-    min_selections: Optional[int] = None
-    max_selections: Optional[int] = None
+    name: str | None = None
+    min_selections: int | None = None
+    max_selections: int | None = None
 
 class OptionGroupOptionsIn(BaseModel):
     options: list[OptionIn]
@@ -781,20 +797,20 @@ class ProductOptionGroupOut(OptionGroupOut):
     cliente — não duplicamos essa conta aqui pra não ter duas fontes de
     verdade. GET /catalog/option-groups (fora do contexto de produto)
     continua usando OptionGroupOut puro, sem estes campos."""
-    min_selections_override: Optional[int] = None
-    max_selections_override: Optional[int] = None
+    min_selections_override: int | None = None
+    max_selections_override: int | None = None
 
 class ProductOptionGroupOverrideIn(BaseModel):
     """Os dois campos são independentes e opcionais — omitido mantém o
     valor atual do vínculo, `null` explícito limpa o override (restaura o
     padrão do grupo). Por isso o endpoint lê com model_dump(exclude_unset=True),
     nunca exclude_none — ver Tech Explorer de ORD-144."""
-    min_selections_override: Optional[int] = None
-    max_selections_override: Optional[int] = None
+    min_selections_override: int | None = None
+    max_selections_override: int | None = None
 
 class ProductOptionGroupOverrideOut(BaseModel):
-    min_selections_override: Optional[int] = None
-    max_selections_override: Optional[int] = None
+    min_selections_override: int | None = None
+    max_selections_override: int | None = None
 
 class ComboSummaryOut(BaseModel):
     id: int
@@ -802,18 +818,18 @@ class ComboSummaryOut(BaseModel):
 
 class ProductOut(BaseModel):
     id: int
-    category_id: Optional[int] = None
+    category_id: int | None = None
     name: str
-    description: Optional[str] = None
-    description_long: Optional[str] = None
+    description: str | None = None
+    description_long: str | None = None
     price: float
-    image_url: Optional[str] = None
-    thumbnail_url: Optional[str] = None
+    image_url: str | None = None
+    thumbnail_url: str | None = None
     active: bool = True
-    tags: Optional[list[str]] = None
-    calories: Optional[int] = None
-    sku: Optional[str] = None
-    sort_order: Optional[int] = None
+    tags: list[str] | None = None
+    calories: int | None = None
+    sku: str | None = None
+    sort_order: int | None = None
     allergens: list[AllergenOut] = []
     option_groups: list[ProductOptionGroupOut] = []
     # ORD-152: só populado por update_product() ao ativar o produto — os
@@ -826,14 +842,14 @@ class ProductListOut(BaseModel):
 
 class ProductIn(BaseModel):
     name: str
-    description: Optional[str] = None
-    description_long: Optional[str] = None
+    description: str | None = None
+    description_long: str | None = None
     price: float
-    category_id: Optional[int] = None
-    tags: Optional[list[str]] = None
-    calories: Optional[int] = None
-    sku: Optional[str] = None
-    allergen_ids: Optional[list[int]] = None
+    category_id: int | None = None
+    tags: list[str] | None = None
+    calories: int | None = None
+    sku: str | None = None
+    allergen_ids: list[int] | None = None
 
     @field_validator("price")
     @classmethod
@@ -843,23 +859,23 @@ class ProductIn(BaseModel):
         return v
 
 class ProductUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    description_long: Optional[str] = None
-    price: Optional[float] = None
-    category_id: Optional[int] = None
-    active: Optional[bool] = None
-    tags: Optional[list[str]] = None
-    calories: Optional[int] = None
-    sku: Optional[str] = None
-    allergen_ids: Optional[list[int]] = None
+    name: str | None = None
+    description: str | None = None
+    description_long: str | None = None
+    price: float | None = None
+    category_id: int | None = None
+    active: bool | None = None
+    tags: list[str] | None = None
+    calories: int | None = None
+    sku: str | None = None
+    allergen_ids: list[int] | None = None
     # ORD-151: precisa vir True pra confirmar a desativação em cascata dos
     # combos ativos vinculados — ver update_product().
-    confirm_deactivate_combos: Optional[bool] = None
+    confirm_deactivate_combos: bool | None = None
 
     @field_validator("price")
     @classmethod
-    def price_positive(cls, v: Optional[float]) -> Optional[float]:
+    def price_positive(cls, v: float | None) -> float | None:
         if v is not None and v <= 0:
             raise ValueError("Preço deve ser positivo")
         return v
@@ -905,15 +921,15 @@ class MenuIn(BaseModel):
         return sorted(set(v))
 
 class MenuUpdate(BaseModel):
-    name: Optional[str] = None
-    weekdays: Optional[list[int]] = None
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    active: Optional[bool] = None
+    name: str | None = None
+    weekdays: list[int] | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    active: bool | None = None
 
     @field_validator("weekdays")
     @classmethod
-    def validate_weekdays(cls, v: Optional[list[int]]) -> Optional[list[int]]:
+    def validate_weekdays(cls, v: list[int] | None) -> list[int] | None:
         if v is not None and (not v or not set(v).issubset(VALID_WEEKDAYS)):
             raise ValueError("weekdays deve ter ao menos 1 dia, valores de 0 (segunda) a 6 (domingo)")
         return sorted(set(v)) if v is not None else v
@@ -925,7 +941,7 @@ class MenuCompositionIn(BaseModel):
 class ProductMenuRef(BaseModel):
     id: int
     name: str
-    via_category: Optional[str] = None  # nome da categoria, se o vínculo for por herança (não direto)
+    via_category: str | None = None  # nome da categoria, se o vínculo for por herança (não direto)
 
 class ProductMenusOut(BaseModel):
     menus: list[ProductMenuRef]
@@ -940,13 +956,13 @@ class ComboItemOut(BaseModel):
 
 class ComboOut(BaseModel):
     id: int
-    category_id: Optional[int] = None
+    category_id: int | None = None
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     price: float
     active: bool
-    image_url: Optional[str] = None
-    thumbnail_url: Optional[str] = None
+    image_url: str | None = None
+    thumbnail_url: str | None = None
     upsell_enabled: bool
     items: list[ComboItemOut] = []
 
@@ -958,9 +974,9 @@ class ComboItemIn(BaseModel):
     triggers_upsell: bool = True
 
 class ComboIn(BaseModel):
-    category_id: Optional[int] = None
+    category_id: int | None = None
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     price: float
     items: list[ComboItemIn]
     upsell_enabled: bool = True
@@ -1072,7 +1088,7 @@ async def list_categories(
     summary="Listar produtos do cardápio",
 )
 async def list_products(
-    category_id: Optional[int] = None,
+    category_id: int | None = None,
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id),
@@ -1453,7 +1469,10 @@ async def upload_product_image_endpoint(
     pillow_format = "JPEG" if ext == "jpg" else "PNG"
     try:
         thumb_content = _make_thumbnail(content, pillow_format)
-    except Exception:
+    # ORD-156 — captura ampla intencional: Pillow levanta vários tipos de
+    # exceção diferentes pra imagem corrompida/inválida (UnidentifiedImageError,
+    # OSError, etc.) — todos viram o mesmo 422 pro cliente.
+    except Exception:  # noqa: BLE001
         raise HTTPException(422, detail="Arquivo não é uma imagem válida")
 
     # Remove os objetos antigos primeiro pra não deixar lixo órfão no bucket
@@ -1627,7 +1646,7 @@ async def delete_option_group(
     linked_result = await db.execute(
         select(Product.name)
         .join(ProductOptionGroup, ProductOptionGroup.product_id == Product.id)
-        .filter(ProductOptionGroup.option_group_id == option_group_id, Product.deleted == False)  # noqa: E712
+        .filter(ProductOptionGroup.option_group_id == option_group_id, Product.deleted == False)
     )
     linked_names = list(linked_result.scalars().all())
     if linked_names:
@@ -1672,7 +1691,10 @@ async def upload_option_image_endpoint(
     pillow_format = "JPEG" if ext == "jpg" else "PNG"
     try:
         thumb_content = _make_thumbnail(content, pillow_format)
-    except Exception:
+    # ORD-156 — captura ampla intencional: Pillow levanta vários tipos de
+    # exceção diferentes pra imagem corrompida/inválida (UnidentifiedImageError,
+    # OSError, etc.) — todos viram o mesmo 422 pro cliente.
+    except Exception:  # noqa: BLE001
         raise HTTPException(422, detail="Arquivo não é uma imagem válida")
 
     if opt.image_url: delete_object(opt.image_url)
@@ -1840,7 +1862,7 @@ async def create_combo(
     summary="Listar combos da empresa",
 )
 async def list_combos(
-    category_id: Optional[int] = None,
+    category_id: int | None = None,
     include_inactive: bool = False,
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id),
@@ -1921,7 +1943,7 @@ async def set_combo_active(
         inactive = (await db.execute(
             select(Product.name)
             .join(ComboItem, ComboItem.product_id == Product.id)
-            .filter(ComboItem.combo_id == combo_id, Product.active == False)  # noqa: E712
+            .filter(ComboItem.combo_id == combo_id, Product.active == False)
         )).scalars().all()
         if inactive:
             raise HTTPException(409, detail=f"Produto(s) inativo(s) no combo: {', '.join(inactive)}")
@@ -1990,7 +2012,10 @@ async def upload_combo_image_endpoint(
     pillow_format = "JPEG" if ext == "jpg" else "PNG"
     try:
         thumb_content = _make_thumbnail(content, pillow_format)
-    except Exception:
+    # ORD-156 — captura ampla intencional: Pillow levanta vários tipos de
+    # exceção diferentes pra imagem corrompida/inválida (UnidentifiedImageError,
+    # OSError, etc.) — todos viram o mesmo 422 pro cliente.
+    except Exception:  # noqa: BLE001
         raise HTTPException(422, detail="Arquivo não é uma imagem válida")
 
     if combo.image_url: delete_object(combo.image_url)

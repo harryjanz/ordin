@@ -4,8 +4,8 @@ Revision ID: 20260821_1500
 Revises: ddd001
 Create Date: 2026-08-21 15:00:00
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "20260821_1500"
 down_revision = "ddd001"

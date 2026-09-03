@@ -1,11 +1,14 @@
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 import bcrypt
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy import delete as sa_delete, select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+import pytest
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest.fixture
@@ -41,8 +44,17 @@ async def ids(client):
     async with svc.AsyncSessionLocal() as db:
         co_b = (await db.execute(select(svc.Company).where(svc.Company.id == 2))).scalars().first()
         if co_b is None:
+            # Banco de teste é sqlite in-memory vazio (forçado sempre pelo
+            # conftest.py) — nunca tem o seed de empresas real. id=2 é
+            # forçado explicitamente (sqlite aceita PK explícita em coluna
+            # autoincrement) pra garantir company_b_id != company_a_id (que é
+            # sempre 1, hardcoded no token_owner). Sem isso, o autoincrement
+            # dava id=1 pra empresa B no banco vazio — mesmo id da empresa A,
+            # fazendo os testes de isolamento passarem "sem querer" mesmo com
+            # a checagem quebrada (ou, como aqui, falharem por não haver
+            # isolamento nenhum sendo exercitado de verdade).
             pin_b = bcrypt.hashpw(b"5678", bcrypt.gensalt(4)).decode()
-            co_b = svc.Company(name="__test_pasta__", document="99999999999",
+            co_b = svc.Company(id=2, name="__test_pasta__", document="99999999999",
                                pin_hash=pin_b, plan="free", payment_provider="mock", state="SP")
             db.add(co_b)
             await db.commit()

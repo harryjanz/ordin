@@ -87,7 +87,10 @@ async def _fetch(url: str, cep: str, parse, body_is_error=None) -> tuple[CepLook
         if body_is_error and body_is_error(data):
             return None, True
         return parse(data), False
-    except Exception as exc:
+    # ORD-156 — captura ampla intencional: consulta best-effort a API
+    # externa de CEP, qualquer falha de rede/parsing vira "não encontrado",
+    # não exceção não tratada no cadastro de empresa.
+    except Exception as exc:  # noqa: BLE001
         logger.warning("%s: falha na consulta de CEP — %s", url, exc)
         return None, False
 

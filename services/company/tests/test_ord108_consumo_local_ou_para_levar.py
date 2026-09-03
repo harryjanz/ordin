@@ -1,12 +1,15 @@
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
-import bcrypt
 from datetime import datetime, timedelta
-from httpx import AsyncClient, ASGITransport
+
+import bcrypt
+import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete as sa_delete
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 def _make_token(role: str, company_id: int) -> str:
@@ -68,7 +71,15 @@ async def test_liga_consumption_mode(client, seed):
         headers=auth(seed["token"]),
     )
     assert r.status_code == 200
-    assert r.json() == {"ok": True, "consumption_mode_enabled": True}
+    # ORD-118/ORD-119 passaram a devolver fulfillment_mode/prep_urgency_minutes
+    # também (mesmo endpoint) — valores default do BehaviorIn, já que este
+    # teste não os envia no body.
+    assert r.json() == {
+        "ok": True,
+        "consumption_mode_enabled": True,
+        "fulfillment_mode": "por_item",
+        "prep_urgency_minutes": 10,
+    }
 
     r2 = await client.get(f"/companies/{seed['company_id']}", headers=auth(seed["token"]))
     assert r2.json()["consumption_mode_enabled"] is True

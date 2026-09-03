@@ -23,13 +23,13 @@ from sqlalchemy import select, update
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from infrastructure.image_storage import (  # noqa: E402
+from infrastructure.image_storage import (
     delete_object,
     ensure_bucket,
     upload_product_image,
     upload_product_thumbnail,
 )
-from main import AsyncSessionLocal, Product  # noqa: E402
+from main import AsyncSessionLocal, Product
 
 ASSETS_DIR = Path(__file__).resolve().parent.parent / "seed_assets" / "burger_house_demo"
 THUMBNAIL_SIZE = (200, 200)

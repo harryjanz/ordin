@@ -5,12 +5,19 @@
 #
 # requirements: qrcode[pil]==7.4.2  Pillow==10.3.0
 
-import qrcode, io, base64, json, hashlib, hmac, os
-from qrcode.image.styledpil import StyledPilImage
-from qrcode.image.styles.moduledrawers import RoundedModuleDrawer
+import base64
+import hashlib
+import hmac
+import io
+import json
+import os
+from datetime import datetime
+
+import qrcode
 import qrcode.image.svg
 from PIL import Image
-from datetime import datetime
+from qrcode.image.styledpil import StyledPilImage
+from qrcode.image.styles.moduledrawers import RoundedModuleDrawer
 
 QR_SECRET = os.getenv("QR_SECRET","qr-secret-troque-em-producao")
 
@@ -29,7 +36,10 @@ def verify_qr_data(qr_string: str):
         data = json.loads(qr_string)
         if not hmac.compare_digest(data.get("sig",""), _sign(data)): return None
         return {"ticket_code":data["id"],"order_ref":data["ref"]}
-    except: return None
+    # ORD-156 — captura ampla intencional: QR escaneado de ticket físico
+    # pode vir malformado/adulterado de várias formas (JSON inválido, campo
+    # faltando) — qualquer uma vira "QR inválido" (None), não exceção.
+    except Exception: return None  # noqa: BLE001
 
 def generate_qr_png_b64(data: str, size: int = 200) -> str:
     qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M,box_size=10,border=3)

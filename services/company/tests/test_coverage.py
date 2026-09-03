@@ -3,19 +3,22 @@ Testes de cobertura que usam chamadas diretas às funções endpoint (sem ASGI t
 Chamadas diretas fazem coverage.py rastrear linhas pós-`await` que o ASGITransport não cobre.
 Testes HTTP (via client) cobrem routing/auth; testes diretos cobrem a lógica de negócio.
 """
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
+from datetime import datetime, timedelta
+
 import bcrypt
 import httpx
+import pytest
 import respx
-from datetime import datetime, timedelta
 from fastapi import HTTPException
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy import delete as sa_delete, select
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete as sa_delete
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -132,8 +135,9 @@ async def _cleanup_seed(SessionLocal, co_id):
 
 def test_encryption_key_sem_configuracao():
     """Linha 47: encrypt_field retorna plaintext quando key is None."""
-    import main as svc
     from unittest.mock import patch
+
+    import main as svc
     with patch.object(svc, '_encryption_key', return_value=None):
         result = svc.encrypt_field("minha-senha")
     assert result == "minha-senha"
@@ -141,17 +145,18 @@ def test_encryption_key_sem_configuracao():
 
 def test_decrypt_enc_sem_key_levanta_runtime_error():
     """Linha 59: decrypt_field levanta RuntimeError quando key é None mas valor tem enc:."""
-    import main as svc
     from unittest.mock import patch
-    with patch.object(svc, '_encryption_key', return_value=None):
-        with pytest.raises(RuntimeError, match="CREDENTIAL_ENCRYPTION_KEY"):
-            svc.decrypt_field("enc:YWJj")
+
+    import main as svc
+    with patch.object(svc, '_encryption_key', return_value=None), \
+         pytest.raises(RuntimeError, match="CREDENTIAL_ENCRYPTION_KEY"):
+        svc.decrypt_field("enc:YWJj")
 
 
-def test_require_superadmin_raises_for_owner():
+def test_require_platform_admin_raises_for_owner():
     import main as svc
     with pytest.raises(HTTPException) as exc:
-        svc._require_superadmin(_user("owner"))
+        svc._require_platform_admin(_user("owner"))
     assert exc.value.status_code == 403
 
 
@@ -184,7 +189,7 @@ async def test_list_companies_owner_forbidden(client):
 
 async def test_dir_validate_pin_invalido(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.validate_pin({"pin": "0000"}, db, None)
@@ -194,7 +199,7 @@ async def test_dir_validate_pin_invalido(db_session):
 
 async def test_dir_validate_pin_valido(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.validate_pin({"pin": "2468"}, db, None)
     assert "company" in result and result["company"]["id"] == co_id
@@ -205,7 +210,7 @@ async def test_dir_validate_pin_valido(db_session):
 
 async def test_dir_verify_pin_invalido(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.verify_pin({"pin": "0000", "terminal_id": t_id}, db, None)
@@ -215,7 +220,7 @@ async def test_dir_verify_pin_invalido(db_session):
 
 async def test_dir_verify_pin_terminal_inexistente(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.verify_pin({"pin": "2468", "terminal_id": 999999}, db, None)
@@ -225,7 +230,7 @@ async def test_dir_verify_pin_terminal_inexistente(db_session):
 
 async def test_dir_verify_pin_valido(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.verify_pin({"pin": "2468", "terminal_id": t_id}, db, None)
     assert "company" in result and "terminal" in result
@@ -237,7 +242,7 @@ async def test_dir_verify_pin_sem_config_ativa_retorna_mock(db_session):
     payment_provider="mock" — nunca None, senão a dica de UX da maquininha
     MP (ORD-131) fica indefinida no frontend."""
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.verify_pin({"pin": "2468", "terminal_id": t_id}, db, None)
     assert result["terminal"]["payment_provider"] == "mock"
@@ -249,7 +254,7 @@ async def test_dir_verify_pin_com_mercadopago_ativo_retorna_provider(db_session)
     receber payment_provider="mercadopago" — usado só pra decidir se mostra
     a dica 'toque em Atualizar na maquininha' (ORD-131)."""
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         db.add(svc.CompanyPaymentConfig(
             company_id=co_id, provider="mercadopago", environment="production", active=True,
@@ -265,7 +270,7 @@ async def test_dir_verify_pin_com_mercadopago_ativo_retorna_provider(db_session)
 
 async def test_dir_verify_credentials_user_inexistente(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.verify_credentials({"email": "nao@existe.com", "password": "x"}, db, None)
@@ -275,7 +280,7 @@ async def test_dir_verify_credentials_user_inexistente(db_session):
 
 async def test_dir_verify_credentials_senha_errada(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.verify_credentials({"email": "cov@test.com", "password": "errada"}, db, None)
@@ -285,7 +290,7 @@ async def test_dir_verify_credentials_senha_errada(db_session):
 
 async def test_dir_verify_credentials_valido(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.verify_credentials({"email": "cov@test.com", "password": "senha123"}, db, None)
     assert result["role"] == "owner"
@@ -304,7 +309,7 @@ async def test_dir_internal_get_terminal_inexistente(db_session):
 
 async def test_dir_internal_get_terminal_mock(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.internal_get_terminal(t_id, db, None)
     assert result["payment_provider"] == "mock" and result["config"] is None
@@ -319,7 +324,7 @@ async def test_dir_internal_get_terminal_paygo_sem_config(db_session):
     # na empresa — não levanta 400. Este teste antes esperava uma exceção que
     # o código nunca levantou nesse caminho (bug do teste, não do código).
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         co = (await db.execute(select(svc.Company).where(svc.Company.id == co_id))).scalars().first()
         co.payment_provider = "paygo"
@@ -334,7 +339,7 @@ async def test_dir_internal_get_terminal_paygo_sem_config(db_session):
 
 async def test_dir_list_companies(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.list_companies(
             0, 50, q=None, document=None, contract_status=None,
@@ -365,7 +370,7 @@ async def test_dir_create_company(db_session):
 
 async def test_dir_get_company_valido(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.get_company(co_id, db, _user("superadmin"))
     assert result.id == co_id
@@ -385,7 +390,7 @@ async def test_dir_get_company_inexistente(db_session):
 async def test_dir_update_company(db_session):
     import main as svc
     from main import CompanyUpdate
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.update_company(co_id, CompanyUpdate(name="__updated__"),
                                           db, _user("superadmin"))
@@ -443,7 +448,7 @@ def _mock_request(ip="127.0.0.1"):
 
 async def test_dir_regenerate_pin(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.regenerate_pin(co_id, _mock_request(), db, _user("owner", co_id))
     assert len(result["pin"]) == 6
@@ -462,7 +467,7 @@ async def test_dir_regenerate_pin_empresa_inexistente(db_session):
 
 async def test_dir_list_terminals(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.list_terminals(
             co_id, label=None, environment=None, status="active", skip=0, limit=50,
@@ -477,7 +482,7 @@ async def test_dir_list_terminals(db_session):
 async def test_dir_create_terminal(db_session):
     import main as svc
     from main import TerminalIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.create_terminal(co_id, TerminalIn(label="__dir_t__", environment="sandbox"),
                                            db, _user("owner", co_id))
@@ -503,7 +508,7 @@ async def test_dir_create_terminal_empresa_inexistente(db_session):
 async def test_dir_update_terminal(db_session):
     import main as svc
     from main import TerminalUpdate
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.update_terminal(
             co_id, t_id,
@@ -528,7 +533,7 @@ async def test_dir_update_terminal_inexistente(db_session):
 async def test_dir_create_terminal_mp_device_formato_invalido(db_session):
     import main as svc
     from main import TerminalIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.create_terminal(
@@ -541,7 +546,7 @@ async def test_dir_create_terminal_mp_device_formato_invalido(db_session):
 async def test_dir_create_terminal_mp_device_conflito_com_ativo(db_session):
     import main as svc
     from main import TerminalIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.create_terminal(
             co_id, TerminalIn(label="__dir_t_a__", environment="sandbox", mp_device_id="PAX_X__111"),
@@ -563,7 +568,7 @@ async def test_dir_create_terminal_mp_device_conflito_com_ativo(db_session):
 async def test_dir_update_terminal_mp_device_conflito_com_outro_ativo(db_session):
     import main as svc
     from main import TerminalIn, TerminalUpdate
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         t_a = await svc.create_terminal(
             co_id, TerminalIn(label="__dir_t_a2__", environment="sandbox", mp_device_id="PAX_X__222"),
@@ -588,7 +593,7 @@ async def test_dir_update_terminal_mantendo_proprio_device_nao_bloqueia(db_sessi
     """Editar um terminal sem trocar o device não deve comparar contra si mesmo."""
     import main as svc
     from main import TerminalIn, TerminalUpdate
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         t_a = await svc.create_terminal(
             co_id, TerminalIn(label="__dir_t_a3__", environment="sandbox", mp_device_id="PAX_X__444"),
@@ -607,7 +612,7 @@ async def test_dir_update_terminal_mantendo_proprio_device_nao_bloqueia(db_sessi
 async def test_dir_create_terminal_mp_device_terminal_conflitante_inativo_nao_bloqueia(db_session):
     import main as svc
     from main import TerminalIn, TerminalUpdate
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         t_a = await svc.create_terminal(
             co_id, TerminalIn(label="__dir_t_a4__", environment="sandbox", mp_device_id="PAX_X__555"),
@@ -628,7 +633,7 @@ async def test_dir_create_terminal_mp_device_terminal_conflitante_inativo_nao_bl
 
 async def test_dir_list_mp_terminals_sem_config_retorna_configured_false(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.list_mp_terminals(co_id, db, _user("owner", co_id))
     assert result == {"configured": False, "terminals": []}
@@ -637,7 +642,7 @@ async def test_dir_list_mp_terminals_sem_config_retorna_configured_false(db_sess
 
 async def test_dir_list_mp_terminals_falha_consulta_mp_retorna_502(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         db.add(svc.CompanyPaymentConfig(
             company_id=co_id, provider="mercadopago", environment="production", active=True,
@@ -658,7 +663,7 @@ async def test_dir_list_mp_terminals_falha_consulta_mp_retorna_502(db_session):
 async def test_dir_list_mp_terminals_sucesso_anota_in_use_by(db_session):
     import main as svc
     from main import TerminalIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         db.add(svc.CompanyPaymentConfig(
             company_id=co_id, provider="mercadopago", environment="production", active=True,
@@ -693,7 +698,7 @@ async def test_dir_list_mp_terminals_sucesso_anota_in_use_by(db_session):
 async def test_dir_list_mp_terminals_empresa_de_outro_token_retorna_403(db_session):
     """Isolamento multi-tenant: admin de uma empresa não consulta terminais MP de outra."""
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.list_mp_terminals(co_id, db, _user("owner", company_id=co_id + 1))
@@ -706,7 +711,7 @@ async def test_dir_list_mp_terminals_empresa_de_outro_token_retorna_403(db_sessi
 async def test_dir_fix_mp_operating_mode_sucesso(db_session):
     import main as svc
     from main import MpOperatingModeIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         db.add(svc.CompanyPaymentConfig(
             company_id=co_id, provider="mercadopago", environment="production", active=True,
@@ -732,7 +737,7 @@ async def test_dir_fix_mp_operating_mode_sucesso(db_session):
 async def test_dir_fix_mp_operating_mode_sem_config_mp_retorna_502(db_session):
     import main as svc
     from main import MpOperatingModeIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.fix_mp_operating_mode(
@@ -744,7 +749,7 @@ async def test_dir_fix_mp_operating_mode_sem_config_mp_retorna_502(db_session):
 async def test_dir_fix_mp_operating_mode_falha_mp_retorna_502_e_nao_altera_nada(db_session):
     import main as svc
     from main import MpOperatingModeIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         db.add(svc.CompanyPaymentConfig(
             company_id=co_id, provider="mercadopago", environment="production", active=True,
@@ -776,7 +781,7 @@ async def test_dir_fix_mp_operating_mode_empresa_inexistente_retorna_404(db_sess
 async def test_dir_fix_mp_operating_mode_role_sem_permissao_retorna_403(db_session):
     import main as svc
     from main import MpOperatingModeIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.fix_mp_operating_mode(
@@ -789,7 +794,7 @@ async def test_dir_fix_mp_operating_mode_empresa_de_outro_token_retorna_403(db_s
     """Isolamento multi-tenant: admin de uma empresa não corrige terminal MP de outra."""
     import main as svc
     from main import MpOperatingModeIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.fix_mp_operating_mode(
@@ -802,7 +807,7 @@ async def test_dir_fix_mp_operating_mode_empresa_de_outro_token_retorna_403(db_s
 
 async def test_dir_delete_terminal(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         extra_t = svc.Terminal(company_id=co_id, label="__del_t__",
                                terminal_code="__DT__", environment="sandbox")
@@ -825,7 +830,7 @@ async def test_dir_delete_terminal_inexistente(db_session):
 
 async def test_dir_list_users(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.list_users(
             co_id, 0, 50, name=None, email=None, role=None, status="active",
@@ -840,7 +845,7 @@ async def test_dir_list_users(db_session):
 async def test_dir_create_user(db_session):
     import main as svc
     from main import UserIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.create_user(
             co_id,
@@ -868,7 +873,7 @@ async def test_dir_create_user_empresa_inexistente(db_session):
 async def test_dir_create_user_email_duplicado(db_session):
     import main as svc
     from main import UserIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.create_user(
@@ -882,7 +887,7 @@ async def test_dir_create_user_email_duplicado(db_session):
 async def test_dir_create_user_manager_nao_pode_criar_owner(db_session):
     import main as svc
     from main import UserIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.create_user(
@@ -898,7 +903,7 @@ async def test_dir_create_user_manager_nao_pode_criar_owner(db_session):
 async def test_dir_update_user(db_session):
     import main as svc
     from main import UserUpdate
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     pw = bcrypt.hashpw(b"pw", bcrypt.gensalt(4)).decode()
     async with db_session() as db:
         u2 = svc.User(company_id=co_id, name="U2", email="u2@dir.com",
@@ -927,7 +932,7 @@ async def test_dir_update_user_inexistente(db_session):
 async def test_dir_update_user_manager_nao_pode_promover_owner(db_session):
     import main as svc
     from main import UserUpdate
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     pw = bcrypt.hashpw(b"pw", bcrypt.gensalt(4)).decode()
     async with db_session() as db:
         u2 = svc.User(company_id=co_id, name="U2b", email="u2b@dir.com",
@@ -949,7 +954,7 @@ async def test_dir_update_user_manager_nao_pode_promover_owner(db_session):
 
 async def test_dir_delete_user(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     pw = bcrypt.hashpw(b"pw", bcrypt.gensalt(4)).decode()
     async with db_session() as db:
         u2 = svc.User(company_id=co_id, name="U2del", email="u2del@dir.com",
@@ -971,7 +976,7 @@ async def test_dir_delete_user_inexistente(db_session):
 
 async def test_dir_delete_user_proprio_usuario(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, u_id = await _create_seed(db_session)
     async with db_session() as db:
         with pytest.raises(HTTPException) as exc:
             await svc.delete_user(co_id, u_id, db, _user("owner", co_id, sub=str(u_id)))
@@ -983,7 +988,7 @@ async def test_dir_delete_user_proprio_usuario(db_session):
 
 async def test_dir_list_payment_configs(db_session):
     import main as svc
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         result = await svc.list_payment_configs(co_id, db, _user("owner", co_id))
     assert "configs" in result
@@ -995,7 +1000,7 @@ async def test_dir_list_payment_configs(db_session):
 async def test_dir_create_payment_config(db_session):
     import main as svc
     from main import PaymentConfigIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     body = PaymentConfigIn(provider="paygo", environment="sandbox", api_key="k1", api_secret="s1")
     async with db_session() as db:
         result = await svc.create_payment_config(co_id, body, db, _user("owner", co_id))
@@ -1006,7 +1011,7 @@ async def test_dir_create_payment_config(db_session):
 async def test_dir_create_payment_config_duplicado(db_session):
     import main as svc
     from main import PaymentConfigIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     body = PaymentConfigIn(provider="mock", environment="sandbox")
     async with db_session() as db:
         await svc.create_payment_config(co_id, body, db, _user("owner", co_id))
@@ -1022,7 +1027,7 @@ async def test_dir_create_payment_config_duplicado(db_session):
 async def test_dir_update_payment_config(db_session):
     import main as svc
     from main import PaymentConfigIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         created = await svc.create_payment_config(
             co_id,
@@ -1060,7 +1065,7 @@ async def test_dir_update_payment_config_inexistente(db_session):
 async def test_dir_delete_payment_config(db_session):
     import main as svc
     from main import PaymentConfigIn
-    co_id, t_id, u_id = await _create_seed(db_session)
+    co_id, _t_id, _u_id = await _create_seed(db_session)
     async with db_session() as db:
         created = await svc.create_payment_config(
             co_id,

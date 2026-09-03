@@ -1,9 +1,9 @@
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
-from pydantic import BaseModel
-from typing import Optional
+
 from config import require_env
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
+from pydantic import BaseModel
 
 SECRET = require_env("JWT_SECRET")
 ALGO   = "HS256"
@@ -15,14 +15,14 @@ class TokenPayload(BaseModel):
     sub:         str
     company_id:  int
     role:        str
-    terminal_id: Optional[int] = None
+    terminal_id: int | None = None
     # ORD-088: tokens de escopo restrito (ex: refresh, mfa_pending) carregam
     # "type" no JWT — nunca devem ser aceitos aqui como token de acesso normal.
-    type:        Optional[str] = None
+    type:        str | None = None
 
 
 def get_current_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> TokenPayload:
     if not credentials:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Token ausente")
@@ -42,7 +42,7 @@ def get_current_user(
 
 
 def get_setup_mfa_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> TokenPayload:
     # ORD-088: usado exclusivamente por POST /users/me/mfa/setup e /confirm —
     # as duas únicas rotas de todo o sistema que precisam aceitar tanto uma

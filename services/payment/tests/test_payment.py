@@ -1,11 +1,13 @@
-import sys, os
+import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import httpx
 import pytest
 import respx
-import httpx
-from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 _MOCK_TERMINAL_CONFIG = {
     "paygo_terminal_id": None,
@@ -559,7 +561,8 @@ async def test_webhook_mercadopago_config_sem_secret_ainda_aceita(client):
 
 
 async def test_webhook_mercadopago_assinatura_valida_aceita(client):
-    import hmac, hashlib
+    import hashlib
+    import hmac
 
     secret = "test-secret"
     data_id = "ORD01M10M7YZ1CN8NJRVX32EX1B76"
@@ -594,7 +597,8 @@ async def test_webhook_mercadopago_secret_da_empresa_2_nao_valida_empresa_1(clie
     """ORD-131, isolamento multi-tenant: uma assinatura calculada com o
     secret da empresa 2 não deve bater na validação da empresa 1, mesmo que
     a URL/company_id da requisição seja da empresa 1."""
-    import hmac, hashlib
+    import hashlib
+    import hmac
 
     secret_empresa_2 = "secret-da-empresa-2"
     data_id = "ORD02"
@@ -624,8 +628,9 @@ async def test_webhook_paygo_aceita_placeholder(client):
 async def test_webhook_mercadopago_type_payment_correlacionado_grava_audit(client):
     """Webhook type=payment correlacionado a uma transação existente grava
     documento com correlated=True, transaction_id e company_id preenchidos."""
-    import main as svc
     from unittest.mock import AsyncMock, patch
+
+    import main as svc
 
     # provider_transaction_id único por execução — evita colisão com
     # resíduo de execuções anteriores no banco de dev compartilhado.
@@ -673,8 +678,9 @@ async def test_webhook_mercadopago_type_payment_correlacionado_grava_audit(clien
 async def test_webhook_mercadopago_nao_correlacionavel_grava_audit(client):
     """Webhook sem transação correspondente ainda é gravado — rastro
     forense, não deve ser descartado silenciosamente."""
-    import main as svc
     from unittest.mock import AsyncMock, patch
+
+    import main as svc
 
     with respx.mock:
         _mock_mp_payment_config(1, None)
@@ -694,8 +700,9 @@ async def test_webhook_mercadopago_nao_correlacionavel_grava_audit(client):
 async def test_webhook_mercadopago_assinatura_invalida_grava_audit(client):
     """Tentativa com assinatura inválida é rejeitada (401) mas ainda auditada
     — valor forense/segurança, decisão tomada no QA Explorer do ORD-132."""
-    import main as svc
     from unittest.mock import AsyncMock, patch
+
+    import main as svc
 
     with respx.mock:
         _mock_mp_payment_config(1, "test-secret")
@@ -714,8 +721,9 @@ async def test_webhook_mercadopago_assinatura_invalida_grava_audit(client):
 
 
 async def test_webhook_paygo_grava_audit(client):
-    import main as svc
     from unittest.mock import AsyncMock, patch
+
+    import main as svc
 
     with patch.object(svc, "save_audit", new=AsyncMock()) as mock_audit:
         r = await client.post("/payments/webhook/paygo", json={"qualquer": "coisa"})
@@ -736,8 +744,9 @@ async def test_webhook_rota_antiga_nao_existe_mais(client):
 # ── ORD-147: reembolso de transação Mercado Pago (Point e PIX) ───────────────
 
 async def _make_mp_tx(order_ref, method, provider_transaction_id, created_at=None, status="approved", company_id=1):
-    import main as svc
     from datetime import datetime
+
+    import main as svc
     tx = svc.Transaction(
         company_id=company_id, order_ref=order_ref, terminal_id=1, method=method,
         amount=10.00, status=status, provider="mercadopago", environment="sandbox",

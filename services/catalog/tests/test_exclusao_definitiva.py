@@ -141,6 +141,7 @@ async def test_produto_excluido_permanent_retorna_404_em_operacoes_seguintes(cli
 
 async def test_excluir_produto_permanent_remove_imagem_do_bucket(client, seed, token_owner):
     import io
+
     from PIL import Image
     buf = io.BytesIO()
     Image.new("RGB", (10, 10), color=(0, 255, 0)).save(buf, format="JPEG")

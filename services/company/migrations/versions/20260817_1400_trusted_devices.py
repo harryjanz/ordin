@@ -4,8 +4,8 @@ Revision ID: 20260817_1400
 Revises: 20260817_1000
 Create Date: 2026-08-17 14:00:00
 """
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "20260817_1400"
 down_revision = "20260817_1000"

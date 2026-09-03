@@ -1,4 +1,5 @@
 from domain.interfaces.message_broker import IMessageBroker
+
 from infrastructure.brokers.rabbitmq import RabbitMQBroker
 from infrastructure.brokers.sqs import SQSBroker
 

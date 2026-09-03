@@ -9,9 +9,9 @@ migration é no-op. Para instalações legadas com pin plaintext: adiciona pin_h
 migra dados existentes e remove a coluna pin.
 
 """
-from alembic import op
-import sqlalchemy as sa
 import bcrypt
+import sqlalchemy as sa
+from alembic import op
 
 revision = "bbb003"
 down_revision = "bbb002"
