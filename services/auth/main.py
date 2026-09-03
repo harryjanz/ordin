@@ -108,6 +108,10 @@ class CompanyInfo(BaseModel):
     # ORD-119 — mesma armadilha de novo: minutos até urgência no preparo,
     # configurável por empresa.
     prep_urgency_minutes: int = 10
+    # ORD-158 — mesma armadilha de novo: timeout de inatividade do totem,
+    # configurável por empresa (era constante fixa, ver ORD-155).
+    inactivity_timeout_min: int = 5
+    inactivity_warn_sec: int = 30
 
 class TerminalInfo(BaseModel):
     id: int

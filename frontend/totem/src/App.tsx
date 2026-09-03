@@ -42,8 +42,11 @@ class PixErrorBoundary extends Component<{ children: ReactNode }, { error: strin
   }
 }
 
-const INACTIVITY_TIMEOUT_MS = 180_000;
-const INACTIVITY_WARN_SEC   = 20;
+// ORD-158 — fallback só pra dado antigo em cache do zustand persist (de
+// antes desta história); depois de um pareamento novo o valor real da
+// empresa sempre vem preenchido pela migration (default 5 min / 30s).
+const DEFAULT_INACTIVITY_TIMEOUT_MIN = 5;
+const DEFAULT_INACTIVITY_WARN_SEC = 30;
 
 export default function App() {
   const {
@@ -75,6 +78,11 @@ export default function App() {
   // ── inatividade — apenas nas telas do fluxo do cliente ───────────────────
   const watchedScreens = ["catalog", "cpf", "payment"];
 
+  // ORD-158 — vem da empresa pareada (configurável no admin), com fallback
+  // pro default só em caso de dado antigo sem esses campos ainda.
+  const inactivityTimeoutMs = (company?.inactivity_timeout_min ?? DEFAULT_INACTIVITY_TIMEOUT_MIN) * 60_000;
+  const inactivityWarnSec = company?.inactivity_warn_sec ?? DEFAULT_INACTIVITY_WARN_SEC;
+
   useEffect(() => {
     if (!watchedScreens.includes(screen)) {
       setShowInactivityModal(false);
@@ -83,11 +91,11 @@ export default function App() {
 
     const interval = setInterval(() => {
       const idle = Date.now() - useStore.getState().lastActivity;
-      if (idle >= INACTIVITY_TIMEOUT_MS) {
+      if (idle >= inactivityTimeoutMs) {
         setShowInactivityModal(false);
         goIdle();
-      } else if (idle >= INACTIVITY_TIMEOUT_MS - INACTIVITY_WARN_SEC * 1000) {
-        setWarnCountdown(Math.ceil((INACTIVITY_TIMEOUT_MS - idle) / 1000));
+      } else if (idle >= inactivityTimeoutMs - inactivityWarnSec * 1000) {
+        setWarnCountdown(Math.ceil((inactivityTimeoutMs - idle) / 1000));
         setShowInactivityModal(true);
       } else {
         setShowInactivityModal(false);
@@ -101,7 +109,7 @@ export default function App() {
       clearInterval(interval);
       ["click", "touchstart", "keydown"].forEach((ev) => window.removeEventListener(ev, handler));
     };
-  }, [screen]);
+  }, [screen, inactivityTimeoutMs, inactivityWarnSec]);
 
   // ── handlers ─────────────────────────────────────────────────────────────
 

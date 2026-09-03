@@ -50,6 +50,9 @@ export interface Company {
   fulfillment_mode?: string;
   // ORD-119 — só usado com fulfillment_mode="retirada_unica".
   prep_urgency_minutes?: number;
+  // ORD-158 — timeout de inatividade do totem (era constante fixa, ver ORD-155).
+  inactivity_timeout_min?: number;
+  inactivity_warn_sec?: number;
 }
 
 // ORD-115 — vídeo de modo espera (attract mode) do totem.

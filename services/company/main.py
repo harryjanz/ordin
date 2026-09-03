@@ -194,6 +194,15 @@ class Company(Base):
     # metade do tempo, vermelho ao passar) no painel de retirada e na tela
     # operacional do admin. Configurável por empresa, default 10 min.
     prep_urgency_minutes      = Column(Integer, nullable=False, default=10)
+    # ORD-158 — minutos sem toque no totem até limpar o carrinho e voltar
+    # pra tela de boas-vindas. Era constante fixa (ver ORD-155), virou
+    # configurável por empresa porque o ritmo ideal depende do perfil do
+    # negócio. Default 5 min.
+    inactivity_timeout_min    = Column(Integer, nullable=False, default=5)
+    # ORD-158 — segundos finais desse período em que o totem mostra o
+    # modal "Ainda está aí?" antes do reset (não é tempo adicional, é uma
+    # janela dentro do próprio inactivity_timeout_min). Default 30s.
+    inactivity_warn_sec       = Column(Integer, nullable=False, default=30)
 
 
 class User(Base):
@@ -393,6 +402,8 @@ class CompanyOut(BaseModel):
     consumption_mode_enabled: bool = False
     fulfillment_mode: str = "por_item"
     prep_urgency_minutes: int = 10
+    inactivity_timeout_min: int = 5
+    inactivity_warn_sec: int = 30
     model_config = {"from_attributes": True}
 
 
@@ -629,6 +640,10 @@ class AppearanceIn(BaseModel):
     # frontend durante o deploy (rollout do admin pode ficar um pouco
     # defasado do company-service).
     menu_layout: str = "horizontal"
+    # ORD-158 — mesmo motivo de default dos campos acima. inactivity_warn_sec
+    # precisa ser menor que inactivity_timeout_min*60 (validado no endpoint).
+    inactivity_timeout_min: int = 5
+    inactivity_warn_sec: int = 30
 
 
 class BehaviorIn(BaseModel):
@@ -864,6 +879,8 @@ async def validate_pin(
             "catalog_menu_layout": co.catalog_menu_layout,
             "fulfillment_mode": co.fulfillment_mode,
             "prep_urgency_minutes": co.prep_urgency_minutes,
+            "inactivity_timeout_min": co.inactivity_timeout_min,
+            "inactivity_warn_sec": co.inactivity_warn_sec,
         },
         "terminals": [
             {"id": t.id, "label": t.label, "terminal_code": t.terminal_code, "tef_number": t.tef_number}
@@ -903,6 +920,8 @@ async def verify_pin(
             "catalog_menu_layout": co.catalog_menu_layout,
             "fulfillment_mode": co.fulfillment_mode,
             "prep_urgency_minutes": co.prep_urgency_minutes,
+            "inactivity_timeout_min": co.inactivity_timeout_min,
+            "inactivity_warn_sec": co.inactivity_warn_sec,
         },
         "terminal": {
             "id": t.id, "label": t.label, "tef_number": t.tef_number,
@@ -1259,6 +1278,13 @@ async def update_appearance(
         raise HTTPException(422, "Modo inválido. Use 'light' ou 'dark'.")
     if body.menu_layout not in VALID_MENU_LAYOUTS:
         raise HTTPException(422, f"Menu inválido. Disponíveis: {sorted(VALID_MENU_LAYOUTS)}")
+    # ORD-158
+    if not (1 <= body.inactivity_timeout_min <= 30):
+        raise HTTPException(422, "Tempo de inatividade deve estar entre 1 e 30 minutos")
+    if not (5 <= body.inactivity_warn_sec <= 120):
+        raise HTTPException(422, "Tempo de aviso deve estar entre 5 e 120 segundos")
+    if body.inactivity_warn_sec >= body.inactivity_timeout_min * 60:
+        raise HTTPException(422, "Tempo de aviso não pode ser maior que o tempo de inatividade")
     if current_user.company_id != company_id and current_user.role != "superadmin":
         raise HTTPException(403, "Acesso negado")
     co = await db.get(Company, company_id)
@@ -1267,8 +1293,14 @@ async def update_appearance(
     co.visual_theme = body.theme
     co.visual_mode  = body.mode
     co.catalog_menu_layout = body.menu_layout
+    co.inactivity_timeout_min = body.inactivity_timeout_min
+    co.inactivity_warn_sec = body.inactivity_warn_sec
     await db.commit()
-    return {"ok": True, "theme": body.theme, "mode": body.mode, "menu_layout": body.menu_layout}
+    return {
+        "ok": True, "theme": body.theme, "mode": body.mode, "menu_layout": body.menu_layout,
+        "inactivity_timeout_min": body.inactivity_timeout_min,
+        "inactivity_warn_sec": body.inactivity_warn_sec,
+    }
 
 
 @app.patch(
@@ -3209,7 +3241,9 @@ async def approve_device(
                      "consumption_mode_enabled": co.consumption_mode_enabled,
                      "catalog_menu_layout": co.catalog_menu_layout,
                      "fulfillment_mode": co.fulfillment_mode,
-                     "prep_urgency_minutes": co.prep_urgency_minutes},
+                     "prep_urgency_minutes": co.prep_urgency_minutes,
+                     "inactivity_timeout_min": co.inactivity_timeout_min,
+                     "inactivity_warn_sec": co.inactivity_warn_sec},
         "terminal": {
             "id": t.id, "label": t.label, "tef_number": t.tef_number,
             "payment_provider": cfg.provider if cfg else "mock",
@@ -3265,7 +3299,9 @@ async def approve_panel(
                      "consumption_mode_enabled": co.consumption_mode_enabled,
                      "catalog_menu_layout": co.catalog_menu_layout,
                      "fulfillment_mode": co.fulfillment_mode,
-                     "prep_urgency_minutes": co.prep_urgency_minutes},
+                     "prep_urgency_minutes": co.prep_urgency_minutes,
+                     "inactivity_timeout_min": co.inactivity_timeout_min,
+                     "inactivity_warn_sec": co.inactivity_warn_sec},
     }), ex=60)
 
     return {"ok": True}
