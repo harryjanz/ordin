@@ -108,13 +108,87 @@
           "Autenticação"
         ],
         "summary": "Login de administrador ou operador",
-        "description": "Login com email + senha para roles `admin` e `cashier`. Retorna access token + refresh token com rotação.",
+        "description": "Login com email + senha para roles `admin`/`owner`/`manager`/`cashier`. Retorna access token + refresh\ntoken com rotação — ou, se o usuário já tiver duplo fator ativo ou a empresa exigir (ORD-088), um\n`mfa_token` temporário em vez dos tokens finais (ver `POST /auth/login/mfa-verify`). O header\n`X-Device-Trust` (ORD-092), quando presente e reconhecido, pula o segundo fator mesmo assim.",
         "operationId": "login_auth_login_post",
+        "parameters": [
+          {
+            "name": "X-Device-Trust",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Device-Trust"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/LoginReq"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TokenOut"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MfaRequiredOut"
+                    }
+                  ],
+                  "title": "Response Login Auth Login Post"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Credenciais inválidas"
+          },
+          "429": {
+            "description": "Rate limit atingido"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login/mfa-verify": {
+      "post": {
+        "tags": [
+          "Autenticação"
+        ],
+        "summary": "Concluir login com o segundo fator (código TOTP ou de backup)",
+        "description": "Segundo passo do login quando `/auth/login` retornou `mfa_required`. Aceita tanto o código de 6\ndígitos do app autenticador quanto um dos códigos de backup. Rate limit por tentativa igual ao do PIN.",
+        "operationId": "login_mfa_verify_auth_login_mfa_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaVerifyReq"
               }
             }
           },
@@ -132,7 +206,7 @@
             }
           },
           "401": {
-            "description": "Credenciais inválidas"
+            "description": "Código inválido, ou mfa_token inválido/expirado"
           },
           "429": {
             "description": "Rate limit atingido"
@@ -265,7 +339,7 @@
           "Autenticação"
         ],
         "summary": "Verificar status do pareamento",
-        "description": "Polling pelo totem. Retorna pending/approved/expired. Quando approved, gera JWT e consome o código.",
+        "description": "Polling pelo totem (ou painel, ORD-119). Retorna pending/approved/expired.\nQuando approved, gera JWT e consome o código. `kind` no payload do Redis\n(gravado por approve_device/approve_panel no company-service) decide o\nformato do token: totem ganha `terminal` + role \"kiosk\"; painel não tem\nterminal (não é ponto de venda) e ganha role \"painel\", só com company_id.",
         "operationId": "device_status_auth_device_status_get",
         "parameters": [
           {
@@ -391,6 +465,26 @@
             "type": "string",
             "title": "Visual Mode",
             "default": "light"
+          },
+          "consumption_mode_enabled": {
+            "type": "boolean",
+            "title": "Consumption Mode Enabled",
+            "default": false
+          },
+          "catalog_menu_layout": {
+            "type": "string",
+            "title": "Catalog Menu Layout",
+            "default": "horizontal"
+          },
+          "fulfillment_mode": {
+            "type": "string",
+            "title": "Fulfillment Mode",
+            "default": "por_item"
+          },
+          "prep_urgency_minutes": {
+            "type": "integer",
+            "title": "Prep Urgency Minutes",
+            "default": 10
           }
         },
         "type": "object",
@@ -577,6 +671,52 @@
         ],
         "title": "MessageOut"
       },
+      "MfaRequiredOut": {
+        "properties": {
+          "mfa_required": {
+            "type": "boolean",
+            "title": "Mfa Required",
+            "default": true
+          },
+          "mfa_status": {
+            "type": "string",
+            "title": "Mfa Status"
+          },
+          "mfa_token": {
+            "type": "string",
+            "title": "Mfa Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mfa_status",
+          "mfa_token"
+        ],
+        "title": "MfaRequiredOut"
+      },
+      "MfaVerifyReq": {
+        "properties": {
+          "mfa_token": {
+            "type": "string",
+            "title": "Mfa Token"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "trust_device": {
+            "type": "boolean",
+            "title": "Trust Device",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "mfa_token",
+          "code"
+        ],
+        "title": "MfaVerifyReq"
+      },
       "PinLoginReq": {
         "properties": {
           "pin": {
@@ -628,6 +768,17 @@
               }
             ],
             "title": "Tef Number"
+          },
+          "payment_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Provider"
           }
         },
         "type": "object",
@@ -650,6 +801,17 @@
           "token_type": {
             "type": "string",
             "title": "Token Type"
+          },
+          "device_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Token"
           }
         },
         "type": "object",

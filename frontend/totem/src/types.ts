@@ -12,6 +12,12 @@ export interface CompanyInfo {
   // ORD-118 — "por_item" (padrão, ticket unitário) ou "retirada_unica"
   // (produção centralizada, ticket compacto com QR único do pedido).
   fulfillment_mode: "por_item" | "retirada_unica";
+  // ORD-158 — timeout de inatividade do totem, configurável por empresa
+  // (era constante fixa, ver ORD-155). Minutos até limpar o carrinho e
+  // voltar pra welcome; segundos finais desse período mostrando o aviso
+  // "Ainda está aí?" antes do reset.
+  inactivity_timeout_min: number;
+  inactivity_warn_sec: number;
 }
 
 export interface TerminalInfo {

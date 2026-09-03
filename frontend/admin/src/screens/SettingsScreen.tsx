@@ -142,6 +142,12 @@ export default function SettingsScreen() {
   // padrão) ou "vertical" (sidebar, melhor pra empresas com muitas
   // categorias).
   const [localMenuLayout, setLocalMenuLayout] = useState<string>("horizontal");
+  // ORD-158 — timeout de inatividade do totem: minutos sem toque até
+  // limpar o carrinho e voltar pra welcome, e segundos finais desse
+  // período mostrando o aviso "Ainda está aí?" (janela dentro do próprio
+  // timeout, não tempo extra — ver ORD-155).
+  const [inactivityTimeoutMin, setInactivityTimeoutMin] = useState<number>(5);
+  const [inactivityWarnSec, setInactivityWarnSec] = useState<number>(30);
   const [saving,     setSaving]     = useState(false);
   const [saveMsg,    setSaveMsg]    = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -151,6 +157,8 @@ export default function SettingsScreen() {
       setLocalTheme(r.data.visual_theme ?? "ordin");
       setLocalMode(r.data.visual_mode  ?? "light");
       setLocalMenuLayout(r.data.catalog_menu_layout ?? "horizontal");
+      setInactivityTimeoutMin(r.data.inactivity_timeout_min ?? 5);
+      setInactivityWarnSec(r.data.inactivity_warn_sec ?? 30);
       setConsumptionModeEnabled(r.data.consumption_mode_enabled ?? false);
       setFulfillmentMode(r.data.fulfillment_mode ?? "por_item");
       setPrepUrgencyMinutes(r.data.prep_urgency_minutes ?? 10);
@@ -159,10 +167,21 @@ export default function SettingsScreen() {
 
   async function saveAppearance() {
     if (!companyId) return;
+    // ORD-158 — validação client-side antes de bater no backend: evita a
+    // viagem de rede pro caso mais comum de erro (aviso >= tempo total).
+    if (inactivityWarnSec >= inactivityTimeoutMin * 60) {
+      setSaveMsg({ ok: false, text: "Tempo de aviso não pode ser maior que o tempo de inatividade." });
+      setTimeout(() => setSaveMsg(null), 4000);
+      return;
+    }
     setSaving(true);
     setSaveMsg(null);
     try {
-      await api.patch(`/companies/${companyId}/appearance`, { theme: localTheme, mode: localMode, menu_layout: localMenuLayout });
+      await api.patch(`/companies/${companyId}/appearance`, {
+        theme: localTheme, mode: localMode, menu_layout: localMenuLayout,
+        inactivity_timeout_min: inactivityTimeoutMin,
+        inactivity_warn_sec: inactivityWarnSec,
+      });
       setSaveMsg({ ok: true, text: "Aparência salva com sucesso!" });
     } catch {
       setSaveMsg({ ok: false, text: "Erro ao salvar. Tente novamente." });
@@ -773,6 +792,31 @@ export default function SettingsScreen() {
                 onChange={() => setLocalMenuLayout(localMenuLayout === "vertical" ? "horizontal" : "vertical")}
               />
               <span className={styles.modeValueLabel}>{localMenuLayout === "vertical" ? "Vertical" : "Horizontal"}</span>
+            </div>
+
+            {/* Timeout de inatividade (ORD-158) — antes era constante fixa
+                no totem (ver ORD-155), agora configurável por empresa. */}
+            <div className={styles.cardTitle} style={{ marginTop: 24 }}>Inatividade do totem</div>
+            <div className={styles.cardDesc}>
+              Tempo sem toque até o totem limpar o carrinho e voltar pra tela de boas-vindas, e
+              quanto tempo antes disso o aviso "Ainda está aí?" aparece. Padrão: 5 minutos / 30
+              segundos.
+            </div>
+            <div className={styles.formRow}>
+              <InputBase
+                type="number"
+                label="Minutos até resetar"
+                value={String(inactivityTimeoutMin)}
+                onChange={(e) => setInactivityTimeoutMin(Math.max(1, Math.min(30, Number(e.target.value) || 1)))}
+                disabled={saving}
+              />
+              <InputBase
+                type="number"
+                label="Segundos de aviso antes do reset"
+                value={String(inactivityWarnSec)}
+                onChange={(e) => setInactivityWarnSec(Math.max(5, Math.min(120, Number(e.target.value) || 5)))}
+                disabled={saving}
+              />
             </div>
 
             {/* Preview ao vivo */}

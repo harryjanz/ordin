@@ -54,6 +54,20 @@ $font-b: 'Inter', sans-serif;
   font-family: $font-b;
 }
 
+// ORD-158 — par de campos numéricos lado a lado (timeout/aviso de
+// inatividade), mesmo racional de largura flexível já usado em outras
+// telas do admin com múltiplos InputBase numa linha.
+.formRow {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 24px;
+
+  > * {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 .pinBox {
   margin-top: 16px;
   background: color('brand-secondary');

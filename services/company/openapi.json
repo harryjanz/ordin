@@ -3365,6 +3365,16 @@
             "type": "string",
             "title": "Menu Layout",
             "default": "horizontal"
+          },
+          "inactivity_timeout_min": {
+            "type": "integer",
+            "title": "Inactivity Timeout Min",
+            "default": 5
+          },
+          "inactivity_warn_sec": {
+            "type": "integer",
+            "title": "Inactivity Warn Sec",
+            "default": 30
           }
         },
         "type": "object",
@@ -4152,6 +4162,16 @@
             "type": "integer",
             "title": "Prep Urgency Minutes",
             "default": 10
+          },
+          "inactivity_timeout_min": {
+            "type": "integer",
+            "title": "Inactivity Timeout Min",
+            "default": 5
+          },
+          "inactivity_warn_sec": {
+            "type": "integer",
+            "title": "Inactivity Warn Sec",
+            "default": 30
           }
         },
         "type": "object",
