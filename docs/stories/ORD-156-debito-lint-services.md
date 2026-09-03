@@ -510,6 +510,11 @@ Corrigido em duas partes no `test` job de `.github/workflows/ci.yml`:
   `requirements.txt` com extras. Sem isso o notification-service quebrava 100% dos testes
   (`ModuleNotFoundError: aiosmtplib`). Corrigido instalando o `requirements.txt` de cada um dos 6
   serviços (`auth company catalog order payment notification`) antes de rodar os testes.
+- **Env var faltando:** achado 3 adicional — com a coleta isolada por serviço, o company-service
+  chegou a rodar de verdade pela primeira vez e travou com `SystemExit: 1` em massa
+  (`require_env("AUTH_SERVICE_URL")` em `company/main.py:90` — nunca esteve no bloco `env:` do
+  job `test`, só o `conftest.py` cobre os outros `require_env` do serviço via `setdefault`, esse
+  não). Adicionado `AUTH_SERVICE_URL: http://localhost:8001` ao `env:` do step `Run tests`.
 
 Validado localmente em container `python:3.12-slim` limpo com o ambiente exato do CI (mesmas env
 vars do `test` job, MySQL/Redis via rede) reproduzindo: **auth 31/31, company 335/335 (9 falhas

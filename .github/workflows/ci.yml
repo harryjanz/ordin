@@ -106,6 +106,7 @@ jobs:
           MESSAGE_BROKER: sqs
           COMPANY_SERVICE_URL: http://localhost:8002
           ORDER_SERVICE_URL: http://localhost:8004
+          AUTH_SERVICE_URL: http://localhost:8001
           PAYGO_BASE_URL: https://sandbox.controlpay.com.br/webapi/
         # ORD-156 — `pytest services/` (uma chamada só) nunca tinha rodado de
         # verdade no CI (job travava sempre atrás do lint quebrado). Primeira
