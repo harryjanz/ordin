@@ -1,6 +1,6 @@
 ---
 id: ORD-156
-status: Ready
+status: Done
 estimativa: 13,5 pontos (0,5 config + 5 auto-fix + 6 manual + 1 medição mypy)
 tipo: chore
 fase: 6
@@ -429,3 +429,60 @@ compose up` real dos 5 com `GET /health` 200.
 
 **Ruff zerado.** Falta só a Fase 4 (medir `mypy`, hoje nunca avaliado porque o CI não chega lá) —
 checkpoint com o usuário antes de prosseguir.
+
+## Validação (Fase 4 — mypy, medição + decisão, 2026-09-03)
+
+**Achado 1 — o `mypy` do CI nunca rodou de verdade.** O job `lint` para no `ruff` antes de
+chegar lá desde sempre (859 erros bloqueavam o step seguinte). Primeira execução real de
+`mypy services/ --ignore-missing-imports` trava de cara com `Duplicate module named
+"20260611_0900_initial_schema"` (migration com mesmo nome de arquivo em `auth` e `catalog`) e,
+mesmo excluindo `migrations/`, trava de novo em `Duplicate module named "tests"` — os 5 serviços
+têm `main.py`/`config.py`/`auth.py`/`conftest.py`/`tests/__init__.py` com nomes idênticos e sem
+isolamento de pacote (`__init__.py` nos diretórios de serviço). Fix: rodar `mypy services/<nome>`
+uma vez por serviço em vez de uma chamada combinada — testado localmente pros 5, roda limpo.
+
+**Achado 2 — o `pip install ruff mypy` do CI nunca instalava as dependências dos serviços.**
+Rodando só com isso (achado 1 já corrigido), o mypy reportava um número artificialmente baixo (~6
+erros no total) porque `--ignore-missing-imports` silencia qualquer import não resolvido — sem
+SQLAlchemy/FastAPI/Pydantic/httpx instalados, quase todo o corpo do código vira "tipo
+desconhecido, sem erro". Reinstalando com `services/requirements.txt` +
+`services/requirements-dev.txt` reais antes do mypy, o número sobe pro valor real.
+
+**Débito real medido: 289 erros.**
+
+| Serviço | Erros |
+|---|---|
+| auth | 11 |
+| company | 104 |
+| catalog | 94 |
+| order | 14 |
+| payment | 66 |
+| **Total** | **289** |
+
+Overwhelming maioria é um único padrão repetido: SQLAlchemy declarativo legado
+(`Column(...)`, não `Mapped[]`/`mapped_column()` do 2.0) faz o mypy enxergar atributo de instância
+como `Column[T]` em vez de `T` — todo `self.campo = valor` após o `__init__` dispara
+"Incompatible types in assignment (expression has type X, variable has type Column[X])". Testado
+`plugins = ["sqlalchemy.ext.mypy.plugin"]` no `[tool.mypy]` esperando resolver de graça (mesmo
+tipo de ganho que o `extend-immutable-calls` deu pro B008) — **não ajudou**, contagem do
+auth-service ficou igual (11) com o plugin ativado. Não existe atalho de config pra esse padrão;
+zerar exigiria ou `# type: ignore` linha a linha nos ~289 pontos ou migrar o mapeamento
+declarativo pra `Mapped[]` (escopo bem maior, story própria).
+
+**Decisão do usuário:** corrigir a invocação do CI pra medir certo, mas **não bloquear** o
+pipeline com os 289 — ficam registrados como débito conhecido pra story futura. `mypy` roda no
+CI a partir de agora (`continue-on-error: true` no step), reporta o número real no log a cada
+PR, mas não trava `test`/`build` — só o `ruff` (já zerado) segue como gate.
+
+`.github/workflows/ci.yml` (`lint` job):
+- `Install dependencies` passa a instalar `services/requirements.txt` + `requirements-dev.txt`
+  além de `ruff`/`mypy`.
+- step `mypy` vira um loop `for svc in auth company catalog order payment; do mypy
+  services/$svc --ignore-missing-imports; done`, com `continue-on-error: true`.
+
+Reproduzido localmente em container `python:3.12-slim` limpo (deps reais instaladas, loop
+per-serviço) confirmando os mesmos 289 antes de aplicar no workflow.
+
+**Fase 4 encerrada — medição feita, decisão tomada, CI corrigido pra refletir a realidade sem
+travar o pipeline.** ORD-156 completa: ruff 859→0, mypy nunca-rodava→289 medidos e registrados
+como débito conhecido (não meta desta história).

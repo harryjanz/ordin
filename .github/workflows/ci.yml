@@ -30,13 +30,25 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install ruff mypy
+        run: pip install ruff mypy -r services/requirements.txt -r services/requirements-dev.txt
 
       - name: ruff
         run: ruff check services/
 
-      - name: mypy
-        run: mypy services/ --ignore-missing-imports
+      - name: mypy (ORD-156 — medição, não bloqueia build ainda; ver docs/stories/ORD-156-debito-lint-services.md)
+        # mypy services/ (uma chamada só) trava em "Duplicate module named" —
+        # main.py/config.py/conftest.py/etc se repetem por serviço sem
+        # isolamento de pacote. Roda um por serviço. continue-on-error:
+        # débito real medido em 289 erros (majoritariamente Column[T] do
+        # SQLAlchemy legado) — registrado como débito conhecido, não é meta
+        # desta história zerar. Corrigir a invocação (deps reais + por
+        # serviço) já destrava medir o número certo, que é o objetivo daqui.
+        continue-on-error: true
+        run: |
+          for svc in auth company catalog order payment; do
+            echo "== mypy services/$svc =="
+            mypy "services/$svc" --ignore-missing-imports
+          done
 
   test:
     name: Testes + cobertura
