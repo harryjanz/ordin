@@ -396,15 +396,39 @@ export default function CatalogScreen() {
     }
   }
 
-  function deactivateProduct(id: number) {
-    setConfirmState({
-      message: "Desativar produto?",
-      onConfirm: async () => {
-        setConfirmState(null);
-        await api.delete(`/catalog/products/${id}`, catalogParams());
-        loadProducts();
-      },
-    });
+  // ORD-151: se o produto for componente de combo ativo, a API recusa com
+  // 409 (mensagem já nomeia os combos afetados) até vir
+  // confirm_deactivate_combos=true — aí desativa produto e combo(s) juntos.
+  // Mesmo padrão de setConfirmState em duas chamadas já usado em
+  // deleteOptionGroup, só que aqui o alerta só aparece SE a API acusar
+  // vínculo (não dá pra saber antes de tentar, sem round-trip a mais).
+  async function deactivateProduct(id: number) {
+    try {
+      await api.delete(`/catalog/products/${id}`, catalogParams());
+      loadProducts();
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      const { message } = parseApiError(err);
+      if (status !== 409) {
+        makeToast("error", message);
+        return;
+      }
+      setConfirmState({
+        message: `${message} Desativar mesmo assim (o(s) combo(s) também ficam desativados)?`,
+        alertVariant: "warning",
+        alertIcon: "alert-triangle",
+        onConfirm: async () => {
+          setConfirmState(null);
+          try {
+            await api.delete(`/catalog/products/${id}`, catalogParams({ confirm_deactivate_combos: true }));
+            loadProducts();
+            loadCombos();
+          } catch (err2) {
+            makeToast("error", parseApiError(err2).message);
+          }
+        },
+      });
+    }
   }
 
   function deleteProductPermanently(id: number, name: string) {
@@ -414,8 +438,35 @@ export default function CatalogScreen() {
       alertIcon: "alert-triangle",
       onConfirm: async () => {
         setConfirmState(null);
-        await api.delete(`/catalog/products/${id}`, catalogParams({ permanent: true }));
-        loadProducts();
+        try {
+          await api.delete(`/catalog/products/${id}`, catalogParams({ permanent: true }));
+          loadProducts();
+        } catch (err) {
+          const status = (err as { response?: { status?: number } })?.response?.status;
+          const { message } = parseApiError(err);
+          if (status !== 409) {
+            makeToast("error", message);
+            return;
+          }
+          setConfirmState({
+            message: `${message} Excluir definitivamente mesmo assim (o(s) combo(s) também ficam desativados)?`,
+            alertVariant: "warning",
+            alertIcon: "alert-triangle",
+            onConfirm: async () => {
+              setConfirmState(null);
+              try {
+                await api.delete(
+                  `/catalog/products/${id}`,
+                  catalogParams({ permanent: true, confirm_deactivate_combos: true }),
+                );
+                loadProducts();
+                loadCombos();
+              } catch (err2) {
+                makeToast("error", parseApiError(err2).message);
+              }
+            },
+          });
+        }
       },
     });
   }

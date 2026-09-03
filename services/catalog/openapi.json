@@ -427,7 +427,7 @@
           "Catálogo"
         ],
         "summary": "Desativar ou excluir definitivamente um produto",
-        "description": "Por padrão só desativa (`active=False`), reversível via PUT com\n`active: true`. Com `permanent=true`, marca `deleted=True` — ação\nirreversível, nunca mais aparece em nenhuma consulta, mas continua no\nbanco (vínculo com vendas já realizadas). Também remove a imagem do bucket.",
+        "description": "Por padrão só desativa (`active=False`), reversível via PUT com\n`active: true`. Com `permanent=true`, marca `deleted=True` — ação\nirreversível, nunca mais aparece em nenhuma consulta, mas continua no\nbanco (vínculo com vendas já realizadas). Também remove a imagem do bucket.\nORD-151: os dois caminhos desativam o produto (`active=False`) — se ele\nfor componente de combo ativo, exige `confirm_deactivate_combos=true`,\nsenão retorna 409 (mesma regra de update_product()).",
         "operationId": "delete_product_catalog_products__product_id__delete",
         "security": [
           {
@@ -455,6 +455,16 @@
             }
           },
           {
+            "name": "confirm_deactivate_combos",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Confirm Deactivate Combos"
+            }
+          },
+          {
             "name": "company_id",
             "in": "query",
             "required": false,
@@ -477,6 +487,9 @@
           },
           "404": {
             "description": "Produto não encontrado"
+          },
+          "409": {
+            "description": "Produto vinculado a combo(s) ativo(s) — envie confirm_deactivate_combos=true"
           },
           "422": {
             "description": "Validation Error",
@@ -3961,6 +3974,17 @@
               }
             ],
             "title": "Allergen Ids"
+          },
+          "confirm_deactivate_combos": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirm Deactivate Combos"
           }
         },
         "type": "object",

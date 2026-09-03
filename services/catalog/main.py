@@ -471,6 +471,38 @@ async def _validate_combo_products(db: AsyncSession, company_id: int, product_id
     if price >= total_avulso:
         raise HTTPException(400, detail="Preço do combo precisa ser menor que a soma dos itens avulsos")
 
+async def _check_combo_deactivation(
+    db: AsyncSession, company_id: int, product_id: int, confirmed: bool,
+) -> list[tuple[int, str]]:
+    """ORD-151: desativar um produto componente de combo ativo (via PUT
+    active=false ou via DELETE sem permanent=true — os dois caminhos que o
+    admin usa pra desativar um produto) exige confirmação explícita, senão
+    o combo fica ativo apontando pra um produto que não aparece mais avulso.
+    Retorna os combos ativos afetados (lista vazia se não houver vínculo);
+    levanta 409 se houver vínculo e ainda não tiver confirmação. Mesmo
+    padrão de detail como string simples já usado em delete_option_group()
+    pra vínculo ativo."""
+    rows = (await db.execute(
+        select(Combo.id, Combo.name)
+        .join(ComboItem, ComboItem.combo_id == Combo.id)
+        .filter(
+            ComboItem.product_id == product_id,
+            Combo.company_id == company_id,
+            Combo.active == True, Combo.deleted == False,  # noqa: E712
+        )
+    )).all()
+    affected = [(cid, name) for cid, name in rows]
+    if affected and not confirmed:
+        names = ", ".join(name for _, name in affected)
+        raise HTTPException(409, detail=f"Produto vinculado ao(s) combo(s) ativo(s): {names}")
+    return affected
+
+async def _cascade_deactivate_combos(db: AsyncSession, affected: list[tuple[int, str]]) -> None:
+    if affected:
+        await db.execute(
+            update(Combo).where(Combo.id.in_([cid for cid, _ in affected])).values(active=False)
+        )
+
 async def _resolve_menu_composition(db: AsyncSession, menu_id: int) -> dict:
     cat_result = await db.execute(
         select(Category.id, Category.name)
@@ -775,6 +807,9 @@ class ProductUpdate(BaseModel):
     calories: Optional[int] = None
     sku: Optional[str] = None
     allergen_ids: Optional[list[int]] = None
+    # ORD-151: precisa vir True pra confirmar a desativação em cascata dos
+    # combos ativos vinculados — ver update_product().
+    confirm_deactivate_combos: Optional[bool] = None
 
     @field_validator("price")
     @classmethod
@@ -1249,8 +1284,18 @@ async def update_product(
         )).scalars().first()
         if not cat:
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
-    for field, value in body.model_dump(exclude_none=True, exclude={"allergen_ids"}).items():
+
+    affected_combos: list[tuple[int, str]] = []
+    if body.active is False:
+        affected_combos = await _check_combo_deactivation(
+            db, company_id, product_id, confirmed=bool(body.confirm_deactivate_combos)
+        )
+
+    for field, value in body.model_dump(
+        exclude_none=True, exclude={"allergen_ids", "confirm_deactivate_combos"}
+    ).items():
         setattr(p, field, value)
+    await _cascade_deactivate_combos(db, affected_combos)
     try:
         await db.commit()
     except IntegrityError:
@@ -1267,21 +1312,31 @@ async def update_product(
     status_code=204,
     tags=["Catálogo"],
     summary="Desativar ou excluir definitivamente um produto",
-    responses={404: {"description": "Produto não encontrado"}},
+    responses={
+        404: {"description": "Produto não encontrado"},
+        409: {"description": "Produto vinculado a combo(s) ativo(s) — envie confirm_deactivate_combos=true"},
+    },
 )
 async def delete_product(
     product_id: int,
     permanent: bool = False,
+    confirm_deactivate_combos: bool = False,
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id_write),
 ):
     """Por padrão só desativa (`active=False`), reversível via PUT com
     `active: true`. Com `permanent=true`, marca `deleted=True` — ação
     irreversível, nunca mais aparece em nenhuma consulta, mas continua no
-    banco (vínculo com vendas já realizadas). Também remove a imagem do bucket."""
+    banco (vínculo com vendas já realizadas). Também remove a imagem do bucket.
+    ORD-151: os dois caminhos desativam o produto (`active=False`) — se ele
+    for componente de combo ativo, exige `confirm_deactivate_combos=true`,
+    senão retorna 409 (mesma regra de update_product())."""
     result = await db.execute(select(Product).filter_by(id=product_id, company_id=company_id, deleted=False))
     p = result.scalars().first()
     if not p: raise HTTPException(404)
+    affected_combos = await _check_combo_deactivation(
+        db, company_id, product_id, confirmed=confirm_deactivate_combos
+    )
     if permanent:
         if p.image_url: delete_object(p.image_url)
         if p.thumbnail_url: delete_object(p.thumbnail_url)
@@ -1289,6 +1344,7 @@ async def delete_product(
         p.active = False
     else:
         p.active = False
+    await _cascade_deactivate_combos(db, affected_combos)
     await db.commit()
 
 def _make_thumbnail(content: bytes, pillow_format: str) -> bytes:

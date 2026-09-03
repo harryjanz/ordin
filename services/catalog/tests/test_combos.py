@@ -247,6 +247,126 @@ async def test_empresa_nao_remove_combo_de_outra_empresa(client, seed, token_own
     assert combo_id in {c["id"] for c in r3.json()["combos"]}
 
 
+# ── ORD-151: alerta ao desativar produto vinculado a combo ativo ────────────
+
+async def test_desativar_produto_sem_vinculo_combo_nao_gera_alerta(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed, product_ids=[seed["burger_id"], seed["fries_id"]])
+    assert r.status_code == 201
+    r2 = await client.put(f"/catalog/products/{seed['soda_id']}", json={"active": False}, headers=auth(token_owner))
+    assert r2.status_code == 200
+    assert r2.json()["active"] is False
+
+
+async def test_desativar_produto_vinculado_sem_confirmar_retorna_409(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    combo_id = r.json()["id"]
+    r2 = await client.put(f"/catalog/products/{seed['burger_id']}", json={"active": False}, headers=auth(token_owner))
+    assert r2.status_code == 409
+    assert "__combo_classico__" in r2.json()["detail"]
+    r3 = await client.get(f"/catalog/products/{seed['burger_id']}", headers=auth(token_owner))
+    assert r3.json()["active"] is True
+    r4 = await client.get("/catalog/combos", headers=auth(token_owner))
+    combo = next(c for c in r4.json()["combos"] if c["id"] == combo_id)
+    assert combo["active"] is True
+
+
+async def test_confirmar_desativacao_aplica_cascata_no_produto_e_no_combo(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    combo_id = r.json()["id"]
+    r2 = await client.put(
+        f"/catalog/products/{seed['burger_id']}",
+        json={"active": False, "confirm_deactivate_combos": True},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 200
+    assert r2.json()["active"] is False
+    r3 = await client.get("/catalog/combos?include_inactive=true", headers=auth(token_owner))
+    combo = next(c for c in r3.json()["combos"] if c["id"] == combo_id)
+    assert combo["active"] is False
+    # os outros componentes do combo não são afetados
+    r4 = await client.get(f"/catalog/products/{seed['fries_id']}", headers=auth(token_owner))
+    assert r4.json()["active"] is True
+
+
+async def test_produto_vinculado_a_multiplos_combos_lista_e_desativa_todos(client, seed, token_owner):
+    r1 = await _create_combo(client, token_owner, seed, name="__combo_a__",
+                              product_ids=[seed["burger_id"], seed["fries_id"]])
+    r2 = await _create_combo(client, token_owner, seed, name="__combo_b__", price=28.0,
+                              product_ids=[seed["burger_id"], seed["soda_id"]])  # soma=31.80
+    assert r1.status_code == 201 and r2.status_code == 201
+    combo_a_id, combo_b_id = r1.json()["id"], r2.json()["id"]
+
+    r3 = await client.put(f"/catalog/products/{seed['burger_id']}", json={"active": False}, headers=auth(token_owner))
+    assert r3.status_code == 409
+    assert "__combo_a__" in r3.json()["detail"] and "__combo_b__" in r3.json()["detail"]
+
+    r4 = await client.put(
+        f"/catalog/products/{seed['burger_id']}",
+        json={"active": False, "confirm_deactivate_combos": True},
+        headers=auth(token_owner),
+    )
+    assert r4.status_code == 200
+    r5 = await client.get("/catalog/combos?include_inactive=true", headers=auth(token_owner))
+    combos_by_id = {c["id"]: c for c in r5.json()["combos"]}
+    assert combos_by_id[combo_a_id]["active"] is False
+    assert combos_by_id[combo_b_id]["active"] is False
+
+
+async def test_produto_vinculado_so_a_combo_ja_inativo_desativa_sem_alerta(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    combo_id = r.json()["id"]
+    await client.patch(f"/catalog/combos/{combo_id}", json={"active": False}, headers=auth(token_owner))
+
+    r2 = await client.put(f"/catalog/products/{seed['burger_id']}", json={"active": False}, headers=auth(token_owner))
+    assert r2.status_code == 200
+    assert r2.json()["active"] is False
+
+
+async def test_reativar_produto_nao_reativa_combo_automaticamente(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    combo_id = r.json()["id"]
+    await client.put(
+        f"/catalog/products/{seed['burger_id']}",
+        json={"active": False, "confirm_deactivate_combos": True},
+        headers=auth(token_owner),
+    )
+    r2 = await client.put(f"/catalog/products/{seed['burger_id']}", json={"active": True}, headers=auth(token_owner))
+    assert r2.status_code == 200
+    assert r2.json()["active"] is True
+    r3 = await client.get("/catalog/combos?include_inactive=true", headers=auth(token_owner))
+    combo = next(c for c in r3.json()["combos"] if c["id"] == combo_id)
+    assert combo["active"] is False
+
+
+# Botão "Desativar" do admin usa DELETE (não PUT) — mesma regra precisa valer lá.
+
+async def test_delete_sem_permanent_com_vinculo_sem_confirmar_retorna_409(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    combo_id = r.json()["id"]
+    r2 = await client.delete(f"/catalog/products/{seed['burger_id']}", headers=auth(token_owner))
+    assert r2.status_code == 409
+    assert "__combo_classico__" in r2.json()["detail"]
+    r3 = await client.get("/catalog/combos", headers=auth(token_owner))
+    combo = next(c for c in r3.json()["combos"] if c["id"] == combo_id)
+    assert combo["active"] is True
+
+
+async def test_delete_com_confirm_deactivate_combos_aplica_cascata(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    combo_id = r.json()["id"]
+    r2 = await client.delete(
+        f"/catalog/products/{seed['burger_id']}",
+        params={"confirm_deactivate_combos": "true"},
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 204
+    r3 = await client.get(f"/catalog/products/{seed['burger_id']}", headers=auth(token_owner))
+    assert r3.json()["active"] is False
+    r4 = await client.get("/catalog/combos?include_inactive=true", headers=auth(token_owner))
+    combo = next(c for c in r4.json()["combos"] if c["id"] == combo_id)
+    assert combo["active"] is False
+
+
 # ── Regressão ────────────────────────────────────────────────────────────
 
 async def test_listagem_de_produtos_continua_funcionando_com_combos_cadastrados(client, seed, token_owner):
