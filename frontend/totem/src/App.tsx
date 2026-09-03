@@ -133,7 +133,7 @@ export default function App() {
       // achado técnico da Tech Explorer). Arredonda a economia POR UNIDADE
       // antes de multiplicar por qty, senão pedidos com 2+ do mesmo combo
       // podem fechar com 1 centavo de diferença.
-      const items: { product_id: number; name: string; qty: number; unit_price: number }[] = [];
+      const items: { product_id: number; name: string; qty: number; unit_price: number; selected_options?: { group_name: string; option_label: string; price_delta: number }[] }[] = [];
       let comboDiscount = 0;
       for (const line of cart) {
         if (line.kind === "combo" && line.comboItems) {
@@ -141,10 +141,17 @@ export default function App() {
           const savingsPerUnit = Math.round((comboSum - line.price) * 100) / 100;
           comboDiscount += savingsPerUnit * line.qty;
           for (const ci of line.comboItems) {
+            // ORD-159 (pendência registrada) — item de combo nunca carrega
+            // opção escolhida, addComboToCart não oferece seleção ainda.
             items.push({ product_id: ci.product_id, name: `${ci.name} (${line.name})`, qty: line.qty, unit_price: ci.price });
           }
         } else {
-          items.push({ product_id: line.id, name: line.name, qty: line.qty, unit_price: line.price });
+          items.push({
+            product_id: line.id, name: line.name, qty: line.qty, unit_price: line.price,
+            selected_options: line.selectedOptions?.map((o) => ({
+              group_name: o.group_name, option_label: o.option_label, price_delta: o.price_delta,
+            })),
+          });
         }
       }
       const res = await api.post("/orders", {

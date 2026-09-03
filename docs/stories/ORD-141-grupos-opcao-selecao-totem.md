@@ -1,6 +1,6 @@
 ---
 id: ORD-141
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Frontend
@@ -339,3 +339,50 @@ modal de opção fechar em vez de direto no clique do "+".
 - [x] Priorizada no sprint backlog
 
 **Status final: Ready.**
+
+## Validação (implementação, 2026-09-03)
+
+Implementado conforme o Tech Explorer, com uma simplificação de UI não antecipada lá: produto com
+grupo de opção deixa de usar o stepper +/- direto no card (ambíguo — qual variante incrementar,
+se pode haver mais de uma linha no carrinho pro mesmo produto?). Card sempre mostra "Toque para
+adicionar", e o ajuste de quantidade por variante acontece no carrinho, onde cada linha já tem seu
+próprio +/- por `key` (mecanismo que já existia, reaproveitado sem mudança).
+
+- `types.ts`: `OptionGroupOption`/`ProductOptionGroup` (copiados do admin), `Product.option_groups`,
+  `CartItem.selectedOptions`.
+- `CatalogScreen.tsx`: modal de seleção (mesma estrutura visual do upsell ORD-150), `handleAddProduct`
+  decide entre abrir o modal ou seguir direto pro fluxo de upsell/adicionar, `confirmOptionModal`
+  computa preço (soma dos `price_delta`) e a `key` do carrinho (`product:<id>:<ids ordenados>`),
+  `maybeUpsellOrAdd` resolve upsell de combo depois da opção já definida (ordem definida no Tech
+  Explorer). Grupo sem opção ativa é filtrado antes de qualquer decisão (`selectableOptionGroups`).
+- `App.tsx`: payload de `POST /orders` ganha `selected_options` por item, batendo com o contrato
+  fixado no Tech Explorer de ORD-142 (`group_name`/`option_label`/`price_delta`). Item de combo
+  nunca carrega opção (ORD-159).
+
+**Achado durante o teste manual:** o dado de demonstração não tinha nenhum produto com grupo de
+opção vinculado de forma coerente (o único vínculo existente era o do burger, já corrigido/removido
+durante o Tech Explorer de ORD-141). Vinculado "Sabores de bebida" (id 50) ao produto real
+"Refrigerante Lata 350ml" (id 6, Burger House) via `PUT /catalog/products/6/option-groups` — mesmo
+exemplo usado na própria ORD-137. Fica como demo funcional pra próximas validações.
+
+`npx tsc --noEmit` limpo. Sem suite de testes automatizados no totem (projeto não tem
+vitest/jest configurado) — validação 100% manual via `npm run dev` + Chrome, conforme convenção do
+projeto pra este frontend específico:
+- Grupo obrigatório: modal abre ao tocar "+", botão Confirmar desabilitado até selecionar,
+  habilita após selecionar "Guaraná Antarctica", confirma e entra no carrinho como
+  "Refrigerante Lata 350ml — Guaraná Antarctica" (R$ 6,90).
+- Duas adições do mesmo produto com opções diferentes (Guaraná, depois Coca-Cola) geram 2 linhas
+  distintas no carrinho, total R$ 13,80 — confirma a regra de `key`.
+- Pedido finalizado (fluxo real até a tela de pagamento) e verificado via API
+  (`GET /orders/{ref}/tickets`): as 2 opções escolhidas persistidas corretamente pelo order-service
+  (ORD-142), inclusive no `qr_data` do ticket (nome do produto já com o sufixo da opção) — confirma
+  a integração ponta a ponta ORD-141 → ORD-142 com dado real, não mockado.
+- Regressão do upsell de combo (ORD-150/157): "Classic Cheddar Burger" (sem grupo de opção após a
+  correção de dado) continua disparando o modal de upsell normalmente; "Não, só Classic Cheddar
+  Burger" adiciona ao carrinho com preço e stepper +/- funcionando como antes — zero regressão.
+
+Não testado visualmente: grupo só-opcional (não há grupo desse tipo ainda cadastrado no ambiente
+de demo) e seleção múltipla (`max_selections > 1`, ex. pizza 2 sabores — grupo "Pizzas Tradicionais"
+existe mas sem produto vinculado). Lógica desses dois casos é a mesma já exercitada (mesmas
+funções `toggleOption`/`confirmOptionModal`/`canConfirmOptionModal`), só não foi clicada na tela —
+registrado aqui por transparência, não bloqueia o fechamento da história.

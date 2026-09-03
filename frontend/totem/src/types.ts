@@ -41,6 +41,35 @@ export interface Category {
   name: string;
 }
 
+// ORD-138/139/141 — grupos de opção reutilizáveis (sabor, tamanho, etc.).
+// price_delta é um ACRÉSCIMO sobre o preço-base do produto, não um preço
+// absoluto — regra de cálculo (soma dos deltas escolhidos) decidida em
+// ORD-138/142. Mesmo shape de frontend/admin/src/types.ts, copiado 1:1 pra
+// bater com o que a mesma API (GET /catalog/products) já retorna.
+export interface OptionGroupOption {
+  id: number;
+  label: string;
+  price_delta: number;
+  image_url: string | null;
+  thumbnail_url: string | null;
+  sort_order: number | null;
+  active: boolean;
+}
+
+// ORD-144 — min/max_selections_override valem só pro vínculo produto↔grupo
+// (null = sem override, usa min_selections/max_selections do próprio
+// grupo). Valor efetivo é sempre override ?? padrão, calculado no cliente.
+export interface ProductOptionGroup {
+  id: number;
+  name: string;
+  min_selections: number;
+  max_selections: number;
+  active: boolean;
+  min_selections_override: number | null;
+  max_selections_override: number | null;
+  options: OptionGroupOption[];
+}
+
 export interface Product {
   id: number;
   category_id: number;
@@ -50,6 +79,7 @@ export interface Product {
   image_url: string | null;
   // ORD-075 — lista livre (sem enum fixo), ex: "vegano", "picante", "mais vendido".
   tags?: string[] | null;
+  option_groups?: ProductOptionGroup[];
 }
 
 // ORD-150 — combo/bundle: conjunto de produtos existentes vendido com preço
@@ -90,6 +120,15 @@ export interface Combo {
 // `combo:<id>`) — combo.id e product.id são sequências independentes no
 // catalog-service, então dois itens diferentes podem ter o mesmo `id`
 // numérico. Nunca usar `id` sozinho como chave de agrupamento do carrinho.
+// ORD-141 — opção de grupo de opção escolhida pro item (produto avulso).
+// price_delta guardado aqui só pra composição de exibição — o preço já
+// somado é o que vai em CartItem.price, ver addProductToCart.
+export interface SelectedOption {
+  group_name: string;
+  option_label: string;
+  price_delta: number;
+}
+
 export interface CartItem {
   key: string;
   kind: "product" | "combo";
@@ -101,6 +140,10 @@ export interface CartItem {
   // itens reais (com preço avulso de cada um) na hora de montar o pedido,
   // ver App.tsx/handleCpfDone.
   comboItems?: ComboItemRef[];
+  // ORD-141 — só presente quando o produto tinha grupo de opção vinculado
+  // e o cliente escolheu algo. Enviado em POST /orders (ORD-142) pro
+  // order-service persistir o que foi escolhido.
+  selectedOptions?: SelectedOption[];
 }
 
 export interface Ticket {
