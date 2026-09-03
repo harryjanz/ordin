@@ -57,7 +57,7 @@
           "Pedidos"
         ],
         "summary": "Listar pedidos da empresa",
-        "description": "Lista pedidos da empresa autenticada com filtro opcional de status.",
+        "description": "Lista pedidos da empresa autenticada (superadmin/admin veem todas, com\nfiltro opcional de empresa) com filtros de status/referência/CPF/período/\nfaixa de horário e resumo agregado por status.",
         "operationId": "list_orders_orders_get",
         "security": [
           {
@@ -79,6 +79,118 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "name": "order_ref",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order Ref"
+            }
+          },
+          {
+            "name": "cpf",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cpf"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "name": "hour_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hour From"
+            }
+          },
+          {
+            "name": "hour_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Hour To"
             }
           },
           {
@@ -132,7 +244,7 @@
           "Tickets"
         ],
         "summary": "Coletar ticket via QR Code",
-        "description": "Registra a coleta de um ticket. Valida o HMAC do QR Code antes de acessar o banco.\nUsa `SELECT FOR UPDATE` para evitar dupla coleta em ambientes multi-device.\nQuando o último ticket de um pedido é coletado, o pedido é marcado como `completed` automaticamente.\nRequer `role: cashier` ou `admin`.",
+        "description": "Registra a coleta de um ticket. Valida o HMAC do QR Code antes de acessar o banco.\nUsa `SELECT FOR UPDATE` para evitar dupla coleta em ambientes multi-device.\nQuando o último ticket de um pedido é coletado, o pedido é marcado como `completed` automaticamente.\nRequer `role: cashier` ou `admin`.\nSem `qr_data` no body, a coleta é manual (ORD-123) — pula a verificação HMAC,\nfica marcada com `collection_method=\"manual\"` e gera evento de auditoria.",
         "operationId": "collect_ticket_tickets__ticket_code__collect_post",
         "security": [
           {
@@ -198,6 +310,230 @@
           },
           "410": {
             "description": "Ticket expirado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{order_ref}/collect": {
+      "post": {
+        "tags": [
+          "Tickets"
+        ],
+        "summary": "Coletar pedido inteiro via QR único (modelo de retirada única, ORD-118)",
+        "description": "Coleta todos os tickets de um pedido numa única operação — pro modelo de atendimento\n`fulfillment_mode = \"retirada_unica\"` (ORD-118). Duas vias de entrada: scan do QR único do\npedido pelo app de balcão (`qr_data` verificado por HMAC), ou coleta manual pela tela\noperacional do balcão/admin (sem `qr_data`, staff autenticado — ORD-123, gera evento de\nauditoria e fica marcada com `collection_method=\"manual\"`). Mesmo padrão de lock\n(`SELECT FOR UPDATE`) e fechamento automático já usado em `collect_ticket`.",
+        "operationId": "collect_order_orders__order_ref__collect_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Ref"
+            }
+          },
+          {
+            "name": "x-device-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Device-Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderCollectOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "QR Code inválido ou assinatura HMAC incorreta"
+          },
+          "404": {
+            "description": "Pedido não encontrado"
+          },
+          "409": {
+            "description": "Pedido já coletado"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/{order_ref}/ready": {
+      "post": {
+        "tags": [
+          "Pedidos"
+        ],
+        "summary": "Marcar pedido como pronto para retirada (ORD-119)",
+        "description": "Transição paid → ready, usada pela tela operacional do admin no modelo de\natendimento retirada_unica (ORD-118). Sem checagem de fulfillment_mode\naqui — order-service é deliberadamente agnóstico a esse campo (é do\ncompany-service); quem decide exibir a ação é o frontend.",
+        "operationId": "mark_order_ready_orders__order_ref__ready_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "order_ref",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Order Ref"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderReadyOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Pedido não encontrado"
+          },
+          "409": {
+            "description": "Pedido não está pago (já pronto, já coletado, ou ainda não pago)"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders/prep-stats": {
+      "get": {
+        "tags": [
+          "Pedidos"
+        ],
+        "summary": "Tempo médio de preparo e relatório de gargalo por hora (ORD-119)",
+        "description": "Só considera pedidos que já passaram por 'ready' (ready_at preenchido) —\nmodelo retirada_unica. Sem date_from, usa as últimas 24h por padrão\n(mesma janela já usada como convenção no app de balcão, ORD-122).\nAgrupa por hora do dia (hora de criação do pedido) pra identificar\nhorário de maior pressão, mesmo relatório documentado pela Zig/Cplug\nna análise de concorrentes (2026-08-24).\nMesmo padrão de escopo de list_orders: superadmin/admin podem filtrar\npor company_id; qualquer outro role fica restrito à própria empresa.\n\nTambém calcula a janela anterior de mesma duração, imediatamente antes\nda atual — mesmo padrão já usado em payments_analytics\n(services/payment/main.py: duration/prev_start/prev_end) — pra\nalimentar a seta de tendência (melhorias de UX, 2026-08-24).",
+        "operationId": "prep_stats_orders_prep_stats_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrepStatsOut"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -351,18 +687,6 @@
     "schemas": {
       "CollectIn": {
         "properties": {
-          "collected_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Collected By",
-            "default": "balcao"
-          },
           "collection_device": {
             "anyOf": [
               {
@@ -486,6 +810,14 @@
           "unit_price": {
             "type": "number",
             "title": "Unit Price"
+          },
+          "selected_options": {
+            "items": {
+              "$ref": "#/components/schemas/SelectedOptionIn"
+            },
+            "type": "array",
+            "title": "Selected Options",
+            "default": []
           }
         },
         "type": "object",
@@ -496,6 +828,45 @@
           "unit_price"
         ],
         "title": "ItemIn"
+      },
+      "OrderCollectOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "order_ref": {
+            "type": "string",
+            "title": "Order Ref"
+          },
+          "collected_at": {
+            "type": "string",
+            "title": "Collected At"
+          },
+          "collected_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected By"
+          },
+          "progress": {
+            "type": "string",
+            "title": "Progress"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "order_ref",
+          "collected_at",
+          "progress"
+        ],
+        "title": "OrderCollectOut"
       },
       "OrderIn": {
         "properties": {
@@ -521,6 +892,28 @@
             "type": "number",
             "title": "Discount",
             "default": 0
+          },
+          "consumption_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumption Type"
+          },
+          "pickup_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pickup Name"
           }
         },
         "type": "object",
@@ -543,9 +936,46 @@
             "type": "number",
             "title": "Total"
           },
+          "company_id": {
+            "type": "integer",
+            "title": "Company Id"
+          },
           "terminal_id": {
             "type": "integer",
             "title": "Terminal Id"
+          },
+          "cpf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpf"
+          },
+          "consumption_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumption Type"
+          },
+          "pickup_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pickup Name"
           },
           "created_at": {
             "type": "string",
@@ -565,6 +995,7 @@
           "order_ref",
           "status",
           "total",
+          "company_id",
           "terminal_id",
           "created_at",
           "tickets_total",
@@ -584,12 +1015,20 @@
           "total": {
             "type": "integer",
             "title": "Total"
+          },
+          "summary": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OrderStatusSummaryItem"
+            },
+            "type": "object",
+            "title": "Summary"
           }
         },
         "type": "object",
         "required": [
           "orders",
-          "total"
+          "total",
+          "summary"
         ],
         "title": "OrderListOut"
       },
@@ -616,6 +1055,29 @@
         ],
         "title": "OrderOut"
       },
+      "OrderReadyOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "order_ref": {
+            "type": "string",
+            "title": "Order Ref"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "order_ref",
+          "status"
+        ],
+        "title": "OrderReadyOut"
+      },
       "OrderStatusOut": {
         "properties": {
           "order_ref": {
@@ -634,6 +1096,157 @@
         ],
         "title": "OrderStatusOut"
       },
+      "OrderStatusSummaryItem": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "total": {
+            "type": "number",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "total"
+        ],
+        "title": "OrderStatusSummaryItem"
+      },
+      "PrepStatsHourItem": {
+        "properties": {
+          "hour": {
+            "type": "integer",
+            "title": "Hour"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "avg_minutes": {
+            "type": "number",
+            "title": "Avg Minutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hour",
+          "count",
+          "avg_minutes"
+        ],
+        "title": "PrepStatsHourItem"
+      },
+      "PrepStatsOut": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "avg_prep_minutes": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Prep Minutes"
+          },
+          "by_hour": {
+            "items": {
+              "$ref": "#/components/schemas/PrepStatsHourItem"
+            },
+            "type": "array",
+            "title": "By Hour"
+          },
+          "avg_prep_minutes_prev": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Prep Minutes Prev"
+          },
+          "change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Pct"
+          },
+          "peak_hour_prev": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrepStatsHourItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "by_hour"
+        ],
+        "title": "PrepStatsOut"
+      },
+      "SelectedOptionIn": {
+        "properties": {
+          "group_name": {
+            "type": "string",
+            "title": "Group Name"
+          },
+          "option_label": {
+            "type": "string",
+            "title": "Option Label"
+          },
+          "price_delta": {
+            "type": "number",
+            "title": "Price Delta",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "group_name",
+          "option_label"
+        ],
+        "title": "SelectedOptionIn"
+      },
+      "SelectedOptionOut": {
+        "properties": {
+          "group_name": {
+            "type": "string",
+            "title": "Group Name"
+          },
+          "option_label": {
+            "type": "string",
+            "title": "Option Label"
+          },
+          "price_delta": {
+            "type": "number",
+            "title": "Price Delta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "group_name",
+          "option_label",
+          "price_delta"
+        ],
+        "title": "SelectedOptionOut"
+      },
       "TicketListOut": {
         "properties": {
           "order_ref": {
@@ -650,6 +1263,17 @@
             },
             "type": "array",
             "title": "Tickets"
+          },
+          "order_qr_data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order Qr Data"
           }
         },
         "type": "object",
@@ -703,6 +1327,25 @@
               }
             ],
             "title": "Collected By"
+          },
+          "collection_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Method"
+          },
+          "selected_options": {
+            "items": {
+              "$ref": "#/components/schemas/SelectedOptionOut"
+            },
+            "type": "array",
+            "title": "Selected Options",
+            "default": []
           }
         },
         "type": "object",
