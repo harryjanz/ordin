@@ -131,11 +131,17 @@ export default function ComboFormScreen() {
     : [];
 
   function addToCombo(p: Product) {
-    setComboItems((prev) => [...prev, { product_id: p.id, name: p.name, price: p.price }]);
+    setComboItems((prev) => [...prev, { product_id: p.id, name: p.name, price: p.price, triggers_upsell: true }]);
   }
 
   function removeFromCombo(productId: number) {
     setComboItems((prev) => prev.filter((i) => i.product_id !== productId));
+  }
+
+  // ORD-157 (addendum) — toggle fino por item, em camada com o toggle geral
+  // do combo (upsellEnabled acima).
+  function setItemTriggersUpsell(productId: number, triggers: boolean) {
+    setComboItems((prev) => prev.map((i) => i.product_id === productId ? { ...i, triggers_upsell: triggers } : i));
   }
 
   async function handleImageFiles(files: UploadFile[]) {
@@ -182,7 +188,7 @@ export default function ComboFormScreen() {
         name: name.trim(),
         description: description.trim() || null,
         price,
-        product_ids: comboItems.map((i) => i.product_id),
+        items: comboItems.map((i) => ({ product_id: i.product_id, triggers_upsell: i.triggers_upsell })),
         upsell_enabled: upsellEnabled,
       };
       if (editingComboId === null) {
@@ -345,6 +351,12 @@ export default function ComboFormScreen() {
                 <span>{i.name}</span>
                 <span className={styles.muted}>{i.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
               </div>
+              <Checkbox
+                id={`combo-item-upsell-${i.product_id}`}
+                label="Indica este combo"
+                checked={i.triggers_upsell}
+                onChange={(checked) => setItemTriggersUpsell(i.product_id, checked)}
+              />
               <button type="button" className={styles.removeBtn} onClick={() => removeFromCombo(i.product_id)} title="Remover do combo">✕</button>
             </div>
           ))}

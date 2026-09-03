@@ -2884,12 +2884,12 @@
             "type": "number",
             "title": "Price"
           },
-          "product_ids": {
+          "items": {
             "items": {
-              "type": "integer"
+              "$ref": "#/components/schemas/ComboItemIn"
             },
             "type": "array",
-            "title": "Product Ids"
+            "title": "Items"
           },
           "upsell_enabled": {
             "type": "boolean",
@@ -2901,9 +2901,27 @@
         "required": [
           "name",
           "price",
-          "product_ids"
+          "items"
         ],
         "title": "ComboIn"
+      },
+      "ComboItemIn": {
+        "properties": {
+          "product_id": {
+            "type": "integer",
+            "title": "Product Id"
+          },
+          "triggers_upsell": {
+            "type": "boolean",
+            "title": "Triggers Upsell",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "product_id"
+        ],
+        "title": "ComboItemIn"
       },
       "ComboItemOut": {
         "properties": {
@@ -2918,13 +2936,18 @@
           "price": {
             "type": "number",
             "title": "Price"
+          },
+          "triggers_upsell": {
+            "type": "boolean",
+            "title": "Triggers Upsell"
           }
         },
         "type": "object",
         "required": [
           "product_id",
           "name",
-          "price"
+          "price",
+          "triggers_upsell"
         ],
         "title": "ComboItemOut"
       },

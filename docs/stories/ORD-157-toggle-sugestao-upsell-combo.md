@@ -1,7 +1,7 @@
 ---
 id: ORD-157
 status: Done
-estimativa: 2,5 pontos (1 backend + 1 admin + 0,5 totem)
+estimativa: 3,5 pontos (1,5 backend + 1,5 admin + 0,5 totem)
 tipo: feature
 fase: 6
 sprint: null
@@ -272,7 +272,7 @@ momento do pedido, independente desse campo, que só afeta a decisão de UI no t
   fazem POST/PUT com payload fixo — precisam continuar passando com o novo campo opcional
   (default `true`), sem quebrar os testes que não passam `upsell_enabled` explicitamente.
 
-## Validação
+## Validação (v1 — toggle geral do combo)
 
 - Migration `20260903_1500_combo_upsell_enabled.py` aplicada limpo (`server_default` cobre a
   linha existente sem UPDATE manual).
@@ -291,3 +291,78 @@ momento do pedido, independente desse campo, que só afeta a decisão de UI no t
   "Classic Cheddar Burger" avulso passou a adicionar direto ao carrinho, sem modal de upsell.
   Reverti a marcação (upsell ligado de novo) e confirmei que o modal volta a aparecer
   normalmente — comportamento simétrico nos dois estados, sem regressão do ORD-150.
+
+## Addendum — granularidade por produto componente (2026-09-03, ainda na mesma sessão)
+
+Feedback do usuário depois de ver a v1 funcionando: o toggle por combo inteiro resolve o caso
+"desligar tudo", mas o pedido original era mais fino — no exemplo do próprio "Combo Classic
+Cheddar" (Classic Cheddar Burger + Coca-Cola Lata 350ml), o burger deveria continuar indicando o
+combo quando comprado avulso, mas a Coca-Cola (item genérico, componente de vários combos
+possíveis) não. Decisão confirmada com o usuário: **os dois níveis coexistem, em camadas** — o
+toggle do combo (v1, já implementado) continua sendo a chave mestra (desligado = nunca sugere,
+não importa o item); com o combo ligado, cada **produto componente** passa a ter seu próprio
+toggle fino, controlando se aquele item específico aciona a sugestão quando comprado avulso.
+
+### Mudança de modelo de dados
+- `ComboItem` (tabela `combo_items`) ganha `triggers_upsell` (`Boolean NOT NULL DEFAULT true`)
+  — mesmo raciocínio de default do `Combo.upsell_enabled`: componentes existentes continuam
+  disparando sugestão, sem regressão silenciosa.
+
+### Mudança de contrato (`ComboIn`)
+`product_ids: list[int]` não comporta mais um flag por item — vira `items: list[ComboItemIn]`,
+onde `ComboItemIn = {product_id: int, triggers_upsell: bool = True}`. É uma mudança de contrato
+(não aditiva), aceitável porque o ORD-157 ainda não foi mergeado/publicado nesta sessão — não há
+consumidor externo do formato antigo pra quebrar. `ComboItemOut`/`ComboItemRef` (backend e
+frontend) ganham o mesmo campo, denormalizado igual `name`/`price` já são hoje.
+
+### Totem — regra de disputa por upsell atualizada
+```ts
+const combo = getQty(`product:${p.id}`) === 0
+  ? combos.find((c) =>
+      c.upsell_enabled &&
+      c.items.some((i) => i.product_id === p.id && i.triggers_upsell)
+    )
+  : undefined;
+```
+Precisa dos DOIS níveis ligados pro combo entrar na disputa: `c.upsell_enabled` (chave mestra) E
+o `triggers_upsell` do item específico que está sendo comprado avulso.
+
+### Admin — UI
+Cada linha da lista "N produtos no combo" (`ComboFormScreen.tsx`) ganha um `Checkbox` pequeno
+("Indica este combo") ao lado do preço/remover, refletindo e editando o `triggers_upsell`
+daquele item. Novo item adicionado ao combo entra com `triggers_upsell: true` por padrão.
+
+### Critérios de aceite adicionais
+- [x] Cada produto componente, na lista do formulário de combo, tem seu próprio controle pra
+      indicar (ou não) o combo quando comprado avulso.
+- [x] No exemplo do "Combo Classic Cheddar": com "Classic Cheddar Burger" marcado e "Coca-Cola
+      Lata 350ml" desmarcado, comprar o burger avulso aciona o upsell; comprar a Coca-Cola
+      avulsa não aciona.
+- [x] Toggle geral do combo continua funcionando como chave mestra — desligado, nenhum item
+      dispara upsell, independente do `triggers_upsell` de cada um (verificado por revisão de
+      código — `c.upsell_enabled &&` continua sendo checado primeiro no filtro; não repeti o
+      teste ao vivo desse caminho específico porque já foi validado na v1).
+- [x] Itens de combos existentes (antes desta extensão) continuam disparando sugestão
+      normalmente — migration com default `true`.
+
+## Validação (v2 — granularidade por item)
+
+- Migration `20260903_1600_combo_item_triggers_upsell.py` aplicada limpo (`server_default`
+  cobre itens de combo já existentes).
+- Contrato `ComboIn` mudou de `product_ids: list[int]` pra `items: list[ComboItemIn]` (breaking
+  change aceitável — feature ainda não publicada nesta sessão). Todos os testes existentes que
+  montavam payload bruto com `product_ids` foram migrados pro novo formato.
+- Suíte automatizada do `catalog-service` em ambiente limpo: 185 passed, 0 failed — 182 já
+  existentes (v1) + 3 novos testes do addendum
+  (`test_criar_combo_item_sem_especificar_triggers_upsell_vem_ativado_por_padrao`,
+  `test_criar_combo_com_um_item_nao_disparando_upsell` — replica o caso motivador
+  burger/refrigerante — e `test_editar_combo_muda_triggers_upsell_de_um_item_especifico`).
+- `ruff`/`mypy`: ruff manteve 130 (igual v1); mypy manteve 91 (igual v1) — a extensão não
+  introduziu nenhuma dívida de tipo nova além da já registrada.
+- Validação manual completa (admin → totem, 2026-09-03), reproduzindo o exemplo exato do
+  usuário: editei "Combo Classic Cheddar", desmarquei "Indica este combo" só na linha da
+  Coca-Cola Lata 350ml (Classic Cheddar Burger continuou marcado), salvei — confirmado via API
+  (`triggers_upsell: true` no burger, `false` na Coca-Cola). No totem: adicionar Coca-Cola
+  avulsa foi direto pro carrinho, sem modal; adicionar Classic Cheddar Burger avulso acionou o
+  modal "Leve o Combo Classic Cheddar" normalmente — mesmo os dois sendo componentes do mesmo
+  combo, com o toggle geral (`upsell_enabled`) ligado nos dois casos.

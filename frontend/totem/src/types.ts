@@ -54,6 +54,9 @@ export interface ComboItemRef {
   product_id: number;
   name: string;
   price: number;
+  // ORD-157 (addendum) — em camada com Combo.upsell_enabled: só dispara
+  // sugestão de upsell se os dois estiverem true.
+  triggers_upsell: boolean;
 }
 
 export interface Combo {
