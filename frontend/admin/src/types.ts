@@ -262,6 +262,9 @@ export interface Combo {
   active: boolean;
   image_url: string | null;
   thumbnail_url: string | null;
+  // ORD-157 — separado de `active`: combo continua à venda mesmo com a
+  // sugestão de upsell desligada.
+  upsell_enabled: boolean;
   items: ComboItem[];
 }
 

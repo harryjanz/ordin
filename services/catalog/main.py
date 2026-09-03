@@ -209,6 +209,11 @@ class Combo(Base):
     created_at     = Column(DateTime, default=datetime.utcnow)
     image_url      = Column(String(255), nullable=True)
     thumbnail_url  = Column(String(255), nullable=True)
+    # ORD-157 — separado de `active`: combo pode continuar à venda
+    # normalmente mas parar de ser oferecido como upsell automático quando
+    # um produto componente é comprado avulso (ex: item muito comum, como
+    # refrigerante, componente de vários combos).
+    upsell_enabled = Column(Boolean, nullable=False, default=True)
 
 class ComboItem(Base):
     """Sem company_id próprio — isolamento via join com Combo, mesmo padrão
@@ -442,6 +447,7 @@ async def _serialize_combo(db: AsyncSession, c: "Combo") -> dict:
         "active": c.active,
         "image_url": presigned_download_url(c.image_url) if c.image_url else None,
         "thumbnail_url": presigned_download_url(c.thumbnail_url) if c.thumbnail_url else None,
+        "upsell_enabled": c.upsell_enabled,
         "items": items,
     }
 
@@ -930,6 +936,7 @@ class ComboOut(BaseModel):
     active: bool
     image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    upsell_enabled: bool
     items: list[ComboItemOut] = []
 
 class ComboListOut(BaseModel):
@@ -941,6 +948,7 @@ class ComboIn(BaseModel):
     description: Optional[str] = None
     price: float
     product_ids: list[int]
+    upsell_enabled: bool = True
 
     @field_validator("price")
     @classmethod
@@ -1800,6 +1808,7 @@ async def create_combo(
     combo = Combo(
         company_id=company_id, category_id=body.category_id,
         name=body.name, description=body.description, price=body.price,
+        upsell_enabled=body.upsell_enabled,
     )
     db.add(combo)
     await db.flush()
@@ -1859,6 +1868,7 @@ async def update_combo(
     combo.name = body.name
     combo.description = body.description
     combo.price = body.price
+    combo.upsell_enabled = body.upsell_enabled
     await db.execute(delete(ComboItem).where(ComboItem.combo_id == combo_id))
     for product_id in set(body.product_ids):
         db.add(ComboItem(combo_id=combo_id, product_id=product_id))

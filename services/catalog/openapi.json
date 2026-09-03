@@ -2890,6 +2890,11 @@
             },
             "type": "array",
             "title": "Product Ids"
+          },
+          "upsell_enabled": {
+            "type": "boolean",
+            "title": "Upsell Enabled",
+            "default": true
           }
         },
         "type": "object",
@@ -3001,6 +3006,10 @@
             ],
             "title": "Thumbnail Url"
           },
+          "upsell_enabled": {
+            "type": "boolean",
+            "title": "Upsell Enabled"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/ComboItemOut"
@@ -3015,7 +3024,8 @@
           "id",
           "name",
           "price",
-          "active"
+          "active",
+          "upsell_enabled"
         ],
         "title": "ComboOut"
       },

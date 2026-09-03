@@ -127,8 +127,10 @@ export default function CatalogScreen({
   // um combo ativo, oferece só o primeiro (ordenado por id, já vem assim do
   // backend) — comportamento simplificado, não ideal, mas previsível.
   function handleAddProduct(p: Product) {
+    // ORD-157 — combo com upsell_enabled=false continua vendável pelo
+    // próprio card, mas não disputa a sugestão automática aqui.
     const combo = getQty(`product:${p.id}`) === 0
-      ? combos.find((c) => c.items.some((i) => i.product_id === p.id))
+      ? combos.find((c) => c.upsell_enabled && c.items.some((i) => i.product_id === p.id))
       : undefined;
     if (combo) setUpsell({ combo, product: p });
     else addProductToCart(p);

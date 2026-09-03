@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Button,
+  Checkbox,
   CurrencyInput,
   Dropdown,
   InputBase,
@@ -42,6 +43,9 @@ export default function ComboFormScreen() {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState<number | null>(null);
   const [comboCategoryId, setComboCategoryId] = useState<string>("");
+  // ORD-157 — separado de "combo ativo": liga/desliga só a sugestão
+  // automática de upsell ao comprar um produto componente avulso no totem.
+  const [upsellEnabled, setUpsellEnabled] = useState(true);
   const [comboItems, setComboItems] = useState<ComboItem[]>([]);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -89,6 +93,7 @@ export default function ComboFormScreen() {
         setPrice(c.price);
         setComboCategoryId(c.category_id !== null ? String(c.category_id) : "");
         setComboItems(c.items);
+        setUpsellEnabled(c.upsell_enabled);
         setImageUrl(c.image_url);
         setThumbnailUrl(c.thumbnail_url);
       } catch {
@@ -178,6 +183,7 @@ export default function ComboFormScreen() {
         description: description.trim() || null,
         price,
         product_ids: comboItems.map((i) => i.product_id),
+        upsell_enabled: upsellEnabled,
       };
       if (editingComboId === null) {
         await api.post("/catalog/combos", body, catalogParams());
@@ -243,6 +249,20 @@ export default function ComboFormScreen() {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
+        <div className={styles.upsellToggle}>
+          <Checkbox
+            id="combo-upsell-enabled"
+            label="Sugerir este combo automaticamente no totem"
+            checked={upsellEnabled}
+            onChange={setUpsellEnabled}
+          />
+          <p className={styles.upsellToggleHint}>
+            Quando ligado, o totem oferece este combo ao cliente sempre que ele adiciona um dos
+            produtos deste combo avulso ao carrinho. Desligue se algum item do combo for muito
+            comum (ex: refrigerante) e a sugestão estiver aparecendo com frequência indesejada —
+            o combo continua à venda normalmente, só a sugestão automática é desativada.
+          </p>
+        </div>
       </div>
 
       <div className={styles.panel}>

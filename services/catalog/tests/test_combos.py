@@ -77,11 +77,13 @@ def auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _create_combo(client, token, seed, price=34.90, name="__combo_classico__", product_ids=None, category_id=None):
+async def _create_combo(client, token, seed, price=34.90, name="__combo_classico__", product_ids=None, category_id=None, upsell_enabled=None):
     product_ids = product_ids if product_ids is not None else [seed["burger_id"], seed["fries_id"], seed["soda_id"]]
     body = {"name": name, "description": "combo de teste", "price": price, "product_ids": product_ids}
     if category_id is not None:
         body["category_id"] = category_id
+    if upsell_enabled is not None:
+        body["upsell_enabled"] = upsell_enabled
     return await client.post("/catalog/combos", json=body, headers=auth(token))
 
 
@@ -95,6 +97,56 @@ async def test_criar_combo_com_itens_denormalizados(client, seed, token_owner):
     assert data["active"] is True
     items = {i["product_id"]: i["price"] for i in data["items"]}
     assert items == {seed["burger_id"]: 24.90, seed["fries_id"]: 10.90, seed["soda_id"]: 6.90}
+
+
+# ── ORD-157: toggle de sugestão automática de upsell ────────────────────────
+
+async def test_criar_combo_sem_especificar_upsell_vem_ativado_por_padrao(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    assert r.status_code == 201
+    assert r.json()["upsell_enabled"] is True
+
+
+async def test_criar_combo_com_upsell_desativado_explicitamente(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed, upsell_enabled=False)
+    assert r.status_code == 201
+    assert r.json()["upsell_enabled"] is False
+
+
+async def test_editar_combo_desativa_upsell_sem_afetar_active(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    combo_id = r.json()["id"]
+    r2 = await client.put(
+        f"/catalog/combos/{combo_id}",
+        json={
+            "name": "__combo_classico__", "price": 34.90,
+            "product_ids": [seed["burger_id"], seed["fries_id"], seed["soda_id"]],
+            "upsell_enabled": False,
+        },
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 200
+    assert r2.json()["upsell_enabled"] is False
+    assert r2.json()["active"] is True
+
+
+async def test_editar_combo_sem_passar_upsell_volta_pro_default_true(client, seed, token_owner):
+    """ComboIn é replace completo (PUT) — se o campo não vier no payload,
+    Pydantic aplica o default (True), mesmo que o combo estivesse com
+    upsell_enabled=False antes. Documenta o comportamento atual do replace
+    completo (mesmo padrão já usado pelos outros campos do combo)."""
+    r = await _create_combo(client, token_owner, seed, upsell_enabled=False)
+    combo_id = r.json()["id"]
+    r2 = await client.put(
+        f"/catalog/combos/{combo_id}",
+        json={
+            "name": "__combo_classico__", "price": 34.90,
+            "product_ids": [seed["burger_id"], seed["fries_id"], seed["soda_id"]],
+        },
+        headers=auth(token_owner),
+    )
+    assert r2.status_code == 200
+    assert r2.json()["upsell_enabled"] is True
 
 
 async def test_criar_combo_vinculado_a_categoria(client, seed, token_owner):

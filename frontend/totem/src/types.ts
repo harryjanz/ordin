@@ -70,6 +70,10 @@ export interface Combo {
   // padrão, mesmo comportamento de produto sem imagem, quando ausente).
   image_url: string | null;
   thumbnail_url: string | null;
+  // ORD-157 — quando false, o combo não entra na disputa por sugestão de
+  // upsell ao comprar um produto componente avulso (mas continua vendável
+  // normalmente pelo próprio card no catálogo).
+  upsell_enabled: boolean;
   items: ComboItemRef[];
 }
 
