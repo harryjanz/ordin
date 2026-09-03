@@ -791,7 +791,9 @@ export default function CatalogScreen({
         <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
           <div onClick={() => setOptionModal(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)" }} />
           <div style={{
-            position: "relative", width: "min(640px, 100%)", maxHeight: "88vh", overflowY: "auto",
+            // ORD-141 (correção pós-QA, rodada 2) — 760px em vez de 640px pra
+            // dar mais espaço às miniaturas das opções (56px → 88px).
+            position: "relative", width: "min(760px, 100%)", maxHeight: "88vh", overflowY: "auto",
             background: T.surface, borderRadius: RADIUS.lg,
             padding: "40px 40px 32px", display: "flex", flexDirection: "column", gap: 20,
             boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
@@ -838,8 +840,8 @@ export default function CatalogScreen({
                           disabled={atMax}
                           onClick={() => toggleOption(g.id, o.id, max)}
                           style={{
-                            display: "flex", alignItems: "center", gap: 14,
-                            padding: 10, borderRadius: RADIUS.lg, cursor: atMax ? "default" : "pointer",
+                            display: "flex", alignItems: "center", gap: 16,
+                            padding: 12, borderRadius: RADIUS.lg, cursor: atMax ? "default" : "pointer",
                             background: isSelected ? T.catActive : T.numBg,
                             color: isSelected ? T.catText : T.text,
                             border: `1.5px solid ${isSelected ? T.catActive : T.borderNeutral}`,
@@ -848,11 +850,12 @@ export default function CatalogScreen({
                             textAlign: "left",
                           }}
                         >
-                          {/* ORD-141 (correção pós-QA) — opção com foto cadastrada
-                              (ORD-138) precisa de layout que caiba a imagem, não só
-                              o rótulo em texto puro. Placeholder com emoji quando
-                              não tem imagem, mesmo padrão do card de combo (ORD-153). */}
-                          <div style={{ width: 56, height: 56, flexShrink: 0, borderRadius: RADIUS.sm, overflow: "hidden" }}>
+                          {/* ORD-141 (correção pós-QA, rodada 2) — 88px em vez de
+                              56px, pedido explícito do usuário pra dar mais
+                              destaque à foto da opção quando cadastrada (ORD-138).
+                              Placeholder com emoji quando não tem imagem, mesmo
+                              padrão do card de combo (ORD-153). */}
+                          <div style={{ width: 88, height: 88, flexShrink: 0, borderRadius: RADIUS.lg, overflow: "hidden" }}>
                             {o.thumbnail_url || o.image_url ? (
                               <img
                                 src={o.thumbnail_url ?? o.image_url ?? undefined}
@@ -862,7 +865,7 @@ export default function CatalogScreen({
                             ) : (
                               <div style={{
                                 width: "100%", height: "100%", background: T.placeholderA,
-                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: FONT.subtitle,
+                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: FONT.title,
                               }}>
                                 🍽️
                               </div>

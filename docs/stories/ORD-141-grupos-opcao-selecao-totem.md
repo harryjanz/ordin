@@ -411,3 +411,14 @@ Validado com dado real: `price_delta=2,50` setado em "Guaraná Antarctica" e fot
 mostra a foto da Coca-Cola, placeholder 🍽️ nas opções sem foto, "+R$ 2,50" em destaque no Guaraná,
 e o Total atualiza de R$ 6,90 pra R$ 9,40 ao selecionar — confirmado também no carrinho e no total
 final do pedido.
+
+### Correção pós-QA do usuário, rodada 2 (2026-09-03)
+
+Com a foto aparecendo, usuário pediu miniatura maior — 56×56 ficava pequeno pra dar destaque real
+à imagem da opção. Modal aumentado de `min(640px, 100%)` pra `min(760px, 100%)` e miniatura de
+56×56 pra 88×88 (com placeholder também maior, `FONT.title` em vez de `FONT.subtitle`).
+
+Validado de novo no navegador: dessa vez todas as 4 opções do grupo "Sabores de bebida" já tinham
+foto real (job de seed automático de imagens do catalog-service preencheu as 3 que faltavam, sem
+ação manual) — miniaturas nítidas de cada lata de refrigerante, modal com espaço confortável,
+seleção e total (R$ 6,90 → R$ 9,40) continuam funcionando sem regressão.
