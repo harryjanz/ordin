@@ -209,14 +209,24 @@ class Combo(Base):
     created_at     = Column(DateTime, default=datetime.utcnow)
     image_url      = Column(String(255), nullable=True)
     thumbnail_url  = Column(String(255), nullable=True)
+    # ORD-157 — separado de `active`: combo pode continuar à venda
+    # normalmente mas parar de ser oferecido como upsell automático quando
+    # um produto componente é comprado avulso (ex: item muito comum, como
+    # refrigerante, componente de vários combos).
+    upsell_enabled = Column(Boolean, nullable=False, default=True)
 
 class ComboItem(Base):
     """Sem company_id próprio — isolamento via join com Combo, mesmo padrão
     de Option/OptionGroup. Sem sort_order/quantity nesta v1: ordem segue a
     inserção e cada componente entra com 1 unidade (ver Tech Explorer)."""
     __tablename__ = "combo_items"
-    combo_id   = Column(Integer, ForeignKey("combos.id"), primary_key=True)
-    product_id = Column(Integer, ForeignKey("products.id"), primary_key=True)
+    combo_id       = Column(Integer, ForeignKey("combos.id"), primary_key=True)
+    product_id     = Column(Integer, ForeignKey("products.id"), primary_key=True)
+    # ORD-157 (addendum) — em camada com Combo.upsell_enabled: o combo
+    # precisa estar com upsell ligado E o item específico comprado avulso
+    # precisar ter triggers_upsell=True pra disparar a sugestão. Permite
+    # ex: burger indica o combo, refrigerante (item genérico) não.
+    triggers_upsell = Column(Boolean, nullable=False, default=True)
 
 class Menu(Base):
     """Cardápio por horário (ORD-124/125) — dias da semana + janela de
@@ -428,11 +438,14 @@ async def _serialize_combo(db: AsyncSession, c: "Combo") -> dict:
     aninhado dentro de ProductOut. Formato pensado pra ORD-150 conseguir
     renderizar o card do combo e checar sobreposição sem chamada extra."""
     result = await db.execute(
-        select(Product.id, Product.name, Product.price)
+        select(Product.id, Product.name, Product.price, ComboItem.triggers_upsell)
         .join(ComboItem, ComboItem.product_id == Product.id)
         .filter(ComboItem.combo_id == c.id)
     )
-    items = [{"product_id": pid, "name": name, "price": float(price)} for pid, name, price in result.all()]
+    items = [
+        {"product_id": pid, "name": name, "price": float(price), "triggers_upsell": triggers_upsell}
+        for pid, name, price, triggers_upsell in result.all()
+    ]
     return {
         "id": c.id,
         "category_id": c.category_id,
@@ -442,6 +455,7 @@ async def _serialize_combo(db: AsyncSession, c: "Combo") -> dict:
         "active": c.active,
         "image_url": presigned_download_url(c.image_url) if c.image_url else None,
         "thumbnail_url": presigned_download_url(c.thumbnail_url) if c.thumbnail_url else None,
+        "upsell_enabled": c.upsell_enabled,
         "items": items,
     }
 
@@ -920,6 +934,9 @@ class ComboItemOut(BaseModel):
     product_id: int
     name: str
     price: float
+    # ORD-157 (addendum) — em camada com Combo.upsell_enabled: só dispara
+    # sugestão de upsell se os dois estiverem true.
+    triggers_upsell: bool
 
 class ComboOut(BaseModel):
     id: int
@@ -930,17 +947,23 @@ class ComboOut(BaseModel):
     active: bool
     image_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    upsell_enabled: bool
     items: list[ComboItemOut] = []
 
 class ComboListOut(BaseModel):
     combos: list[ComboOut]
+
+class ComboItemIn(BaseModel):
+    product_id: int
+    triggers_upsell: bool = True
 
 class ComboIn(BaseModel):
     category_id: Optional[int] = None
     name: str
     description: Optional[str] = None
     price: float
-    product_ids: list[int]
+    items: list[ComboItemIn]
+    upsell_enabled: bool = True
 
     @field_validator("price")
     @classmethod
@@ -949,10 +972,10 @@ class ComboIn(BaseModel):
             raise ValueError("Preço deve ser positivo")
         return v
 
-    @field_validator("product_ids")
+    @field_validator("items")
     @classmethod
-    def at_least_two_products(cls, v: list[int]) -> list[int]:
-        if len(set(v)) < 2:
+    def at_least_two_products(cls, v: list["ComboItemIn"]) -> list["ComboItemIn"]:
+        if len({i.product_id for i in v}) < 2:
             raise ValueError("Combo precisa de ao menos 2 produtos componentes")
         return v
 
@@ -1795,16 +1818,18 @@ async def create_combo(
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id_write),
 ):
-    await _validate_combo_products(db, company_id, body.product_ids, body.price)
+    unique_items = {i.product_id: i for i in body.items}  # dedup mantendo a última ocorrência
+    await _validate_combo_products(db, company_id, list(unique_items.keys()), body.price)
     await _validate_combo_category(db, company_id, body.category_id)
     combo = Combo(
         company_id=company_id, category_id=body.category_id,
         name=body.name, description=body.description, price=body.price,
+        upsell_enabled=body.upsell_enabled,
     )
     db.add(combo)
     await db.flush()
-    for product_id in set(body.product_ids):
-        db.add(ComboItem(combo_id=combo.id, product_id=product_id))
+    for product_id, item in unique_items.items():
+        db.add(ComboItem(combo_id=combo.id, product_id=product_id, triggers_upsell=item.triggers_upsell))
     await db.commit(); await db.refresh(combo)
     return await _serialize_combo(db, combo)
 
@@ -1853,15 +1878,17 @@ async def update_combo(
 ):
     combo = (await db.execute(select(Combo).filter_by(id=combo_id, company_id=company_id, deleted=False))).scalars().first()
     if not combo: raise HTTPException(404)
-    await _validate_combo_products(db, company_id, body.product_ids, body.price)
+    unique_items = {i.product_id: i for i in body.items}  # dedup mantendo a última ocorrência
+    await _validate_combo_products(db, company_id, list(unique_items.keys()), body.price)
     await _validate_combo_category(db, company_id, body.category_id)
     combo.category_id = body.category_id
     combo.name = body.name
     combo.description = body.description
     combo.price = body.price
+    combo.upsell_enabled = body.upsell_enabled
     await db.execute(delete(ComboItem).where(ComboItem.combo_id == combo_id))
-    for product_id in set(body.product_ids):
-        db.add(ComboItem(combo_id=combo_id, product_id=product_id))
+    for product_id, item in unique_items.items():
+        db.add(ComboItem(combo_id=combo_id, product_id=product_id, triggers_upsell=item.triggers_upsell))
     await db.commit(); await db.refresh(combo)
     return await _serialize_combo(db, combo)
 

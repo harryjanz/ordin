@@ -251,6 +251,9 @@ export interface ComboItem {
   product_id: number;
   name: string;
   price: number;
+  // ORD-157 (addendum) — em camada com Combo.upsell_enabled: só dispara
+  // sugestão de upsell no totem se os dois estiverem true.
+  triggers_upsell: boolean;
 }
 
 export interface Combo {
@@ -262,6 +265,9 @@ export interface Combo {
   active: boolean;
   image_url: string | null;
   thumbnail_url: string | null;
+  // ORD-157 — separado de `active`: combo continua à venda mesmo com a
+  // sugestão de upsell desligada.
+  upsell_enabled: boolean;
   items: ComboItem[];
 }
 

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Button,
+  Checkbox,
   CurrencyInput,
   Dropdown,
   InputBase,
@@ -42,6 +43,9 @@ export default function ComboFormScreen() {
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState<number | null>(null);
   const [comboCategoryId, setComboCategoryId] = useState<string>("");
+  // ORD-157 — separado de "combo ativo": liga/desliga só a sugestão
+  // automática de upsell ao comprar um produto componente avulso no totem.
+  const [upsellEnabled, setUpsellEnabled] = useState(true);
   const [comboItems, setComboItems] = useState<ComboItem[]>([]);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -89,6 +93,7 @@ export default function ComboFormScreen() {
         setPrice(c.price);
         setComboCategoryId(c.category_id !== null ? String(c.category_id) : "");
         setComboItems(c.items);
+        setUpsellEnabled(c.upsell_enabled);
         setImageUrl(c.image_url);
         setThumbnailUrl(c.thumbnail_url);
       } catch {
@@ -126,11 +131,17 @@ export default function ComboFormScreen() {
     : [];
 
   function addToCombo(p: Product) {
-    setComboItems((prev) => [...prev, { product_id: p.id, name: p.name, price: p.price }]);
+    setComboItems((prev) => [...prev, { product_id: p.id, name: p.name, price: p.price, triggers_upsell: true }]);
   }
 
   function removeFromCombo(productId: number) {
     setComboItems((prev) => prev.filter((i) => i.product_id !== productId));
+  }
+
+  // ORD-157 (addendum) — toggle fino por item, em camada com o toggle geral
+  // do combo (upsellEnabled acima).
+  function setItemTriggersUpsell(productId: number, triggers: boolean) {
+    setComboItems((prev) => prev.map((i) => i.product_id === productId ? { ...i, triggers_upsell: triggers } : i));
   }
 
   async function handleImageFiles(files: UploadFile[]) {
@@ -177,7 +188,8 @@ export default function ComboFormScreen() {
         name: name.trim(),
         description: description.trim() || null,
         price,
-        product_ids: comboItems.map((i) => i.product_id),
+        items: comboItems.map((i) => ({ product_id: i.product_id, triggers_upsell: i.triggers_upsell })),
+        upsell_enabled: upsellEnabled,
       };
       if (editingComboId === null) {
         await api.post("/catalog/combos", body, catalogParams());
@@ -243,6 +255,20 @@ export default function ComboFormScreen() {
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
+        <div className={styles.upsellToggle}>
+          <Checkbox
+            id="combo-upsell-enabled"
+            label="Sugerir este combo automaticamente no totem"
+            checked={upsellEnabled}
+            onChange={setUpsellEnabled}
+          />
+          <p className={styles.upsellToggleHint}>
+            Quando ligado, o totem oferece este combo ao cliente sempre que ele adiciona um dos
+            produtos deste combo avulso ao carrinho. Desligue se algum item do combo for muito
+            comum (ex: refrigerante) e a sugestão estiver aparecendo com frequência indesejada —
+            o combo continua à venda normalmente, só a sugestão automática é desativada.
+          </p>
+        </div>
       </div>
 
       <div className={styles.panel}>
@@ -321,11 +347,19 @@ export default function ComboFormScreen() {
           )}
           {comboItems.map((i) => (
             <div key={i.product_id} className={styles.comboItemRow}>
-              <div className={styles.searchResultInfo}>
+              <div className={styles.comboItemInfo}>
                 <span>{i.name}</span>
                 <span className={styles.muted}>{i.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
               </div>
-              <button type="button" className={styles.removeBtn} onClick={() => removeFromCombo(i.product_id)} title="Remover do combo">✕</button>
+              <div className={styles.comboItemActions}>
+                <Checkbox
+                  id={`combo-item-upsell-${i.product_id}`}
+                  label="Indica este combo"
+                  checked={i.triggers_upsell}
+                  onChange={(checked) => setItemTriggersUpsell(i.product_id, checked)}
+                />
+                <button type="button" className={styles.removeBtn} onClick={() => removeFromCombo(i.product_id)} title="Remover do combo">✕</button>
+              </div>
             </div>
           ))}
         </div>
