@@ -367,6 +367,29 @@ async def test_delete_com_confirm_deactivate_combos_aplica_cascata(client, seed,
     assert combo["active"] is False
 
 
+async def test_ativar_combo_com_produto_inativo_e_recusado(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    combo_id = r.json()["id"]
+    await client.delete(
+        f"/catalog/products/{seed['burger_id']}",
+        params={"confirm_deactivate_combos": "true"},
+        headers=auth(token_owner),
+    )
+    # combo e produto já estão inativos aqui — tentar reativar só o combo direto
+    r2 = await client.patch(f"/catalog/combos/{combo_id}", json={"active": True}, headers=auth(token_owner))
+    assert r2.status_code == 409
+    assert "__combo_burger__" in r2.json()["detail"]
+    r3 = await client.get("/catalog/combos?include_inactive=true", headers=auth(token_owner))
+    combo = next(c for c in r3.json()["combos"] if c["id"] == combo_id)
+    assert combo["active"] is False
+
+    # reativa o produto primeiro — agora o combo pode ser reativado
+    await client.put(f"/catalog/products/{seed['burger_id']}", json={"active": True}, headers=auth(token_owner))
+    r4 = await client.patch(f"/catalog/combos/{combo_id}", json={"active": True}, headers=auth(token_owner))
+    assert r4.status_code == 200
+    assert r4.json()["active"] is True
+
+
 # ── Regressão ────────────────────────────────────────────────────────────
 
 async def test_listagem_de_produtos_continua_funcionando_com_combos_cadastrados(client, seed, token_owner):

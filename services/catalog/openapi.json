@@ -1949,6 +1949,7 @@
           "Catálogo"
         ],
         "summary": "Ativar/desativar um combo sem reeditar o resto dos dados",
+        "description": "ORD-151: complemento simétrico da checagem em update_product/\ndelete_product — aquela impede desativar produto sem avisar sobre o\ncombo; esta impede ativar o combo enquanto algum componente segue\ninativo (reproduziria a mesma inconsistência pelo lado contrário).\nSem confirmação/cascata aqui — reativar produtos em massa sem o admin\npedir explicitamente seria um efeito colateral grande demais; o combo\nsó reativa depois que os componentes já estiverem ativos de novo.",
         "operationId": "set_combo_active_catalog_combos__combo_id__patch",
         "security": [
           {
@@ -2005,6 +2006,9 @@
           },
           "404": {
             "description": "Combo não encontrado"
+          },
+          "409": {
+            "description": "Ativar recusado: algum produto componente está inativo"
           },
           "422": {
             "description": "Validation Error",

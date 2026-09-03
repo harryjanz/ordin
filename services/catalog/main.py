@@ -1832,7 +1832,10 @@ async def update_combo(
     response_model=ComboOut,
     tags=["Catálogo"],
     summary="Ativar/desativar um combo sem reeditar o resto dos dados",
-    responses={404: {"description": "Combo não encontrado"}},
+    responses={
+        404: {"description": "Combo não encontrado"},
+        409: {"description": "Ativar recusado: algum produto componente está inativo"},
+    },
 )
 async def set_combo_active(
     combo_id: int,
@@ -1840,8 +1843,23 @@ async def set_combo_active(
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id_write),
 ):
+    """ORD-151: complemento simétrico da checagem em update_product/
+    delete_product — aquela impede desativar produto sem avisar sobre o
+    combo; esta impede ativar o combo enquanto algum componente segue
+    inativo (reproduziria a mesma inconsistência pelo lado contrário).
+    Sem confirmação/cascata aqui — reativar produtos em massa sem o admin
+    pedir explicitamente seria um efeito colateral grande demais; o combo
+    só reativa depois que os componentes já estiverem ativos de novo."""
     combo = (await db.execute(select(Combo).filter_by(id=combo_id, company_id=company_id, deleted=False))).scalars().first()
     if not combo: raise HTTPException(404)
+    if body.active:
+        inactive = (await db.execute(
+            select(Product.name)
+            .join(ComboItem, ComboItem.product_id == Product.id)
+            .filter(ComboItem.combo_id == combo_id, Product.active == False)  # noqa: E712
+        )).scalars().all()
+        if inactive:
+            raise HTTPException(409, detail=f"Produto(s) inativo(s) no combo: {', '.join(inactive)}")
     combo.active = body.active
     await db.commit(); await db.refresh(combo)
     return await _serialize_combo(db, combo)
