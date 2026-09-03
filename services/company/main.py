@@ -139,7 +139,12 @@ class Company(Base):
     __tablename__ = "companies"
     id                      = Column(Integer, primary_key=True)
     name                    = Column(String(120))
-    document                = Column(String(20))
+    # unique=True espelha a migration 20260805_1000_document_unique.py
+    # (ORD-065) — sem isso o modelo Python fica dessincronizado da migration
+    # real, e Base.metadata.create_all() (usado pelos testes, que não rodam
+    # Alembic) nunca cria a constraint, mascarando o comportamento de
+    # duplicidade que só existe de verdade em ambiente com migration aplicada.
+    document                = Column(String(20), unique=True)
     pin_hash                = Column(String(128), nullable=False)
     plan                    = Column(String(20), default="free")
     payment_provider        = Column(String(20), default="mock")

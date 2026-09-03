@@ -522,3 +522,46 @@ pré-existentes — mesmas já documentadas na Fase 3, não introduzidas por est
 185/185, order 58/58, payment 126/126, notification 8/8**, cobertura total 73% (gate 40%). As 9
 falhas de `company` são pré-existentes e já estavam registradas na Validação da Fase 3 — não são
 regressão deste achado.
+
+## Investigação das 9 falhas pré-existentes de `company` (2026-09-03)
+
+Com lint + coleta + env corrigidos, os 9 testes de `company` que sempre estiveram escondidos
+atrás do `lint` quebrado passaram a bloquear o job de verdade. Investigado um por um antes de
+fechar o ORD-156 — **nenhum é bug de produção**, todos são teste desatualizado/dessincronizado:
+
+1. **`test_require_superadmin_raises_for_owner`** — `AttributeError: module 'main' has no
+   attribute '_require_superadmin'`. Função foi renomeada pra `_require_platform_admin` num
+   refactor anterior (comentário em `main.py:349`: "admin e superadmin são equivalentes... antes
+   só superadmin tinha bypass aqui") e o teste nunca foi atualizado. **Fix:** renomeado o teste
+   pra `test_require_platform_admin_raises_for_owner`, chamando a função certa.
+2. **4 testes de `test_isolation.py`** (`test_list_terminais/usuarios/payment_configs_empresa_
+   alheia_retorna_403`, `test_regenerar_pin_empresa_alheia_retorna_403`) — todos `assert 200 ==
+   403`. **Não é vazamento de isolamento multi-tenant real** — `_require_company_admin`
+   (`main.py:355`) compara `token.company_id != company_id` corretamente. O bug é no fixture
+   `ids`: assume que a empresa B (id=2) já existe num banco seedado (comentário original: "Usa as
+   empresas do seed... Em CI com banco limpo, cria empresa B temporária"), mas o `conftest.py`
+   força sqlite in-memory sempre — banco sempre vazio, então o fallback criava a empresa B sem
+   forçar `id=2`, e ela ganhava `id=1` por autoincrement, colidindo com `company_a_id` (hardcoded
+   como 1 no `token_owner`). Sem colisão de id não haveria isolamento nenhum sendo exercitado —
+   os dois "tenants" eram o mesmo id. **Fix:** força `id=2` explicitamente na criação da empresa B
+   (sqlite aceita PK explícita em coluna autoincrement).
+3. **3 testes de `test_ord065_cnpj_unico.py`** — CNPJ duplicado não bloqueado (`201` em vez de
+   `422`). O endpoint (`create_company`, `main.py:1153`) depende inteiramente de `IntegrityError`
+   do banco pra detectar duplicidade (sem pré-checagem via `SELECT`) — comportamento correto e
+   real em produção, que roda `alembic upgrade head` e aplica a migration
+   `20260805_1000_document_unique.py` (ORD-065, `uq_companies_document`). Mas o modelo Python
+   `Company.document` (`main.py:142`) nunca ganhou `unique=True` depois dessa migration — como os
+   testes montam o schema via `Base.metadata.create_all()` (não rodam Alembic), a constraint nunca
+   existia no banco de teste. **Fix:** adicionado `unique=True` no modelo, sincronizando com a
+   migration — sem efeito em produção (que já tinha a constraint via Alembic), só destrava o
+   `create_all()` dos testes a replicar o comportamento real.
+4. **`test_liga_consumption_mode`** — `assert {...} == {'ok': True, 'consumption_mode_enabled':
+   True}` falhando por causa de 2 campos a mais na resposta. O endpoint `PATCH
+   /companies/{id}/behavior` ganhou `fulfillment_mode`/`prep_urgency_minutes` depois (ORD-118/
+   ORD-119, mesmo endpoint do ORD-108) e passou a devolver os dois na resposta — comportamento
+   correto, só a asserção de igualdade exata do teste nunca foi atualizada. **Fix:** asserção
+   inclui os 2 campos novos com seus defaults (`"por_item"`, `10`).
+
+Validado: `pytest services/company` → **344 passed, 0 failed** (335 + os 9 agora corrigidos), sem
+regressão em nenhum dos que já passavam. `docker compose build company-service` + `up -d` +
+`GET /health` → 200 confirmados após as mudanças.

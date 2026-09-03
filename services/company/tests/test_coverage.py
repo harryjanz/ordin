@@ -153,10 +153,10 @@ def test_decrypt_enc_sem_key_levanta_runtime_error():
         svc.decrypt_field("enc:YWJj")
 
 
-def test_require_superadmin_raises_for_owner():
+def test_require_platform_admin_raises_for_owner():
     import main as svc
     with pytest.raises(HTTPException) as exc:
-        svc._require_superadmin(_user("owner"))
+        svc._require_platform_admin(_user("owner"))
     assert exc.value.status_code == 403
 
 
