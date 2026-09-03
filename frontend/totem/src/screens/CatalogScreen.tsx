@@ -708,13 +708,18 @@ export default function CatalogScreen({
               <img
                 src={upsell.combo.image_url}
                 alt={upsell.combo.name}
-                style={{ width: "100%", height: 180, objectFit: "cover", borderRadius: RADIUS.lg, display: "block" }}
+                style={{ width: "100%", height: 260, objectFit: "cover", borderRadius: RADIUS.lg, display: "block" }}
               />
             )}
-            <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.headlineLg, lineHeight: 1.2, paddingRight: 40 }}>
+            <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
               Leve o {upsell.combo.name}
               {upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price > 0 && (
-                <> e economize {fmt(upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price)}</>
+                <>
+                  {" "}e{" "}
+                  <span style={{ color: "#1c8a53", background: "#e4f6ec", borderRadius: RADIUS.pill, padding: "2px 12px", whiteSpace: "nowrap", display: "inline-block" }}>
+                    economize {fmt(upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price)}
+                  </span>
+                </>
               )}
             </div>
             <div style={{ background: T.numBg, borderRadius: RADIUS.lg, padding: "18px 22px", display: "flex", flexDirection: "column", gap: 10 }}>
