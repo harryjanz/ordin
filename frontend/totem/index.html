@@ -9,7 +9,15 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
+      /* EXPERIMENTO totem-shadcn-react-aria — margin/padding removidos daqui:
+         eram inofensivos enquanto tudo usava inline style (que sempre ganha
+         de qualquer CSS), mas essa regra não está em nenhum @layer, então
+         ganhava até das classes utilitárias do Tailwind (CSS Cascade Layers:
+         não-camada sempre vence camada, não importa a especificidade) —
+         zerava padding/margin/gap em qualquer tela convertida. Nenhuma tela
+         atual depende do reset (todo elemento que precisa de zero já seta
+         via style inline); box-sizing continua, é inofensivo. */
+      * { box-sizing: border-box; }
       body { font-family: 'Inter', sans-serif; background: #DFE8ED; }
       @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
       @keyframes spin  { to{transform:rotate(360deg)} }
