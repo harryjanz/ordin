@@ -1,6 +1,6 @@
 ---
 id: ORD-152
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Backend SR + Frontend

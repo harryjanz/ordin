@@ -1,6 +1,6 @@
 ---
 id: ORD-116
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Fullstack

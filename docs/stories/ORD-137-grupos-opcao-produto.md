@@ -1,6 +1,6 @@
 ---
 id: ORD-137
-status: New
+status: Done
 fase: 6
 sprint: null
 responsavel: Produto
@@ -43,3 +43,11 @@ ORD-138 é pré-requisito de todas as outras (não existe grupo de opção sem o
 grupo de opção — produto componente de combo com grupo obrigatório vinculado é adicionado sem
 nunca perguntar a opção. Fora do escopo de ORD-141/142/143 (que tratam só produto avulso),
 registrada como história separada pra decisão de prioridade do usuário.
+
+## Nota (2026-09-04)
+
+Esta história nunca avançou pelo próprio upstream (ficou `New`) — o guarda-chuva foi cumprido
+por completo pelas histórias filhas (ORD-138 a ORD-146, todas `Done`), que implementaram modelo
+de dados, cadastro admin, vínculo produto↔grupo, seleção no totem, persistência no pedido e
+impressão do ticket. Status corrigido pra `Done` retroativamente — não representa trabalho
+pendente.

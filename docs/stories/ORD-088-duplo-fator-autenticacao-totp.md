@@ -1,6 +1,6 @@
 ---
 id: ORD-088
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Backend + Frontend

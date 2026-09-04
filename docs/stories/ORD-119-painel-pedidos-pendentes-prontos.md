@@ -1,6 +1,6 @@
 ---
 id: ORD-119
-status: Ready
+status: Done
 fase: 7
 sprint: null
 responsavel: PM + Produto

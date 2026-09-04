@@ -1,6 +1,6 @@
 ---
 id: ORD-120
-status: Ready
+status: Done
 fase: 7
 sprint: null
 responsavel: Backend SR + Frontend
