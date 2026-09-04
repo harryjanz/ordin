@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import api from "../api";
 import type { Theme } from "../themes";
-import type { Category, Product, CartItem, Combo } from "../types";
+import type { Category, Product, CartItem, Combo, ProductOptionGroup, SelectedOption } from "../types";
 import { RADIUS, FONT } from "../scale";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -48,7 +48,14 @@ export default function CatalogScreen({
   // adição do produto avulso, não é um banner discreto. Só dispara na
   // primeira unidade (getQty === 0); incrementar um produto já no carrinho
   // via stepper não repete a pergunta a cada unidade.
-  const [upsell, setUpsell] = useState<{ combo: Combo; product: Product } | null>(null);
+  // ORD-141 — carrega selectedOptions/price/key já resolvidos (calculados
+  // antes do upsell decidir se mostra), pro botão "Não, só X" adicionar com
+  // a opção escolhida certa em vez de reabrir a seleção.
+  const [upsell, setUpsell] = useState<{ combo: Combo; product: Product; selectedOptions: SelectedOption[]; price: number; key: string } | null>(null);
+
+  // ORD-141 — modal de seleção de grupo de opção. `selections` mapeia
+  // option_group.id -> ids das opções escolhidas nesse grupo.
+  const [optionModal, setOptionModal] = useState<{ product: Product; selections: Record<number, number[]> } | null>(null);
 
   const isVertical = menuLayout === "vertical";
 
@@ -119,27 +126,129 @@ export default function CatalogScreen({
     onAdd({ key: `product:${p.id}`, kind: "product", id: p.id, name: p.name, price: p.price, qty: 1 });
   }
 
+  // ORD-141 — mesma ideia de addProductToCart, mas com a(s) opção(ões)
+  // escolhida(s) já resolvida(s): nome do carrinho ganha o sufixo da opção
+  // (ex. "Refrigerante — Guaraná Antarctica"), preço já vem com os
+  // price_delta somados, e a key inclui os ids das opções pra não misturar
+  // com outra variante do mesmo produto numa única linha.
+  function addProductWithOptionsToCart(p: Product, selectedOptions: SelectedOption[], price: number, key: string) {
+    const name = selectedOptions.length
+      ? `${p.name} — ${selectedOptions.map((o) => o.option_label).join(", ")}`
+      : p.name;
+    onAdd({
+      key, kind: "product", id: p.id, name, price, qty: 1,
+      selectedOptions: selectedOptions.length ? selectedOptions : undefined,
+    });
+  }
+
   function addComboToCart(c: Combo) {
     onAdd({ key: `combo:${c.id}`, kind: "combo", id: c.id, name: c.name, price: c.price, qty: 1, comboItems: c.items });
+  }
+
+  // ORD-141 — grupos de opção "de verdade" pro produto: ativos e com pelo
+  // menos uma opção ativa. Grupo obrigatório sem nenhuma opção selecionável
+  // (todas desativadas via ORD-145) é tratado como se não estivesse
+  // vinculado — decisão do Tech Explorer, pra não travar a venda inteira
+  // do produto por causa de uma opção temporariamente indisponível.
+  function selectableOptionGroups(p: Product): ProductOptionGroup[] {
+    return (p.option_groups ?? []).filter((g) => g.active && g.options.some((o) => o.active));
   }
 
   // Decisão validada com o usuário: se o produto for componente de mais de
   // um combo ativo, oferece só o primeiro (ordenado por id, já vem assim do
   // backend) — comportamento simplificado, não ideal, mas previsível.
-  function handleAddProduct(p: Product) {
+  // ORD-141 — seleção de opção resolve primeiro; a checagem de upsell abaixo
+  // roda depois, com o produto (e sua opção) já definidos.
+  function maybeUpsellOrAdd(p: Product, selectedOptions: SelectedOption[], price: number, key: string) {
     // ORD-157 — dois níveis em camada: o combo precisa estar com a
     // sugestão ligada (chave mestra, continua vendável pelo próprio card
     // mesmo desligada) E o item específico comprado avulso precisa ter
     // triggers_upsell=true (ex: burger indica o combo, refrigerante não).
-    const combo = getQty(`product:${p.id}`) === 0
+    // ORD-141 — checa por QUALQUER linha desse produto no carrinho (não só
+    // a key exata), já que produto com opção pode ter várias linhas
+    // diferentes pra um mesmo product_id.
+    const hasProductInCart = cart.some((i) => i.kind === "product" && i.id === p.id);
+    const combo = !hasProductInCart
       ? combos.find((c) =>
           c.upsell_enabled &&
           c.items.some((i) => i.product_id === p.id && i.triggers_upsell)
         )
       : undefined;
-    if (combo) setUpsell({ combo, product: p });
-    else addProductToCart(p);
+    if (combo) setUpsell({ combo, product: p, selectedOptions, price, key });
+    else addProductWithOptionsToCart(p, selectedOptions, price, key);
   }
+
+  function handleAddProduct(p: Product) {
+    const groups = selectableOptionGroups(p);
+    if (groups.length > 0) {
+      setOptionModal({ product: p, selections: {} });
+      return;
+    }
+    maybeUpsellOrAdd(p, [], p.price, `product:${p.id}`);
+  }
+
+  function toggleOption(groupId: number, optionId: number, max: number) {
+    setOptionModal((prev) => {
+      if (!prev) return prev;
+      const current = prev.selections[groupId] ?? [];
+      let next: number[];
+      if (current.includes(optionId)) {
+        next = current.filter((id) => id !== optionId);
+      } else if (current.length < max) {
+        next = [...current, optionId];
+      } else {
+        // ORD-141 (correção pós-QA) — no limite (inclusive seleção única,
+        // max=1), tocar numa opção nova troca a mais antiga automaticamente
+        // em vez de exigir desmarcar antes. Sem isso o cliente que já
+        // escolheu "Guaraná" e quer trocar pra "Coca-Cola" precisava de 2
+        // toques (desmarcar, depois marcar) em vez de 1 — feedback direto
+        // do usuário testando manualmente.
+        next = [...current.slice(1), optionId];
+      }
+      return { ...prev, selections: { ...prev.selections, [groupId]: next } };
+    });
+  }
+
+  function confirmOptionModal() {
+    if (!optionModal) return;
+    const { product, selections } = optionModal;
+    const groups = selectableOptionGroups(product);
+    const selectedOptions: SelectedOption[] = [];
+    let priceExtra = 0;
+    const allIds: number[] = [];
+    for (const g of groups) {
+      for (const optId of selections[g.id] ?? []) {
+        const opt = g.options.find((o) => o.id === optId);
+        if (!opt) continue;
+        selectedOptions.push({ group_name: g.name, option_label: opt.label, price_delta: opt.price_delta });
+        priceExtra += opt.price_delta;
+        allIds.push(optId);
+      }
+    }
+    allIds.sort((a, b) => a - b);
+    const key = allIds.length ? `product:${product.id}:${allIds.join(",")}` : `product:${product.id}`;
+    setOptionModal(null);
+    maybeUpsellOrAdd(product, selectedOptions, product.price + priceExtra, key);
+  }
+
+  const canConfirmOptionModal = optionModal
+    ? selectableOptionGroups(optionModal.product).every((g) => {
+        const min = g.min_selections_override ?? g.min_selections;
+        return (optionModal.selections[g.id]?.length ?? 0) >= min;
+      })
+    : false;
+
+  // ORD-141 (correção pós-QA do usuário) — preço-base + soma dos deltas
+  // já selecionados, recalculado a cada seleção/desmarcação. Sem isso o
+  // cliente só via o acréscimo de cada opção isolado, nunca quanto o
+  // produto ficava no total — feedback explícito de precisar ficar visível.
+  const optionModalTotal = optionModal
+    ? optionModal.product.price + selectableOptionGroups(optionModal.product).reduce(
+        (sum, g) => sum + (optionModal.selections[g.id] ?? []).reduce(
+          (s, optId) => s + (g.options.find((o) => o.id === optId)?.price_delta ?? 0), 0,
+        ), 0,
+      )
+    : 0;
 
   // Categorias — mesmo conteúdo nos dois modos, só o container/botão mudam
   // de faixa horizontal pra coluna lateral.
@@ -386,7 +495,12 @@ export default function CatalogScreen({
               Nenhum produto disponível.
             </div>
           ) : products.map((p, i) => {
-            const qty = getQty(`product:${p.id}`);
+            // ORD-141 — produto com grupo de opção pode ter várias linhas no
+            // carrinho (uma por combinação de opção escolhida), então o
+            // card não usa mais o stepper +/- direto (ambíguo: qual linha
+            // incrementar?). Ajuste de quantidade por variante acontece no
+            // carrinho, onde cada linha já tem seu próprio +/- por key.
+            const qty = selectableOptionGroups(p).length > 0 ? 0 : getQty(`product:${p.id}`);
             const gradient = i % 2 === 0 ? T.placeholderA : T.placeholderB;
             return (
               <div
@@ -672,6 +786,135 @@ export default function CatalogScreen({
         </div>
       )}
 
+      {/* Modal de seleção de grupo de opção (ORD-141) — mesma estrutura
+          visual do modal de upsell (overlay + card central), reaproveitada
+          por decisão do Explorer em vez de um segundo padrão de UI. Grupo
+          obrigatório (min_selections efetivo >= 1) trava o botão Confirmar
+          até a contagem bater; grupo opcional não trava nada. */}
+      {optionModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div onClick={() => setOptionModal(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)" }} />
+          <div style={{
+            // ORD-141 (correção pós-QA, rodada 2) — 760px em vez de 640px pra
+            // dar mais espaço às miniaturas das opções (56px → 88px).
+            position: "relative", width: "min(760px, 100%)", maxHeight: "88vh", overflowY: "auto",
+            background: T.surface, borderRadius: RADIUS.lg,
+            padding: "40px 40px 32px", display: "flex", flexDirection: "column", gap: 20,
+            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
+            border: `1.5px solid ${T.border}`,
+          }}>
+            <button
+              onClick={() => setOptionModal(null)}
+              style={{
+                position: "absolute", top: 16, right: 16, width: 44, height: 44, borderRadius: "50%",
+                background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.text,
+                fontSize: FONT.subtitle, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              ✕
+            </button>
+            <div>
+              <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
+                {optionModal.product.name}
+              </div>
+              <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, marginTop: 4 }}>
+                A partir de {fmt(optionModal.product.price)}
+              </div>
+            </div>
+            {selectableOptionGroups(optionModal.product).map((g) => {
+              const min = g.min_selections_override ?? g.min_selections;
+              const max = g.max_selections_override ?? g.max_selections;
+              const selected = optionModal.selections[g.id] ?? [];
+              return (
+                <div key={g.id} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.bodyLg, color: T.text }}>{g.name}</span>
+                    <span style={{ fontFamily: FONT_B, fontSize: FONT.label, color: T.muted }}>
+                      {min >= 1 ? `Escolha ${max > min ? `de ${min} a ${max}` : min}` : `Opcional${max > 1 ? ` — até ${max}` : ""}`}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {g.options.filter((o) => o.active).map((o) => {
+                      const isSelected = selected.includes(o.id);
+                      return (
+                        <button
+                          key={o.id}
+                          onClick={() => toggleOption(g.id, o.id, max)}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 16,
+                            padding: 12, borderRadius: RADIUS.lg, cursor: "pointer",
+                            background: isSelected ? T.catActive : T.numBg,
+                            color: isSelected ? T.catText : T.text,
+                            border: `1.5px solid ${isSelected ? T.catActive : T.borderNeutral}`,
+                            fontFamily: FONT_B, fontWeight: 700, fontSize: FONT.subtitle,
+                            textAlign: "left",
+                          }}
+                        >
+                          {/* ORD-141 (correção pós-QA, rodada 2) — 88px em vez de
+                              56px, pedido explícito do usuário pra dar mais
+                              destaque à foto da opção quando cadastrada (ORD-138).
+                              Placeholder com emoji quando não tem imagem, mesmo
+                              padrão do card de combo (ORD-153). */}
+                          <div style={{ width: 88, height: 88, flexShrink: 0, borderRadius: RADIUS.lg, overflow: "hidden" }}>
+                            {o.thumbnail_url || o.image_url ? (
+                              <img
+                                src={o.thumbnail_url ?? o.image_url ?? undefined}
+                                alt={o.label}
+                                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                              />
+                            ) : (
+                              <div style={{
+                                width: "100%", height: "100%", background: T.placeholderA,
+                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: FONT.title,
+                              }}>
+                                🍽️
+                              </div>
+                            )}
+                          </div>
+                          <span style={{ flex: 1 }}>{o.label}</span>
+                          {/* Preço adicional em destaque — some quando delta=0
+                              (sabor padrão, incluído no preço-base) em vez de
+                              mostrar "R$ 0,00", que soaria como cobrança dupla. */}
+                          {o.price_delta > 0 && (
+                            <span style={{
+                              fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
+                              color: isSelected ? T.catText : T.priceColor,
+                            }}>
+                              +{fmt(o.price_delta)}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", paddingTop: 12, borderTop: `1px dashed ${T.borderNeutral}` }}>
+              <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.bodyLg, fontWeight: 600 }}>Total</span>
+              <span style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 900, fontSize: FONT.title }}>{fmt(optionModalTotal)}</span>
+            </div>
+            <button
+              onClick={confirmOptionModal}
+              disabled={!canConfirmOptionModal}
+              style={{
+                minHeight: 76, borderRadius: RADIUS.pill,
+                background: canConfirmOptionModal ? T.btn : T.numBg,
+                color: canConfirmOptionModal ? T.btnText : T.muted,
+                border: canConfirmOptionModal ? "none" : `1px solid ${T.borderNeutral}`,
+                fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
+                cursor: canConfirmOptionModal ? "pointer" : "default",
+                boxShadow: canConfirmOptionModal ? T.glow : "none",
+                marginTop: 4,
+              }}
+            >
+              Confirmar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Modal de upsell (ORD-150) — interrompe a adição do produto avulso,
           decisão validada com o usuário: não é um banner discreto.
           Correção pós-QA (2026-09-02): centralizado na tela (não mais um
@@ -752,7 +995,7 @@ export default function CatalogScreen({
                 Sim, quero o combo
               </button>
               <button
-                onClick={() => { addProductToCart(upsell.product); setUpsell(null); }}
+                onClick={() => { addProductWithOptionsToCart(upsell.product, upsell.selectedOptions, upsell.price, upsell.key); setUpsell(null); }}
                 style={{
                   minHeight: 68, borderRadius: RADIUS.pill, background: T.numBg, color: T.text,
                   border: `1px solid ${T.borderNeutral}`, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body, cursor: "pointer",

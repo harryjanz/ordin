@@ -306,3 +306,68 @@ Nenhum além dos já listados (`auth` só por causa do filtro de schema no parea
   ~10s de inatividade (60s − 50s de aviso), com contagem regressiva correta — confirmando que o
   totem usa o valor configurado, não mais os 3min/20s fixos do ORD-155. Restaurei a Burger House
   pro default real (5min/30s) depois do teste.
+
+## Correção pós-lançamento — mousemove/scroll não resetavam o timer (2026-09-03)
+
+Usuário reportou, testando manualmente numa sessão posterior (durante validação do ORD-141),
+que o aviso "insistia em aparecer mesmo com atividade no navegador". Investigado com
+`console.log` temporário instrumentando `touch()` e o cálculo de `idle` — confirmado que
+`touch()` disparava corretamente a cada **clique** real (sem bug nenhum aí). A causa raiz: o
+listener de atividade (`App.tsx`) só escuta `click`, `touchstart` e `keydown` — **não**
+`scroll`/`wheel`/`mousemove`. Testando no navegador com mouse (não num touchscreen real), rolar
+o catálogo ou só mover o cursor por cima dos cards sem clicar em nada não conta como atividade,
+então o timer segue contando e o aviso aparece mesmo com o cliente "ali", só sem tocar em nada
+clicável.
+
+Corrigido: `scroll`/`wheel` adicionados à mesma lista de `click`/`touchstart`/`keydown`;
+`mousemove` adicionado separadamente com throttle de 1s (senão dispara a cada pixel de
+movimento, gerando `touch()` — e o re-render de toda a `App` que isso causa, já que `useStore()`
+é chamado sem seletor — a uma taxa desnecessária). `mousemove` nunca dispara em touchscreen
+real, mas não atrapalha deixar registrado — é só um listener a mais que nunca é acionado lá.
+
+Validado: com timeout curto de teste (1min/50s = 10s de graça), 18s de puro movimento de mouse
+sem nenhum clique não disparou mais o aviso (antes da correção, disparava por volta dos 10-13s
+mesmo com cliques reais acontecendo, porque o teste original só simulava clique, nunca scroll/
+hover — o gap ficou invisível até testar com mouse de verdade). Config revertida pro default
+(5min/30s) depois da validação, mesmo ritual da validação original acima.
+
+## Correção pós-lançamento #2 — causa raiz real: `company` nunca era refeito depois do login (2026-09-03)
+
+O fix de mousemove/scroll acima **não resolveu** — usuário reportou de novo, com a config real
+confirmada em 5min/30s (não a config de teste), que o aviso continuava aparecendo em ~20s.
+Investigação extensa com painel de debug renderizado na própria tela (não console — descoberto
+que `read_console_messages` reapresenta mensagens antigas com timestamp de leitura, não de
+emissão original, o que mascarou a investigação por um bom tempo) revelou a causa raiz real: o
+painel mostrava `timeoutMs=60000 warnSec=50` — a config de **teste** (1min/50s) que eu tinha
+configurado horas antes durante a investigação do achado #1, não a config real (5min/30s) que
+estava no banco havia tempo.
+
+**Causa raiz:** `company` (e portanto `inactivity_timeout_min`/`inactivity_warn_sec`) só é
+buscado **uma vez, no momento do login** (`handlePinSuccess` → `setCompany(co)`) — nunca de novo
+durante a sessão. Um totem pareado continua usando os valores de quando logou, para sempre,
+mesmo que o admin mude a configuração depois. Isso não é um bug introduzido recentemente — é uma
+lacuna de design que sempre existiu desde que `company` foi introduzido no estado persistido; só
+ficou visível agora porque ORD-158 tornou esse campo específico editável em runtime pela
+primeira vez (antes, `company` só mudava campos que não importavam mudar no meio de uma sessão
+ativa do totem, ex: nome/tema).
+
+**Corrigido:** `App.tsx` ganha um `useEffect` que, a cada 2 minutos (enquanto `token`/`company`
+existirem), chama `GET /companies/{company.id}` e atualiza o `company` local com os campos
+relevantes. Não precisou de endpoint novo — `get_company` (`company-service/main.py:1213`) já
+permite o próprio token ler sua empresa mesmo com `role: kiosk`, desde que `company_id` do token
+bata com o `company_id` do path (`current_user.company_id != company_id` é o único bloqueio, sem
+checagem de role) — exatamente o caso do totem lendo a própria empresa. Falha na chamada não
+quebra nada — mantém o valor já em cache (`.catch(() => null)`), mesmo padrão de resiliência já
+usado no polling de combos/catálogo do `CatalogScreen`.
+
+Validado ao vivo com o usuário: sessão com config de teste (1min/50s) em cache, config real
+alterada pra 5min/30s no admin enquanto a sessão do totem já estava aberta, aguardado o refresh
+automático (testado com intervalo reduzido pra 5s só durante a validação, revertido pra 2min
+antes do commit) — totem passou a usar a config nova sem precisar reparear. Confirmado
+funcionando pelo usuário testando diretamente.
+
+**Nota para o backlog:** o mesmo problema de "config só carrega no login" existe, em tese, para
+qualquer outro campo de `CompanyInfo` que um admin possa querer mudar em runtime
+(`visual_theme`/`visual_mode`/`consumption_mode_enabled`/`catalog_menu_layout`/
+`fulfillment_mode`) — o refresh periódico agora implementado cobre todos eles igualmente, já que
+atualiza o objeto `company` inteiro, não só os campos de inatividade. Não é um fix parcial.

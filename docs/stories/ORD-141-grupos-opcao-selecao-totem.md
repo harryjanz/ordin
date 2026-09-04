@@ -1,6 +1,6 @@
 ---
 id: ORD-141
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Frontend
@@ -339,3 +339,118 @@ modal de opção fechar em vez de direto no clique do "+".
 - [x] Priorizada no sprint backlog
 
 **Status final: Ready.**
+
+## Validação (implementação, 2026-09-03)
+
+Implementado conforme o Tech Explorer, com uma simplificação de UI não antecipada lá: produto com
+grupo de opção deixa de usar o stepper +/- direto no card (ambíguo — qual variante incrementar,
+se pode haver mais de uma linha no carrinho pro mesmo produto?). Card sempre mostra "Toque para
+adicionar", e o ajuste de quantidade por variante acontece no carrinho, onde cada linha já tem seu
+próprio +/- por `key` (mecanismo que já existia, reaproveitado sem mudança).
+
+- `types.ts`: `OptionGroupOption`/`ProductOptionGroup` (copiados do admin), `Product.option_groups`,
+  `CartItem.selectedOptions`.
+- `CatalogScreen.tsx`: modal de seleção (mesma estrutura visual do upsell ORD-150), `handleAddProduct`
+  decide entre abrir o modal ou seguir direto pro fluxo de upsell/adicionar, `confirmOptionModal`
+  computa preço (soma dos `price_delta`) e a `key` do carrinho (`product:<id>:<ids ordenados>`),
+  `maybeUpsellOrAdd` resolve upsell de combo depois da opção já definida (ordem definida no Tech
+  Explorer). Grupo sem opção ativa é filtrado antes de qualquer decisão (`selectableOptionGroups`).
+- `App.tsx`: payload de `POST /orders` ganha `selected_options` por item, batendo com o contrato
+  fixado no Tech Explorer de ORD-142 (`group_name`/`option_label`/`price_delta`). Item de combo
+  nunca carrega opção (ORD-159).
+
+**Achado durante o teste manual:** o dado de demonstração não tinha nenhum produto com grupo de
+opção vinculado de forma coerente (o único vínculo existente era o do burger, já corrigido/removido
+durante o Tech Explorer de ORD-141). Vinculado "Sabores de bebida" (id 50) ao produto real
+"Refrigerante Lata 350ml" (id 6, Burger House) via `PUT /catalog/products/6/option-groups` — mesmo
+exemplo usado na própria ORD-137. Fica como demo funcional pra próximas validações.
+
+`npx tsc --noEmit` limpo. Sem suite de testes automatizados no totem (projeto não tem
+vitest/jest configurado) — validação 100% manual via `npm run dev` + Chrome, conforme convenção do
+projeto pra este frontend específico:
+- Grupo obrigatório: modal abre ao tocar "+", botão Confirmar desabilitado até selecionar,
+  habilita após selecionar "Guaraná Antarctica", confirma e entra no carrinho como
+  "Refrigerante Lata 350ml — Guaraná Antarctica" (R$ 6,90).
+- Duas adições do mesmo produto com opções diferentes (Guaraná, depois Coca-Cola) geram 2 linhas
+  distintas no carrinho, total R$ 13,80 — confirma a regra de `key`.
+- Pedido finalizado (fluxo real até a tela de pagamento) e verificado via API
+  (`GET /orders/{ref}/tickets`): as 2 opções escolhidas persistidas corretamente pelo order-service
+  (ORD-142), inclusive no `qr_data` do ticket (nome do produto já com o sufixo da opção) — confirma
+  a integração ponta a ponta ORD-141 → ORD-142 com dado real, não mockado.
+- Regressão do upsell de combo (ORD-150/157): "Classic Cheddar Burger" (sem grupo de opção após a
+  correção de dado) continua disparando o modal de upsell normalmente; "Não, só Classic Cheddar
+  Burger" adiciona ao carrinho com preço e stepper +/- funcionando como antes — zero regressão.
+
+Não testado visualmente: grupo só-opcional (não há grupo desse tipo ainda cadastrado no ambiente
+de demo) e seleção múltipla (`max_selections > 1`, ex. pizza 2 sabores — grupo "Pizzas Tradicionais"
+existe mas sem produto vinculado). Lógica desses dois casos é a mesma já exercitada (mesmas
+funções `toggleOption`/`confirmOptionModal`/`canConfirmOptionModal`), só não foi clicada na tela —
+registrado aqui por transparência, não bloqueia o fechamento da história.
+
+### Correção pós-QA do usuário (2026-09-03)
+
+Testando manualmente, o usuário apontou 2 problemas reais no modal (nenhum dos dois coberto pelos
+cenários do QA Explorer, que focaram em comportamento, não em apresentação visual):
+
+1. **Preço adicional e total não ficavam evidentes.** O `price_delta` de cada opção já era exibido,
+   mas sem destaque (mesmo peso visual do resto do texto) e **não havia nenhum total visível** —
+   o cliente via "+R$ 2,50" numa opção mas não tinha como saber quanto o produto ficava no fim.
+   Corrigido: preço adicional agora usa `T.priceColor` em negrito (mesmo tom usado pro preço do
+   produto em todo o resto do catálogo) e some quando `price_delta = 0` (evita "+R$ 0,00", que
+   soaria como cobrança dupla do sabor padrão); adicionado rodapé "Total" recalculado em tempo
+   real (`optionModalTotal`, preço-base + soma dos deltas selecionados) e "A partir de {preço
+   base}" abaixo do nome do produto no topo do modal.
+2. **Opção com foto cadastrada não tinha layout que suportasse imagem.** O modal original só
+   renderizava `label` + `price_delta` em texto puro — nenhuma leitura de `image_url`/
+   `thumbnail_url`, mesmo esses campos já existindo no tipo e vindo preenchidos da API (ORD-138).
+   Corrigido: cada opção ganhou uma miniatura 56×56 à esquerda do rótulo (mesmo padrão de
+   placeholder com emoji do card de combo, ORD-153, quando a opção não tem foto cadastrada).
+
+Validado com dado real: `price_delta=2,50` setado em "Guaraná Antarctica" e foto real enviada pra
+"Coca-Cola" (`PUT /catalog/option-groups/50/options` + `POST /catalog/options/113/image`) — modal
+mostra a foto da Coca-Cola, placeholder 🍽️ nas opções sem foto, "+R$ 2,50" em destaque no Guaraná,
+e o Total atualiza de R$ 6,90 pra R$ 9,40 ao selecionar — confirmado também no carrinho e no total
+final do pedido.
+
+### Correção pós-QA do usuário, rodada 2 (2026-09-03)
+
+Com a foto aparecendo, usuário pediu miniatura maior — 56×56 ficava pequeno pra dar destaque real
+à imagem da opção. Modal aumentado de `min(640px, 100%)` pra `min(760px, 100%)` e miniatura de
+56×56 pra 88×88 (com placeholder também maior, `FONT.title` em vez de `FONT.subtitle`).
+
+Validado de novo no navegador: dessa vez todas as 4 opções do grupo "Sabores de bebida" já tinham
+foto real (job de seed automático de imagens do catalog-service preencheu as 3 que faltavam, sem
+ação manual) — miniaturas nítidas de cada lata de refrigerante, modal com espaço confortável,
+seleção e total (R$ 6,90 → R$ 9,40) continuam funcionando sem regressão.
+
+### Correção pós-QA do usuário, rodada 3 (2026-09-03)
+
+Bug real de UX achado testando manualmente: uma vez que o grupo atingia o máximo de seleções
+(inclusive seleção única, `max=1`), as demais opções ficavam com `disabled` — pra trocar de
+escolha, o cliente precisava primeiro tocar na opção já marcada pra desmarcar, só então tocar na
+nova. Dois toques pra uma ação que devia ser uma só, e pior em seleção múltipla (`max>1`, ex.
+pizza 2 sabores) — usuário destacou esse caso explicitamente.
+
+`toggleOption` reescrita: ao tocar numa opção nova estando no limite, a seleção mais antiga do
+grupo é removida automaticamente e a nova entra no lugar (`[...current.slice(1), optionId]`), sem
+exigir nenhuma ação manual de desmarcar antes. `max=1` já se comporta como caso particular dessa
+mesma regra (troca direta) — código que tratava `max===1` como caso especial foi removido junto
+com o `disabled`/opacidade que não fazem mais sentido (nenhuma opção fica realmente bloqueada
+agora).
+
+Validado no navegador nos dois casos:
+- Seleção única ("Sabores de bebida"): Guaraná selecionado, toque direto em Coca-Cola troca em 1
+  toque (Guaraná desmarca sozinho, total volta de R$ 9,40 pra R$ 6,90).
+- Seleção múltipla (`max=2`, testado com grupo "Pizzas Tradicionais" vinculado temporariamente a
+  um produto só pra este teste, depois desvinculado): Margherita + Calabresa selecionadas (no
+  limite), toque em Portuguesa remove a mais antiga (Margherita) automaticamente e mantém
+  Calabresa + Portuguesa — exatamente 2 seleções, sem passo extra.
+
+### Correção pós-QA do usuário, rodada 4 (2026-09-03)
+
+Rótulo da opção e preço adicional ainda pareciam pequenos pro usuário. Ambos passaram de
+`FONT.body` (14px) pra `FONT.subtitle` (20px) — mesmo tamanho já usado pro preço de item no
+carrinho (`CatalogScreen.tsx`, linha do total por item), mantendo consistência com o resto do
+arquivo em vez de inventar um tamanho novo. Validado no navegador: "Guaraná Antarctica" e
+"+R$ 2,50" bem mais legíveis, sem quebrar o layout do modal (760px de largura já dava folga o
+suficiente da correção da rodada 2).

@@ -50,7 +50,7 @@ const DEFAULT_INACTIVITY_WARN_SEC = 30;
 
 export default function App() {
   const {
-    company, terminal, cart, cpf, consumptionType, completedOrder, screen,
+    token, company, terminal, cart, cpf, consumptionType, completedOrder, screen,
     setToken, setCompany, setTerminal, setScreen,
     addToCart, removeFromCart, setCpf, setConsumptionType, setCompletedOrder,
     newOrder, goIdle, resetSession, touch,
@@ -102,14 +102,60 @@ export default function App() {
       }
     }, 500);
 
+    // Investigação (2026-09-03) — instrumentado com console.log temporário e
+    // confirmado que touch() disparava corretamente a cada clique real; o
+    // "timer insiste em aparecer" que o usuário via testando no navegador
+    // era rolagem/hover de mouse sem clicar em nada — click/touchstart/
+    // keydown não cobrem isso. scroll/wheel/mousemove adicionados (mousemove
+    // com throttle de 1s, senão dispara a cada pixel e o touch() vira
+    // trabalho desperdiçado); mousemove não existe em touchscreen real, mas
+    // não faz mal deixar — só nunca dispara lá.
+    let lastMouseMoveTouch = 0;
     const handler = () => touch();
-    ["click", "touchstart", "keydown"].forEach((ev) => window.addEventListener(ev, handler));
+    const throttledMouseHandler = () => {
+      const now = Date.now();
+      if (now - lastMouseMoveTouch > 1000) {
+        lastMouseMoveTouch = now;
+        touch();
+      }
+    };
+    ["click", "touchstart", "keydown", "scroll", "wheel"].forEach((ev) => window.addEventListener(ev, handler));
+    window.addEventListener("mousemove", throttledMouseHandler);
 
     return () => {
       clearInterval(interval);
-      ["click", "touchstart", "keydown"].forEach((ev) => window.removeEventListener(ev, handler));
+      ["click", "touchstart", "keydown", "scroll", "wheel"].forEach((ev) => window.removeEventListener(ev, handler));
+      window.removeEventListener("mousemove", throttledMouseHandler);
     };
   }, [screen, inactivityTimeoutMs, inactivityWarnSec]);
+
+  // Achado investigando o timer de inatividade (2026-09-03) — `company`
+  // (e portanto inactivity_timeout_min/inactivity_warn_sec) só era buscado
+  // uma vez, no login (handlePinSuccess). Um totem pareado há dias continua
+  // usando a config de quando logou, mesmo que o admin mude o valor depois
+  // — sem re-parear, o totem nunca sabe. Refresca periodicamente via
+  // GET /companies/{id}, que já permite o próprio token ler sua empresa
+  // (mesmo role kiosk — só quando company_id do token bate com o path,
+  // ver get_company em company-service/main.py). Falha silenciosa: mantém
+  // o valor já em cache se a chamada falhar, nunca quebra o totem por isso.
+  useEffect(() => {
+    if (!token || !company) return;
+    const COMPANY_REFRESH_MS = 2 * 60_000;
+    const iv = setInterval(() => {
+      api.get(`/companies/${company.id}`).then((r) => {
+        setCompany({
+          id: r.data.id, name: r.data.name, plan: r.data.plan,
+          visual_theme: r.data.visual_theme, visual_mode: r.data.visual_mode,
+          consumption_mode_enabled: r.data.consumption_mode_enabled,
+          catalog_menu_layout: r.data.catalog_menu_layout,
+          fulfillment_mode: r.data.fulfillment_mode,
+          inactivity_timeout_min: r.data.inactivity_timeout_min,
+          inactivity_warn_sec: r.data.inactivity_warn_sec,
+        });
+      }).catch(() => null);
+    }, COMPANY_REFRESH_MS);
+    return () => clearInterval(iv);
+  }, [token, company?.id]);
 
   // ── handlers ─────────────────────────────────────────────────────────────
 
@@ -133,7 +179,7 @@ export default function App() {
       // achado técnico da Tech Explorer). Arredonda a economia POR UNIDADE
       // antes de multiplicar por qty, senão pedidos com 2+ do mesmo combo
       // podem fechar com 1 centavo de diferença.
-      const items: { product_id: number; name: string; qty: number; unit_price: number }[] = [];
+      const items: { product_id: number; name: string; qty: number; unit_price: number; selected_options?: { group_name: string; option_label: string; price_delta: number }[] }[] = [];
       let comboDiscount = 0;
       for (const line of cart) {
         if (line.kind === "combo" && line.comboItems) {
@@ -141,10 +187,17 @@ export default function App() {
           const savingsPerUnit = Math.round((comboSum - line.price) * 100) / 100;
           comboDiscount += savingsPerUnit * line.qty;
           for (const ci of line.comboItems) {
+            // ORD-159 (pendência registrada) — item de combo nunca carrega
+            // opção escolhida, addComboToCart não oferece seleção ainda.
             items.push({ product_id: ci.product_id, name: `${ci.name} (${line.name})`, qty: line.qty, unit_price: ci.price });
           }
         } else {
-          items.push({ product_id: line.id, name: line.name, qty: line.qty, unit_price: line.price });
+          items.push({
+            product_id: line.id, name: line.name, qty: line.qty, unit_price: line.price,
+            selected_options: line.selectedOptions?.map((o) => ({
+              group_name: o.group_name, option_label: o.option_label, price_delta: o.price_delta,
+            })),
+          });
         }
       }
       const res = await api.post("/orders", {
