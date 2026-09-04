@@ -1,6 +1,6 @@
 ---
 id: ORD-159
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Produto
@@ -389,3 +389,43 @@ racional inalterado; não é uma mudança de precificação, é a ausência deli
 - [x] Priorizada no sprint backlog
 
 **Status final: Ready.**
+
+## Validação (implementação, 2026-09-04)
+
+Backend e frontend implementados conforme a Solução Técnica. Testado ao vivo pelo usuário no
+totem real (Burger House): combo → modal por componente → seleção de sabor → checkout → ticket.
+
+**Achado 1 — apresentação do resultado precisava de ajuste (não previsto na Solução Técnica
+original):** o primeiro teste mostrou os componentes do combo como linhas soltas
+(`"1x Refrigerante Lata 350ml (Combo Classic Cheddar)"`, `"1x Classic Cheddar Burger (Combo
+Classic Cheddar)"`), sem nenhum vínculo visual entre eles. Usuário pediu explicitamente: "deveria
+vir uma linha principal do combo e abaixo os itens... no caso de dois combos iguais replicar as
+linhas pois podem ter adicionais diferentes". Expandido o escopo (aprovado pelo usuário na hora,
+sem reabrir Explorer — mudança de apresentação/dado, não de regra de negócio nova):
+
+- `order_items` ganha `combo_instance_key`/`combo_name` (migration `20260904_1200`) — cada
+  UNIDADE de combo comprada (não cada linha do carrinho) gera uma key nova, nunca reaproveitada
+  entre 2 combos idênticos, propagada via `ItemIn`/`TicketOut`.
+- `App.tsx handleCpfDone` para de explodir componentes com `qty:line.qty` num só `OrderItem` —
+  agora faz loop explícito por unidade, cada uma com sua própria `combo_instance_key`.
+- `printService.ts` (ESC/POS) e `SuccessScreen.tsx` (preview HTML) agrupam tickets consecutivos
+  com a mesma `combo_instance_key` sob um cabeçalho com o nome do combo.
+- Segundo ajuste do usuário, depois de ver o resultado agrupado: repetir "(Nome do Combo)" no
+  nome de cada item ficava redundante com o cabeçalho — `stripComboSuffix` remove esse sufixo só
+  na exibição (ESC/POS e HTML), nunca em `product_name`/`qr_data` persistido (o app de balcão
+  depende desse sufixo pra saber que o item é parte de um combo, ver
+  `frontend/balcao/src/lib/orderItems.ts`).
+
+**Achado 2 — bug real, não relacionado ao escopo desta história:** depois do ajuste acima, a
+opção escolhida (ex. "Guaraná Antarctica") continuava sumindo do ticket, mesmo com o dado
+correto em `selected_options`. Investigação com `console.log` temporário (frontend) + `curl`
+direto na API confirmou que o **frontend montava o nome certo**, mas o valor **persistido no
+banco vinha cortado**. Causa raiz: `_make_qr_data` (`order-service`, existente desde ORD-052/053,
+bem antes de combo ou grupo de opção) tinha `[:50]` — e
+`"Refrigerante Lata 350ml (Combo Classic Cheddar) — "` sozinho já bate exatamente 50 caracteres,
+cortando qualquer opção escolhida, sempre, silenciosamente. Corrigido pra `[:100]`. Teste de
+regressão adicionado. Ver `[[gotcha-truncamento-qr-data-50-chars]]` (memória).
+
+Validado ponta a ponta pelo usuário depois das duas correções: ticket mostra cabeçalho "Combo
+Classic Cheddar", componentes indentados abaixo, opção completa visível
+("Refrigerante Lata 350ml — Guaraná Antarctica").
