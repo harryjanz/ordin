@@ -98,6 +98,14 @@ class OrderItem(Base):
     unit_price      = Column(Numeric(10,2), nullable=False)
     quantity        = Column(Integer, nullable=False, default=1)
     subtotal        = Column(Numeric(10,2), nullable=False)
+    # ORD-159 — presente só quando o item veio de um componente de combo
+    # explodido (App.tsx handleCpfDone). combo_instance_key é gerado no
+    # totem, um valor novo por CLIQUE de "adicionar combo" (nunca reaproveita
+    # entre 2 combos iguais no carrinho) — é o que permite agrupar de volta
+    # "essas N linhas pertencem ao mesmo combo comprado" no ticket/impressão,
+    # mesmo que os componentes tenham ficado em OrderItems separados.
+    combo_instance_key = Column(String(40), nullable=True, index=True)
+    combo_name          = Column(String(120), nullable=True)
     order           = relationship("Order", back_populates="items")
     tickets         = relationship("Ticket", back_populates="item", cascade="all, delete")
     selected_options = relationship("OrderItemOption", cascade="all, delete")
@@ -155,6 +163,10 @@ class ItemIn(BaseModel):
     # ORD-142 — opção(ões) de grupo de opção escolhida(s) no totem (ORD-141).
     # Vazio pra item sem grupo vinculado, mesmo comportamento de hoje.
     selected_options: list[SelectedOptionIn] = []
+    # ORD-159 — presentes só pra item que veio de combo explodido. Null pra
+    # produto avulso, mesmo comportamento de hoje.
+    combo_instance_key: str | None = None
+    combo_name: str | None = None
 
 class OrderIn(BaseModel):
     items: list[ItemIn]
@@ -215,6 +227,9 @@ class TicketOut(BaseModel):
     collection_method: str | None = None
     # ORD-142 — vazio pra ticket de item sem grupo de opção vinculado.
     selected_options: list[SelectedOptionOut] = []
+    # ORD-159 — presentes só pra ticket de item vindo de combo explodido.
+    combo_instance_key: str | None = None
+    combo_name: str | None = None
 
 class TicketListOut(BaseModel):
     order_ref: str
@@ -315,7 +330,13 @@ def _gen_code():
     return "".join(random.choices(chars,k=8))
 
 def _make_qr_data(code: str, name: str, ref: str, ts: str) -> str:
-    safe_name = name.replace("|", "-")[:50]
+    # ORD-159 — 50 já cortava nomes reais de componente de combo com opção
+    # (ex.: "Refrigerante Lata 350ml (Combo Classic Cheddar) — Guaraná
+    # Antarctica" tem o sufixo "(Combo X) — " sozinho batendo os 50 chars,
+    # cortando a opção inteira sempre, silenciosamente). 100 fica folgado
+    # tanto pro tamanho de OrderItem.product_name (VARCHAR(120)) quanto pra
+    # capacidade de um QR nível de correção M (usado em qrCode() no totem).
+    safe_name = name.replace("|", "-")[:100]
     payload = f"{code}|{safe_name}|{ref}|{ts}"
     sig = hmaclib.new(QR_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
     return f"{payload}|{sig}"
@@ -378,7 +399,8 @@ async def create_order(
     for item in body.items:
         oi = OrderItem(order_id=order.id, product_id=item.product_id,
                        product_name=item.name, unit_price=item.unit_price,
-                       quantity=item.qty, subtotal=item.unit_price*item.qty)
+                       quantity=item.qty, subtotal=item.unit_price*item.qty,
+                       combo_instance_key=item.combo_instance_key, combo_name=item.combo_name)
         db.add(oi); await db.flush()
         for opt in item.selected_options:
             db.add(OrderItemOption(order_item_id=oi.id, group_name=opt.group_name,
@@ -856,13 +878,22 @@ async def list_order_tickets(
         opts_by_item.setdefault(o.order_item_id, []).append(
             {"group_name": o.group_name, "option_label": o.option_label, "price_delta": float(o.price_delta)}
         )
+    # ORD-159 — mesmo padrão em lote de opts_result acima, uma query só pra
+    # trazer combo_instance_key/combo_name de todos os OrderItem envolvidos.
+    items_result = await db.execute(
+        select(OrderItem.id, OrderItem.combo_instance_key, OrderItem.combo_name)
+        .where(OrderItem.id.in_({t.order_item_id for t in tickets}))
+    )
+    combo_by_item = {row.id: (row.combo_instance_key, row.combo_name) for row in items_result.all()}
     return {"order_ref":order_ref,"progress":f"{col}/{len(tickets)}","order_qr_data":order_qr_data,
             "tickets":[{"ticket_code":t.ticket_code,"qr_data":t.qr_data,"status":t.status,
                         "unit_number":t.unit_number,"total_units":t.total_units,
                         "collected_at":t.collected_at.isoformat() if t.collected_at else None,
                         "collected_by":t.collected_by,
                         "collection_method":t.collection_method,
-                        "selected_options":opts_by_item.get(t.order_item_id, [])} for t in tickets]}
+                        "selected_options":opts_by_item.get(t.order_item_id, []),
+                        "combo_instance_key":combo_by_item.get(t.order_item_id, (None, None))[0],
+                        "combo_name":combo_by_item.get(t.order_item_id, (None, None))[1]} for t in tickets]}
 
 @app.patch("/internal/orders/{order_ref}/status", include_in_schema=False)
 async def internal_update_status(

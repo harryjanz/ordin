@@ -179,17 +179,44 @@ export default function App() {
       // achado técnico da Tech Explorer). Arredonda a economia POR UNIDADE
       // antes de multiplicar por qty, senão pedidos com 2+ do mesmo combo
       // podem fechar com 1 centavo de diferença.
-      const items: { product_id: number; name: string; qty: number; unit_price: number; selected_options?: { group_name: string; option_label: string; price_delta: number }[] }[] = [];
+      const items: {
+        product_id: number; name: string; qty: number; unit_price: number;
+        selected_options?: { group_name: string; option_label: string; price_delta: number }[];
+        combo_instance_key?: string; combo_name?: string;
+      }[] = [];
       let comboDiscount = 0;
       for (const line of cart) {
         if (line.kind === "combo" && line.comboItems) {
           const comboSum = line.comboItems.reduce((s, ci) => s + ci.price, 0);
           const savingsPerUnit = Math.round((comboSum - line.price) * 100) / 100;
           comboDiscount += savingsPerUnit * line.qty;
-          for (const ci of line.comboItems) {
-            // ORD-159 (pendência registrada) — item de combo nunca carrega
-            // opção escolhida, addComboToCart não oferece seleção ainda.
-            items.push({ product_id: ci.product_id, name: `${ci.name} (${line.name})`, qty: line.qty, unit_price: ci.price });
+          // ORD-159 — cada UNIDADE do combo vira uma instância própria (qty:1
+          // por componente, nunca qty:line.qty), com uma combo_instance_key
+          // nova por repetição. Sem isso, 2 combos no carrinho (mesma key de
+          // carrinho, qty=2) viravam 1 OrderItem por componente com
+          // quantity=2 — sem jeito de saber depois, no ticket, que "essas 2
+          // unidades de burger + essas 2 de refri" pertencem a 2 combos
+          // distintos (podem ter opção escolhida diferente por unidade no
+          // futuro). Loop explícito por qty resolve isso na raiz.
+          for (let n = 0; n < line.qty; n++) {
+            const comboInstanceKey = `${line.key}-${Date.now()}-${n}`;
+            for (const ci of line.comboItems) {
+              // ORD-159 — quando o componente tem opção escolhida, o sufixo
+              // "(Nome do Combo)" fica ANTES do " — Opção" (não depois): o
+              // ticket usa splitNameOption (ORD-143), que corta no primeiro
+              // " — "; colocar o combo depois faria seu nome virar parte do
+              // texto da opção impressa.
+              const name = ci.selectedOptions?.length
+                ? `${ci.name} (${line.name}) — ${ci.selectedOptions.map((o) => o.option_label).join(", ")}`
+                : `${ci.name} (${line.name})`;
+              items.push({
+                product_id: ci.product_id, name, qty: 1, unit_price: ci.price,
+                selected_options: ci.selectedOptions?.map((o) => ({
+                  group_name: o.group_name, option_label: o.option_label, price_delta: o.price_delta,
+                })),
+                combo_instance_key: comboInstanceKey, combo_name: line.name,
+              });
+            }
           }
         } else {
           items.push({
