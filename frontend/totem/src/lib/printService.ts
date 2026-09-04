@@ -5,6 +5,20 @@ function norm(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
+// ORD-143 — product_name já vem combinado com a opção escolhida desde
+// ORD-141/142 (ex.: "Refrigerante Lata 350ml — Guaraná Antarctica"), no
+// mesmo separador " — " que addProductWithOptionsToCart (CatalogScreen.tsx)
+// usa pra montá-lo. Faz o split aqui, na camada de impressão, em vez de
+// mudar o formato de product_name em si — evita tocar o carrinho/tela de
+// compra já validados no ORD-141. Risco aceito: nome de produto real
+// contendo " — " seria mal interpretado como tendo opção; mesmo racional de
+// confiança já usado no parsing de qr_data.split("|") neste arquivo.
+export function splitNameOption(combined: string): { name: string; option: string | null } {
+  const idx = combined.indexOf(" — ");
+  if (idx === -1) return { name: combined, option: null };
+  return { name: combined.slice(0, idx), option: combined.slice(idx + 3) };
+}
+
 const METHOD_LABEL: Record<string, string> = {
   credit: "Credito", debit: "Debito", pix: "PIX", voucher: "Voucher",
 };
@@ -67,7 +81,9 @@ function buildEscPosBase64Compact(order: CompletedOrder, companyName: string): s
   for (const tk of order.tickets.filter((t) => t.unit_number === 1)) {
     const parts = tk.qr_data.split("|");
     const productName = parts[1] ?? "";
-    text(`${tk.total_units}x ${norm(productName)}`); nl();
+    const { name, option } = splitNameOption(productName);
+    text(`${tk.total_units}x ${norm(name)}`); nl();
+    if (option) { text(`   ${norm(option)}`); nl(); }
   }
   nl();
 
@@ -154,6 +170,7 @@ function buildEscPosBase64(order: CompletedOrder, companyName: string): string {
   for (const tk of order.tickets) {
     const parts = tk.qr_data.split("|");
     const productName = parts[1] ?? "";
+    const { name, option } = splitNameOption(productName);
 
     nl();
     raw(0x1B, 0x61, 0x01); // Center
@@ -161,9 +178,16 @@ function buildEscPosBase64(order: CompletedOrder, companyName: string): string {
 
     raw(0x1B, 0x45, 0x01); // Bold
     raw(0x1D, 0x21, 0x11); // Double
-    text(norm(productName).toUpperCase().slice(0, 18)); nl();
+    text(norm(name).toUpperCase().slice(0, 18)); nl();
     raw(0x1D, 0x21, 0x00);
     raw(0x1B, 0x45, 0x00);
+
+    // ORD-143 — opção numa linha própria, sem dupla-largura (a fonte grande
+    // do nome já usa a maior parte da linha de 80mm; opção em tamanho
+    // normal cabe bem mais caractere sem cortar).
+    if (option) {
+      text(norm(option).slice(0, 32)); nl();
+    }
 
     raw(0x1D, 0x21, 0x01); // Double height
     text(`Unidade ${tk.unit_number} de ${tk.total_units}`); nl();

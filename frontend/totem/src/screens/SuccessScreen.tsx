@@ -5,7 +5,7 @@ import type { Theme } from "../themes";
 import type { CompletedOrder } from "../types";
 import { useStore } from "../store";
 import api from "../api";
-import { silentPrint } from "../lib/printService";
+import { silentPrint, splitNameOption } from "../lib/printService";
 import type { PrintMethod } from "../lib/printService";
 import { RADIUS, FONT } from "../scale";
 
@@ -34,11 +34,15 @@ function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string
   const ticketsHtml = order.tickets.map((tk, i) => {
     const parts = tk.qr_data.split("|");
     const productName = parts[1] ?? "";
+    const { name, option } = splitNameOption(productName);
     const svgEl = (svgs[i] ?? "").replace(/width="[^"]*"/, 'width="110"').replace(/height="[^"]*"/, 'height="110"');
     return `
       <div class="cut">- &nbsp; - &nbsp; - &nbsp;✂&nbsp; - &nbsp; - &nbsp; -</div>
       <div class="ticket">
-        <div class="ticket-name">${productName}</div>
+        <div class="ticket-title">
+          <div class="ticket-name">${name}</div>
+          ${option ? `<div class="ticket-option">${option}</div>` : ""}
+        </div>
         <table class="ticket-body"><tbody><tr>
           <td class="ticket-qr">${svgEl}</td>
           <td class="ticket-info">
@@ -81,11 +85,16 @@ function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string
     color:#444;
   }
   .ticket{padding:2px 0 6px;}
+  .ticket-title{
+    margin-bottom:5px;text-align:center;
+    border-bottom:1px solid #eee;padding-bottom:4px;
+  }
   .ticket-name{
     font-size:15px;font-weight:bold;
     text-transform:uppercase;letter-spacing:.5px;
-    margin-bottom:5px;text-align:center;
-    border-bottom:1px solid #eee;padding-bottom:4px;
+  }
+  .ticket-option{
+    font-size:11px;color:#666;margin-top:2px;
   }
   .ticket-body{width:100%;border-collapse:collapse;table-layout:fixed;}
   .ticket-qr{width:40%;text-align:center;vertical-align:middle;padding:2px 2px 2px 0;}
@@ -136,7 +145,8 @@ function buildCompactPrintHtml(order: CompletedOrder, companyName: string, order
     .filter((tk) => tk.unit_number === 1)
     .map((tk) => {
       const productName = (tk.qr_data.split("|")[1] ?? "");
-      return `<div class="item-row"><span class="item-qty">${tk.total_units}x</span> ${productName}</div>`;
+      const { name, option } = splitNameOption(productName);
+      return `<div class="item-row"><span class="item-qty">${tk.total_units}x</span> ${name}</div>${option ? `<div class="item-option">${option}</div>` : ""}`;
     })
     .join("");
   const svgEl = orderQrSvg.replace(/width="[^"]*"/, 'width="150"').replace(/height="[^"]*"/, 'height="150"');
@@ -156,6 +166,7 @@ function buildCompactPrintHtml(order: CompletedOrder, companyName: string, order
   .items{margin:10px 0;border-bottom:1px dashed #000;padding-bottom:8px;}
   .item-row{font-size:12px;margin:3px 0;}
   .item-qty{font-weight:bold;}
+  .item-option{font-size:10px;color:#666;margin:0 0 3px 20px;}
   .total{font-size:15px;font-weight:bold;text-align:center;margin:8px 0;}
   .qr{text-align:center;margin:10px 0;}
   .qr svg{width:150px;height:150px;}
