@@ -607,7 +607,7 @@ export default function CatalogScreen({
       {/* Cart Drawer — EXPERIMENTO: Sheet do shadcn (Modal/ModalOverlay do
           React Aria por baixo) no lugar do overlay+div feito à mão. Foco
           preso, ESC fecha, scroll do body bloqueado — de graça. */}
-      <Sheet isOpen={cartOpen} onOpenChange={setCartOpen} side="right" className="w-[440px] sm:max-w-[440px]" style={{ background: T.surface }}>
+      <Sheet isOpen={cartOpen} onOpenChange={setCartOpen} side="right" className="w-[440px] sm:max-w-[440px]">
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2" style={{ fontFamily: FONT_D, color: T.text, fontSize: FONT.subtitle, fontWeight: 800 }}>
             <ShoppingCart className="size-5" /> Meu pedido
@@ -674,7 +674,6 @@ export default function CatalogScreen({
         isOpen={!!optionModal}
         onOpenChange={(open) => !open && setOptionModal(null)}
         className="sm:max-w-[760px] max-h-[88vh] overflow-y-auto flex flex-col gap-5 p-10"
-        style={{ background: T.surface }}
       >
         {optionModal && (
           <>
@@ -771,7 +770,6 @@ export default function CatalogScreen({
         isOpen={!!comboOptionModal}
         onOpenChange={(open) => !open && setComboOptionModal(null)}
         className="sm:max-w-[760px] max-h-[88vh] overflow-y-auto flex flex-col gap-7 p-10"
-        style={{ background: T.surface }}
       >
         {comboOptionModal && (
           <>
@@ -867,7 +865,6 @@ export default function CatalogScreen({
         isOpen={!!upsell}
         onOpenChange={(open) => !open && setUpsell(null)}
         className="sm:max-w-[640px] max-h-[88vh] overflow-y-auto flex flex-col gap-5 p-10"
-        style={{ background: T.surface }}
       >
         {upsell && (
           <>
