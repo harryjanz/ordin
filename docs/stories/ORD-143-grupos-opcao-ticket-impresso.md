@@ -1,6 +1,6 @@
 ---
 id: ORD-143
-status: Ready
+status: Done
 fase: 6
 sprint: null
 responsavel: Frontend
@@ -299,3 +299,37 @@ cor mais clara) logo abaixo do nome, só quando não-null.
 - [x] Priorizada no sprint backlog
 
 **Status final: Ready.**
+
+## Validação (implementação, 2026-09-03)
+
+Implementado conforme o Tech Explorer: `splitNameOption` em `printService.ts` (exportado, único
+lugar com a lógica), usado nos 4 pontos (`buildEscPosBase64`, `buildEscPosBase64Compact`,
+`buildPrintHtml`, `buildCompactPrintHtml`). `.ticket-name`/`.ticket-title` em `SuccessScreen.tsx`
+reestruturados pra acomodar a nova linha `.ticket-option`/`.item-option` sem quebrar o layout
+existente pra item sem opção.
+
+`npx tsc --noEmit` limpo.
+
+**Lógica de split validada isoladamente** (script Node standalone, sem depender do browser):
+| Entrada | `name` | `option` |
+|---|---|---|
+| `"Refrigerante Lata 350ml — Guaraná Antarctica"` | `"Refrigerante Lata 350ml"` | `"Guaraná Antarctica"` |
+| `"Classic Cheddar Burger"` (sem opção) | `"Classic Cheddar Burger"` | `null` |
+| `"Pizza G — Marguerita, Calabresa"` (seleção múltipla) | `"Pizza G"` | `"Marguerita, Calabresa"` |
+| `"Produto com — dentro do nome mesmo — Opção"` (colisão do separador) | `"Produto com"` | `"dentro do nome mesmo — Opção"` — risco aceito, já documentado no Tech Explorer |
+
+**Confirmado com dado real**: pedido de teste criado via totem (Refrigerante + opção Guaraná,
+dentro de um combo) — `GET /orders/{ref}/tickets` retornou exatamente os 3 formatos esperados:
+`"Refrigerante Lata 350ml — Guaraná Antarctica"` (produto avulso com opção, split funciona),
+`"Classic Cheddar Burger (Combo Classic Cheddar)"` e `"Coca-Cola Lata 350ml (Combo Classic
+Cheddar)"` (itens de combo, formato de sufixo diferente — parênteses, não `" — "` — `option`
+corretamente `null`, sem interpretar errado o texto do combo como opção).
+
+**Limitação da validação:** não foi possível ver o HTML/ticket renderizado de verdade no
+navegador — o fallback (`window.print()`) dispara o diálogo nativo de impressão do sistema, que
+bloqueia a sessão de automação usada nesta investigação (travou uma aba de teste, precisou ser
+fechada). Sem impressora física/QZ Tray neste ambiente pra testar o caminho ESC/POS principal
+também. Confiança na correção vem da lógica isolada validada + revisão de código (interpolação
+simples de string em template já existente, mesmo padrão usado pros outros campos do ticket) —
+não de teste visual ponta a ponta do papel impresso. Recomendado: validação visual com impressora
+física real antes de considerar 100% fechado, se possível.
