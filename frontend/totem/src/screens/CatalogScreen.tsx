@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Toggle } from "@/components/ui/toggle";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Sheet, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -337,9 +338,10 @@ export default function CatalogScreen({
     : 0;
 
   // Categorias — mesmo conteúdo nos dois modos, só o container/botão mudam
-  // de faixa horizontal pra coluna lateral. EXPERIMENTO — shadcn Toggle
-  // (react-aria-components ToggleButton por baixo) no lugar do <button>
-  // manual; isSelected em vez de comparar id na mão em cada render.
+  // de faixa horizontal pra coluna lateral. EXPERIMENTO — shadcn ToggleGroup
+  // (react-aria-components ToggleButtonGroup por baixo) no lugar de N Toggle
+  // controlados na mão: um só selectedKeys/onSelectionChange substitui a
+  // comparação `activeCat?.id === cat.id` repetida em cada item.
   const categoriesContent = loadingCat ? (
     isVertical
       ? Array.from({ length: 6 }).map((_, i) => (
@@ -348,33 +350,44 @@ export default function CatalogScreen({
       : Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="shrink-0" style={{ height: 48, width: 120, borderRadius: RADIUS.pill }} />
         ))
-  ) : categories.map((cat) => (
-    <Toggle
-      key={cat.id}
-      isSelected={activeCat?.id === cat.id}
-      onChange={() => setActiveCat(cat)}
-      className={
-        isVertical
-          ? "w-full justify-start text-left"
-          : "shrink-0"
-      }
-      style={{
-        minHeight: 48,
-        borderRadius: isVertical ? RADIUS.sm : RADIUS.pill,
-        fontFamily: FONT_D,
-        fontWeight: 700,
-        fontSize: FONT.body,
-        paddingLeft: isVertical ? 20 : 24,
-        paddingRight: isVertical ? 20 : 24,
-        background: activeCat?.id === cat.id ? T.catActive : "transparent",
-        color: activeCat?.id === cat.id ? T.catText : T.muted,
-        border: `1px solid ${activeCat?.id === cat.id ? T.btn : T.borderNeutral}`,
-        boxShadow: activeCat?.id === cat.id ? T.glow : "none",
+  ) : (
+    <ToggleGroup
+      selectionMode="single"
+      disallowEmptySelection
+      orientation={isVertical ? "vertical" : "horizontal"}
+      spacing={isVertical ? 2 : 3}
+      selectedKeys={activeCat ? [activeCat.id] : []}
+      onSelectionChange={(keys) => {
+        const id = [...keys][0];
+        const cat = categories.find((c) => c.id === id);
+        if (cat) setActiveCat(cat);
       }}
+      className={isVertical ? "w-full" : undefined}
     >
-      {cat.name}
-    </Toggle>
-  ));
+      {categories.map((cat) => (
+        <ToggleGroupItem
+          key={cat.id}
+          id={cat.id}
+          className={isVertical ? "w-full justify-start text-left" : "shrink-0"}
+          style={({ isSelected }) => ({
+            minHeight: 48,
+            borderRadius: isVertical ? RADIUS.sm : RADIUS.pill,
+            fontFamily: FONT_D,
+            fontWeight: 700,
+            fontSize: FONT.body,
+            paddingLeft: isVertical ? 20 : 24,
+            paddingRight: isVertical ? 20 : 24,
+            background: isSelected ? T.catActive : "transparent",
+            color: isSelected ? T.catText : T.muted,
+            border: `1px solid ${isSelected ? T.btn : T.borderNeutral}`,
+            boxShadow: isSelected ? T.glow : "none",
+          })}
+        >
+          {cat.name}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
