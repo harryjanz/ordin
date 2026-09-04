@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import api from "../api";
 import type { Theme } from "../themes";
-import type { Category, Product, CartItem, Combo, ProductOptionGroup, SelectedOption } from "../types";
+import type { Category, Product, CartItem, Combo, ComboItemRef, ProductOptionGroup, SelectedOption } from "../types";
 import { RADIUS, FONT } from "../scale";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -56,6 +56,11 @@ export default function CatalogScreen({
   // ORD-141 — modal de seleção de grupo de opção. `selections` mapeia
   // option_group.id -> ids das opções escolhidas nesse grupo.
   const [optionModal, setOptionModal] = useState<{ product: Product; selections: Record<number, number[]> } | null>(null);
+
+  // ORD-159 — mesma ideia do optionModal, mas por combo: `selections` tem
+  // uma camada a mais (product_id do componente -> option_group.id -> ids
+  // escolhidos), já que um combo pode ter N componentes com grupo.
+  const [comboOptionModal, setComboOptionModal] = useState<{ combo: Combo; selections: Record<number, Record<number, number[]>> } | null>(null);
 
   const isVertical = menuLayout === "vertical";
 
@@ -141,8 +146,8 @@ export default function CatalogScreen({
     });
   }
 
-  function addComboToCart(c: Combo) {
-    onAdd({ key: `combo:${c.id}`, kind: "combo", id: c.id, name: c.name, price: c.price, qty: 1, comboItems: c.items });
+  function addComboToCart(c: Combo, comboItems?: ComboItemRef[], key?: string) {
+    onAdd({ key: key ?? `combo:${c.id}`, kind: "combo", id: c.id, name: c.name, price: c.price, qty: 1, comboItems: comboItems ?? c.items });
   }
 
   // ORD-141 — grupos de opção "de verdade" pro produto: ativos e com pelo
@@ -150,9 +155,81 @@ export default function CatalogScreen({
   // (todas desativadas via ORD-145) é tratado como se não estivesse
   // vinculado — decisão do Tech Explorer, pra não travar a venda inteira
   // do produto por causa de uma opção temporariamente indisponível.
-  function selectableOptionGroups(p: Product): ProductOptionGroup[] {
+  // ORD-159 — generalizada pra aceitar qualquer coisa com option_groups
+  // (Product ou ComboItemRef), já que o mesmo filtro vale pro componente
+  // de um combo.
+  function selectableOptionGroups(p: { option_groups?: ProductOptionGroup[] }): ProductOptionGroup[] {
     return (p.option_groups ?? []).filter((g) => g.active && g.options.some((o) => o.active));
   }
+
+  // ORD-159 — decide se o combo precisa do modal de seleção por componente
+  // (algum item tem grupo selecionável) ou entra direto no carrinho, igual
+  // hoje. Chamado tanto pelo card do catálogo quanto pelo "Sim, quero o
+  // combo" do upsell — um só ponto de entrada, sem duplicar a checagem.
+  function tryAddCombo(c: Combo) {
+    const needsSelection = c.items.some((i) => selectableOptionGroups(i).length > 0);
+    if (needsSelection) {
+      setComboOptionModal({ combo: c, selections: {} });
+      return;
+    }
+    addComboToCart(c);
+  }
+
+  function toggleComboOption(productId: number, groupId: number, optionId: number, max: number) {
+    setComboOptionModal((prev) => {
+      if (!prev) return prev;
+      const productSelections = prev.selections[productId] ?? {};
+      const current = productSelections[groupId] ?? [];
+      let next: number[];
+      if (current.includes(optionId)) {
+        next = current.filter((id) => id !== optionId);
+      } else if (current.length < max) {
+        next = [...current, optionId];
+      } else {
+        // Mesma troca-automática-no-limite do ORD-141 (pós-QA) — reaproveitada
+        // aqui pra não reescrever a regra.
+        next = [...current.slice(1), optionId];
+      }
+      return {
+        ...prev,
+        selections: { ...prev.selections, [productId]: { ...productSelections, [groupId]: next } },
+      };
+    });
+  }
+
+  function confirmComboOptionModal() {
+    if (!comboOptionModal) return;
+    const { combo, selections } = comboOptionModal;
+    const allIds: number[] = [];
+    const comboItems: ComboItemRef[] = combo.items.map((item) => {
+      const groups = selectableOptionGroups(item);
+      if (groups.length === 0) return item;
+      const productSelections = selections[item.product_id] ?? {};
+      const selectedOptions: SelectedOption[] = [];
+      for (const g of groups) {
+        for (const optId of productSelections[g.id] ?? []) {
+          const opt = g.options.find((o) => o.id === optId);
+          if (!opt) continue;
+          selectedOptions.push({ group_name: g.name, option_label: opt.label, price_delta: opt.price_delta });
+          allIds.push(optId);
+        }
+      }
+      return selectedOptions.length ? { ...item, selectedOptions } : item;
+    });
+    allIds.sort((a, b) => a - b);
+    const key = allIds.length ? `combo:${combo.id}:${allIds.join(",")}` : `combo:${combo.id}`;
+    setComboOptionModal(null);
+    addComboToCart(combo, comboItems, key);
+  }
+
+  const canConfirmComboOptionModal = comboOptionModal
+    ? comboOptionModal.combo.items.every((item) =>
+        selectableOptionGroups(item).every((g) => {
+          const min = g.min_selections_override ?? g.min_selections;
+          return (comboOptionModal.selections[item.product_id]?.[g.id]?.length ?? 0) >= min;
+        }),
+      )
+    : false;
 
   // Decisão validada com o usuário: se o produto for componente de mais de
   // um combo ativo, oferece só o primeiro (ordenado por id, já vem assim do
@@ -396,7 +473,13 @@ export default function CatalogScreen({
                 Destaque
               </div>
               {combosForActiveCat.map((c) => {
-                const comboQty = getQty(`combo:${c.id}`);
+                // ORD-159 — mesma ideia do produto com grupo de opção
+                // (`qty` forçado a 0 no card avulso): combo com componente
+                // de opção pode gerar várias linhas (uma por combinação
+                // escolhida), então o stepper direto no card fica ambíguo —
+                // sempre mostra "Adicionar combo", que abre o modal.
+                const comboNeedsSelection = c.items.some((i) => selectableOptionGroups(i).length > 0);
+                const comboQty = comboNeedsSelection ? 0 : getQty(`combo:${c.id}`);
                 const sumAvulso = c.items.reduce((s, i) => s + i.price, 0);
                 const savings = sumAvulso - c.price;
                 return (
@@ -467,7 +550,7 @@ export default function CatalogScreen({
                           </div>
                         ) : (
                           <button
-                            onClick={() => addComboToCart(c)}
+                            onClick={() => tryAddCombo(c)}
                             style={{
                               width: "100%", minHeight: 52, borderRadius: RADIUS.pill,
                               background: T.btn, color: T.btnText, border: "none",
@@ -915,6 +998,125 @@ export default function CatalogScreen({
         </div>
       )}
 
+      {/* Modal de seleção de opção por componente de combo (ORD-159) — mesma
+          estrutura visual do modal de produto avulso acima, organizada em
+          uma seção por componente do combo que tiver grupo selecionável.
+          Sem badge de preço adicional por opção: o preço do combo é fixo e
+          não muda com a opção escolhida (decisão do Tech Explorer), então
+          mostrar "+R$ X" aqui sugeriria uma cobrança que não acontece. */}
+      {comboOptionModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div onClick={() => setComboOptionModal(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)" }} />
+          <div style={{
+            position: "relative", width: "min(760px, 100%)", maxHeight: "88vh", overflowY: "auto",
+            background: T.surface, borderRadius: RADIUS.lg,
+            padding: "40px 40px 32px", display: "flex", flexDirection: "column", gap: 28,
+            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
+            border: `1.5px solid ${T.border}`,
+          }}>
+            <button
+              onClick={() => setComboOptionModal(null)}
+              style={{
+                position: "absolute", top: 16, right: 16, width: 44, height: 44, borderRadius: "50%",
+                background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.text,
+                fontSize: FONT.subtitle, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              ✕
+            </button>
+            <div>
+              <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
+                {comboOptionModal.combo.name}
+              </div>
+              <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, marginTop: 4 }}>
+                {fmt(comboOptionModal.combo.price)}
+              </div>
+            </div>
+            {comboOptionModal.combo.items.filter((item) => selectableOptionGroups(item).length > 0).map((item) => (
+              <div key={item.product_id} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg, color: T.text, borderBottom: `1px solid ${T.borderNeutral}`, paddingBottom: 10 }}>
+                  {item.name}
+                </div>
+                {selectableOptionGroups(item).map((g) => {
+                  const min = g.min_selections_override ?? g.min_selections;
+                  const max = g.max_selections_override ?? g.max_selections;
+                  const selected = comboOptionModal.selections[item.product_id]?.[g.id] ?? [];
+                  return (
+                    <div key={g.id} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {/* ORD-159 (ajuste pós-teste manual) — sem o nome do grupo aqui:
+                          o cabeçalho do componente (item.name) já identifica o que está
+                          sendo escolhido, e nome de produto e nome de grupo costumam ficar
+                          quase idênticos no catálogo real (ex.: "Refrigerante Lata 350ml"
+                          vs. grupo "Refrigerantes Lata 350ml"), lendo como repetição. */}
+                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                        <span style={{ fontFamily: FONT_B, fontSize: FONT.label, color: T.muted }}>
+                          {min >= 1 ? `Escolha ${max > min ? `de ${min} a ${max}` : min}` : `Opcional${max > 1 ? ` — até ${max}` : ""}`}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {g.options.filter((o) => o.active).map((o) => {
+                          const isSelected = selected.includes(o.id);
+                          return (
+                            <button
+                              key={o.id}
+                              onClick={() => toggleComboOption(item.product_id, g.id, o.id, max)}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 16,
+                                padding: 12, borderRadius: RADIUS.lg, cursor: "pointer",
+                                background: isSelected ? T.catActive : T.numBg,
+                                color: isSelected ? T.catText : T.text,
+                                border: `1.5px solid ${isSelected ? T.catActive : T.borderNeutral}`,
+                                fontFamily: FONT_B, fontWeight: 700, fontSize: FONT.subtitle,
+                                textAlign: "left",
+                              }}
+                            >
+                              <div style={{ width: 88, height: 88, flexShrink: 0, borderRadius: RADIUS.lg, overflow: "hidden" }}>
+                                {o.thumbnail_url || o.image_url ? (
+                                  <img
+                                    src={o.thumbnail_url ?? o.image_url ?? undefined}
+                                    alt={o.label}
+                                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                  />
+                                ) : (
+                                  <div style={{
+                                    width: "100%", height: "100%", background: T.placeholderA,
+                                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: FONT.title,
+                                  }}>
+                                    🍽️
+                                  </div>
+                                )}
+                              </div>
+                              <span style={{ flex: 1 }}>{o.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+            <button
+              onClick={confirmComboOptionModal}
+              disabled={!canConfirmComboOptionModal}
+              style={{
+                minHeight: 76, borderRadius: RADIUS.pill,
+                background: canConfirmComboOptionModal ? T.btn : T.numBg,
+                color: canConfirmComboOptionModal ? T.btnText : T.muted,
+                border: canConfirmComboOptionModal ? "none" : `1px solid ${T.borderNeutral}`,
+                fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
+                cursor: canConfirmComboOptionModal ? "pointer" : "default",
+                boxShadow: canConfirmComboOptionModal ? T.glow : "none",
+                marginTop: 4,
+              }}
+            >
+              Confirmar
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Modal de upsell (ORD-150) — interrompe a adição do produto avulso,
           decisão validada com o usuário: não é um banner discreto.
           Correção pós-QA (2026-09-02): centralizado na tela (não mais um
@@ -986,7 +1188,7 @@ export default function CatalogScreen({
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
               <button
-                onClick={() => { addComboToCart(upsell.combo); setUpsell(null); }}
+                onClick={() => { tryAddCombo(upsell.combo); setUpsell(null); }}
                 style={{
                   minHeight: 76, borderRadius: RADIUS.pill, background: T.btn, color: T.btnText,
                   border: "none", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, cursor: "pointer", boxShadow: T.glow,

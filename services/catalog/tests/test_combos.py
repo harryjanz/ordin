@@ -575,3 +575,53 @@ async def test_listagem_de_produtos_continua_funcionando_com_combos_cadastrados(
     assert r.status_code == 200
     names = {p["name"] for p in r.json()["products"]}
     assert "__combo_burger__" in names
+
+
+# ── ORD-159: option_groups por componente do combo ──────────────────────────
+
+async def test_item_de_combo_com_grupo_vinculado_expoe_option_groups(client, seed, token_owner):
+    g = await client.post(
+        "/catalog/option-groups",
+        json={
+            "name": "__sabores_combo__", "min_selections": 1, "max_selections": 1,
+            "options": [{"label": "Guaraná Antarctica", "price_delta": 0}, {"label": "Coca-Cola", "price_delta": 0}],
+        },
+        headers=auth(token_owner),
+    )
+    gid = g.json()["id"]
+    try:
+        await client.put(
+            f"/catalog/products/{seed['soda_id']}/option-groups",
+            json={"option_group_ids": [gid]},
+            headers=auth(token_owner),
+        )
+
+        r = await _create_combo(client, token_owner, seed)
+        assert r.status_code == 201
+        items = {i["product_id"]: i for i in r.json()["items"]}
+
+        soda_groups = items[seed["soda_id"]]["option_groups"]
+        assert len(soda_groups) == 1
+        assert soda_groups[0]["name"] == "__sabores_combo__"
+        assert {o["label"] for o in soda_groups[0]["options"]} == {"Guaraná Antarctica", "Coca-Cola"}
+
+        # componente sem grupo vinculado retorna lista vazia — mudança aditiva,
+        # sem quebrar consumidor que ignora o campo.
+        assert items[seed["burger_id"]]["option_groups"] == []
+        assert items[seed["fries_id"]]["option_groups"] == []
+    finally:
+        # Mesmo cuidado de test_grupos_opcao.py (incidente de 2026-09-01):
+        # sem banco de teste isolado neste setup, limpa explicitamente o que
+        # este teste criou em vez de confiar em rollback.
+        import main as svc
+        async with svc.AsyncSessionLocal() as db:
+            await db.execute(sa_delete(svc.ProductOptionGroup).where(svc.ProductOptionGroup.option_group_id == gid))
+            await db.execute(sa_delete(svc.Option).where(svc.Option.option_group_id == gid))
+            await db.execute(sa_delete(svc.OptionGroup).where(svc.OptionGroup.id == gid))
+            await db.commit()
+
+
+async def test_combo_sem_nenhum_item_com_grupo_option_groups_todos_vazios(client, seed, token_owner):
+    r = await _create_combo(client, token_owner, seed)
+    assert r.status_code == 201
+    assert all(i["option_groups"] == [] for i in r.json()["items"])

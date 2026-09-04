@@ -187,9 +187,20 @@ export default function App() {
           const savingsPerUnit = Math.round((comboSum - line.price) * 100) / 100;
           comboDiscount += savingsPerUnit * line.qty;
           for (const ci of line.comboItems) {
-            // ORD-159 (pendência registrada) — item de combo nunca carrega
-            // opção escolhida, addComboToCart não oferece seleção ainda.
-            items.push({ product_id: ci.product_id, name: `${ci.name} (${line.name})`, qty: line.qty, unit_price: ci.price });
+            // ORD-159 — quando o componente tem opção escolhida, o sufixo
+            // "(Nome do Combo)" fica ANTES do " — Opção" (não depois): o
+            // ticket usa splitNameOption (ORD-143), que corta no primeiro
+            // " — "; colocar o combo depois faria seu nome virar parte do
+            // texto da opção impressa.
+            const name = ci.selectedOptions?.length
+              ? `${ci.name} (${line.name}) — ${ci.selectedOptions.map((o) => o.option_label).join(", ")}`
+              : `${ci.name} (${line.name})`;
+            items.push({
+              product_id: ci.product_id, name, qty: line.qty, unit_price: ci.price,
+              selected_options: ci.selectedOptions?.map((o) => ({
+                group_name: o.group_name, option_label: o.option_label, price_delta: o.price_delta,
+              })),
+            });
           }
         } else {
           items.push({

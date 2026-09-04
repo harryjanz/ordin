@@ -93,6 +93,12 @@ export interface ComboItemRef {
   // ORD-157 (addendum) — em camada com Combo.upsell_enabled: só dispara
   // sugestão de upsell se os dois estiverem true.
   triggers_upsell: boolean;
+  // ORD-159 — grupos de opção do componente (vem da API, mesmo formato de
+  // Product.option_groups). Vazio quando o componente não tem grupo.
+  option_groups?: ProductOptionGroup[];
+  // ORD-159 — só presente em cópias de item dentro do carrinho (nunca vem
+  // da API): opção escolhida pra esse componente específico do combo.
+  selectedOptions?: SelectedOption[];
 }
 
 export interface Combo {

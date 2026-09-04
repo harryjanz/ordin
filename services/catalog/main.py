@@ -459,7 +459,17 @@ async def _serialize_combo(db: AsyncSession, c: "Combo") -> dict:
         .filter(ComboItem.combo_id == c.id)
     )
     items = [
-        {"product_id": pid, "name": name, "price": float(price), "triggers_upsell": triggers_upsell}
+        {
+            "product_id": pid,
+            "name": name,
+            "price": float(price),
+            "triggers_upsell": triggers_upsell,
+            # ORD-159 — mesmo racional de option_groups aninhado em ProductOut:
+            # o componente pode ter grupo de opção vinculado (ex.: sabor da
+            # bebida), e o totem precisa saber disso pra oferecer a seleção
+            # dentro da jornada de combo.
+            "option_groups": await _get_product_option_groups(db, pid),
+        }
         for pid, name, price, triggers_upsell in result.all()
     ]
     return {
@@ -953,6 +963,10 @@ class ComboItemOut(BaseModel):
     # ORD-157 (addendum) — em camada com Combo.upsell_enabled: só dispara
     # sugestão de upsell se os dois estiverem true.
     triggers_upsell: bool
+    # ORD-159 — grupos de opção do produto componente (mesmo schema de
+    # ProductOut.option_groups). Vazio quando o componente não tem grupo
+    # vinculado — consumidor antigo que ignora o campo não quebra.
+    option_groups: list[ProductOptionGroupOut] = []
 
 class ComboOut(BaseModel):
     id: int
