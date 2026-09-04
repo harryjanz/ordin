@@ -6,8 +6,10 @@ import type { Theme } from "../themes";
 import type { CartItem, CompletedOrder } from "../types";
 import { FONT } from "../scale";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const CARD_TIMEOUT_S = 90;
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
 
@@ -64,9 +66,19 @@ function CardProcessingView({ T, countdown, error, onRetry, onCancel, showMpHint
               Insira ou aproxime o cartão
             </p>
             <DotsAnimation T={T} />
-            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.3 }}>
-              Aguardando terminal… {countdown}s
-            </p>
+            <div style={{ width: "min(320px, 80vw)" }}>
+              <p className="mb-2" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.5 }}>
+                Aguardando terminal… {countdown}s
+              </p>
+              <Progress
+                value={countdown}
+                minValue={0}
+                maxValue={CARD_TIMEOUT_S}
+                aria-label="Tempo restante pra inserir o cartão"
+                className="[&_[data-slot=progress-track]]:h-2"
+                style={{ ["--primary" as string]: T.roxo }}
+              />
+            </div>
             {showMpHint && (
               <p style={{ color: T.text, fontFamily: FONT_B, fontSize: FONT.body, fontWeight: 700, opacity: 0.85 }}>
                 Se a maquininha não atualizar sozinha, toque em "Atualizar" na tela dela.
@@ -113,7 +125,7 @@ interface Props {
 export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentProvider, onSuccess, onRefused, onPix, onBack }: Props) {
   const [method, setMethod] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [countdown, setCountdown] = useState(90);
+  const [countdown, setCountdown] = useState(CARD_TIMEOUT_S);
   const [error, setError] = useState("");
   const [idleCountdown, setIdleCountdown] = useState(60);
 
@@ -135,7 +147,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentPr
     if (!method) return;
     setProcessing(true);
     setError("");
-    setCountdown(90);
+    setCountdown(CARD_TIMEOUT_S);
     const timer = setInterval(() => setCountdown((c) => c - 1), 1000);
 
     // Para cartão: aguarda no mínimo 10s na tela de processamento (cobre mock instantâneo)
@@ -171,7 +183,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentPr
     }
   }
 
-  function handleRetry() { setProcessing(false); setError(""); setMethod(null); setCountdown(90); }
+  function handleRetry() { setProcessing(false); setError(""); setMethod(null); setCountdown(CARD_TIMEOUT_S); }
 
   if (processing && method !== "pix") {
     return (

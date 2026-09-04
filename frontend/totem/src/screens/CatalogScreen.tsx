@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Toggle } from "@/components/ui/toggle";
 import { Sheet, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogTitle } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const FONT_D = "'Lexend', sans-serif";
@@ -339,7 +341,13 @@ export default function CatalogScreen({
   // (react-aria-components ToggleButton por baixo) no lugar do <button>
   // manual; isSelected em vez de comparar id na mão em cada render.
   const categoriesContent = loadingCat ? (
-    <div className="text-muted-foreground" style={{ fontSize: FONT.bodyLg, fontFamily: FONT_B }}>Carregando categorias…</div>
+    isVertical
+      ? Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="w-full shrink-0" style={{ height: 48, borderRadius: RADIUS.sm }} />
+        ))
+      : Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="shrink-0" style={{ height: 48, width: 120, borderRadius: RADIUS.pill }} />
+        ))
   ) : categories.map((cat) => (
     <Toggle
       key={cat.id}
@@ -490,13 +498,24 @@ export default function CatalogScreen({
           )}
 
           {loadingProds ? (
-            <div className="col-span-3 text-center text-muted-foreground" style={{ fontSize: FONT.bodyLg, padding: "48px 0", fontFamily: FONT_B }}>
-              Carregando produtos…
-            </div>
+            Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex flex-col gap-3">
+                <Skeleton style={{ height: 180, borderRadius: RADIUS.lg }} />
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton style={{ height: 52, borderRadius: RADIUS.pill }} />
+              </div>
+            ))
           ) : products.length === 0 ? (
-            <div className="col-span-3 text-center text-muted-foreground" style={{ fontSize: FONT.bodyLg, padding: "48px 0", fontFamily: FONT_B }}>
-              Nenhum produto disponível.
-            </div>
+            <Empty className="col-span-3">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <UtensilsCrossed />
+                </EmptyMedia>
+                <EmptyTitle>Nenhum produto disponível</EmptyTitle>
+                <EmptyDescription>Essa categoria não tem itens no cardápio agora.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : products.map((p, i) => {
             // ORD-141 — produto com grupo de opção pode ter várias linhas no
             // carrinho (uma por combinação de opção escolhida), então o

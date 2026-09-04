@@ -4,6 +4,16 @@ import api from "../api";
 import type { Theme } from "../themes";
 import { FONT } from "../scale";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const FONT_D = "'Lexend', sans-serif";
@@ -119,55 +129,60 @@ export default function PIXPaymentScreen({
       </p>
 
       {/* Status + countdown */}
-      <div className="text-center">
+      <div className="text-center" style={{ width: "min(320px, 80vw)" }}>
         <p className="mb-2" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body }}>
           Aguardando pagamento…
         </p>
-        <div className="flex items-center justify-center gap-2" style={{ fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800, color: urgente ? T.errorText : T.text, letterSpacing: 2 }}>
+        <div className="flex items-center justify-center gap-2 mb-2" style={{ fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800, color: urgente ? T.errorText : T.text, letterSpacing: 2 }}>
           <Hourglass size={FONT.title} /> {mm}:{ss}
         </div>
+        <Progress
+          value={secondsLeft}
+          minValue={0}
+          maxValue={PIX_TTL}
+          aria-label="Tempo restante para pagar"
+          className="[&_[data-slot=progress-track]]:h-2"
+          style={{ ["--primary" as string]: urgente ? T.errorText : T.roxo }}
+        />
         {urgente && (
-          <p className="mt-1" style={{ color: T.errorText, fontFamily: FONT_B, fontSize: FONT.body }}>
+          <p className="mt-2" style={{ color: T.errorText, fontFamily: FONT_B, fontSize: FONT.body }}>
             Tempo quase esgotado!
           </p>
         )}
       </div>
 
       {/* Cancelar */}
-      {!cancelConfirm ? (
-        <Button
-          variant="outline"
-          onClick={() => setCancelConfirm(true)}
-          className="rounded-full"
-          style={{ paddingLeft: 28, paddingRight: 28, minHeight: 52, color: T.muted, fontFamily: FONT_D, fontSize: FONT.bodyLg, fontWeight: 600 }}
-        >
-          Cancelar pagamento
-        </Button>
-      ) : (
-        <div className="rounded-2xl text-center" style={{ background: T.surface, border: `1px solid ${T.border}`, padding: "16px 24px" }}>
-          <p className="mb-4" style={{ color: T.text, fontFamily: FONT_B, fontSize: FONT.bodyLg }}>
-            Deseja cancelar o pagamento?
-          </p>
-          <div className="flex gap-3 justify-center">
-            <Button
-              variant="outline"
-              onClick={() => setCancelConfirm(false)}
-              className="rounded-full"
-              style={{ paddingLeft: 24, paddingRight: 24, minHeight: 48, color: T.muted, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body }}
-            >
-              Não, continuar
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={cancelPayment}
-              className="rounded-full"
-              style={{ paddingLeft: 24, paddingRight: 24, minHeight: 48, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body }}
-            >
-              Sim, cancelar
-            </Button>
-          </div>
-        </div>
-      )}
+      <Button
+        variant="outline"
+        onClick={() => setCancelConfirm(true)}
+        className="rounded-full"
+        style={{ paddingLeft: 28, paddingRight: 28, minHeight: 52, color: T.muted, fontFamily: FONT_D, fontSize: FONT.bodyLg, fontWeight: 600 }}
+      >
+        Cancelar pagamento
+      </Button>
+
+      <AlertDialog isOpen={cancelConfirm} onOpenChange={setCancelConfirm}>
+        <AlertDialogHeader>
+          <AlertDialogTitle style={{ color: T.text, fontFamily: FONT_D }}>
+            Cancelar pagamento?
+          </AlertDialogTitle>
+          <AlertDialogDescription style={{ fontFamily: FONT_B }}>
+            Deseja realmente cancelar esse pagamento por PIX?
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel style={{ fontFamily: FONT_D, fontWeight: 700 }}>
+            Não, continuar
+          </AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={cancelPayment}
+            style={{ fontFamily: FONT_D, fontWeight: 700 }}
+          >
+            Sim, cancelar
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialog>
 
       <p className="text-center" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.label, opacity: 0.4 }}>
         Pedido: {orderRef}

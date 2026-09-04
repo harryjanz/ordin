@@ -11,10 +11,12 @@ import { FONT } from "../scale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
+import { Progress } from "@/components/ui/progress";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtMethod = (m: string) =>
   ({ credit: "Crédito", debit: "Débito", pix: "PIX", voucher: "Voucher" })[m] ?? m.toUpperCase();
+const NEW_ORDER_TIMEOUT_S = 30;
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -237,7 +239,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
   // ORD-118 — "por_item" (padrão) ou "retirada_unica" (ticket compacto, QR único).
   const fulfillmentMode = useStore((s) => s.company?.fulfillment_mode ?? "por_item");
   const compactPrint = fulfillmentMode === "retirada_unica" && !!order.order_qr_data;
-  const [countdown, setCountdown] = useState(30);
+  const [countdown, setCountdown] = useState(NEW_ORDER_TIMEOUT_S);
   const [printMethod, setPrintMethod] = useState<PrintMethod | "pending">("pending");
   // ORD-119 (item 4, análise de concorrentes 2026-08-24) — estimativa de
   // tempo de espera baseada em dado real (GET /orders/prep-stats, últimas
@@ -439,9 +441,19 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
           Novo pedido
         </Button>
 
-        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.4 }}>
-          Novo pedido em {countdown}s…
-        </p>
+        <div style={{ width: "min(320px, 92vw)" }}>
+          <p className="mb-2" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.5 }}>
+            Novo pedido em {countdown}s…
+          </p>
+          <Progress
+            value={countdown}
+            minValue={0}
+            maxValue={NEW_ORDER_TIMEOUT_S}
+            aria-label="Tempo até iniciar um novo pedido"
+            className="[&_[data-slot=progress-track]]:h-1.5"
+            style={{ ["--primary" as string]: T.roxo }}
+          />
+        </div>
 
       </div>
     </div>
