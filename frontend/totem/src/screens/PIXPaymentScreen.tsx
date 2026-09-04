@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from "react";
+import { Zap, Hourglass } from "lucide-react";
 import api from "../api";
 import type { Theme } from "../themes";
-import { RADIUS, FONT } from "../scale";
+import { FONT } from "../scale";
+import { Button } from "@/components/ui/button";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const FONT_D = "'Lexend', sans-serif";
@@ -81,72 +83,51 @@ export default function PIXPaymentScreen({
   const urgente = secondsLeft <= 60;
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: T.radial,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 20,
-      padding: "32px 16px",
-    }}>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: FONT.headline, marginBottom: 8 }}>⚡</div>
-        <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800, margin: 0 }}>
+    <div
+      className="min-h-screen flex flex-col items-center justify-center gap-5 px-4 py-8"
+      style={{ background: T.radial }}
+    >
+      <div className="text-center">
+        <Zap className="mx-auto mb-2" size={FONT.headline} color={T.roxo} fill={T.roxo} />
+        <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800 }}>
           Pague com PIX
         </h2>
-        <p style={{ color: T.priceColor, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800, marginTop: 4, marginBottom: 0 }}>
+        <p className="mt-1" style={{ color: T.priceColor, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800 }}>
           {fmt(amount)}
         </p>
       </div>
 
       {/* QR Code */}
-      <div style={{
-        background: "#fff",
-        borderRadius: RADIUS.lg,
-        padding: 16,
-        boxShadow: T.cardShadow,
-      }}>
+      <div className="rounded-2xl p-4" style={{ background: "#fff", boxShadow: T.cardShadow }}>
         {qrCodeBase64 ? (
           <img
             src={`data:image/png;base64,${qrCodeBase64}`}
             alt="QR Code PIX"
             width={260}
             height={260}
-            style={{ display: "block" }}
+            className="block"
           />
         ) : (
-          <div style={{
-            width: 260, height: 260,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            color: "#999", fontSize: FONT.body,
-          }}>
+          <div className="flex items-center justify-center" style={{ width: 260, height: 260, color: "#999", fontSize: FONT.body }}>
             QR indisponível
           </div>
         )}
       </div>
 
-      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, margin: 0, textAlign: "center" }}>
+      <p className="text-center" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body }}>
         Aponte a câmera do seu celular para o QR Code
       </p>
 
       {/* Status + countdown */}
-      <div style={{ textAlign: "center" }}>
-        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, margin: "0 0 8px" }}>
+      <div className="text-center">
+        <p className="mb-2" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body }}>
           Aguardando pagamento…
         </p>
-        <div style={{
-          fontFamily: FONT_D,
-          fontSize: FONT.title,
-          fontWeight: 800,
-          color: urgente ? T.errorText : T.text,
-          letterSpacing: 2,
-        }}>
-          ⏳ {mm}:{ss}
+        <div className="flex items-center justify-center gap-2" style={{ fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800, color: urgente ? T.errorText : T.text, letterSpacing: 2 }}>
+          <Hourglass size={FONT.title} /> {mm}:{ss}
         </div>
         {urgente && (
-          <p style={{ color: T.errorText, fontFamily: FONT_B, fontSize: FONT.body, marginTop: 4 }}>
+          <p className="mt-1" style={{ color: T.errorText, fontFamily: FONT_B, fontSize: FONT.body }}>
             Tempo quase esgotado!
           </p>
         )}
@@ -154,74 +135,41 @@ export default function PIXPaymentScreen({
 
       {/* Cancelar */}
       {!cancelConfirm ? (
-        <button
+        <Button
+          variant="outline"
           onClick={() => setCancelConfirm(true)}
-          style={{
-            padding: "0 28px",
-            minHeight: 52,
-            background: "transparent",
-            border: `1px solid ${T.borderNeutral}`,
-            borderRadius: RADIUS.pill,
-            color: T.muted,
-            fontFamily: FONT_D,
-            fontSize: FONT.bodyLg,
-            fontWeight: 600,
-            cursor: "pointer",
-          }}
+          className="rounded-full"
+          style={{ paddingLeft: 28, paddingRight: 28, minHeight: 52, color: T.muted, fontFamily: FONT_D, fontSize: FONT.bodyLg, fontWeight: 600 }}
         >
           Cancelar pagamento
-        </button>
+        </Button>
       ) : (
-        <div style={{
-          background: T.surface,
-          border: `1px solid ${T.border}`,
-          borderRadius: RADIUS.lg,
-          padding: "16px 24px",
-          textAlign: "center",
-        }}>
-          <p style={{ color: T.text, fontFamily: FONT_B, fontSize: FONT.bodyLg, marginBottom: 16 }}>
+        <div className="rounded-2xl text-center" style={{ background: T.surface, border: `1px solid ${T.border}`, padding: "16px 24px" }}>
+          <p className="mb-4" style={{ color: T.text, fontFamily: FONT_B, fontSize: FONT.bodyLg }}>
             Deseja cancelar o pagamento?
           </p>
-          <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-            <button
+          <div className="flex gap-3 justify-center">
+            <Button
+              variant="outline"
               onClick={() => setCancelConfirm(false)}
-              style={{
-                padding: "0 24px",
-                minHeight: 48,
-                background: T.surface,
-                border: `1px solid ${T.borderNeutral}`,
-                borderRadius: RADIUS.pill,
-                color: T.muted,
-                fontFamily: FONT_D,
-                fontWeight: 700,
-                fontSize: FONT.body,
-                cursor: "pointer",
-              }}
+              className="rounded-full"
+              style={{ paddingLeft: 24, paddingRight: 24, minHeight: 48, color: T.muted, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body }}
             >
               Não, continuar
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="destructive"
               onClick={cancelPayment}
-              style={{
-                padding: "0 24px",
-                minHeight: 48,
-                background: T.errorBg ?? "rgba(255,77,109,0.12)",
-                border: "none",
-                borderRadius: RADIUS.pill,
-                color: T.errorText,
-                fontFamily: FONT_D,
-                fontWeight: 700,
-                fontSize: FONT.body,
-                cursor: "pointer",
-              }}
+              className="rounded-full"
+              style={{ paddingLeft: 24, paddingRight: 24, minHeight: 48, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body }}
             >
               Sim, cancelar
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
-      <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.label, opacity: 0.4, textAlign: "center", margin: 0 }}>
+      <p className="text-center" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.label, opacity: 0.4 }}>
         Pedido: {orderRef}
       </p>
     </div>

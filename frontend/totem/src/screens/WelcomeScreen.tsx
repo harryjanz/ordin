@@ -49,19 +49,8 @@ export default function WelcomeScreen({ T, companyName, companyId, onStart }: Pr
   return (
     <div
       onClick={onStart}
-      style={{
-        position: "relative",
-        minHeight: "100vh",
-        overflow: "hidden",
-        background: T.radial,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        userSelect: "none",
-        WebkitUserSelect: "none",
-      }}
+      className="relative min-h-screen overflow-hidden flex flex-col items-center justify-center cursor-pointer select-none"
+      style={{ background: T.radial }}
     >
       {/* Vídeo em rotação — desmonta (e para) automaticamente quando o
           cliente toca a tela, já que onStart() troca de tela imediatamente
@@ -82,87 +71,53 @@ export default function WelcomeScreen({ T, companyName, companyId, onStart }: Pr
           // próximo, sempre um índice diferente do atual.
           loop={videos.length === 1}
           onEnded={() => setIndex((i) => (i + 1) % videos.length)}
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            zIndex: 0,
-          }}
+          className="absolute inset-0 w-full h-full object-cover z-0"
         />
       )}
 
       {/* Escurece o vídeo pra manter o texto legível por cima, sem tampar
           quando não há vídeo (fallback estático não muda em nada). */}
-      {current && (
-        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 1 }} />
-      )}
+      {current && <div className="absolute inset-0 bg-black/35 z-10" />}
 
-      <div style={{ position: "relative", zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center" }}>
+      <div className="relative z-20 flex flex-col items-center">
         {/* Marca — só a da empresa, de propósito (ORD-114): esta é a única
             tela vista pelo cliente final antes de decidir tocar pra começar,
             nenhuma identificação do fornecedor de software (Ordin) aqui. */}
-        <div style={{ textAlign: "center", marginBottom: 48 }}>
-          <div style={{
-            fontFamily: FONT_D,
-            fontWeight: 900,
-            fontSize: FONT.headlineLg,
-            color: current ? "#fff" : T.text,
-            letterSpacing: "-1px",
-            lineHeight: 1,
-            marginBottom: 8,
-          }}>
+        <div className="text-center mb-12">
+          <div
+            className="leading-none mb-2 tracking-tighter"
+            style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.headlineLg, color: current ? "#fff" : T.text }}
+          >
             {companyName}
           </div>
-          <div style={{
-            fontFamily: FONT_D,
-            color: current ? "#fff" : T.roxo,
-            fontSize: FONT.body,
-            fontWeight: 700,
-            letterSpacing: "4px",
-            textTransform: "uppercase",
-          }}>
+          <div
+            className="uppercase tracking-[4px]"
+            style={{ fontFamily: FONT_D, color: current ? "#fff" : T.roxo, fontSize: FONT.body, fontWeight: 700 }}
+          >
             Autoatendimento
           </div>
         </div>
 
         {/* CTA — pulse */}
-        <div style={{
-          animation: "pulse 2.4s ease-in-out infinite",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 16,
-        }}>
-          <div style={{
-            width: 88,
-            height: 88,
-            borderRadius: "50%",
-            background: current ? "rgba(255,255,255,0.15)" : T.roxoSubtle,
-            border: `2px solid ${current ? "#fff" : T.roxo}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            animation: "glow 2.4s ease-in-out infinite",
-          }}>
+        <div className="flex flex-col items-center gap-4" style={{ animation: "pulse 2.4s ease-in-out infinite" }}>
+          <div
+            className="rounded-full flex items-center justify-center"
+            style={{
+              width: 88, height: 88,
+              background: current ? "rgba(255,255,255,0.15)" : T.roxoSubtle,
+              border: `2px solid ${current ? "#fff" : T.roxo}`,
+              animation: "glow 2.4s ease-in-out infinite",
+            }}
+          >
             <Hand size={44} color={current ? "#fff" : T.roxo} strokeWidth={1.5} />
           </div>
-          <div style={{
-            fontFamily: FONT_D,
-            fontSize: FONT.headline,
-            fontWeight: 800,
-            color: current ? "#fff" : T.text,
-            letterSpacing: "-0.5px",
-          }}>
+          <div
+            className="tracking-tight"
+            style={{ fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800, color: current ? "#fff" : T.text }}
+          >
             Toque para começar
           </div>
-          <div style={{
-            fontFamily: "'Inter', sans-serif",
-            fontSize: FONT.bodyLg,
-            color: current ? "rgba(255,255,255,0.8)" : T.muted,
-            fontWeight: 400,
-          }}>
+          <div style={{ fontFamily: "'Inter', sans-serif", fontSize: FONT.bodyLg, color: current ? "rgba(255,255,255,0.8)" : T.muted, fontWeight: 400 }}>
             Faça seu pedido em minutos
           </div>
         </div>
