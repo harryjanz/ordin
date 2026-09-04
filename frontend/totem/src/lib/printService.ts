@@ -19,6 +19,18 @@ export function splitNameOption(combined: string): { name: string; option: strin
   return { name: combined.slice(0, idx), option: combined.slice(idx + 3) };
 }
 
+// ORD-159 — o nome do componente (product_name/qr_data) carrega
+// "(Nome do Combo)" pro app de balcão, que mostra o item solto sem
+// cabeçalho de combo (ver frontend/balcao/src/lib/orderItems.ts). Na
+// impressão/tela do totem, onde o cabeçalho do combo já aparece antes do
+// grupo, esse sufixo fica redundante — removido só aqui, na exibição,
+// nunca no qr_data/product_name em si.
+export function stripComboSuffix(name: string, comboName?: string | null): string {
+  if (!comboName) return name;
+  const suffix = ` (${comboName})`;
+  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name;
+}
+
 const METHOD_LABEL: Record<string, string> = {
   credit: "Credito", debit: "Debito", pix: "PIX", voucher: "Voucher",
 };
@@ -78,11 +90,22 @@ function buildEscPosBase64Compact(order: CompletedOrder, companyName: string): s
   raw(0x1B, 0x61, 0x00); // Left
   // order.tickets tem 1 linha por unidade (qty=2 -> 2 tickets) — só a
   // unidade 1 de cada item representa a linha, senão duplica no impresso.
+  // ORD-159 — componentes com o mesmo combo_instance_key (mesma unidade de
+  // combo comprada) ganham um cabeçalho com o nome do combo antes do
+  // grupo, em vez de repetir "(Nome do Combo)" em cada linha solta.
+  let lastComboKeyCompact: string | null = null;
   for (const tk of order.tickets.filter((t) => t.unit_number === 1)) {
     const parts = tk.qr_data.split("|");
     const productName = parts[1] ?? "";
     const { name, option } = splitNameOption(productName);
-    text(`${tk.total_units}x ${norm(name)}`); nl();
+    if (tk.combo_instance_key && tk.combo_instance_key !== lastComboKeyCompact) {
+      raw(0x1B, 0x45, 0x01); // Bold
+      text(norm(tk.combo_name ?? "Combo")); nl();
+      raw(0x1B, 0x45, 0x00);
+    }
+    lastComboKeyCompact = tk.combo_instance_key ?? null;
+    const displayName = stripComboSuffix(name, tk.combo_name);
+    text(`${tk.combo_instance_key ? "  " : ""}${tk.total_units}x ${norm(displayName)}`); nl();
     if (option) { text(`   ${norm(option)}`); nl(); }
   }
   nl();
@@ -167,18 +190,35 @@ function buildEscPosBase64(order: CompletedOrder, companyName: string): string {
 
   // One ticket block per ticket — partial cut after each
   // QR format: {ticket_code}|{order_ref}|{product_name}|{unit}/{total}|{HMAC}
+  // ORD-159 — cada ticket físico continua sendo cortado/coletado
+  // separadamente (é assim que o balcão funciona hoje, um componente do
+  // combo pode ser retirado numa estação diferente da outra); o que muda é
+  // só um cabeçalho impresso ANTES do primeiro ticket de cada combo
+  // comprado, pra dar contexto visual de que os próximos N tickets
+  // pertencem ao mesmo combo — sem alterar corte/QR/coleta de nenhum deles.
+  let lastComboKey: string | null = null;
   for (const tk of order.tickets) {
     const parts = tk.qr_data.split("|");
     const productName = parts[1] ?? "";
     const { name, option } = splitNameOption(productName);
 
+    if (tk.combo_instance_key && tk.combo_instance_key !== lastComboKey) {
+      nl();
+      raw(0x1B, 0x61, 0x01); // Center
+      raw(0x1B, 0x45, 0x01); // Bold
+      text(`=== ${norm(tk.combo_name ?? "Combo")} ===`); nl();
+      raw(0x1B, 0x45, 0x00);
+    }
+    lastComboKey = tk.combo_instance_key ?? null;
+
     nl();
     raw(0x1B, 0x61, 0x01); // Center
     text("- - - - - - - - - - - - - - - - -"); nl();
 
+    const displayName = stripComboSuffix(name, tk.combo_name);
     raw(0x1B, 0x45, 0x01); // Bold
     raw(0x1D, 0x21, 0x11); // Double
-    text(norm(name).toUpperCase().slice(0, 18)); nl();
+    text(norm(displayName).toUpperCase().slice(0, 18)); nl();
     raw(0x1D, 0x21, 0x00);
     raw(0x1B, 0x45, 0x00);
 

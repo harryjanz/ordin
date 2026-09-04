@@ -5,7 +5,7 @@ import type { Theme } from "../themes";
 import type { CompletedOrder } from "../types";
 import { useStore } from "../store";
 import api from "../api";
-import { silentPrint, splitNameOption } from "../lib/printService";
+import { silentPrint, splitNameOption, stripComboSuffix } from "../lib/printService";
 import type { PrintMethod } from "../lib/printService";
 import { RADIUS, FONT } from "../scale";
 
@@ -31,16 +31,28 @@ function extractOrderNumber(ref: string): string {
 function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string[]): string {
   const now = new Date().toLocaleString("pt-BR");
 
+  // ORD-159 — cada ticket continua sendo seu próprio bloco cortável (é
+  // assim que o balcão coleta, componente por componente); só ganha um
+  // cabeçalho "Combo X" antes do primeiro ticket de cada instância de
+  // combo comprada, pra dar contexto visual sem repetir "(Nome do Combo)"
+  // em cada linha solta.
+  let lastComboKeyPrint: string | null = null;
   const ticketsHtml = order.tickets.map((tk, i) => {
     const parts = tk.qr_data.split("|");
     const productName = parts[1] ?? "";
     const { name, option } = splitNameOption(productName);
     const svgEl = (svgs[i] ?? "").replace(/width="[^"]*"/, 'width="110"').replace(/height="[^"]*"/, 'height="110"');
+    const comboHeader = tk.combo_instance_key && tk.combo_instance_key !== lastComboKeyPrint
+      ? `<div class="combo-header">${tk.combo_name ?? "Combo"}</div>`
+      : "";
+    lastComboKeyPrint = tk.combo_instance_key ?? null;
+    const displayName = stripComboSuffix(name, tk.combo_name);
     return `
       <div class="cut">- &nbsp; - &nbsp; - &nbsp;✂&nbsp; - &nbsp; - &nbsp; -</div>
-      <div class="ticket">
+      ${comboHeader}
+      <div class="ticket${tk.combo_instance_key ? " ticket-combo-item" : ""}">
         <div class="ticket-title">
-          <div class="ticket-name">${name}</div>
+          <div class="ticket-name">${displayName}</div>
           ${option ? `<div class="ticket-option">${option}</div>` : ""}
         </div>
         <table class="ticket-body"><tbody><tr>
@@ -84,7 +96,12 @@ function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string
     letter-spacing:3px;
     color:#444;
   }
+  .combo-header{
+    font-size:12px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;
+    margin:6px 0 2px;color:#000;
+  }
   .ticket{padding:2px 0 6px;}
+  .ticket-combo-item{padding-left:8px;border-left:2px solid #ccc;}
   .ticket-title{
     margin-bottom:5px;text-align:center;
     border-bottom:1px solid #eee;padding-bottom:4px;
@@ -141,12 +158,19 @@ function buildCompactPrintHtml(order: CompletedOrder, companyName: string, order
   const now = new Date().toLocaleString("pt-BR");
   // order.tickets tem 1 linha por unidade (qty=2 -> 2 tickets) — só a
   // unidade 1 de cada item representa a linha, senão duplica no impresso.
+  let lastComboKeyCompact: string | null = null;
   const itemsHtml = order.tickets
     .filter((tk) => tk.unit_number === 1)
     .map((tk) => {
       const productName = (tk.qr_data.split("|")[1] ?? "");
       const { name, option } = splitNameOption(productName);
-      return `<div class="item-row"><span class="item-qty">${tk.total_units}x</span> ${name}</div>${option ? `<div class="item-option">${option}</div>` : ""}`;
+      const comboHeader = tk.combo_instance_key && tk.combo_instance_key !== lastComboKeyCompact
+        ? `<div class="combo-header">${tk.combo_name ?? "Combo"}</div>`
+        : "";
+      lastComboKeyCompact = tk.combo_instance_key ?? null;
+      const rowClass = tk.combo_instance_key ? "item-row item-row-combo" : "item-row";
+      const displayName = stripComboSuffix(name, tk.combo_name);
+      return `${comboHeader}<div class="${rowClass}"><span class="item-qty">${tk.total_units}x</span> ${displayName}</div>${option ? `<div class="item-option">${option}</div>` : ""}`;
     })
     .join("");
   const svgEl = orderQrSvg.replace(/width="[^"]*"/, 'width="150"').replace(/height="[^"]*"/, 'height="150"');
@@ -164,7 +188,9 @@ function buildCompactPrintHtml(order: CompletedOrder, companyName: string, order
   .brand{font-size:10px;color:#555;margin-bottom:6px;}
   .hrow{font-size:11px;margin:2px 0;}
   .items{margin:10px 0;border-bottom:1px dashed #000;padding-bottom:8px;}
+  .combo-header{font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:.5px;margin:6px 0 2px;}
   .item-row{font-size:12px;margin:3px 0;}
+  .item-row-combo{margin-left:12px;}
   .item-qty{font-weight:bold;}
   .item-option{font-size:10px;color:#666;margin:0 0 3px 20px;}
   .total{font-size:15px;font-weight:bold;text-align:center;margin:8px 0;}

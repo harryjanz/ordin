@@ -158,6 +158,12 @@ export interface Ticket {
   status: string;
   unit_number: number;
   total_units: number;
+  // ORD-159 — presentes só pra ticket de componente de combo explodido;
+  // permitem agrupar de volta "essas N linhas pertencem ao mesmo combo
+  // comprado" na tela de sucesso e na impressão, mesmo cada componente
+  // tendo virado um OrderItem/ticket separado no order-service.
+  combo_instance_key?: string | null;
+  combo_name?: string | null;
 }
 
 export interface CompletedOrder {
