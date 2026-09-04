@@ -50,7 +50,7 @@ const DEFAULT_INACTIVITY_WARN_SEC = 30;
 
 export default function App() {
   const {
-    company, terminal, cart, cpf, consumptionType, completedOrder, screen,
+    token, company, terminal, cart, cpf, consumptionType, completedOrder, screen,
     setToken, setCompany, setTerminal, setScreen,
     addToCart, removeFromCart, setCpf, setConsumptionType, setCompletedOrder,
     newOrder, goIdle, resetSession, touch,
@@ -128,6 +128,34 @@ export default function App() {
       window.removeEventListener("mousemove", throttledMouseHandler);
     };
   }, [screen, inactivityTimeoutMs, inactivityWarnSec]);
+
+  // Achado investigando o timer de inatividade (2026-09-03) — `company`
+  // (e portanto inactivity_timeout_min/inactivity_warn_sec) só era buscado
+  // uma vez, no login (handlePinSuccess). Um totem pareado há dias continua
+  // usando a config de quando logou, mesmo que o admin mude o valor depois
+  // — sem re-parear, o totem nunca sabe. Refresca periodicamente via
+  // GET /companies/{id}, que já permite o próprio token ler sua empresa
+  // (mesmo role kiosk — só quando company_id do token bate com o path,
+  // ver get_company em company-service/main.py). Falha silenciosa: mantém
+  // o valor já em cache se a chamada falhar, nunca quebra o totem por isso.
+  useEffect(() => {
+    if (!token || !company) return;
+    const COMPANY_REFRESH_MS = 2 * 60_000;
+    const iv = setInterval(() => {
+      api.get(`/companies/${company.id}`).then((r) => {
+        setCompany({
+          id: r.data.id, name: r.data.name, plan: r.data.plan,
+          visual_theme: r.data.visual_theme, visual_mode: r.data.visual_mode,
+          consumption_mode_enabled: r.data.consumption_mode_enabled,
+          catalog_menu_layout: r.data.catalog_menu_layout,
+          fulfillment_mode: r.data.fulfillment_mode,
+          inactivity_timeout_min: r.data.inactivity_timeout_min,
+          inactivity_warn_sec: r.data.inactivity_warn_sec,
+        });
+      }).catch(() => null);
+    }, COMPANY_REFRESH_MS);
+    return () => clearInterval(iv);
+  }, [token, company?.id]);
 
   // ── handlers ─────────────────────────────────────────────────────────────
 
