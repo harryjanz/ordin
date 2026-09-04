@@ -1,6 +1,6 @@
 # ORD-131 — Webhook secret do Mercado Pago por empresa (multi-tenant)
 
-**Status:** Ready
+**Status:** Done
 **Pontos:** 6
 **Sprint:** Pagamentos MP
 

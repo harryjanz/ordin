@@ -1,6 +1,6 @@
 # ORD-130 — Webhooks por provider (rota dedicada) + corrige assinatura Mercado Pago
 
-**Status:** Ready
+**Status:** Done
 **Pontos:** 5
 **Sprint:** Pagamentos MP
 
