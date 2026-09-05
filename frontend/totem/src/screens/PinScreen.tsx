@@ -1,7 +1,9 @@
 import { useState } from "react";
 import axios from "axios";
+import { Delete } from "lucide-react";
 import type { Theme } from "../themes";
 import type { CompanyInfo, TerminalInfo } from "../types";
+import { Spinner } from "@/components/ui/spinner";
 
 // Layout ATM: 7-8-9 no topo (igual a terminais físicos e caixas eletrônicos)
 const KEYS = [7, 8, 9, 4, 5, 6, 1, 2, 3, "", 0, "⌫"] as const;
@@ -14,17 +16,12 @@ interface Props {
 
 function Numpad({ onPress, onDel, T }: { onPress: (v: string) => void; onDel: () => void; T: Theme }) {
   return (
-    <div style={{
-      display: "grid",
-      gridTemplateColumns: "repeat(3, 1fr)",
-      border: `1px solid ${T.border}`,
-      borderRadius: 16,
-      overflow: "hidden",
-    }}>
+    <div className="grid grid-cols-3 rounded-2xl overflow-hidden" style={{ border: `1px solid ${T.border}` }}>
       {KEYS.map((k, i) => (
         <button
           key={i}
           onClick={() => k === "⌫" ? onDel() : k !== "" ? onPress(String(k)) : undefined}
+          className="flex items-center justify-center"
           style={{
             minHeight: 84,
             fontSize: 26,
@@ -40,7 +37,7 @@ function Numpad({ onPress, onDel, T }: { onPress: (v: string) => void; onDel: ()
           onMouseEnter={(e) => { if (k !== "") e.currentTarget.style.background = T.numHover; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = k === "" ? "transparent" : T.numBg; }}
         >
-          {k}
+          {k === "⌫" ? <Delete size={24} /> : k}
         </button>
       ))}
     </div>
@@ -86,64 +83,50 @@ export default function PinScreen({ T, terminalId, onSuccess }: Props) {
   }
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: T.radial,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      transition: "background 0.3s",
-    }}>
-      <div style={{ marginBottom: 32, textAlign: "center" }}>
-        <svg width={56} height={56} viewBox="0 0 48 48" fill="none" style={{ display: "block", margin: "0 auto 12px" }}>
+    <div
+      className="min-h-screen flex flex-col items-center justify-center"
+      style={{ background: T.radial, transition: "background 0.3s" }}
+    >
+      <div className="mb-8 text-center">
+        <svg width={56} height={56} viewBox="0 0 48 48" fill="none" className="block mx-auto mb-3">
           <rect width="48" height="48" rx="13" fill="#9900ff"/>
           <circle cx="24" cy="22" r="10" stroke="white" strokeWidth="3.5" fill="none"/>
           <circle cx="24" cy="22" r="4" fill="white"/>
           <rect x="14" y="34" width="20" height="3" rx="1.5" fill="white" opacity="0.4"/>
         </svg>
         <div style={{ fontWeight: 800, fontSize: 26, color: "#9900ff", letterSpacing: "-0.5px" }}>ordin</div>
-        <p style={{ color: T.muted, fontSize: 14, marginTop: 6 }}>Digite o PIN da empresa para começar</p>
+        <p className="mt-1.5" style={{ color: T.muted, fontSize: 14 }}>Digite o PIN da empresa para começar</p>
       </div>
 
       <div style={{ width: "min(400px, 92vw)" }}>
         {/* Indicadores de dígitos */}
-        <div style={{
-          display: "flex",
-          justifyContent: "center",
-          gap: 16,
-          marginBottom: 24,
-          animation: shake ? "shake 0.4s" : "none",
-        }}>
+        <div
+          className="flex justify-center gap-4 mb-6"
+          style={{ animation: shake ? "shake 0.4s" : "none" }}
+        >
           {[0, 1, 2, 3].map((i) => (
-            <div key={i} style={{
-              width: 16,
-              height: 16,
-              borderRadius: "50%",
-              background: pin.length > i ? T.roxo : T.border,
-              transition: "background 0.15s",
-              boxShadow: pin.length > i ? `0 0 10px ${T.roxo}` : "none",
-            }} />
+            <div
+              key={i}
+              className="rounded-full"
+              style={{
+                width: 16, height: 16,
+                background: pin.length > i ? T.roxo : T.border,
+                transition: "background 0.15s",
+                boxShadow: pin.length > i ? `0 0 10px ${T.roxo}` : "none",
+              }}
+            />
           ))}
         </div>
 
         {error && (
-          <p style={{ color: T.errorText, textAlign: "center", fontSize: 13, marginBottom: 12 }}>
+          <p className="text-center mb-3" style={{ color: T.errorText, fontSize: 13 }}>
             {error}
           </p>
         )}
 
         {loading ? (
-          <div style={{ textAlign: "center", padding: "20px 0" }}>
-            <div style={{
-              width: 40,
-              height: 40,
-              border: `4px solid ${T.border}`,
-              borderTop: `4px solid ${T.roxo}`,
-              borderRadius: "50%",
-              animation: "spin 0.8s linear infinite",
-              margin: "0 auto",
-            }} />
+          <div className="text-center" style={{ padding: "20px 0" }}>
+            <Spinner className="mx-auto size-10" style={{ color: T.roxo }} />
           </div>
         ) : (
           <Numpad

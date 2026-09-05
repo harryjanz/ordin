@@ -3,8 +3,10 @@ import axios from "axios";
 import { QRCodeSVG } from "qrcode.react";
 import type { Theme } from "../themes";
 import type { CompanyInfo, TerminalInfo } from "../types";
-import { RADIUS, FONT } from "../scale";
+import { FONT } from "../scale";
 import { OrdinSymbol } from "../assets/OrdinSymbol";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -79,102 +81,87 @@ export default function DevicePairingScreen({ T, onDone, onUsePIN }: Props) {
   const secs = String(countdown % 60).padStart(2, "0");
 
   return (
-    <div style={{
-      minHeight: "100vh", background: T.radial,
-      display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
-      padding: 32,
-    }}>
-      <div style={{
-        background: T.surface, borderRadius: RADIUS.lg,
-        border: `1px solid ${T.border}`,
-        padding: "40px 48px", maxWidth: 480, width: "100%",
-        textAlign: "center", boxShadow: T.cardShadow,
-      }}>
-        {/* Ícone + "ordin" em roxo fixo (não T.roxo) — telas de
-            autenticação/configuração identificam o sistema, ao contrário
-            da tela de boas-vindas (ORD-114). Mesmo padrão do SetupScreen. */}
-        <div style={{ marginBottom: 16, display: "flex", justifyContent: "center" }}>
-          <OrdinSymbol size={48} color="#9900ff" />
-        </div>
-        <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.title, color: "#9900ff", letterSpacing: "-0.5px", marginBottom: 8 }}>
-          ordin
-        </div>
-
-        <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text, marginBottom: 8 }}>
-          Parear totem
-        </div>
-        <div style={{ fontFamily: FONT_B, fontSize: FONT.body, color: T.muted, marginBottom: 28, lineHeight: 1.6 }}>
-          Digite o código no admin ou escaneie o QR com o celular
-        </div>
-
-        {err ? (
-          <>
-            <div style={{ color: T.errorText, fontFamily: FONT_B, fontSize: FONT.body, marginBottom: 16 }}>{err}</div>
-            <button onClick={fetchChallenge} style={btnStyle(T)}>Tentar novamente</button>
-          </>
-        ) : expired ? (
-          <>
-            <div style={{ fontFamily: FONT_B, fontSize: FONT.body, color: T.muted, marginBottom: 20 }}>
-              Código expirado.
-            </div>
-            <button onClick={fetchChallenge} style={btnStyle(T)}>Gerar novo código</button>
-          </>
-        ) : code ? (
-          <>
-            <div style={{
-              fontFamily: "'Courier New', monospace",
-              fontSize: FONT.headlineLg, fontWeight: 900,
-              letterSpacing: 10, color: T.roxo,
-              background: T.roxoSubtle,
-              borderRadius: RADIUS.lg, padding: "16px 20px",
-              marginBottom: 24, border: `1px solid ${T.border}`,
-            }}>
-              {code}
-            </div>
-
-            {qrUrl && (
-              <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
-                <div style={{ background: "#fff", padding: 12, borderRadius: RADIUS.sm }}>
-                  <QRCodeSVG value={qrUrl} size={140} />
-                </div>
-              </div>
-            )}
-
-            <div style={{ fontFamily: FONT_B, fontSize: FONT.body, color: T.muted, marginBottom: 8 }}>
-              Expira em{" "}
-              <span style={{ fontWeight: 700, color: countdown < 60 ? T.errorText : T.text }}>
-                {mins}:{secs}
-              </span>
-            </div>
-          </>
-        ) : (
-          <div style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, padding: "20px 0" }}>
-            Gerando código…
+    <div className="min-h-screen flex flex-col items-center justify-center p-8" style={{ background: T.radial }}>
+      <Card className="text-center" style={{ maxWidth: 480, width: "100%", boxShadow: T.cardShadow }}>
+        <CardContent style={{ padding: "40px 48px" }}>
+          {/* Ícone + "ordin" em roxo fixo (não T.roxo) — telas de
+              autenticação/configuração identificam o sistema, ao contrário
+              da tela de boas-vindas (ORD-114). Mesmo padrão do SetupScreen. */}
+          <div className="flex justify-center mb-4">
+            <OrdinSymbol size={48} color="#9900ff" />
           </div>
-        )}
+          <div className="mb-2" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.title, color: "#9900ff", letterSpacing: "-0.5px" }}>
+            ordin
+          </div>
 
-        <button
-          onClick={onUsePIN}
-          style={{
-            display: "block", margin: "16px auto 0",
-            background: "transparent", border: "none",
-            color: T.muted, fontFamily: FONT_B, fontSize: FONT.body,
-            cursor: "pointer", textDecoration: "underline",
-          }}
-        >
-          Entrar com PIN
-        </button>
-      </div>
+          <div className="mb-2" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text }}>
+            Parear totem
+          </div>
+          <div className="mb-7 leading-relaxed" style={{ fontFamily: FONT_B, fontSize: FONT.body, color: T.muted }}>
+            Digite o código no admin ou escaneie o QR com o celular
+          </div>
+
+          {err ? (
+            <>
+              <div className="mb-4" style={{ color: T.errorText, fontFamily: FONT_B, fontSize: FONT.body }}>{err}</div>
+              <Button onClick={fetchChallenge} className="rounded-full" style={{ background: T.btn, color: T.btnText, padding: "12px 32px", fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.bodyLg, boxShadow: T.glow }}>
+                Tentar novamente
+              </Button>
+            </>
+          ) : expired ? (
+            <>
+              <div className="mb-5" style={{ fontFamily: FONT_B, fontSize: FONT.body, color: T.muted }}>
+                Código expirado.
+              </div>
+              <Button onClick={fetchChallenge} className="rounded-full" style={{ background: T.btn, color: T.btnText, padding: "12px 32px", fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.bodyLg, boxShadow: T.glow }}>
+                Gerar novo código
+              </Button>
+            </>
+          ) : code ? (
+            <>
+              <div
+                className="mb-6 rounded-2xl"
+                style={{
+                  fontFamily: "'Courier New', monospace",
+                  fontSize: FONT.headlineLg, fontWeight: 900,
+                  letterSpacing: 10, color: T.roxo,
+                  background: T.roxoSubtle,
+                  padding: "16px 20px", border: `1px solid ${T.border}`,
+                }}
+              >
+                {code}
+              </div>
+
+              {qrUrl && (
+                <div className="flex justify-center mb-5">
+                  <div className="rounded-lg" style={{ background: "#fff", padding: 12 }}>
+                    <QRCodeSVG value={qrUrl} size={140} />
+                  </div>
+                </div>
+              )}
+
+              <div className="mb-2" style={{ fontFamily: FONT_B, fontSize: FONT.body, color: T.muted }}>
+                Expira em{" "}
+                <span style={{ fontWeight: 700, color: countdown < 60 ? T.errorText : T.text }}>
+                  {mins}:{secs}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, padding: "20px 0" }}>
+              Gerando código…
+            </div>
+          )}
+
+          <button
+            onClick={onUsePIN}
+            className="block mx-auto bg-transparent border-none underline"
+            style={{ marginTop: 16, color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, cursor: "pointer" }}
+          >
+            Entrar com PIN
+          </button>
+        </CardContent>
+      </Card>
     </div>
   );
-}
-
-function btnStyle(T: Theme): React.CSSProperties {
-  return {
-    background: T.btn, color: T.btnText, border: "none",
-    borderRadius: RADIUS.pill, padding: "12px 32px",
-    fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.bodyLg,
-    cursor: "pointer", boxShadow: T.glow,
-  };
 }
