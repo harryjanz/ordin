@@ -137,11 +137,18 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentPr
   useEffect(() => {
     if (processing) return;
     setIdleCountdown(60);
-    const t = setInterval(() => {
-      setIdleCountdown((c) => { if (c <= 1) { clearInterval(t); onBack(); } return c - 1; });
-    }, 1000);
-    return () => clearInterval(t);
   }, [processing]);
+
+  // onBack() troca a tela no store do App — mesma correção do SuccessScreen:
+  // efeito separado reagindo a idleCountdown<=0 em vez de chamar dentro do
+  // updater do setIdleCountdown (evita "Cannot update a component while
+  // rendering a different component").
+  useEffect(() => {
+    if (processing) return;
+    if (idleCountdown <= 0) { onBack(); return; }
+    const t = setTimeout(() => setIdleCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [processing, idleCountdown, onBack]);
 
   async function pay() {
     if (!method) return;

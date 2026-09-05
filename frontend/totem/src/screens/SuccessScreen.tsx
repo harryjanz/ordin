@@ -293,15 +293,15 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       .catch(() => setPrepEstimateMin(null));
   }, [fulfillmentMode]);
 
+  // newOrder() atualiza o store do App (troca `screen`) — chamar direto
+  // dentro do updater do setCountdown dispara "Cannot update a component
+  // while rendering a different component" (React pode invocar o updater
+  // na fase de render). Efeito separado reagindo a countdown<=0 evita isso.
   useEffect(() => {
-    const t = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) { clearInterval(t); newOrder(); }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(t);
-  }, []);
+    if (countdown <= 0) { newOrder(); return; }
+    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown, newOrder]);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center pt-8 pb-7" style={{ background: T.bg }}>
