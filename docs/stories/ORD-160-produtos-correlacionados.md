@@ -1,6 +1,6 @@
 ---
 id: ORD-160
-status: Tech Explorer
+status: Ready
 estimativa: 3,5 pontos (1,5 backend + 1 admin + 1 totem)
 tipo: feature
 fase: 6
@@ -124,6 +124,10 @@ tempo, então não existe cenário de dois modais concorrentes disputando o mesm
 ### Wireframe / Mockup
 N/A — reaproveita padrão de busca+seleção múltipla já usado em outras associações do admin (ex.
 seleção de produtos ao montar um `Combo` em `ComboFormScreen.tsx`).
+
+**Aprovação final (2026-09-08):** aprovado no chat pelo usuário após o Tech Explorer, incluindo
+a correção de semântica de desativação (relação nunca some, só a oferta no totem) e o requisito
+de status visível no admin. `Ready` — sem bloqueios, apto a entrar no sprint backlog.
 
 ## QA Explorer
 
