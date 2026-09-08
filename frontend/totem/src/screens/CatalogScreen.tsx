@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Home, ShoppingCart, Plus, Minus, X, UtensilsCrossed, PartyPopper, Tag } from "lucide-react";
+import { Home, ShoppingCart, Plus, Minus, X, UtensilsCrossed, PartyPopper, Tag, Check } from "lucide-react";
 import api from "../api";
 import type { Theme } from "../themes";
-import type { Category, Product, CartItem, Combo, ComboItemRef, ProductOptionGroup, SelectedOption } from "../types";
+import type { Category, Product, CartItem, Combo, ComboItemRef, ProductOptionGroup, SelectedOption, RelatedProduct } from "../types";
 import { RADIUS, FONT } from "../scale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -63,9 +63,21 @@ export default function CatalogScreen({
   // a opção escolhida certa em vez de reabrir a seleção.
   const [upsell, setUpsell] = useState<{ combo: Combo; product: Product; selectedOptions: SelectedOption[]; price: number; key: string } | null>(null);
 
+  // ORD-160 — produtos correlacionados: só entra quando NÃO há combo
+  // elegível (prioridade combo > correlacionado, if/else em
+  // maybeUpsellOrAdd abaixo — nunca os dois modais ao mesmo tempo).
+  // addedIds dá feedback visual claro de quais itens já foram adicionados
+  // nesta sugestão, sem fechar a lista — cliente pode adicionar mais de um
+  // item sugerido antes de fechar o modal.
+  const [relatedSuggestion, setRelatedSuggestion] = useState<{ product: Product; related: RelatedProduct[]; addedIds: number[] } | null>(null);
+
   // ORD-141 — modal de seleção de grupo de opção. `selections` mapeia
   // option_group.id -> ids das opções escolhidas nesse grupo.
-  const [optionModal, setOptionModal] = useState<{ product: Product; selections: Record<number, number[]> } | null>(null);
+  // ORD-160 — product também aceita RelatedProduct, pra reaproveitar este
+  // mesmo modal quando o item sugerido tem grupo de opção obrigatório.
+  // fromRelated marca esse caso pra confirmOptionModal rotear pro add
+  // simples (sem checar combo/nova sugestão em cadeia).
+  const [optionModal, setOptionModal] = useState<{ product: Product | RelatedProduct; selections: Record<number, number[]>; fromRelated?: boolean } | null>(null);
 
   // ORD-159 — mesma ideia do optionModal, mas por combo: `selections` tem
   // uma camada a mais (product_id do componente -> option_group.id -> ids
@@ -146,7 +158,9 @@ export default function CatalogScreen({
   // (ex. "Refrigerante — Guaraná Antarctica"), preço já vem com os
   // price_delta somados, e a key inclui os ids das opções pra não misturar
   // com outra variante do mesmo produto numa única linha.
-  function addProductWithOptionsToCart(p: Product, selectedOptions: SelectedOption[], price: number, key: string) {
+  // ORD-160 — tipo relaxado (só usa id/name) pra aceitar também um item de
+  // related_products, reaproveitado quando o correlacionado tem opção.
+  function addProductWithOptionsToCart(p: { id: number; name: string }, selectedOptions: SelectedOption[], price: number, key: string) {
     const name = selectedOptions.length
       ? `${p.name} — ${selectedOptions.map((o) => o.option_label).join(", ")}`
       : p.name;
@@ -154,6 +168,35 @@ export default function CatalogScreen({
       key, kind: "product", id: p.id, name, price, qty: 1,
       selectedOptions: selectedOptions.length ? selectedOptions : undefined,
     });
+  }
+
+  // ORD-160 (correção pós-QA manual) — marca o item como adicionado na
+  // sugestão aberta, pro botão dar feedback ("✓ Adicionado") sem fechar a
+  // lista — cliente pode adicionar mais de um item sugerido antes de sair.
+  function markRelatedAdded(id: number) {
+    setRelatedSuggestion((prev) => (prev ? { ...prev, addedIds: [...prev.addedIds, id] } : prev));
+  }
+
+  // Item de related_products sem opção — mesma forma de addProductToCart,
+  // com o dado já denormalizado que a API devolve.
+  function addRelatedSuggestionItem(item: RelatedProduct) {
+    onAdd({ key: `product:${item.id}`, kind: "product", id: item.id, name: item.name, price: item.price, qty: 1 });
+    markRelatedAdded(item.id);
+  }
+
+  // ORD-160 (correção pós-QA manual) — o item sugerido pode ter grupo de
+  // opção obrigatório igual qualquer produto do catálogo (ex.: sabor);
+  // sem esta checagem ele ia pro carrinho sem a escolha. Abre o MESMO
+  // modal de opção do catálogo principal, marcado com fromRelated pra
+  // confirmOptionModal rotear pro add simples (sem checar combo/nova
+  // sugestão em cadeia a partir de um item já dentro de uma sugestão).
+  function handleAddRelatedItem(item: RelatedProduct) {
+    const groups = selectableOptionGroups(item);
+    if (groups.length > 0) {
+      setOptionModal({ product: item, selections: {}, fromRelated: true });
+      return;
+    }
+    addRelatedSuggestionItem(item);
   }
 
   function addComboToCart(c: Combo, comboItems?: ComboItemRef[], key?: string) {
@@ -261,8 +304,17 @@ export default function CatalogScreen({
           c.items.some((i) => i.product_id === p.id && i.triggers_upsell)
         )
       : undefined;
-    if (combo) setUpsell({ combo, product: p, selectedOptions, price, key });
-    else addProductWithOptionsToCart(p, selectedOptions, price, key);
+    if (combo) {
+      setUpsell({ combo, product: p, selectedOptions, price, key });
+      return;
+    }
+    addProductWithOptionsToCart(p, selectedOptions, price, key);
+    // ORD-160 — só entra se não achou combo elegível acima (prioridade
+    // combo > correlacionado, decisão fechada no Tech Explorer). Produto
+    // original já foi adicionado na linha acima, diferente do fluxo de
+    // combo (que decide antes de adicionar qualquer coisa).
+    const offerableRelated = !hasProductInCart ? (p.related_products ?? []).filter((r) => r.active) : [];
+    if (offerableRelated.length > 0) setRelatedSuggestion({ product: p, related: offerableRelated, addedIds: [] });
   }
 
   function handleAddProduct(p: Product) {
@@ -298,7 +350,7 @@ export default function CatalogScreen({
 
   function confirmOptionModal() {
     if (!optionModal) return;
-    const { product, selections } = optionModal;
+    const { product, selections, fromRelated } = optionModal;
     const groups = selectableOptionGroups(product);
     const selectedOptions: SelectedOption[] = [];
     let priceExtra = 0;
@@ -315,7 +367,16 @@ export default function CatalogScreen({
     allIds.sort((a, b) => a - b);
     const key = allIds.length ? `product:${product.id}:${allIds.join(",")}` : `product:${product.id}`;
     setOptionModal(null);
-    maybeUpsellOrAdd(product, selectedOptions, product.price + priceExtra, key);
+    // ORD-160 (correção pós-QA manual) — item vindo de related_products
+    // (fromRelated) só adiciona ao carrinho, sem checar combo/nova sugestão
+    // em cadeia: já estamos dentro de uma sugestão, não é o ponto de
+    // entrada normal do catálogo.
+    if (fromRelated) {
+      addProductWithOptionsToCart(product, selectedOptions, product.price + priceExtra, key);
+      markRelatedAdded(product.id);
+      return;
+    }
+    maybeUpsellOrAdd(product as Product, selectedOptions, product.price + priceExtra, key);
   }
 
   const canConfirmOptionModal = optionModal
@@ -705,7 +766,12 @@ export default function CatalogScreen({
       <Dialog
         isOpen={!!optionModal}
         onOpenChange={(open) => !open && setOptionModal(null)}
-        className="sm:max-w-[760px] max-h-[88vh] overflow-y-auto flex flex-col gap-5 p-10"
+        // ORD-160 (correção pós-QA manual) — z-[60] em vez do z-50 padrão do
+        // Dialog: este é o único modal que pode abrir por CIMA de outro já
+        // aberto (produto correlacionado com opção, clicado de dentro do
+        // modal de sugestão) — sem isso os dois empatam em z-50 e a ordem
+        // vira sorte de posição no DOM, como aconteceu na primeira versão.
+        className="sm:max-w-[760px] max-h-[88vh] overflow-y-auto flex flex-col gap-5 p-10 z-[60]"
       >
         {optionModal && (
           <>
@@ -952,6 +1018,91 @@ export default function CatalogScreen({
                 Não, só {upsell.product.name}
               </Button>
             </div>
+          </>
+        )}
+      </Dialog>
+
+      {/* Modal de produtos correlacionados (ORD-160) — mais simples que o de
+          combo: produto original já está no carrinho, aqui é só uma lista
+          de sugestões extras, cada uma com botão próprio de adicionar (não
+          é uma escolha binária). */}
+      <Dialog
+        isOpen={!!relatedSuggestion}
+        onOpenChange={(open) => !open && setRelatedSuggestion(null)}
+        className="sm:max-w-[560px] max-h-[88vh] overflow-y-auto flex flex-col gap-4 p-10"
+      >
+        {relatedSuggestion && (
+          <>
+            <DialogTitle className="leading-tight pr-10" style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title }}>
+              Que tal completar com...
+            </DialogTitle>
+            <div className="flex flex-col gap-2.5">
+              {relatedSuggestion.related.map((item) => {
+                const added = relatedSuggestion.addedIds.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 rounded-lg"
+                    style={{
+                      padding: "14px 18px", borderRadius: RADIUS.lg,
+                      background: added ? "#e4f6ec" : T.numBg,
+                      border: added ? "1.5px solid #1c8a53" : "1.5px solid transparent",
+                    }}
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      {/* ORD-160 (correção pós-QA manual) — mostra a foto só
+                          quando cadastrada, sem placeholder aqui — lista
+                          mais compacta, funciona bem só com texto quando o
+                          item não tem imagem. */}
+                      {item.image_url && (
+                        <div className="shrink-0 overflow-hidden" style={{ width: 64, height: 64, borderRadius: RADIUS.lg }}>
+                          <img src={item.image_url} alt={item.name} className="w-full h-full object-cover block" />
+                        </div>
+                      )}
+                      <div className="flex flex-col gap-0.5">
+                        <span style={{ fontFamily: FONT_B, fontWeight: 700, fontSize: FONT.bodyLg, color: added ? "#1c8a53" : T.text }}>{item.name}</span>
+                        <span style={{ fontFamily: FONT_B, fontSize: FONT.body, color: added ? "#1c8a53" : T.muted }}>{fmt(item.price)}</span>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => !added && handleAddRelatedItem(item)}
+                      isDisabled={added}
+                      variant={added ? "outline" : "default"}
+                      className="rounded-full gap-1.5 shrink-0"
+                      style={{
+                        minHeight: 52, padding: "0 22px",
+                        background: added ? "transparent" : T.btn, color: added ? "#1c8a53" : T.btnText,
+                        border: added ? "1.5px solid #1c8a53" : "none",
+                        fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body,
+                      }}
+                    >
+                      {added ? (<><Check className="size-4" /> Adicionado</>) : "+ Adicionar"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+            {/* ORD-160 (correção pós-QA manual) — depois de adicionar pelo
+                menos um item, o botão de fechar vira o CTA principal do
+                modal (mesma cor/peso de "+ Adicionar"), maiúsculas, fonte
+                maior e com glow — pedido explícito do usuário pra ficar bem
+                mais evidente que "concluir" é a ação esperada depois de já
+                ter escolhido algo. */}
+            <Button
+              onClick={() => setRelatedSuggestion(null)}
+              variant={relatedSuggestion.addedIds.length > 0 ? "default" : "outline"}
+              className="rounded-full mt-1 uppercase"
+              style={relatedSuggestion.addedIds.length > 0 ? {
+                minHeight: 72, background: T.btn, color: T.btnText,
+                fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
+                letterSpacing: "0.5px", boxShadow: T.glow,
+              } : {
+                minHeight: 68, color: T.muted,
+                fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body, textTransform: "none",
+              }}
+            >
+              {relatedSuggestion.addedIds.length > 0 ? "Concluir" : "Continuar sem adicionar"}
+            </Button>
           </>
         )}
       </Dialog>

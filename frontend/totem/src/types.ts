@@ -70,6 +70,21 @@ export interface ProductOptionGroup {
   options: OptionGroupOption[];
 }
 
+// ORD-160 — cross-sell sem combo. `active` reflete o produto sugerido (a
+// associação em si nunca é escondida no catalog-service) — o totem que
+// decide, filtrando por active, se oferece ou não como sugestão.
+export interface RelatedProduct {
+  id: number;
+  name: string;
+  price: number;
+  image_url: string | null;
+  active: boolean;
+  // ORD-160 (correção pós-QA manual) — mesmo dado que Product já traz, pra
+  // saber se o correlacionado exige escolha de opção (ex.: sabor) antes de
+  // ir pro carrinho, em vez de adicionar direto pulando a escolha.
+  option_groups?: ProductOptionGroup[];
+}
+
 export interface Product {
   id: number;
   category_id: number;
@@ -80,6 +95,7 @@ export interface Product {
   // ORD-075 — lista livre (sem enum fixo), ex: "vegano", "picante", "mais vendido".
   tags?: string[] | null;
   option_groups?: ProductOptionGroup[];
+  related_products?: RelatedProduct[];
 }
 
 // ORD-150 — combo/bundle: conjunto de produtos existentes vendido com preço

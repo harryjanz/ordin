@@ -27,7 +27,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
-import type { Allergen, Category, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup } from "../types";
+import type { Allergen, Category, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct } from "../types";
 import styles from "./ProductEditScreen.module.scss";
 
 const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
@@ -67,6 +67,7 @@ interface EditProdState {
   tags: string[];
   allergen_ids: string[];
   option_groups: ProductOptionGroup[];
+  related_products: RelatedProduct[];
 }
 
 // ORD-136 — edição de produto sai do modal (espaço comprometido, mais
@@ -84,6 +85,11 @@ export default function ProductEditScreen() {
   const [editProdMenus, setEditProdMenus] = useState<ProductMenuRef[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [allergens, setAllergens] = useState<Allergen[]>([]);
+  // ORD-160 — produtos correlacionados: catálogo inteiro carregado uma vez
+  // pra busca (mesmo padrão de ComboFormScreen), busca por nome/categoria.
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [relatedSearch, setRelatedSearch] = useState("");
+  const [relatedSearchCategoryId, setRelatedSearchCategoryId] = useState("");
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
   const [productFormError, setProductFormError] = useState("");
@@ -114,11 +120,12 @@ export default function ProductEditScreen() {
       setLoading(true);
       setLoadError(null);
       try {
-        const [productRes, categoriesRes, allergensRes, menusRes] = await Promise.all([
+        const [productRes, categoriesRes, allergensRes, menusRes, productsRes] = await Promise.all([
           api.get(`/catalog/products/${productId}`, catalogParams()),
           api.get("/catalog/categories", catalogParams({ include_inactive: true })),
           api.get("/catalog/allergens"),
           api.get(`/catalog/products/${productId}/menus`, catalogParams()).catch(() => ({ data: { menus: [] } })),
+          api.get("/catalog/products", catalogParams()),
         ]);
         if (cancelled) return;
         const p: Product = productRes.data;
@@ -136,10 +143,12 @@ export default function ProductEditScreen() {
           tags: p.tags ?? [],
           allergen_ids: (p.allergens ?? []).map((a) => String(a.id)),
           option_groups: p.option_groups ?? [],
+          related_products: p.related_products ?? [],
         });
         setCategories(categoriesRes.data.categories ?? categoriesRes.data);
         setAllergens(allergensRes.data.allergens ?? allergensRes.data);
         setEditProdMenus(menusRes.data.menus ?? []);
+        setAllProducts(productsRes.data.products ?? productsRes.data);
       } catch {
         if (!cancelled) setLoadError("Produto não encontrado.");
       } finally {
@@ -154,6 +163,14 @@ export default function ProductEditScreen() {
   const activeCategoryOptions: DropdownOptions[] = categories
     .filter((c) => c.active)
     .map((c) => ({ value: String(c.id), label: c.name }));
+
+  // ORD-160 — filtro de categoria na busca de produtos correlacionados,
+  // mesmo padrão de ComboFormScreen (com "Todas categorias" como opção
+  // neutra, diferente do Dropdown de categoria do próprio produto acima).
+  const relatedCategoryOptions: DropdownOptions[] = [
+    { value: "", label: "Todas categorias" },
+    ...categories.map((c) => ({ value: String(c.id), label: c.name })),
+  ];
 
   async function handleImageFiles(files: UploadFile[]) {
     const picked = files[0];
@@ -324,6 +341,29 @@ export default function ProductEditScreen() {
     }
   }
 
+  // ── Produtos correlacionados (ORD-160) ───────────────────────────────────
+  const relatedIds = editProd?.related_products.map((rp) => rp.id) ?? [];
+  const hasRelatedSearch = relatedSearch.trim().length > 0 || relatedSearchCategoryId.length > 0;
+  const relatedSearchResults = hasRelatedSearch
+    ? allProducts.filter((p) => {
+        if (p.id === editProd?.id || relatedIds.includes(p.id)) return false;
+        if (relatedSearch.trim() && !p.name.toLowerCase().includes(relatedSearch.trim().toLowerCase())) return false;
+        if (relatedSearchCategoryId && p.category_id !== Number(relatedSearchCategoryId)) return false;
+        return true;
+      })
+    : [];
+
+  function addRelatedProduct(p: Product) {
+    setEditProd((prev) => (prev ? {
+      ...prev,
+      related_products: [...prev.related_products, { id: p.id, name: p.name, price: p.price, image_url: p.image_url, active: p.active }],
+    } : prev));
+  }
+
+  function removeRelatedProduct(id: number) {
+    setEditProd((prev) => (prev ? { ...prev, related_products: prev.related_products.filter((rp) => rp.id !== id) } : prev));
+  }
+
   async function saveEditProd() {
     if (!editProd || !editProd.name.trim() || editProd.price <= 0) return;
     setProductSaving(true);
@@ -339,6 +379,7 @@ export default function ProductEditScreen() {
         sku: editProd.sku.trim() || null,
         tags: editProd.tags,
         allergen_ids: editProd.allergen_ids.map(Number),
+        related_product_ids: editProd.related_products.map((rp) => rp.id),
       }, catalogParams());
       navigate("/catalog?tab=products");
     } catch {
@@ -560,6 +601,66 @@ export default function ProductEditScreen() {
               );
             })}
           </div>
+        )}
+      </div>
+
+      <div className={styles.panel}>
+        <h2 className={styles.h2}>Produtos correlacionados</h2>
+        <p className={styles.menusInfo}>
+          Quando este produto for adicionado avulso no totem (e não tiver combo elegível), o
+          cliente recebe a sugestão de levar também os produtos abaixo — sem empacotar num
+          preço de combo.
+        </p>
+
+        <div className={styles.relatedSearchRow}>
+          <div className={styles.relatedSearchRowField}>
+            <InputBase
+              placeholder="Buscar produto pra correlacionar…"
+              value={relatedSearch}
+              onChange={(e) => setRelatedSearch(e.target.value)}
+            />
+          </div>
+          <Dropdown
+            label=""
+            value={relatedCategoryOptions.find((o) => o.value === relatedSearchCategoryId) ?? relatedCategoryOptions[0]}
+            onValueSelected={(opt) => setRelatedSearchCategoryId(opt.value)}
+            options={relatedCategoryOptions}
+          />
+        </div>
+        {hasRelatedSearch && (
+          <div className={styles.relatedSearchResults}>
+            {relatedSearchResults.length === 0 ? (
+              <div className={styles.menusInfo}>Nenhum produto encontrado (ou já está na lista).</div>
+            ) : (
+              relatedSearchResults.map((p) => (
+                <div key={p.id} className={styles.relatedRow}>
+                  <div className={styles.relatedRowInfo}>
+                    <span>{p.name}</span>
+                    <span className={styles.mutedText}>{p.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                  </div>
+                  <Button size="small" variant="secondary" onClick={() => addRelatedProduct(p)}>+ Adicionar</Button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        <div className={styles.formLabel}>
+          {editProd.related_products.length} produto{editProd.related_products.length === 1 ? "" : "s"} correlacionado{editProd.related_products.length === 1 ? "" : "s"}
+        </div>
+        {editProd.related_products.length === 0 ? (
+          <div className={styles.menusInfo}>Nenhum produto correlacionado ainda — busque acima.</div>
+        ) : (
+          editProd.related_products.map((rp) => (
+            <div key={rp.id} className={styles.relatedRow}>
+              <div className={styles.relatedRowInfo}>
+                <span>{rp.name}</span>
+                <span className={styles.mutedText}>{rp.price.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}</span>
+                <Tag variant={rp.active ? "neutral" : "error"}>{rp.active ? "Ativo" : "Inativo"}</Tag>
+              </div>
+              <button type="button" className={styles.removeBtn} onClick={() => removeRelatedProduct(rp.id)} title="Remover correlação">✕</button>
+            </div>
+          ))
         )}
       </div>
 
