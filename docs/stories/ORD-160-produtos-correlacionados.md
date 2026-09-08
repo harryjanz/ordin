@@ -1,11 +1,11 @@
 ---
 id: ORD-160
-status: Explorer
+status: QA Explorer
 estimativa: null
 tipo: feature
 fase: 6
 sprint: null
-responsavel: Produto
+responsavel: Backend SR + Frontend
 ---
 
 # ORD-160 — Produtos correlacionados (cross-sell sem combo)
@@ -122,7 +122,103 @@ N/A — reaproveita padrão de busca+seleção múltipla já usado em outras ass
 seleção de produtos ao montar um `Combo` em `ComboFormScreen.tsx`).
 
 ## QA Explorer
-Pendente — próxima fase do upstream.
+
+```gherkin
+Feature: Produtos correlacionados (cross-sell sem combo)
+  Como admin da empresa
+  Quero cadastrar produtos correlacionados a um produto do catálogo
+  Para que o totem sugira esse item complementar sem depender de combo
+
+  Background:
+    Dado os produtos ativos "Batata Frita" e "Molho Barbecue" da empresa "Burger House"
+
+  Scenario: Admin cadastra um produto correlacionado
+    Quando o admin edita "Batata Frita" e adiciona "Molho Barbecue" como produto correlacionado
+    E salva
+    Então "Molho Barbecue" aparece na lista de produtos correlacionados de "Batata Frita"
+
+  Scenario: Admin remove uma correlação já cadastrada
+    Dado "Batata Frita" com "Molho Barbecue" como produto correlacionado
+    Quando o admin remove essa correlação e salva
+    Então "Molho Barbecue" não aparece mais na lista de correlacionados de "Batata Frita"
+
+  Scenario: Correlação é unidirecional
+    Dado "Batata Frita" com "Molho Barbecue" como produto correlacionado
+    Quando o admin abre a edição de "Molho Barbecue"
+    Então "Batata Frita" NÃO aparece automaticamente como correlacionado de "Molho Barbecue"
+
+  Scenario: Admin não consegue correlacionar um produto a ele mesmo
+    Quando o admin tenta adicionar "Batata Frita" como correlacionado dela própria
+    Então o sistema bloqueia com um erro de validação
+    E nenhuma correlação é salva
+
+  Scenario: Sugestão aparece no totem quando não há combo elegível
+    Dado "Batata Frita" com "Molho Barbecue" como produto correlacionado
+    E "Batata Frita" não é componente de nenhum combo ativo
+    Quando o cliente no totem adiciona "Batata Frita" avulsa ao carrinho
+    Então aparece a sugestão oferecendo "Molho Barbecue"
+    E "Batata Frita" já está no carrinho nesse momento
+
+  Scenario: Combo tem prioridade sobre produto correlacionado
+    Dado "Batata Frita" é componente do combo ativo "Combo Lanche Grande" com sugestão de upsell ligada
+    E "Batata Frita" também tem "Molho Barbecue" como produto correlacionado
+    Quando o cliente no totem adiciona "Batata Frita" avulsa ao carrinho
+    Então aparece o modal de upsell do "Combo Lanche Grande"
+    E a sugestão de produto correlacionado NÃO aparece
+
+  Scenario: Cliente aceita a sugestão de produto correlacionado
+    Dado a sugestão de "Molho Barbecue" apareceu após adicionar "Batata Frita"
+    Quando o cliente aceita a sugestão
+    Então "Molho Barbecue" é adicionado ao carrinho
+    E "Batata Frita" continua no carrinho
+
+  Scenario: Cliente recusa a sugestão de produto correlacionado
+    Dado a sugestão de "Molho Barbecue" apareceu após adicionar "Batata Frita"
+    Quando o cliente recusa a sugestão
+    Então "Molho Barbecue" NÃO é adicionado ao carrinho
+    E "Batata Frita" continua normalmente no carrinho
+
+  Scenario: Múltiplos produtos correlacionados aparecem juntos na sugestão
+    Dado "Batata Frita" com "Molho Barbecue" e "Molho Cheddar" como produtos correlacionados, ambos ativos
+    E "Batata Frita" não é componente de nenhum combo ativo
+    Quando o cliente no totem adiciona "Batata Frita" avulsa ao carrinho
+    Então a sugestão oferece "Molho Barbecue" e "Molho Cheddar" juntos, não só o primeiro
+
+  Scenario: Produto correlacionado inativo não aparece como sugestão
+    Dado "Batata Frita" com "Molho Barbecue" como produto correlacionado
+    E "Molho Barbecue" está com active: false
+    Quando o cliente no totem adiciona "Batata Frita" avulsa ao carrinho
+    Então nenhuma sugestão de "Molho Barbecue" aparece
+
+  Scenario: Produto correlacionado excluído não aparece como sugestão
+    Dado "Batata Frita" com "Molho Barbecue" como produto correlacionado
+    E "Molho Barbecue" foi excluído (deleted: true)
+    Quando o cliente no totem adiciona "Batata Frita" avulsa ao carrinho
+    Então nenhuma sugestão de "Molho Barbecue" aparece
+
+  Scenario: Produto de origem excluído deixa de disparar suas correlações
+    Dado "Batata Frita" com "Molho Barbecue" como produto correlacionado
+    Quando "Batata Frita" é excluída (deleted: true)
+    Então a correlação não é mais consultada
+    E "Molho Barbecue" não aparece mais como sugestão de "Batata Frita" em nenhum lugar
+
+  Scenario: Produto sem combo e sem produtos correlacionados segue sem sugestão
+    Dado um produto ativo sem nenhum combo elegível e sem produtos correlacionados cadastrados
+    Quando o cliente no totem adiciona esse produto avulso ao carrinho
+    Então o produto é adicionado direto, sem nenhum modal de sugestão
+
+  Scenario: Isolamento multi-tenant
+    Dado a empresa "Burger House" com "Batata Frita" correlacionada a "Molho Barbecue"
+    Quando a empresa "Pasta & Co" consulta ou edita seus próprios produtos
+    Então a correlação da "Burger House" não é visível nem editável pela "Pasta & Co"
+```
+
+**Cenários revisados e aprovados pelo PM:** sim — cobrem happy path (cadastrar/remover
+correlação, sugestão aparecendo e sendo aceita/recusada), a borda mais arriscada da história
+(prioridade combo > correlacionado, cenário que valida a decisão de coexistência do Explorer),
+múltiplas sugestões simultâneas, os dois níveis de soft-delete (`active`/`deleted`) tanto do lado
+sugerido quanto do lado de origem, unidirecionalidade, autocorrelação bloqueada, e isolamento
+multi-tenant.
 
 ## Solução Técnica
 Pendente — Tech Explorer, próxima fase do upstream.
