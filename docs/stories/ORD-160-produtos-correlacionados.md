@@ -1,7 +1,7 @@
 ---
 id: ORD-160
-status: QA Explorer
-estimativa: null
+status: Tech Explorer
+estimativa: 3,5 pontos (1,5 backend + 1 admin + 1 totem)
 tipo: feature
 fase: 6
 sprint: null
@@ -221,4 +221,174 @@ sugerido quanto do lado de origem, unidirecionalidade, autocorrelação bloquead
 multi-tenant.
 
 ## Solução Técnica
-Pendente — Tech Explorer, próxima fase do upstream.
+
+### Serviços impactados
+- `catalog`: nova tabela de associação `related_products`, extensão de `ProductOut`/`ProductUpdate`,
+  novo par de helpers `_get_product_related`/`_set_product_related` (mesmo padrão de
+  `_get_product_allergens`/`_set_product_allergens`). Sem endpoint novo — reaproveita
+  `PUT /catalog/products/{product_id}`.
+- `frontend/admin`: `ProductEditScreen.tsx` ganha uma seção "Produtos correlacionados" com
+  busca+seleção múltipla, mesmo padrão de UI já usado no seletor de produtos do
+  `ComboFormScreen.tsx`.
+- `frontend/totem`: `CatalogScreen.tsx` (`handleAddProduct`) ganha um segundo `else if` depois da
+  checagem de combo existente, e um novo modal/estado pra oferecer os produtos correlacionados;
+  `types.ts` (admin e totem) ganham o campo no tipo `Product`.
+
+### Endpoints
+
+Sem endpoint novo. Contrato alterado no já existente:
+
+#### PUT /catalog/products/{product_id} (alterado)
+**Serviço:** catalog-service
+**Auth:** JWT obrigatório | role: admin/owner
+**company_id:** extraído do JWT
+
+Request (novo campo, opcional, replace completo — mesma semântica de `allergen_ids`):
+```json
+{
+  "related_product_ids": [1042, 1055]
+}
+```
+
+Response 200 (`ProductOut`, novo campo):
+```json
+{
+  "id": 1030,
+  "name": "Batata Frita",
+  "...": "...",
+  "related_products": [
+    { "id": 1042, "name": "Molho Barbecue", "price": 4.5, "image_url": "https://..." },
+    { "id": 1055, "name": "Molho Cheddar", "price": 4.5, "image_url": "https://..." }
+  ]
+}
+```
+
+Erros novos:
+- `400` — `related_product_ids` contém id que não existe, não pertence à empresa, ou é o próprio
+  `product_id` (autocorrelação bloqueada, critério de aceite do Explorer).
+
+`GET /catalog/products` e `POST /catalog/products` (criação) também passam a devolver
+`related_products` no `ProductOut` (lista vazia por padrão pra produto novo), mas **sem** aceitar
+`related_product_ids` no `POST` — o Explorer descreve o fluxo só a partir da edição de um produto
+já existente, criar e correlacionar na mesma chamada fica fora de escopo (evita também o caso sem
+sentido de um produto referenciar um id que ainda não existe).
+
+### Migrations
+- Nova tabela `related_products`:
+  ```
+  product_id          INTEGER NOT NULL REFERENCES products(id)
+  related_product_id  INTEGER NOT NULL REFERENCES products(id)
+  sort_order           INTEGER
+  PRIMARY KEY (product_id, related_product_id)
+  ```
+  Sem `company_id` próprio — isolamento via join com `Product` nos dois lados (mesmo padrão de
+  `ComboItem`/`ProductAllergen`), validado na escrita (`_set_product_related` abaixo).
+
+### Mudança de implementação
+
+**Backend (`services/catalog/main.py`):**
+```python
+class RelatedProduct(Base):
+    __tablename__ = "related_products"
+    product_id         = Column(Integer, ForeignKey("products.id"), primary_key=True)
+    related_product_id = Column(Integer, ForeignKey("products.id"), primary_key=True)
+    sort_order          = Column(Integer)
+
+async def _get_product_related(db: AsyncSession, product_id: int) -> list[dict]:
+    """Só devolve produtos ainda ativos e não excluídos — se o correlacionado
+    for desativado, some da sugestão automaticamente sem precisar limpar a
+    linha de related_products (reaparece sozinho se for reativado depois)."""
+    result = await db.execute(
+        select(Product)
+        .join(RelatedProduct, RelatedProduct.related_product_id == Product.id)
+        .filter(RelatedProduct.product_id == product_id, Product.active == True, Product.deleted == False)
+        .order_by(RelatedProduct.sort_order)
+    )
+    return [
+        {"id": r.id, "name": r.name, "price": float(r.price),
+         "image_url": presigned_download_url(r.image_url) if r.image_url else None}
+        for r in result.scalars().all()
+    ]
+
+async def _set_product_related(db: AsyncSession, company_id: int, product_id: int, related_ids: list[int]) -> None:
+    if product_id in related_ids:
+        raise HTTPException(400, detail="Produto não pode ser correlacionado a si mesmo")
+    unique_ids = list(dict.fromkeys(related_ids))  # dedup preservando ordem de sort_order
+    if unique_ids:
+        result = await db.execute(
+            select(Product.id).filter(Product.id.in_(unique_ids), Product.company_id == company_id, Product.deleted == False)
+        )
+        found_ids = set(result.scalars().all())
+        if found_ids != set(unique_ids):
+            raise HTTPException(400, detail="related_product_ids contém id que não existe ou não pertence à empresa")
+    await db.execute(delete(RelatedProduct).where(RelatedProduct.product_id == product_id))
+    for index, related_id in enumerate(unique_ids):
+        db.add(RelatedProduct(product_id=product_id, related_product_id=related_id, sort_order=index))
+```
+
+`_serialize_product` ganha `"related_products": await _get_product_related(db, p.id)`.
+`ProductOut` ganha `related_products: list[RelatedProductOut] = []` (`RelatedProductOut = {id, name, price, image_url}`, mesmo formato de `ComboSummaryOut`).
+`ProductUpdate` ganha `related_product_ids: list[int] | None = None`.
+`update_product` — mesmo ponto onde `allergen_ids` é tratado hoje (linha ~1391): adicionar
+`exclude={"allergen_ids", "related_product_ids", "confirm_deactivate_combos"}` no `model_dump` do
+loop de campos simples, e chamar `_set_product_related` quando `body.related_product_ids is not None`.
+
+**Admin (`ProductEditScreen.tsx`):** nova seção "Produtos correlacionados", reaproveitando o
+componente de busca+seleção múltipla já usado em `ComboFormScreen.tsx` pra escolher os produtos
+do combo — mesma UX, filtrado pra excluir o próprio produto sendo editado da lista de busca (
+reforça no client o que o backend já valida). Novo state `relatedProductIds`, incluído no payload
+de `PUT` como `related_product_ids`.
+
+**Totem (`CatalogScreen.tsx`):**
+```ts
+function handleAddProduct(p: Product) {
+  if (getQty(`product:${p.id}`) === 0) {
+    const combo = combos.find((c) =>
+      c.upsell_enabled && c.items.some((i) => i.product_id === p.id && i.triggers_upsell)
+    );
+    if (combo) { setUpsell({ combo, product: p }); return; }
+    if (p.related_products.length > 0) {
+      setRelatedSuggestion({ product: p, related: p.related_products });
+      addProductToCart(p);  // produto original entra no carrinho de qualquer forma (critério de aceite)
+      return;
+    }
+  }
+  addProductToCart(p);
+}
+```
+Novo modal (componente próprio, não reaproveita o modal de upsell de combo — layout diferente: N
+produtos com botão de adicionar cada um, não uma escolha binária "leve o combo/só o avulso"),
+listando cada `related_products[]` com um botão "Adicionar" individual e um botão "Continuar sem
+adicionar" pra fechar sem mais nenhum item. Produto original já foi adicionado ao carrinho antes
+do modal abrir (diferente do combo, que decide entre as duas opções antes de adicionar qualquer
+coisa) — reflete a semântica do Explorer: a sugestão é umas duas opções, não um garfo.
+
+### Eventos de fila
+Nenhum.
+
+### Impacto em outros serviços
+Nenhum — `order-service` não precisa saber que um item foi adicionado via sugestão de produto
+correlacionado; cada item entra no pedido como uma linha independente, igual a qualquer produto
+avulso adicionado manualmente.
+
+### Estimativa
+- Backend: 1,5 pontos (tabela + migration + helpers + validação de autocorrelação/company_id +
+  extensão de 1 endpoint já existente).
+- Admin: 1 ponto (reaproveita componente de busca+seleção já existente no combo).
+- Totem: 1 ponto (novo modal, mais simples que o de combo — sem cálculo de economia/preço).
+
+### Riscos
+- **Produto correlacionado desativado some da lista de edição do admin também** (mesmo helper de
+  leitura filtra `active`/`deleted`) — se o admin salvar o produto de origem nesse meio-tempo sem
+  perceber que um item sumiu da lista visível, a associação é removida silenciosamente (replace
+  completo). É o mesmo comportamento que `allergen_ids` já tem hoje pro caso análogo — não é
+  regressão nova, mas vale o mesmo aviso de UX que qualquer campo de replace completo no admin.
+- **Confusão de nomenclatura com "upsell" de combo** — mitigado desde o Explorer com o nome
+  "produtos correlacionados" e o `if`/`else if` que impede os dois modais concorrerem; ainda assim,
+  o admin vê dois lugares diferentes pra configurar "sugestão automática" (combo e produto), vale
+  texto de apoio nas duas telas explicando a diferença (mesma mitigação usada no ORD-157 pro par
+  `active`/`upsell_enabled`).
+- **Nenhum teste de regressão do modal de upsell de combo deve quebrar** — `handleAddProduct` é
+  reescrito, não só estendido; a suíte de frontend (se existir para `CatalogScreen.tsx`) e a
+  validação manual do fluxo de combo (ORD-150/157) precisam ser repetidas mesmo sem mudança de
+  comportamento esperada nele.
