@@ -62,6 +62,13 @@ de `Ready`.
 - [ ] **Modelos de POS (T8, P2A11).** Já voltaram a ser suportados? Qual
       modelo recomendam pro piloto (seção 7)?
 
+### ✅ Resolvido — não precisa perguntar ao suporte
+
+- [x] **Hardware compatível com Connect 2.0.** A S920 é um dos únicos dois
+      modelos homologados hoje (S920 e Q92) — confirmado na própria central
+      de ajuda da Stone, fora da doc de API. Cobre o requisito de terminal
+      físico pro fluxo "Pagamento Direto" (seção 7).
+
 Cada item aponta pra seção com o contexto completo — não mandar a pergunta
 solta sem reler a seção antes, o gerente comercial vai perguntar "no contexto
 de quê".
@@ -424,11 +431,18 @@ antes de expor `/payments/webhook/stone` em produção:
    confirmar que existe assinatura, essa consulta extra deixa de ser
    obrigatória e vira só uma rede de segurança.
 
-### ⚠️ Modelos de POS temporariamente fora da lista
+### ✅ Confirmado — S920 é modelo homologado / ⚠️ T8 e P2A11 seguem fora
 
-T8 e P2A11 removidos "para ajustes técnicos" (sem data de retorno) — se o
-piloto depender de um desses modelos, checar disponibilidade atual antes de
-prosseguir com a compra do equipamento.
+A central de ajuda da Stone (fora da doc de API, checado em 2026-09-08) é
+explícita: *"Verifique se sua máquina é do modelo S920 ou Q92. Apenas estes
+modelos estão disponíveis"* para operar com Connect 2.0. A S920 tem Android
+5.1, Wi-Fi/3G/4G/Bluetooth e tela touch — hardware compatível com o fluxo
+"Pagamento Direto" da seção 3.
+
+T8 e P2A11 continuam fora da lista, removidos "para ajustes técnicos" (sem
+data de retorno na doc de API) — se o piloto depender de um desses modelos,
+checar disponibilidade atual antes de prosseguir com a compra do
+equipamento. Pro piloto com o que já está confirmado, S920 é a opção segura.
 
 ### ✅ Resolvido — Reembolso pós-captura tem endpoint programático
 
@@ -495,3 +509,10 @@ story): `reference/customer`, `reference/impressão-de-nota-fiscal`,
 `reference/exemplo-de-webhook-1` (Pagar.me Gateway). O FAQ do Connect Stone
 aponta ainda um "Developer Guide" em Google Docs, não acessível por leitura
 automatizada — candidato a pedir direto ao account manager da Stone.
+
+Confirmação do modelo S920, em 2026-09-08 (fora da doc de API, central de
+ajuda geral da Stone): `ajuda.stone.com.br/connect-20/connect-20` (lista de
+terminais suportados pro Connect 2.0), `ajuda.stone.com.br/s920` e
+`ajuda.stone.com.br/maquininha-e-tef/modelos-de-maquininhas` (specs de
+hardware da S920), cruzado com páginas de integradores terceiros que também
+listam S920 como compatível (Tecnofit, TagPlus, Belle Software).
