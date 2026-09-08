@@ -112,7 +112,11 @@ tempo, então não existe cenário de dois modais concorrentes disputando o mesm
       produtos correlacionados cadastrados.
 - [ ] Cliente pode aceitar (adiciona também o produto sugerido) ou recusar (segue só com o
       original) a sugestão — produto original é adicionado ao carrinho nos dois casos.
-- [ ] Produto correlacionado inativo ou excluído não aparece como sugestão.
+- [ ] Produto correlacionado inativo ou excluído não aparece como sugestão **no totem** — mas a
+      relação continua existindo e visível no admin (não é removida por desativação do produto
+      correlacionado).
+- [ ] Na lista de produtos correlacionados do admin, cada item mostra visivelmente se está ativo
+      ou inativo (ex.: badge "Inativo") — admin não precisa abrir o outro produto pra descobrir.
 - [ ] Não é possível cadastrar um produto como correlacionado a ele mesmo.
 - [ ] Isolamento multi-tenant: correlação cadastrada por uma empresa não aparece nem é editável
       por outra.
@@ -184,11 +188,19 @@ Feature: Produtos correlacionados (cross-sell sem combo)
     Quando o cliente no totem adiciona "Batata Frita" avulsa ao carrinho
     Então a sugestão oferece "Molho Barbecue" e "Molho Cheddar" juntos, não só o primeiro
 
-  Scenario: Produto correlacionado inativo não aparece como sugestão
+  Scenario: Produto correlacionado inativo não aparece como sugestão, mas a relação continua
     Dado "Batata Frita" com "Molho Barbecue" como produto correlacionado
     E "Molho Barbecue" está com active: false
     Quando o cliente no totem adiciona "Batata Frita" avulsa ao carrinho
     Então nenhuma sugestão de "Molho Barbecue" aparece
+    Mas ao editar "Batata Frita" no admin, "Molho Barbecue" continua na lista de correlacionados
+    E aparece marcado visivelmente como inativo
+
+  Scenario: Produto correlacionado reativado volta a ser sugerido, sem recadastrar nada
+    Dado "Batata Frita" com "Molho Barbecue" como produto correlacionado, "Molho Barbecue" inativo
+    Quando o admin reativa "Molho Barbecue" (active: true)
+    E o cliente no totem adiciona "Batata Frita" avulsa ao carrinho
+    Então a sugestão de "Molho Barbecue" volta a aparecer, sem nenhuma nova associação cadastrada
 
   Scenario: Produto correlacionado excluído não aparece como sugestão
     Dado "Batata Frita" com "Molho Barbecue" como produto correlacionado
@@ -257,8 +269,8 @@ Response 200 (`ProductOut`, novo campo):
   "name": "Batata Frita",
   "...": "...",
   "related_products": [
-    { "id": 1042, "name": "Molho Barbecue", "price": 4.5, "image_url": "https://..." },
-    { "id": 1055, "name": "Molho Cheddar", "price": 4.5, "image_url": "https://..." }
+    { "id": 1042, "name": "Molho Barbecue", "price": 4.5, "image_url": "https://...", "active": true },
+    { "id": 1055, "name": "Molho Cheddar", "price": 4.5, "image_url": "https://...", "active": false }
   ]
 }
 ```
@@ -295,18 +307,24 @@ class RelatedProduct(Base):
     sort_order          = Column(Integer)
 
 async def _get_product_related(db: AsyncSession, product_id: int) -> list[dict]:
-    """Só devolve produtos ainda ativos e não excluídos — se o correlacionado
-    for desativado, some da sugestão automaticamente sem precisar limpar a
-    linha de related_products (reaparece sozinho se for reativado depois)."""
+    """Devolve a relação inteira, incluindo produtos inativos — a associação
+    em si nunca é escondida (admin precisa continuar vendo e gerenciando o
+    par mesmo com o correlacionado desativado). Filtra só `deleted`, que é
+    irreversível e já é escondido em todo o resto do catálogo. Quem decide
+    esconder o inativo da OFERTA ao cliente é o consumidor do dado (totem),
+    olhando o campo `active` de cada item — mesmo padrão já usado hoje pra
+    `option_groups`/`options` (endpoint devolve tudo, totem filtra active no
+    client, ver CatalogScreen.tsx)."""
     result = await db.execute(
         select(Product)
         .join(RelatedProduct, RelatedProduct.related_product_id == Product.id)
-        .filter(RelatedProduct.product_id == product_id, Product.active == True, Product.deleted == False)
+        .filter(RelatedProduct.product_id == product_id, Product.deleted == False)
         .order_by(RelatedProduct.sort_order)
     )
     return [
         {"id": r.id, "name": r.name, "price": float(r.price),
-         "image_url": presigned_download_url(r.image_url) if r.image_url else None}
+         "image_url": presigned_download_url(r.image_url) if r.image_url else None,
+         "active": r.active}
         for r in result.scalars().all()
     ]
 
@@ -327,7 +345,7 @@ async def _set_product_related(db: AsyncSession, company_id: int, product_id: in
 ```
 
 `_serialize_product` ganha `"related_products": await _get_product_related(db, p.id)`.
-`ProductOut` ganha `related_products: list[RelatedProductOut] = []` (`RelatedProductOut = {id, name, price, image_url}`, mesmo formato de `ComboSummaryOut`).
+`ProductOut` ganha `related_products: list[RelatedProductOut] = []` (`RelatedProductOut = {id, name, price, image_url, active}` — o campo `active` é o que o totem usa pra decidir se oferece ou não, sem precisar de uma segunda chamada).
 `ProductUpdate` ganha `related_product_ids: list[int] | None = None`.
 `update_product` — mesmo ponto onde `allergen_ids` é tratado hoje (linha ~1391): adicionar
 `exclude={"allergen_ids", "related_product_ids", "confirm_deactivate_combos"}` no `model_dump` do
@@ -339,6 +357,13 @@ do combo — mesma UX, filtrado pra excluir o próprio produto sendo editado da 
 reforça no client o que o backend já valida). Novo state `relatedProductIds`, incluído no payload
 de `PUT` como `related_product_ids`.
 
+**Requisito explícito do usuário (2026-09-08): o status do produto correlacionado precisa ficar
+visível na lista, não escondido.** Cada linha da lista de "Produtos correlacionados" já
+selecionados mostra o `active` de cada item (badge/tag "Inativo", mesmo padrão visual já usado em
+outras listas do admin pra produto/combo/opção desativados) — o admin precisa enxergar de cara
+que aquele par existe mas não está sendo oferecido no momento, sem precisar abrir o outro produto
+pra descobrir. Isso vira critério de aceite novo (adicionado na seção de Explorer).
+
 **Totem (`CatalogScreen.tsx`):**
 ```ts
 function handleAddProduct(p: Product) {
@@ -347,8 +372,11 @@ function handleAddProduct(p: Product) {
       c.upsell_enabled && c.items.some((i) => i.product_id === p.id && i.triggers_upsell)
     );
     if (combo) { setUpsell({ combo, product: p }); return; }
-    if (p.related_products.length > 0) {
-      setRelatedSuggestion({ product: p, related: p.related_products });
+    // related_products vem com inativos também (mesmo padrão de option_groups/options,
+    // que a API já devolve por completo hoje) — quem decide o que oferecer é o totem.
+    const offerable = p.related_products.filter((r) => r.active);
+    if (offerable.length > 0) {
+      setRelatedSuggestion({ product: p, related: offerable });
       addProductToCart(p);  // produto original entra no carrinho de qualquer forma (critério de aceite)
       return;
     }
@@ -358,7 +386,7 @@ function handleAddProduct(p: Product) {
 ```
 Novo modal (componente próprio, não reaproveita o modal de upsell de combo — layout diferente: N
 produtos com botão de adicionar cada um, não uma escolha binária "leve o combo/só o avulso"),
-listando cada `related_products[]` com um botão "Adicionar" individual e um botão "Continuar sem
+listando cada item de `offerable` com um botão "Adicionar" individual e um botão "Continuar sem
 adicionar" pra fechar sem mais nenhum item. Produto original já foi adicionado ao carrinho antes
 do modal abrir (diferente do combo, que decide entre as duas opções antes de adicionar qualquer
 coisa) — reflete a semântica do Explorer: a sugestão é umas duas opções, não um garfo.
@@ -378,11 +406,22 @@ avulso adicionado manualmente.
 - Totem: 1 ponto (novo modal, mais simples que o de combo — sem cálculo de economia/preço).
 
 ### Riscos
-- **Produto correlacionado desativado some da lista de edição do admin também** (mesmo helper de
-  leitura filtra `active`/`deleted`) — se o admin salvar o produto de origem nesse meio-tempo sem
-  perceber que um item sumiu da lista visível, a associação é removida silenciosamente (replace
-  completo). É o mesmo comportamento que `allergen_ids` já tem hoje pro caso análogo — não é
-  regressão nova, mas vale o mesmo aviso de UX que qualquer campo de replace completo no admin.
+- ~~Produto correlacionado desativado some da relação~~ — **corrigido após avaliação com o
+  usuário (2026-09-08): não é isso que acontece, e não seria aceitável se fosse.** A relação em
+  si **nunca desaparece** — a linha em `related_products` continua existindo e visível pro admin
+  independente do estado do produto correlacionado. O que muda é só a **oferta ao cliente final**:
+  com o produto correlacionado desativado (motivo operacional comum, ex. falta de estoque), o
+  totem para de sugeri-lo — mas o admin continua vendo e gerenciando o par normalmente, e a
+  sugestão volta sozinha se o produto for reativado, sem precisar recadastrar nada. Corrigido no
+  desenho técnico: `_get_product_related` devolve a relação inteira (com o campo `active` de cada
+  item), e é o **totem quem filtra** o que oferece, mesmo padrão que `option_groups`/`options` já
+  usam hoje (API devolve tudo, `CatalogScreen.tsx` filtra `active` no client). Ponto de atenção
+  real, fora de escopo desta história: a semântica de **exclusão** (`deleted: true`) é diferente
+  de desativação — o Ordin mantém produtos excluídos no
+  banco pra preservar histórico de vendas (linha de `OrderItem`/`Ticket` referencia o produto
+  mesmo depois de excluído), então vale uma análise própria, numa história separada, sobre se
+  "produto correlacionado excluído" deveria se comportar exatamente igual a "desativado" (como
+  implementado aqui) ou precisar de algum tratamento diferente. Não bloqueia esta história.
 - **Confusão de nomenclatura com "upsell" de combo** — mitigado desde o Explorer com o nome
   "produtos correlacionados" e o `if`/`else if` que impede os dois modais concorrerem; ainda assim,
   o admin vê dois lugares diferentes pra configurar "sugestão automática" (combo e produto), vale
