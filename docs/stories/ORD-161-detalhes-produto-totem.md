@@ -1,6 +1,6 @@
 ---
 id: ORD-161
-status: Tech Explorer
+status: Ready
 estimativa: 2 pontos (frontend/totem)
 tipo: feature
 fase: 6
@@ -110,6 +110,9 @@ nome de cada alérgeno (isso fica disponível ao tocar/expandir, não obrigatór
 ### Wireframe / Mockup
 N/A — reaproveita o padrão visual já existente de `Badge` (shadcn) usado hoje pra tags e pro selo
 "Combo" no mesmo arquivo.
+
+**Aprovação final:** aprovado no chat pelo usuário após o Tech Explorer. `Ready` — sem bloqueios,
+apto a entrar no sprint backlog.
 
 ## QA Explorer
 
