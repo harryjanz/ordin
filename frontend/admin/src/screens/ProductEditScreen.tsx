@@ -542,7 +542,9 @@ export default function ProductEditScreen() {
             727/2022) — cabe tudo numa grade sem precisar de dropdown nem
             busca, pedido explícito do usuário por algo "mais simples e
             usual". */}
-        <div className={styles.formLabel}>Alérgenos (RDC 727/2022)</div>
+        <Divider />
+
+        <h2 className={styles.h2}>Alérgenos (RDC 727/2022)</h2>
         <div className={styles.allergenGrid}>
           {allergens.map((a) => (
             <Checkbox
