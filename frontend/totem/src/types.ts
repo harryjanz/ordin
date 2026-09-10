@@ -85,6 +85,16 @@ export interface RelatedProduct {
   option_groups?: ProductOptionGroup[];
 }
 
+// ORD-161 — mesmo formato de AllergenOut (catalog-service), já existe
+// idêntico em frontend/admin/src/types.ts (totem e admin não compartilham
+// types.ts).
+export interface Allergen {
+  id: number;
+  code: string;
+  name: string;
+  category: string | null;
+}
+
 export interface Product {
   id: number;
   category_id: number;
@@ -96,6 +106,10 @@ export interface Product {
   tags?: string[] | null;
   option_groups?: ProductOptionGroup[];
   related_products?: RelatedProduct[];
+  // ORD-161 — já existem em ProductOut desde ORD-075, só nunca tinham
+  // chegado ao tipo do totem nem sido exibidos.
+  calories?: number | null;
+  allergens?: Allergen[];
 }
 
 // ORD-150 — combo/bundle: conjunto de produtos existentes vendido com preço

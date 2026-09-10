@@ -71,6 +71,10 @@ export default function CatalogScreen({
   // item sugerido antes de fechar o modal.
   const [relatedSuggestion, setRelatedSuggestion] = useState<{ product: Product; related: RelatedProduct[]; addedIds: number[] } | null>(null);
 
+  // ORD-161 — lista completa de alérgenos por extenso, quando não cabem os
+  // 2 badges compactos do card (critério de aceite do Explorer).
+  const [allergenDetail, setAllergenDetail] = useState<Product | null>(null);
+
   // ORD-141 — modal de seleção de grupo de opção. `selections` mapeia
   // option_group.id -> ids das opções escolhidas nesse grupo.
   // ORD-160 — product também aceita RelatedProduct, pra reaproveitar este
@@ -636,8 +640,55 @@ export default function CatalogScreen({
                       {p.description}
                     </div>
                   )}
-                  <div className="text-price mt-1" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg }}>
-                    {fmt(p.price)}
+                  {/* ORD-161 (correção pós-QA manual, lente de touch screen) —
+                      Badge do shadcn nunca é pensado como elemento clicável
+                      (nenhum demo oficial usa onClick nele) e é pequeno
+                      demais como alvo de toque (~24px, abaixo até do menor
+                      alvo já usado neste totem, 44px no carrinho). Só vira
+                      alvo de toque quando há de fato algo escondido (+2
+                      alérgenos) — nesse caso o conjunto inteiro vira um
+                      <button> de verdade, com área de toque expandida via
+                      padding invisível (-m-2 p-2) até 44px, sem alterar o
+                      visual compacto dos badges. Com 2 ou menos, fica só
+                      informativo — nada pra revelar, não devia parecer
+                      clicável. */}
+                  {p.allergens && p.allergens.length > 0 && (
+                    p.allergens.length > 2 ? (
+                      <button
+                        type="button"
+                        onClick={() => setAllergenDetail(p)}
+                        aria-label={`Ver todos os ${p.allergens.length} alérgenos de ${p.name}`}
+                        className="flex flex-wrap items-center gap-1 mt-0.5 -m-2 p-2 rounded-lg text-left cursor-pointer"
+                        style={{ minHeight: 44 }}
+                      >
+                        {p.allergens.slice(0, 2).map((a) => (
+                          <Badge key={a.id} variant="secondary" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+                            {a.name}
+                          </Badge>
+                        ))}
+                        <Badge variant="outline" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+                          +{p.allergens.length - 2}
+                        </Badge>
+                      </button>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                        {p.allergens.map((a) => (
+                          <Badge key={a.id} variant="secondary" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+                            {a.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    )
+                  )}
+                  <div className="flex items-baseline gap-2 mt-1">
+                    <span className="text-price" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg }}>
+                      {fmt(p.price)}
+                    </span>
+                    {p.calories != null && (
+                      <span className="text-muted-foreground" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+                        {p.calories} kcal
+                      </span>
+                    )}
                   </div>
                 </CardContent>
 
@@ -781,7 +832,21 @@ export default function CatalogScreen({
               </DialogTitle>
               <div className="text-muted-foreground mt-1" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
                 A partir de {fmt(optionModal.product.price)}
+                {/* ORD-161 — guarda de tipo: optionModal.product é
+                    Product | RelatedProduct (ORD-160), e RelatedProduct não
+                    tem calories/allergens (decisão de escopo, ver Tech
+                    Explorer). */}
+                {"calories" in optionModal.product && optionModal.product.calories != null && ` · ${optionModal.product.calories} kcal`}
               </div>
+              {"allergens" in optionModal.product && optionModal.product.allergens && optionModal.product.allergens.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {optionModal.product.allergens.map((a) => (
+                    <Badge key={a.id} variant="secondary" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+                      {a.name}
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </div>
             {selectableOptionGroups(optionModal.product).map((g) => {
               const min = g.min_selections_override ?? g.min_selections;
@@ -1103,6 +1168,29 @@ export default function CatalogScreen({
             >
               {relatedSuggestion.addedIds.length > 0 ? "Concluir" : "Continuar sem adicionar"}
             </Button>
+          </>
+        )}
+      </Dialog>
+
+      {/* Modal de detalhe de alérgenos (ORD-161) — só abre quando o produto
+          tem mais alérgenos do que cabe compacto no card (badge "+N"). */}
+      <Dialog
+        isOpen={!!allergenDetail}
+        onOpenChange={(open) => !open && setAllergenDetail(null)}
+        className="sm:max-w-[420px] p-8 flex flex-col gap-3"
+      >
+        {allergenDetail && (
+          <>
+            <DialogTitle style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.subtitle }}>
+              Alérgenos — {allergenDetail.name}
+            </DialogTitle>
+            <div className="flex flex-wrap gap-1.5">
+              {allergenDetail.allergens?.map((a) => (
+                <Badge key={a.id} variant="secondary" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+                  {a.name}
+                </Badge>
+              ))}
+            </div>
           </>
         )}
       </Dialog>
