@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { ArrowLeft } from "lucide-react";
 import type { Theme } from "../themes";
-import { RADIUS, FONT } from "../scale";
+import { FONT } from "../scale";
 import TextKeyboard from "../components/TextKeyboard";
+import { Button } from "@/components/ui/button";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -25,41 +27,31 @@ export default function PickupNameScreen({ T, onNext, onBack }: Props) {
   const trimmed = name.trim();
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: T.radial,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      transition: "background 0.3s",
-      padding: "32px 0 24px",
-    }}>
-      <div style={{ width: "min(820px, 94vw)", display: "flex", flexDirection: "column", gap: 28 }}>
+    <div
+      className="min-h-screen flex flex-col items-center justify-center pt-8 pb-6"
+      style={{ background: T.radial, transition: "background 0.3s" }}
+    >
+      <div className="flex flex-col gap-7" style={{ width: "min(820px, 94vw)" }}>
 
-        <div style={{ textAlign: "center" }}>
-          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800, margin: "0 0 8px" }}>
+        <div className="text-center">
+          <h2 className="mb-2" style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800 }}>
             Quer receber com seu nome?
           </h2>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle }}>
             Opcional — vai aparecer no painel de retirada
           </p>
         </div>
 
         {/* Display — só leitura, entrada é sempre pelo TextKeyboard abaixo */}
-        <div style={{
-          padding: "24px 28px",
-          border: `2px solid ${T.border}`,
-          borderRadius: RADIUS.sm,
-          background: T.numBg,
-          color: name.length > 0 ? T.text : T.muted,
-          fontFamily: FONT_D,
-          fontSize: FONT.headline,
-          fontWeight: 700,
-          textAlign: "center",
-          minHeight: 32,
-          letterSpacing: 1,
-        }}>
+        <div
+          className="text-center rounded-lg"
+          style={{
+            padding: "24px 28px", border: `2px solid ${T.border}`, background: T.numBg,
+            color: name.length > 0 ? T.text : T.muted,
+            fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 700,
+            minHeight: 32, letterSpacing: 1,
+          }}
+        >
           {name.length > 0 ? name : "SEU NOME"}
         </div>
 
@@ -72,64 +64,28 @@ export default function PickupNameScreen({ T, onNext, onBack }: Props) {
 
         <button
           onClick={() => onNext(null)}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: T.muted,
-            cursor: "pointer",
-            fontSize: FONT.subtitle,
-            fontWeight: 600,
-            fontFamily: FONT_D,
-            padding: "8px 0",
-            textAlign: "center",
-          }}
+          className="bg-transparent border-none text-center py-2"
+          style={{ color: T.muted, cursor: "pointer", fontSize: FONT.subtitle, fontWeight: 600, fontFamily: FONT_D }}
         >
           Prefiro não informar
         </button>
 
-        <div style={{ display: "flex", gap: 12 }}>
-          <button
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
             onClick={onBack}
-            style={{
-              padding: "0 28px",
-              height: 88,
-              background: T.surface,
-              border: `1.5px solid ${T.border}`,
-              borderRadius: RADIUS.sm,
-              color: T.text,
-              cursor: "pointer",
-              fontFamily: FONT_D,
-              fontSize: FONT.subtitle,
-              textTransform: "uppercase",
-              letterSpacing: 1,
-              fontWeight: 700,
-              flexShrink: 0,
-              whiteSpace: "nowrap",
-            }}
+            className="shrink-0 whitespace-nowrap rounded-lg uppercase tracking-wide"
+            style={{ minHeight: 88, paddingLeft: 28, paddingRight: 28, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700 }}
           >
-            ← Voltar
-          </button>
-          <button
+            <ArrowLeft className="size-4" /> Voltar
+          </Button>
+          <Button
             onClick={() => onNext(trimmed || null)}
-            style={{
-              flex: 1,
-              height: 88,
-              background: T.btn,
-              color: T.btnText,
-              border: "none",
-              borderRadius: RADIUS.sm,
-              fontFamily: FONT_D,
-              fontSize: FONT.title,
-              fontWeight: 800,
-              textTransform: "uppercase",
-              letterSpacing: 1,
-              cursor: "pointer",
-              boxShadow: T.glow,
-              transition: "all 0.15s",
-            }}
+            className="flex-1 rounded-lg uppercase tracking-wide"
+            style={{ minHeight: 88, background: T.btn, color: T.btnText, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800, boxShadow: T.glow }}
           >
             Confirmar
-          </button>
+          </Button>
         </div>
 
       </div>

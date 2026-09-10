@@ -1,8 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Home, ShoppingCart, Plus, Minus, X, UtensilsCrossed, PartyPopper, Tag, Check } from "lucide-react";
 import api from "../api";
 import type { Theme } from "../themes";
-import type { Category, Product, CartItem, Combo, ComboItemRef, ProductOptionGroup, SelectedOption } from "../types";
+import type { Category, Product, CartItem, Combo, ComboItemRef, ProductOptionGroup, SelectedOption, RelatedProduct } from "../types";
 import { RADIUS, FONT } from "../scale";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Toggle } from "@/components/ui/toggle";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Sheet, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogTitle } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const FONT_D = "'Lexend', sans-serif";
@@ -53,9 +63,21 @@ export default function CatalogScreen({
   // a opção escolhida certa em vez de reabrir a seleção.
   const [upsell, setUpsell] = useState<{ combo: Combo; product: Product; selectedOptions: SelectedOption[]; price: number; key: string } | null>(null);
 
+  // ORD-160 — produtos correlacionados: só entra quando NÃO há combo
+  // elegível (prioridade combo > correlacionado, if/else em
+  // maybeUpsellOrAdd abaixo — nunca os dois modais ao mesmo tempo).
+  // addedIds dá feedback visual claro de quais itens já foram adicionados
+  // nesta sugestão, sem fechar a lista — cliente pode adicionar mais de um
+  // item sugerido antes de fechar o modal.
+  const [relatedSuggestion, setRelatedSuggestion] = useState<{ product: Product; related: RelatedProduct[]; addedIds: number[] } | null>(null);
+
   // ORD-141 — modal de seleção de grupo de opção. `selections` mapeia
   // option_group.id -> ids das opções escolhidas nesse grupo.
-  const [optionModal, setOptionModal] = useState<{ product: Product; selections: Record<number, number[]> } | null>(null);
+  // ORD-160 — product também aceita RelatedProduct, pra reaproveitar este
+  // mesmo modal quando o item sugerido tem grupo de opção obrigatório.
+  // fromRelated marca esse caso pra confirmOptionModal rotear pro add
+  // simples (sem checar combo/nova sugestão em cadeia).
+  const [optionModal, setOptionModal] = useState<{ product: Product | RelatedProduct; selections: Record<number, number[]>; fromRelated?: boolean } | null>(null);
 
   // ORD-159 — mesma ideia do optionModal, mas por combo: `selections` tem
   // uma camada a mais (product_id do componente -> option_group.id -> ids
@@ -136,7 +158,9 @@ export default function CatalogScreen({
   // (ex. "Refrigerante — Guaraná Antarctica"), preço já vem com os
   // price_delta somados, e a key inclui os ids das opções pra não misturar
   // com outra variante do mesmo produto numa única linha.
-  function addProductWithOptionsToCart(p: Product, selectedOptions: SelectedOption[], price: number, key: string) {
+  // ORD-160 — tipo relaxado (só usa id/name) pra aceitar também um item de
+  // related_products, reaproveitado quando o correlacionado tem opção.
+  function addProductWithOptionsToCart(p: { id: number; name: string }, selectedOptions: SelectedOption[], price: number, key: string) {
     const name = selectedOptions.length
       ? `${p.name} — ${selectedOptions.map((o) => o.option_label).join(", ")}`
       : p.name;
@@ -144,6 +168,35 @@ export default function CatalogScreen({
       key, kind: "product", id: p.id, name, price, qty: 1,
       selectedOptions: selectedOptions.length ? selectedOptions : undefined,
     });
+  }
+
+  // ORD-160 (correção pós-QA manual) — marca o item como adicionado na
+  // sugestão aberta, pro botão dar feedback ("✓ Adicionado") sem fechar a
+  // lista — cliente pode adicionar mais de um item sugerido antes de sair.
+  function markRelatedAdded(id: number) {
+    setRelatedSuggestion((prev) => (prev ? { ...prev, addedIds: [...prev.addedIds, id] } : prev));
+  }
+
+  // Item de related_products sem opção — mesma forma de addProductToCart,
+  // com o dado já denormalizado que a API devolve.
+  function addRelatedSuggestionItem(item: RelatedProduct) {
+    onAdd({ key: `product:${item.id}`, kind: "product", id: item.id, name: item.name, price: item.price, qty: 1 });
+    markRelatedAdded(item.id);
+  }
+
+  // ORD-160 (correção pós-QA manual) — o item sugerido pode ter grupo de
+  // opção obrigatório igual qualquer produto do catálogo (ex.: sabor);
+  // sem esta checagem ele ia pro carrinho sem a escolha. Abre o MESMO
+  // modal de opção do catálogo principal, marcado com fromRelated pra
+  // confirmOptionModal rotear pro add simples (sem checar combo/nova
+  // sugestão em cadeia a partir de um item já dentro de uma sugestão).
+  function handleAddRelatedItem(item: RelatedProduct) {
+    const groups = selectableOptionGroups(item);
+    if (groups.length > 0) {
+      setOptionModal({ product: item, selections: {}, fromRelated: true });
+      return;
+    }
+    addRelatedSuggestionItem(item);
   }
 
   function addComboToCart(c: Combo, comboItems?: ComboItemRef[], key?: string) {
@@ -251,8 +304,17 @@ export default function CatalogScreen({
           c.items.some((i) => i.product_id === p.id && i.triggers_upsell)
         )
       : undefined;
-    if (combo) setUpsell({ combo, product: p, selectedOptions, price, key });
-    else addProductWithOptionsToCart(p, selectedOptions, price, key);
+    if (combo) {
+      setUpsell({ combo, product: p, selectedOptions, price, key });
+      return;
+    }
+    addProductWithOptionsToCart(p, selectedOptions, price, key);
+    // ORD-160 — só entra se não achou combo elegível acima (prioridade
+    // combo > correlacionado, decisão fechada no Tech Explorer). Produto
+    // original já foi adicionado na linha acima, diferente do fluxo de
+    // combo (que decide antes de adicionar qualquer coisa).
+    const offerableRelated = !hasProductInCart ? (p.related_products ?? []).filter((r) => r.active) : [];
+    if (offerableRelated.length > 0) setRelatedSuggestion({ product: p, related: offerableRelated, addedIds: [] });
   }
 
   function handleAddProduct(p: Product) {
@@ -288,7 +350,7 @@ export default function CatalogScreen({
 
   function confirmOptionModal() {
     if (!optionModal) return;
-    const { product, selections } = optionModal;
+    const { product, selections, fromRelated } = optionModal;
     const groups = selectableOptionGroups(product);
     const selectedOptions: SelectedOption[] = [];
     let priceExtra = 0;
@@ -305,7 +367,16 @@ export default function CatalogScreen({
     allIds.sort((a, b) => a - b);
     const key = allIds.length ? `product:${product.id}:${allIds.join(",")}` : `product:${product.id}`;
     setOptionModal(null);
-    maybeUpsellOrAdd(product, selectedOptions, product.price + priceExtra, key);
+    // ORD-160 (correção pós-QA manual) — item vindo de related_products
+    // (fromRelated) só adiciona ao carrinho, sem checar combo/nova sugestão
+    // em cadeia: já estamos dentro de uma sugestão, não é o ponto de
+    // entrada normal do catálogo.
+    if (fromRelated) {
+      addProductWithOptionsToCart(product, selectedOptions, product.price + priceExtra, key);
+      markRelatedAdded(product.id);
+      return;
+    }
+    maybeUpsellOrAdd(product as Product, selectedOptions, product.price + priceExtra, key);
   }
 
   const canConfirmOptionModal = optionModal
@@ -328,118 +399,82 @@ export default function CatalogScreen({
     : 0;
 
   // Categorias — mesmo conteúdo nos dois modos, só o container/botão mudam
-  // de faixa horizontal pra coluna lateral.
+  // de faixa horizontal pra coluna lateral. EXPERIMENTO — shadcn ToggleGroup
+  // (react-aria-components ToggleButtonGroup por baixo) no lugar de N Toggle
+  // controlados na mão: um só selectedKeys/onSelectionChange substitui a
+  // comparação `activeCat?.id === cat.id` repetida em cada item.
   const categoriesContent = loadingCat ? (
-    <div style={{ color: T.muted, fontSize: FONT.bodyLg, fontFamily: FONT_B }}>Carregando categorias…</div>
-  ) : categories.map((cat) => (
-    <button
-      key={cat.id}
-      onClick={() => setActiveCat(cat)}
-      style={isVertical ? {
-        padding: "14px 20px",
-        borderRadius: RADIUS.sm,
-        border: `1px solid ${activeCat?.id === cat.id ? T.btn : T.borderNeutral}`,
-        background: activeCat?.id === cat.id ? T.catActive : "transparent",
-        color: activeCat?.id === cat.id ? T.catText : T.muted,
-        fontFamily: FONT_D,
-        fontWeight: 700,
-        cursor: "pointer",
-        transition: "all 0.15s",
-        fontSize: FONT.body,
-        minHeight: 48,
-        textAlign: "left",
-        width: "100%",
-        boxShadow: activeCat?.id === cat.id ? "0 0 12px rgba(153,0,255,0.3)" : "none",
-      } : {
-        padding: "12px 24px",
-        borderRadius: RADIUS.pill,
-        border: `1px solid ${activeCat?.id === cat.id ? T.btn : T.borderNeutral}`,
-        background: activeCat?.id === cat.id ? T.catActive : "transparent",
-        color: activeCat?.id === cat.id ? T.catText : T.muted,
-        fontFamily: FONT_D,
-        fontWeight: 700,
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        transition: "all 0.15s",
-        fontSize: FONT.body,
-        minHeight: 48,
-        boxShadow: activeCat?.id === cat.id ? "0 0 12px rgba(153,0,255,0.3)" : "none",
+    isVertical
+      ? Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="w-full shrink-0" style={{ height: 48, borderRadius: RADIUS.sm }} />
+        ))
+      : Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="shrink-0" style={{ height: 48, width: 120, borderRadius: RADIUS.pill }} />
+        ))
+  ) : (
+    <ToggleGroup
+      selectionMode="single"
+      disallowEmptySelection
+      orientation={isVertical ? "vertical" : "horizontal"}
+      spacing={isVertical ? 2 : 3}
+      selectedKeys={activeCat ? [activeCat.id] : []}
+      onSelectionChange={(keys) => {
+        const id = [...keys][0];
+        const cat = categories.find((c) => c.id === id);
+        if (cat) setActiveCat(cat);
       }}
+      className={isVertical ? "w-full" : undefined}
     >
-      {cat.name}
-    </button>
-  ));
-
-  return (
-    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column" }}>
-
-      {/* Zona 1 — Header */}
-      <div style={{
-        background: T.header,
-        padding: "16px 28px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        borderBottom: `1px solid ${T.borderNeutral}`,
-        boxShadow: T.cardShadow,
-        minHeight: 72,
-        flexShrink: 0,
-        zIndex: 10,
-      }}>
-        <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.title, color: T.roxo, letterSpacing: "-0.5px" }}>
-          {companyName}
-        </div>
-        <button
-          onClick={onHome}
-          style={{
-            padding: "12px 24px",
-            borderRadius: RADIUS.pill,
-            border: `1px solid ${T.borderNeutral}`,
-            background: "transparent",
-            color: T.muted,
-            cursor: "pointer",
-            fontSize: FONT.body,
+      {categories.map((cat) => (
+        <ToggleGroupItem
+          key={cat.id}
+          id={cat.id}
+          className={isVertical ? "w-full justify-start text-left" : "shrink-0"}
+          style={({ isSelected }) => ({
+            minHeight: 48,
+            borderRadius: isVertical ? RADIUS.sm : RADIUS.pill,
             fontFamily: FONT_D,
             fontWeight: 700,
-            minHeight: 52,
-          }}
+            fontSize: FONT.body,
+            paddingLeft: isVertical ? 20 : 24,
+            paddingRight: isVertical ? 20 : 24,
+            background: isSelected ? T.catActive : "transparent",
+            color: isSelected ? T.catText : T.muted,
+            border: `1px solid ${isSelected ? T.btn : T.borderNeutral}`,
+            boxShadow: isSelected ? T.glow : "none",
+          })}
         >
-          ⌂ Início
-        </button>
+          {cat.name}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+
+  return (
+    <div className="min-h-screen flex flex-col bg-background">
+
+      {/* Zona 1 — Header */}
+      <div
+        className="bg-header px-7 py-4 flex items-center justify-between border-b shrink-0 z-10"
+        style={{ boxShadow: T.cardShadow, minHeight: 72 }}
+      >
+        <div className="text-brand tracking-tight" style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.title }}>
+          {companyName}
+        </div>
+        <Button variant="outline" onClick={onHome} className="rounded-full" style={{ minHeight: 52, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body, paddingLeft: 24, paddingRight: 24 }}>
+          <Home className="size-4" /> Início
+        </Button>
       </div>
 
       {/* Zona 2 (categorias) + Zona 3 (grade) — lado a lado no modo
           vertical, empilhadas no horizontal (padrão, comportamento
           inalterado). */}
-      <div style={{
-        flex: 1,
-        display: "flex",
-        flexDirection: isVertical ? "row" : "column",
-        overflow: "hidden",
-        minHeight: 0,
-      }}>
+      <div className={`flex-1 flex overflow-hidden min-h-0 ${isVertical ? "flex-row" : "flex-col"}`}>
         {/* Zona 2 — Categorias */}
-        <div style={isVertical ? {
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          padding: "20px 12px",
-          overflowY: "auto",
-          borderRight: `1px solid ${T.borderNeutral}`,
-          background: T.header,
-          flexShrink: 0,
-          width: 190,
-        } : {
-          display: "flex",
-          gap: 12,
-          padding: "16px 28px",
-          overflowX: "auto",
-          borderBottom: `1px solid ${T.borderNeutral}`,
-          background: T.header,
-          flexShrink: 0,
-          alignItems: "center",
-          minHeight: 68,
-        }}>
+        <div
+          className={`bg-header shrink-0 ${isVertical ? "flex flex-col gap-2 py-5 px-3 overflow-y-auto border-r w-[190px]" : "flex gap-3 px-7 py-4 overflow-x-auto border-b items-center"}`}
+          style={!isVertical ? { minHeight: 68 } : undefined}
+        >
           {categoriesContent}
         </div>
 
@@ -447,29 +482,15 @@ export default function CatalogScreen({
             horizontal) — telas de totem são grandes (21-27"), 2 colunas no
             modo vertical desperdiçava espaço mesmo com a coluna de
             categorias ao lado. */}
-        <div style={{
-          flex: 1,
-          padding: "24px 28px",
-          paddingBottom: 136,
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 20,
-          alignContent: "start",
-          overflowY: "auto",
-        }}>
+        <div className="flex-1 px-7 pt-6 grid grid-cols-3 gap-5 content-start overflow-y-auto" style={{ paddingBottom: 136 }}>
           {/* ORD-150 — decisão revisada (2026-09-02): combo só aparece na
               categoria em que foi alocado (category_id, ORD-112), não numa
-              seção "Destaque" global. Isso já respeita o contexto de
-              cardápio de graça: activeCat só existe entre as categorias que
-              o backend já filtrou por janela de horário (ORD-127); categoria
-              fora da janela nunca vira activeCat, e o combo alocado nela
-              simplesmente não aparece. Combo sem category_id não aparece em
-              nenhuma categoria. Card visualmente diferenciado do produto
-              avulso: fundo em gradiente + selo "COMBO" + preço com economia
-              visível sem abrir nada. */}
+              seção "Destaque" global. Card visualmente diferenciado do
+              produto avulso: fundo em gradiente + selo "COMBO" + preço com
+              economia visível sem abrir nada. */}
           {activeCat && combosForActiveCat.length > 0 && (
             <>
-              <div style={{ gridColumn: "1/-1", fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.label, color: T.muted, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              <div className="col-span-3 uppercase tracking-wide text-muted-foreground" style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.label }}>
                 Destaque
               </div>
               {combosForActiveCat.map((c) => {
@@ -483,100 +504,92 @@ export default function CatalogScreen({
                 const sumAvulso = c.items.reduce((s, i) => s + i.price, 0);
                 const savings = sumAvulso - c.price;
                 return (
-                  <div
+                  <Card
                     key={`combo-${c.id}`}
+                    className="p-0 gap-0 relative"
                     style={{
                       background: `linear-gradient(155deg, ${T.catActive}, ${T.surface})`,
                       border: `1.5px solid ${T.btn}`,
-                      borderRadius: RADIUS.lg,
-                      display: "flex",
-                      flexDirection: "column",
-                      overflow: "hidden",
                       boxShadow: T.cardShadow,
-                      position: "relative",
                     }}
                   >
                     {/* ORD-153 — mesma área de imagem do card de produto
-                        (altura menor, 140 vs 180, porque o combo já tem mais
-                        conteúdo de texto embaixo); placeholder com o mesmo
-                        emoji quando não tem imagem cadastrada. */}
-                    <div style={{ position: "relative", width: "100%", height: 140, flexShrink: 0 }}>
+                        (altura menor, 140 vs 180). */}
+                    <div className="relative w-full shrink-0" style={{ height: 140 }}>
                       {c.image_url ? (
-                        <img src={c.image_url} alt={c.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                        <img src={c.image_url} alt={c.name} className="w-full h-full object-cover block" />
                       ) : (
-                        <div style={{
-                          width: "100%",
-                          height: "100%",
-                          background: T.placeholderA,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: FONT.headlineLg,
-                        }}>
-                          🍽️
+                        <div className="w-full h-full flex items-center justify-center" style={{ background: T.placeholderA }}>
+                          <UtensilsCrossed className="size-10 text-white/70" />
                         </div>
                       )}
-                      <span style={{
-                        position: "absolute", top: 14, right: 14,
-                        background: T.btn, color: T.btnText,
-                        fontFamily: FONT_B, fontSize: FONT.caption, fontWeight: 800,
-                        borderRadius: RADIUS.pill, padding: "3px 10px", textTransform: "uppercase", letterSpacing: "0.5px",
-                      }}>
+                      <Badge className="absolute top-3.5 right-3.5 uppercase tracking-wide" style={{ background: T.btn, color: T.btnText, fontFamily: FONT_B }}>
                         Combo
-                      </span>
+                      </Badge>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: 16 }}>
-                      <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.body }}>
+                    <CardContent className="flex flex-col gap-2 p-4">
+                      <div className="text-foreground" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body }}>
                         {c.name}
                       </div>
-                      <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, lineHeight: 1.4 }}>
+                      <div className="text-muted-foreground leading-snug" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
                         {c.items.map((i) => i.name).join(" + ")}
                       </div>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.bodyLg }}>{fmt(c.price)}</span>
-                        <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, textDecoration: "line-through" }}>{fmt(sumAvulso)}</span>
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-price" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg }}>{fmt(c.price)}</span>
+                        <span className="text-muted-foreground line-through" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>{fmt(sumAvulso)}</span>
                         {savings > 0 && (
-                          <span style={{ fontFamily: FONT_B, color: "#1c8a53", background: "#e4f6ec", fontSize: FONT.caption, fontWeight: 700, borderRadius: RADIUS.pill, padding: "2px 10px" }}>
+                          <Badge variant="secondary" className="text-[#1c8a53] bg-[#e4f6ec]">
                             economize {fmt(savings)}
-                          </span>
+                          </Badge>
                         )}
                       </div>
-                      <div style={{ marginTop: 4 }}>
+                      <div className="mt-1">
                         {comboQty > 0 ? (
-                          <div style={{ display: "flex", alignItems: "center", background: T.numBg, border: `1px solid ${T.border}`, borderRadius: RADIUS.pill, overflow: "hidden" }}>
-                            <button onClick={() => onRemove(`combo:${c.id}`)} style={{ width: 52, height: 52, background: "none", border: "none", color: T.roxo, fontSize: FONT.title, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
-                            <span style={{ flex: 1, textAlign: "center", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text }}>{comboQty}</span>
-                            <button onClick={() => addComboToCart(c)} style={{ width: 52, height: 52, background: "none", border: "none", color: T.roxo, fontSize: FONT.title, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>+</button>
+                          <div className="flex items-center rounded-full overflow-hidden border" style={{ background: T.numBg }}>
+                            <Button variant="ghost" onClick={() => onRemove(`combo:${c.id}`)} className="rounded-none" style={{ width: 52, height: 52, color: T.roxo }}>
+                              <Minus className="size-5" />
+                            </Button>
+                            <span className="flex-1 text-center" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text }}>{comboQty}</span>
+                            <Button variant="ghost" onClick={() => addComboToCart(c)} className="rounded-none" style={{ width: 52, height: 52, color: T.roxo }}>
+                              <Plus className="size-5" />
+                            </Button>
                           </div>
                         ) : (
-                          <button
+                          <Button
                             onClick={() => tryAddCombo(c)}
-                            style={{
-                              width: "100%", minHeight: 52, borderRadius: RADIUS.pill,
-                              background: T.btn, color: T.btnText, border: "none",
-                              fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body,
-                              cursor: "pointer", boxShadow: T.glow,
-                            }}
+                            className="w-full rounded-full"
+                            style={{ minHeight: 52, background: T.btn, color: T.btnText, fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body, boxShadow: T.glow }}
                           >
                             Adicionar combo
-                          </button>
+                          </Button>
                         )}
                       </div>
-                    </div>
-                  </div>
+                    </CardContent>
+                  </Card>
                 );
               })}
             </>
           )}
 
           {loadingProds ? (
-            <div style={{ color: T.muted, gridColumn: "1/-1", fontSize: FONT.bodyLg, padding: "48px 0", textAlign: "center", fontFamily: FONT_B }}>
-              Carregando produtos…
-            </div>
+            Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex flex-col gap-3">
+                <Skeleton style={{ height: 180, borderRadius: RADIUS.lg }} />
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton style={{ height: 52, borderRadius: RADIUS.pill }} />
+              </div>
+            ))
           ) : products.length === 0 ? (
-            <div style={{ color: T.muted, gridColumn: "1/-1", fontSize: FONT.bodyLg, padding: "48px 0", textAlign: "center", fontFamily: FONT_B }}>
-              Nenhum produto disponível.
-            </div>
+            <Empty className="col-span-3">
+              <EmptyHeader>
+                <EmptyMedia variant="icon">
+                  <UtensilsCrossed />
+                </EmptyMedia>
+                <EmptyTitle>Nenhum produto disponível</EmptyTitle>
+                <EmptyDescription>Essa categoria não tem itens no cardápio agora.</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : products.map((p, i) => {
             // ORD-141 — produto com grupo de opção pode ter várias linhas no
             // carrinho (uma por combinação de opção escolhida), então o
@@ -586,322 +599,187 @@ export default function CatalogScreen({
             const qty = selectableOptionGroups(p).length > 0 ? 0 : getQty(`product:${p.id}`);
             const gradient = i % 2 === 0 ? T.placeholderA : T.placeholderB;
             return (
-              <div
+              <Card
                 key={p.id}
-                style={{
-                  background: T.surface,
-                  border: `1px solid ${T.borderNeutral}`,
-                  borderRadius: RADIUS.lg,
-                  display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
-                  boxShadow: T.cardShadow,
-                  transition: "transform 0.15s, box-shadow 0.15s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = T.glow; }}
-                onMouseLeave={(e) => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = T.cardShadow; }}
+                className="p-0 gap-0 transition-transform hover:-translate-y-0.5"
+                style={{ border: `1px solid ${T.borderNeutral}`, boxShadow: T.cardShadow }}
               >
                 {/* Imagem — 60% da altura do card. Tags (no máx. 2) viram
-                    badges sobrepostos no rodapé da imagem, com gradiente
-                    escuro embaixo pra garantir contraste em foto clara —
-                    economiza a linha extra que ocupavam no bloco de texto. */}
-                <div style={{ position: "relative", width: "100%", height: 180, flexShrink: 0 }}>
+                    badges sobrepostos no rodapé da imagem. */}
+                <div className="relative w-full shrink-0" style={{ height: 180 }}>
                   {p.image_url ? (
-                    <img src={p.image_url} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    <img src={p.image_url} alt={p.name} className="w-full h-full object-cover block" />
                   ) : (
-                    <div style={{
-                      width: "100%",
-                      height: "100%",
-                      background: gradient,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: FONT.headlineLg,
-                    }}>
-                      🍽️
+                    <div className="w-full h-full flex items-center justify-center" style={{ background: gradient }}>
+                      <UtensilsCrossed className="size-12 text-white/70" />
                     </div>
                   )}
                   {p.tags && p.tags.length > 0 && (
-                    <div style={{
-                      position: "absolute", left: 0, right: 0, bottom: 0,
-                      display: "flex", flexWrap: "wrap", gap: 4,
-                      padding: "20px 10px 8px",
-                      background: "linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0))",
-                    }}>
+                    <div className="absolute left-0 right-0 bottom-0 flex flex-wrap gap-1 px-2.5 pt-5 pb-2" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0))" }}>
                       {p.tags.slice(0, 2).map((tag) => (
-                        <span
-                          key={tag}
-                          style={{
-                            fontFamily: FONT_B,
-                            fontSize: FONT.caption,
-                            fontWeight: 700,
-                            color: "#fff",
-                            background: T.roxo,
-                            borderRadius: RADIUS.pill,
-                            padding: "2px 8px",
-                            textTransform: "uppercase",
-                            letterSpacing: "0.3px",
-                          }}
-                        >
+                        <Badge key={tag} className="uppercase tracking-wide text-white" style={{ background: T.roxo, fontFamily: FONT_B }}>
                           {tag}
-                        </span>
+                        </Badge>
                       ))}
                     </div>
                   )}
                 </div>
 
                 {/* Info do produto — flex:1 empurra o bloco de quantidade
-                    (abaixo) sempre pro rodapé do card, alinhado entre os
-                    cards da mesma linha mesmo quando a descrição varia de
-                    tamanho. */}
-                <div style={{ flex: 1, padding: "16px 16px 0", display: "flex", flexDirection: "column", gap: 4 }}>
-                  <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: FONT.body, lineHeight: 1.2 }}>
+                    (abaixo) sempre pro rodapé do card. */}
+                <CardContent className="flex-1 flex flex-col gap-1 pt-4 px-4">
+                  <div className="text-foreground leading-tight" style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body }}>
                     {p.name}
                   </div>
                   {p.description && (
-                    <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, lineHeight: 1.4 }}>
+                    <div className="text-muted-foreground leading-snug" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
                       {p.description}
                     </div>
                   )}
-                  <div style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.bodyLg, marginTop: 4 }}>
+                  <div className="text-price mt-1" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg }}>
                     {fmt(p.price)}
                   </div>
-                </div>
+                </CardContent>
 
                 {/* Controle de quantidade */}
-                <div style={{ padding: "12px 16px 16px" }}>
+                <div className="px-4 pt-3 pb-4">
                   {qty > 0 ? (
-                    /* Stepper pill */
-                    <div style={{
-                      display: "flex",
-                      alignItems: "center",
-                      background: T.numBg,
-                      border: `1px solid ${T.border}`,
-                      borderRadius: RADIUS.pill,
-                      overflow: "hidden",
-                    }}>
-                      <button
-                        onClick={() => onRemove(`product:${p.id}`)}
-                        style={{
-                          width: 52, height: 52,
-                          background: "none", border: "none",
-                          color: T.roxo, fontSize: FONT.title, fontWeight: 700,
-                          cursor: "pointer",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                        }}
-                      >
-                        −
-                      </button>
-                      <span style={{
-                        flex: 1, textAlign: "center",
-                        fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text,
-                      }}>
+                    <div className="flex items-center rounded-full overflow-hidden border" style={{ background: T.numBg }}>
+                      <Button variant="ghost" onClick={() => onRemove(`product:${p.id}`)} className="rounded-none" style={{ width: 52, height: 52, color: T.roxo }}>
+                        <Minus className="size-5" />
+                      </Button>
+                      <span className="flex-1 text-center" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text }}>
                         {qty}
                       </span>
-                      <button
-                        onClick={() => addProductToCart(p)}
-                        style={{
-                          width: 52, height: 52,
-                          background: "none", border: "none",
-                          color: T.roxo, fontSize: FONT.title, fontWeight: 700,
-                          cursor: "pointer",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                        }}
-                      >
-                        +
-                      </button>
+                      <Button variant="ghost" onClick={() => addProductToCart(p)} className="rounded-none" style={{ width: 52, height: 52, color: T.roxo }}>
+                        <Plus className="size-5" />
+                      </Button>
                     </div>
                   ) : (
-                    /* Botão "+" circular */
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontFamily: FONT_B, fontSize: FONT.label, color: T.muted }}>Toque para adicionar</span>
-                      <button
+                    <div className="flex justify-between items-center">
+                      <span className="text-muted-foreground" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>Toque para adicionar</span>
+                      <Button
                         onClick={() => handleAddProduct(p)}
-                        style={{
-                          width: 52, height: 52, borderRadius: "50%",
-                          background: T.btn, color: T.btnText,
-                          border: "none", fontSize: FONT.title, fontWeight: 700,
-                          cursor: "pointer", boxShadow: T.glow,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          flexShrink: 0,
-                        }}
+                        className="rounded-full shrink-0"
+                        style={{ width: 52, height: 52, background: T.btn, color: T.btnText, boxShadow: T.glow }}
                       >
-                        +
-                      </button>
+                        <Plus className="size-5" />
+                      </Button>
                     </div>
                   )}
                 </div>
-              </div>
+              </Card>
             );
           })}
         </div>
       </div>
 
       {/* Zona 4 — Carrinho fixo */}
-      <div style={{
-        position: "fixed",
-        bottom: 0, left: 0, right: 0,
-        padding: "16px 24px 24px",
-        background: `linear-gradient(0deg, ${T.bg} 78%, transparent)`,
-        zIndex: 50,
-      }}>
-        <button
+      <div className="fixed bottom-0 left-0 right-0 px-6 pb-6 pt-4 z-50" style={{ background: `linear-gradient(0deg, ${T.bg} 78%, transparent)` }}>
+        <Button
           onClick={() => count > 0 && setCartOpen(true)}
+          className="w-full rounded-full justify-between"
           style={{
-            width: "100%",
-            minHeight: 90,
-            padding: "0 28px",
+            minHeight: 90, padding: "0 28px",
             background: count > 0 ? T.btn : T.surface,
             border: `1px solid ${count > 0 ? "transparent" : T.borderNeutral}`,
-            borderRadius: RADIUS.pill,
             color: count > 0 ? T.btnText : T.muted,
-            fontFamily: FONT_D,
-            fontWeight: 800,
-            fontSize: FONT.subtitle,
-            cursor: count > 0 ? "pointer" : "default",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            transition: "all 0.2s",
+            fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
             boxShadow: count > 0 ? T.glow : T.cardShadow,
           }}
         >
-          <span>🛒 {count > 0 ? `Ver pedido (${count} item${count > 1 ? "s" : ""})` : "Carrinho vazio"}</span>
+          <span className="flex items-center gap-2"><ShoppingCart className="size-5" /> {count > 0 ? `Ver pedido (${count} item${count > 1 ? "s" : ""})` : "Carrinho vazio"}</span>
           {count > 0 && (
-            <span style={{
-              background: "rgba(0,0,0,0.18)",
-              borderRadius: RADIUS.pill,
-              padding: "8px 24px",
-              fontSize: FONT.subtitle,
-              fontWeight: 900,
-            }}>
+            <span className="rounded-full" style={{ background: "rgba(0,0,0,0.18)", padding: "8px 24px", fontSize: FONT.subtitle, fontWeight: 900 }}>
               {fmt(total)} →
             </span>
           )}
-        </button>
+        </Button>
       </div>
 
-      {/* Cart Drawer */}
-      {cartOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 100 }}>
-          <div onClick={() => setCartOpen(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)" }} />
-          <div style={{
-            position: "absolute", right: 0, top: 0, bottom: 0, width: 440,
-            background: T.surface,
-            borderLeft: `1px solid ${T.borderNeutral}`,
-            boxShadow: "-4px 0 32px rgba(0,0,0,0.15)",
-            display: "flex", flexDirection: "column",
-            padding: 28, gap: 16, overflowY: "auto",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ fontFamily: FONT_D, color: T.text, margin: 0, fontSize: FONT.subtitle, fontWeight: 800 }}>
-                🛒 Meu pedido
-              </h3>
-              <button
-                onClick={() => setCartOpen(false)}
-                style={{
-                  background: T.numBg, border: `1px solid ${T.borderNeutral}`,
-                  color: T.text, borderRadius: RADIUS.pill, padding: "0 20px",
-                  cursor: "pointer", fontSize: FONT.bodyLg, fontFamily: FONT_D, fontWeight: 700, minHeight: 44,
-                }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {cart.length === 0 ? (
-              <p style={{ color: T.muted, textAlign: "center", marginTop: 48, fontSize: FONT.bodyLg, fontFamily: FONT_B }}>
-                Carrinho vazio
-              </p>
-            ) : (
-              <>
-                {cart.map((item) => (
-                  <div key={item.key} style={{
-                    display: "flex", alignItems: "center", gap: 16,
-                    padding: "16px 0", borderBottom: `1px solid ${T.borderNeutral}`,
-                  }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: FONT.bodyLg, display: "flex", alignItems: "center", gap: 8 }}>
-                        {item.name}
-                        {item.kind === "combo" && (
-                          <span style={{
-                            fontFamily: FONT_B, fontSize: FONT.caption, fontWeight: 700, color: "#fff",
-                            background: T.roxo, borderRadius: RADIUS.pill, padding: "2px 8px", textTransform: "uppercase", letterSpacing: "0.3px",
-                          }}>
-                            Combo
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body, marginTop: 4 }}>
-                        {fmt(item.price)} × {item.qty}
-                      </div>
+      {/* Cart Drawer — EXPERIMENTO: Sheet do shadcn (Modal/ModalOverlay do
+          React Aria por baixo) no lugar do overlay+div feito à mão. Foco
+          preso, ESC fecha, scroll do body bloqueado — de graça. */}
+      <Sheet isOpen={cartOpen} onOpenChange={setCartOpen} side="right" className="w-[440px] sm:max-w-[440px]">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2" style={{ fontFamily: FONT_D, color: T.text, fontSize: FONT.subtitle, fontWeight: 800 }}>
+            <ShoppingCart className="size-5" /> Meu pedido
+          </SheetTitle>
+        </SheetHeader>
+        <div className="flex-1 flex flex-col gap-4 px-4 pb-4 overflow-y-auto">
+          {cart.length === 0 ? (
+            <p className="text-center text-muted-foreground mt-12" style={{ fontSize: FONT.bodyLg, fontFamily: FONT_B }}>
+              Carrinho vazio
+            </p>
+          ) : (
+            <>
+              {cart.map((item) => (
+                <div key={item.key} className="flex items-center gap-4 py-4 border-b">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2" style={{ fontFamily: FONT_D, color: T.text, fontWeight: 700, fontSize: FONT.bodyLg }}>
+                      {item.name}
+                      {item.kind === "combo" && (
+                        <Badge className="uppercase tracking-wide text-white" style={{ background: T.roxo, fontFamily: FONT_B }}>
+                          Combo
+                        </Badge>
+                      )}
                     </div>
-                    <div style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 800, fontSize: FONT.subtitle }}>
-                      {fmt(item.price * item.qty)}
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button onClick={() => onRemove(item.key)} style={{ background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.roxo, borderRadius: RADIUS.sm, width: 44, height: 44, cursor: "pointer", fontSize: FONT.subtitle, fontWeight: 700 }}>−</button>
-                      <button onClick={() => onAdd({ ...item, qty: 1 })} style={{ background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.roxo, borderRadius: RADIUS.sm, width: 44, height: 44, cursor: "pointer", fontSize: FONT.subtitle, fontWeight: 700 }}>+</button>
+                    <div className="text-muted-foreground mt-1" style={{ fontFamily: FONT_B, fontSize: FONT.body }}>
+                      {fmt(item.price)} × {item.qty}
                     </div>
                   </div>
-                ))}
-                <div style={{ marginTop: "auto" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "20px 0", borderTop: `1px solid ${T.borderNeutral}` }}>
-                    <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.bodyLg, fontWeight: 600 }}>Total</span>
-                    <span style={{ fontFamily: FONT_D, color: T.text, fontWeight: 900, fontSize: FONT.title }}>{fmt(total)}</span>
+                  <div className="text-price" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle }}>
+                    {fmt(item.price * item.qty)}
                   </div>
-                  <button
-                    onClick={() => { setCartOpen(false); onCheckout(); }}
-                    style={{
-                      width: "100%", minHeight: 90, padding: "0 24px",
-                      background: T.btn, color: T.btnText,
-                      border: "none", borderRadius: RADIUS.pill,
-                      fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 800,
-                      cursor: "pointer", boxShadow: T.glow,
-                    }}
-                  >
-                    Finalizar pedido →
-                  </button>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="icon" onClick={() => onRemove(item.key)} style={{ width: 44, height: 44, color: T.roxo }}>
+                      <Minus className="size-4" />
+                    </Button>
+                    <Button variant="outline" size="icon" onClick={() => onAdd({ ...item, qty: 1 })} style={{ width: 44, height: 44, color: T.roxo }}>
+                      <Plus className="size-4" />
+                    </Button>
+                  </div>
                 </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Modal de seleção de grupo de opção (ORD-141) — mesma estrutura
-          visual do modal de upsell (overlay + card central), reaproveitada
-          por decisão do Explorer em vez de um segundo padrão de UI. Grupo
-          obrigatório (min_selections efetivo >= 1) trava o botão Confirmar
-          até a contagem bater; grupo opcional não trava nada. */}
-      {optionModal && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-          <div onClick={() => setOptionModal(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)" }} />
-          <div style={{
-            // ORD-141 (correção pós-QA, rodada 2) — 760px em vez de 640px pra
-            // dar mais espaço às miniaturas das opções (56px → 88px).
-            position: "relative", width: "min(760px, 100%)", maxHeight: "88vh", overflowY: "auto",
-            background: T.surface, borderRadius: RADIUS.lg,
-            padding: "40px 40px 32px", display: "flex", flexDirection: "column", gap: 20,
-            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
-            border: `1.5px solid ${T.border}`,
-          }}>
-            <button
-              onClick={() => setOptionModal(null)}
-              style={{
-                position: "absolute", top: 16, right: 16, width: 44, height: 44, borderRadius: "50%",
-                background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.text,
-                fontSize: FONT.subtitle, fontWeight: 700, cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}
-            >
-              ✕
-            </button>
-            <div>
-              <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
-                {optionModal.product.name}
+              ))}
+              <div className="mt-auto">
+                <div className="flex justify-between py-5 border-t">
+                  <span className="text-muted-foreground" style={{ fontFamily: FONT_B, fontSize: FONT.bodyLg, fontWeight: 600 }}>Total</span>
+                  <span style={{ fontFamily: FONT_D, color: T.text, fontWeight: 900, fontSize: FONT.title }}>{fmt(total)}</span>
+                </div>
+                <Button
+                  onClick={() => { setCartOpen(false); onCheckout(); }}
+                  className="w-full rounded-full"
+                  style={{ minHeight: 90, background: T.btn, color: T.btnText, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 800, boxShadow: T.glow }}
+                >
+                  Finalizar pedido →
+                </Button>
               </div>
-              <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, marginTop: 4 }}>
+            </>
+          )}
+        </div>
+      </Sheet>
+
+      {/* Modal de seleção de grupo de opção (ORD-141) — EXPERIMENTO: Dialog
+          do shadcn (React Aria por baixo) no lugar do overlay feito à mão.
+          Grupo obrigatório (min_selections efetivo >= 1) trava o botão
+          Confirmar até a contagem bater; grupo opcional não trava nada. */}
+      <Dialog
+        isOpen={!!optionModal}
+        onOpenChange={(open) => !open && setOptionModal(null)}
+        // ORD-160 (correção pós-QA manual) — z-[60] em vez do z-50 padrão do
+        // Dialog: este é o único modal que pode abrir por CIMA de outro já
+        // aberto (produto correlacionado com opção, clicado de dentro do
+        // modal de sugestão) — sem isso os dois empatam em z-50 e a ordem
+        // vira sorte de posição no DOM, como aconteceu na primeira versão.
+        className="sm:max-w-[760px] max-h-[88vh] overflow-y-auto flex flex-col gap-5 p-10 z-[60]"
+      >
+        {optionModal && (
+          <>
+            <div>
+              <DialogTitle className="leading-tight pr-10" style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title }}>
+                {optionModal.product.name}
+              </DialogTitle>
+              <div className="text-muted-foreground mt-1" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
                 A partir de {fmt(optionModal.product.price)}
               </div>
             </div>
@@ -910,132 +788,100 @@ export default function CatalogScreen({
               const max = g.max_selections_override ?? g.max_selections;
               const selected = optionModal.selections[g.id] ?? [];
               return (
-                <div key={g.id} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <div key={g.id} className="flex flex-col gap-2.5">
+                  <div className="flex justify-between items-baseline">
                     <span style={{ fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.bodyLg, color: T.text }}>{g.name}</span>
-                    <span style={{ fontFamily: FONT_B, fontSize: FONT.label, color: T.muted }}>
+                    <span className="text-muted-foreground" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
                       {min >= 1 ? `Escolha ${max > min ? `de ${min} a ${max}` : min}` : `Opcional${max > 1 ? ` — até ${max}` : ""}`}
                     </span>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div className="flex flex-col gap-2">
                     {g.options.filter((o) => o.active).map((o) => {
                       const isSelected = selected.includes(o.id);
                       return (
-                        <button
+                        <Toggle
                           key={o.id}
-                          onClick={() => toggleOption(g.id, o.id, max)}
+                          isSelected={isSelected}
+                          onChange={() => toggleOption(g.id, o.id, max)}
+                          className="w-full justify-start h-auto"
                           style={{
-                            display: "flex", alignItems: "center", gap: 16,
-                            padding: 12, borderRadius: RADIUS.lg, cursor: "pointer",
+                            padding: 12, borderRadius: RADIUS.lg,
                             background: isSelected ? T.catActive : T.numBg,
                             color: isSelected ? T.catText : T.text,
                             border: `1.5px solid ${isSelected ? T.catActive : T.borderNeutral}`,
                             fontFamily: FONT_B, fontWeight: 700, fontSize: FONT.subtitle,
-                            textAlign: "left",
                           }}
                         >
-                          {/* ORD-141 (correção pós-QA, rodada 2) — 88px em vez de
-                              56px, pedido explícito do usuário pra dar mais
-                              destaque à foto da opção quando cadastrada (ORD-138).
-                              Placeholder com emoji quando não tem imagem, mesmo
-                              padrão do card de combo (ORD-153). */}
-                          <div style={{ width: 88, height: 88, flexShrink: 0, borderRadius: RADIUS.lg, overflow: "hidden" }}>
+                          <div className="shrink-0 rounded-lg overflow-hidden" style={{ width: 88, height: 88, borderRadius: RADIUS.lg }}>
                             {o.thumbnail_url || o.image_url ? (
                               <img
                                 src={o.thumbnail_url ?? o.image_url ?? undefined}
                                 alt={o.label}
-                                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                className="w-full h-full object-cover block"
                               />
                             ) : (
-                              <div style={{
-                                width: "100%", height: "100%", background: T.placeholderA,
-                                display: "flex", alignItems: "center", justifyContent: "center", fontSize: FONT.title,
-                              }}>
-                                🍽️
+                              <div className="w-full h-full flex items-center justify-center" style={{ background: T.placeholderA }}>
+                                <UtensilsCrossed className="size-7 text-white/70" />
                               </div>
                             )}
                           </div>
-                          <span style={{ flex: 1 }}>{o.label}</span>
-                          {/* Preço adicional em destaque — some quando delta=0
-                              (sabor padrão, incluído no preço-base) em vez de
-                              mostrar "R$ 0,00", que soaria como cobrança dupla. */}
+                          <span className="flex-1 text-left">{o.label}</span>
                           {o.price_delta > 0 && (
-                            <span style={{
-                              fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
-                              color: isSelected ? T.catText : T.priceColor,
-                            }}>
+                            <span style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: isSelected ? T.catText : T.priceColor }}>
                               +{fmt(o.price_delta)}
                             </span>
                           )}
-                        </button>
+                        </Toggle>
                       );
                     })}
                   </div>
                 </div>
               );
             })}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", paddingTop: 12, borderTop: `1px dashed ${T.borderNeutral}` }}>
-              <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.bodyLg, fontWeight: 600 }}>Total</span>
-              <span style={{ fontFamily: FONT_D, color: T.priceColor, fontWeight: 900, fontSize: FONT.title }}>{fmt(optionModalTotal)}</span>
+            <div className="flex justify-between items-baseline pt-3 border-t border-dashed">
+              <span className="text-muted-foreground" style={{ fontFamily: FONT_B, fontSize: FONT.bodyLg, fontWeight: 600 }}>Total</span>
+              <span className="text-price" style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.title }}>{fmt(optionModalTotal)}</span>
             </div>
-            <button
+            <Button
               onClick={confirmOptionModal}
-              disabled={!canConfirmOptionModal}
+              isDisabled={!canConfirmOptionModal}
+              className="rounded-full mt-1"
               style={{
-                minHeight: 76, borderRadius: RADIUS.pill,
+                minHeight: 76,
                 background: canConfirmOptionModal ? T.btn : T.numBg,
                 color: canConfirmOptionModal ? T.btnText : T.muted,
                 border: canConfirmOptionModal ? "none" : `1px solid ${T.borderNeutral}`,
                 fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
-                cursor: canConfirmOptionModal ? "pointer" : "default",
                 boxShadow: canConfirmOptionModal ? T.glow : "none",
-                marginTop: 4,
               }}
             >
               Confirmar
-            </button>
-          </div>
-        </div>
-      )}
+            </Button>
+          </>
+        )}
+      </Dialog>
 
-      {/* Modal de seleção de opção por componente de combo (ORD-159) — mesma
-          estrutura visual do modal de produto avulso acima, organizada em
-          uma seção por componente do combo que tiver grupo selecionável.
-          Sem badge de preço adicional por opção: o preço do combo é fixo e
-          não muda com a opção escolhida (decisão do Tech Explorer), então
-          mostrar "+R$ X" aqui sugeriria uma cobrança que não acontece. */}
-      {comboOptionModal && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-          <div onClick={() => setComboOptionModal(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)" }} />
-          <div style={{
-            position: "relative", width: "min(760px, 100%)", maxHeight: "88vh", overflowY: "auto",
-            background: T.surface, borderRadius: RADIUS.lg,
-            padding: "40px 40px 32px", display: "flex", flexDirection: "column", gap: 28,
-            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
-            border: `1.5px solid ${T.border}`,
-          }}>
-            <button
-              onClick={() => setComboOptionModal(null)}
-              style={{
-                position: "absolute", top: 16, right: 16, width: 44, height: 44, borderRadius: "50%",
-                background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.text,
-                fontSize: FONT.subtitle, fontWeight: 700, cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}
-            >
-              ✕
-            </button>
+      {/* Modal de seleção de opção por componente de combo (ORD-159) —
+          mesma estrutura do modal de produto avulso acima, organizada em
+          uma seção por componente do combo que tiver grupo selecionável. */}
+      <Dialog
+        isOpen={!!comboOptionModal}
+        onOpenChange={(open) => !open && setComboOptionModal(null)}
+        className="sm:max-w-[760px] max-h-[88vh] overflow-y-auto flex flex-col gap-7 p-10"
+      >
+        {comboOptionModal && (
+          <>
             <div>
-              <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
+              <DialogTitle className="leading-tight pr-10" style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title }}>
                 {comboOptionModal.combo.name}
-              </div>
-              <div style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, marginTop: 4 }}>
+              </DialogTitle>
+              <div className="text-muted-foreground mt-1" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
                 {fmt(comboOptionModal.combo.price)}
               </div>
             </div>
             {comboOptionModal.combo.items.filter((item) => selectableOptionGroups(item).length > 0).map((item) => (
-              <div key={item.product_id} style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg, color: T.text, borderBottom: `1px solid ${T.borderNeutral}`, paddingBottom: 10 }}>
+              <div key={item.product_id} className="flex flex-col gap-5">
+                <div className="border-b pb-2.5" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg, color: T.text }}>
                   {item.name}
                 </div>
                 {selectableOptionGroups(item).map((g) => {
@@ -1043,52 +889,47 @@ export default function CatalogScreen({
                   const max = g.max_selections_override ?? g.max_selections;
                   const selected = comboOptionModal.selections[item.product_id]?.[g.id] ?? [];
                   return (
-                    <div key={g.id} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      {/* ORD-159 (ajuste pós-teste manual) — sem o nome do grupo aqui:
-                          o cabeçalho do componente (item.name) já identifica o que está
-                          sendo escolhido, e nome de produto e nome de grupo costumam ficar
-                          quase idênticos no catálogo real (ex.: "Refrigerante Lata 350ml"
-                          vs. grupo "Refrigerantes Lata 350ml"), lendo como repetição. */}
-                      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                        <span style={{ fontFamily: FONT_B, fontSize: FONT.label, color: T.muted }}>
+                    <div key={g.id} className="flex flex-col gap-2.5">
+                      {/* ORD-159 (ajuste pós-teste manual) — sem o nome do
+                          grupo aqui: o cabeçalho do componente já identifica
+                          o que está sendo escolhido. */}
+                      <div className="flex justify-end">
+                        <span className="text-muted-foreground" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
                           {min >= 1 ? `Escolha ${max > min ? `de ${min} a ${max}` : min}` : `Opcional${max > 1 ? ` — até ${max}` : ""}`}
                         </span>
                       </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div className="flex flex-col gap-2">
                         {g.options.filter((o) => o.active).map((o) => {
                           const isSelected = selected.includes(o.id);
                           return (
-                            <button
+                            <Toggle
                               key={o.id}
-                              onClick={() => toggleComboOption(item.product_id, g.id, o.id, max)}
+                              isSelected={isSelected}
+                              onChange={() => toggleComboOption(item.product_id, g.id, o.id, max)}
+                              className="w-full justify-start h-auto"
                               style={{
-                                display: "flex", alignItems: "center", gap: 16,
-                                padding: 12, borderRadius: RADIUS.lg, cursor: "pointer",
+                                padding: 12, borderRadius: RADIUS.lg,
                                 background: isSelected ? T.catActive : T.numBg,
                                 color: isSelected ? T.catText : T.text,
                                 border: `1.5px solid ${isSelected ? T.catActive : T.borderNeutral}`,
                                 fontFamily: FONT_B, fontWeight: 700, fontSize: FONT.subtitle,
-                                textAlign: "left",
                               }}
                             >
-                              <div style={{ width: 88, height: 88, flexShrink: 0, borderRadius: RADIUS.lg, overflow: "hidden" }}>
+                              <div className="shrink-0 overflow-hidden" style={{ width: 88, height: 88, borderRadius: RADIUS.lg }}>
                                 {o.thumbnail_url || o.image_url ? (
                                   <img
                                     src={o.thumbnail_url ?? o.image_url ?? undefined}
                                     alt={o.label}
-                                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                                    className="w-full h-full object-cover block"
                                   />
                                 ) : (
-                                  <div style={{
-                                    width: "100%", height: "100%", background: T.placeholderA,
-                                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: FONT.title,
-                                  }}>
-                                    🍽️
+                                  <div className="w-full h-full flex items-center justify-center" style={{ background: T.placeholderA }}>
+                                    <UtensilsCrossed className="size-7 text-white/70" />
                                   </div>
                                 )}
                               </div>
-                              <span style={{ flex: 1 }}>{o.label}</span>
-                            </button>
+                              <span className="flex-1 text-left">{o.label}</span>
+                            </Toggle>
                           );
                         })}
                       </div>
@@ -1097,118 +938,174 @@ export default function CatalogScreen({
                 })}
               </div>
             ))}
-            <button
+            <Button
               onClick={confirmComboOptionModal}
-              disabled={!canConfirmComboOptionModal}
+              isDisabled={!canConfirmComboOptionModal}
+              className="rounded-full mt-1"
               style={{
-                minHeight: 76, borderRadius: RADIUS.pill,
+                minHeight: 76,
                 background: canConfirmComboOptionModal ? T.btn : T.numBg,
                 color: canConfirmComboOptionModal ? T.btnText : T.muted,
                 border: canConfirmComboOptionModal ? "none" : `1px solid ${T.borderNeutral}`,
                 fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
-                cursor: canConfirmComboOptionModal ? "pointer" : "default",
                 boxShadow: canConfirmComboOptionModal ? T.glow : "none",
-                marginTop: 4,
               }}
             >
               Confirmar
-            </button>
-          </div>
-        </div>
-      )}
+            </Button>
+          </>
+        )}
+      </Dialog>
 
       {/* Modal de upsell (ORD-150) — interrompe a adição do produto avulso,
-          decisão validada com o usuário: não é um banner discreto.
-          Correção pós-QA (2026-09-02): centralizado na tela (não mais um
-          bottom sheet, que ficava pouco visível), maior, com badge corrigido
-          — usava `color: T.btn` sobre `background: T.catActive`, par que só
-          funciona por acaso em alguns temas; catActive/catText já são o par
-          contraste-garantido usado em todo o resto do arquivo (ex.: pill de
-          categoria ativa) e é o que devia ter sido usado aqui desde o início. */}
-      {upsell && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-          <div onClick={() => setUpsell(null)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.65)" }} />
-          <div style={{
-            position: "relative", width: "min(640px, 100%)", maxHeight: "88vh", overflowY: "auto",
-            background: T.surface, borderRadius: RADIUS.lg,
-            padding: "40px 40px 32px", display: "flex", flexDirection: "column", gap: 20,
-            boxShadow: "0 24px 64px rgba(0,0,0,0.35)",
-            border: `1.5px solid ${T.border}`,
-          }}>
-            <button
-              onClick={() => setUpsell(null)}
-              style={{
-                position: "absolute", top: 16, right: 16, width: 44, height: 44, borderRadius: "50%",
-                background: T.numBg, border: `1px solid ${T.borderNeutral}`, color: T.text,
-                fontSize: FONT.subtitle, fontWeight: 700, cursor: "pointer",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}
-            >
-              ✕
-            </button>
-            <span style={{
-              alignSelf: "flex-start", fontFamily: FONT_B, fontSize: FONT.body, fontWeight: 800,
-              color: T.catText, background: T.catActive, borderRadius: RADIUS.pill, padding: "6px 18px",
-              textTransform: "uppercase", letterSpacing: "0.5px",
-            }}>
-              🎉 Combo disponível
-            </span>
-            {/* ORD-153 — só renderiza se tiver imagem; sem placeholder aqui
-                (diferente do card na grade) porque o modal já funciona bem
-                só com texto — combo sem foto não perde nada essencial. */}
+          decisão validada com o usuário: não é um banner discreto. */}
+      <Dialog
+        isOpen={!!upsell}
+        onOpenChange={(open) => !open && setUpsell(null)}
+        className="sm:max-w-[640px] max-h-[88vh] overflow-y-auto flex flex-col gap-5 p-10"
+      >
+        {upsell && (
+          <>
+            <Badge className="self-start uppercase tracking-wide gap-1.5" style={{ color: T.catText, background: T.catActive, fontFamily: FONT_B, fontSize: FONT.body }}>
+              <PartyPopper className="size-4" /> Combo disponível
+            </Badge>
+            {/* ORD-153 — só renderiza se tiver imagem. */}
             {upsell.combo.image_url && (
               <img
                 src={upsell.combo.image_url}
                 alt={upsell.combo.name}
-                style={{ width: "100%", height: 320, objectFit: "cover", borderRadius: RADIUS.lg, display: "block" }}
+                className="w-full object-cover block rounded-lg"
+                style={{ height: 320, borderRadius: RADIUS.lg }}
               />
             )}
-            <div style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title, lineHeight: 1.3, paddingRight: 40 }}>
+            <DialogTitle className="leading-tight pr-10" style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title }}>
               Leve o {upsell.combo.name}
               {upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price > 0 && (
                 <>
                   {" "}e{" "}
-                  <span style={{ color: "#1c8a53", background: "#e4f6ec", borderRadius: RADIUS.pill, padding: "2px 12px", whiteSpace: "nowrap", display: "inline-block" }}>
+                  <span className="rounded-full whitespace-nowrap inline-block" style={{ color: "#1c8a53", background: "#e4f6ec", padding: "2px 12px" }}>
                     economize {fmt(upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price)}
                   </span>
                 </>
               )}
-            </div>
-            <div style={{ background: T.numBg, borderRadius: RADIUS.lg, padding: "18px 22px", display: "flex", flexDirection: "column", gap: 10 }}>
+            </DialogTitle>
+            <div className="flex flex-col gap-2.5 rounded-lg" style={{ background: T.numBg, padding: "18px 22px", borderRadius: RADIUS.lg }}>
               {upsell.combo.items.map((i) => (
-                <div key={i.product_id} style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT_B, fontSize: FONT.bodyLg, color: T.muted }}>
+                <div key={i.product_id} className="flex justify-between text-muted-foreground" style={{ fontFamily: FONT_B, fontSize: FONT.bodyLg }}>
                   <span>{i.name}</span>
                   <span>incluso</span>
                 </div>
               ))}
-              <div style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text, paddingTop: 10, borderTop: `1px dashed ${T.borderNeutral}` }}>
+              <div className="flex justify-between pt-2.5 border-t border-dashed" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text }}>
                 <span>{upsell.combo.name}</span>
                 <span>{fmt(upsell.combo.price)}</span>
               </div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
-              <button
+            <div className="flex flex-col gap-2.5 mt-1">
+              <Button
                 onClick={() => { tryAddCombo(upsell.combo); setUpsell(null); }}
-                style={{
-                  minHeight: 76, borderRadius: RADIUS.pill, background: T.btn, color: T.btnText,
-                  border: "none", fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, cursor: "pointer", boxShadow: T.glow,
-                }}
+                className="rounded-full"
+                style={{ minHeight: 76, background: T.btn, color: T.btnText, fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, boxShadow: T.glow }}
               >
                 Sim, quero o combo
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="outline"
                 onClick={() => { addProductWithOptionsToCart(upsell.product, upsell.selectedOptions, upsell.price, upsell.key); setUpsell(null); }}
-                style={{
-                  minHeight: 68, borderRadius: RADIUS.pill, background: T.numBg, color: T.text,
-                  border: `1px solid ${T.borderNeutral}`, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body, cursor: "pointer",
-                }}
+                className="rounded-full"
+                style={{ minHeight: 68, background: T.numBg, color: T.text, fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body }}
               >
                 Não, só {upsell.product.name}
-              </button>
+              </Button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Dialog>
+
+      {/* Modal de produtos correlacionados (ORD-160) — mais simples que o de
+          combo: produto original já está no carrinho, aqui é só uma lista
+          de sugestões extras, cada uma com botão próprio de adicionar (não
+          é uma escolha binária). */}
+      <Dialog
+        isOpen={!!relatedSuggestion}
+        onOpenChange={(open) => !open && setRelatedSuggestion(null)}
+        className="sm:max-w-[560px] max-h-[88vh] overflow-y-auto flex flex-col gap-4 p-10"
+      >
+        {relatedSuggestion && (
+          <>
+            <DialogTitle className="leading-tight pr-10" style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title }}>
+              Que tal completar com...
+            </DialogTitle>
+            <div className="flex flex-col gap-2.5">
+              {relatedSuggestion.related.map((item) => {
+                const added = relatedSuggestion.addedIds.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-3 rounded-lg"
+                    style={{
+                      padding: "14px 18px", borderRadius: RADIUS.lg,
+                      background: added ? "#e4f6ec" : T.numBg,
+                      border: added ? "1.5px solid #1c8a53" : "1.5px solid transparent",
+                    }}
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      {/* ORD-160 (correção pós-QA manual) — mostra a foto só
+                          quando cadastrada, sem placeholder aqui — lista
+                          mais compacta, funciona bem só com texto quando o
+                          item não tem imagem. */}
+                      {item.image_url && (
+                        <div className="shrink-0 overflow-hidden" style={{ width: 64, height: 64, borderRadius: RADIUS.lg }}>
+                          <img src={item.image_url} alt={item.name} className="w-full h-full object-cover block" />
+                        </div>
+                      )}
+                      <div className="flex flex-col gap-0.5">
+                        <span style={{ fontFamily: FONT_B, fontWeight: 700, fontSize: FONT.bodyLg, color: added ? "#1c8a53" : T.text }}>{item.name}</span>
+                        <span style={{ fontFamily: FONT_B, fontSize: FONT.body, color: added ? "#1c8a53" : T.muted }}>{fmt(item.price)}</span>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={() => !added && handleAddRelatedItem(item)}
+                      isDisabled={added}
+                      variant={added ? "outline" : "default"}
+                      className="rounded-full gap-1.5 shrink-0"
+                      style={{
+                        minHeight: 52, padding: "0 22px",
+                        background: added ? "transparent" : T.btn, color: added ? "#1c8a53" : T.btnText,
+                        border: added ? "1.5px solid #1c8a53" : "none",
+                        fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.body,
+                      }}
+                    >
+                      {added ? (<><Check className="size-4" /> Adicionado</>) : "+ Adicionar"}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+            {/* ORD-160 (correção pós-QA manual) — depois de adicionar pelo
+                menos um item, o botão de fechar vira o CTA principal do
+                modal (mesma cor/peso de "+ Adicionar"), maiúsculas, fonte
+                maior e com glow — pedido explícito do usuário pra ficar bem
+                mais evidente que "concluir" é a ação esperada depois de já
+                ter escolhido algo. */}
+            <Button
+              onClick={() => setRelatedSuggestion(null)}
+              variant={relatedSuggestion.addedIds.length > 0 ? "default" : "outline"}
+              className="rounded-full mt-1 uppercase"
+              style={relatedSuggestion.addedIds.length > 0 ? {
+                minHeight: 72, background: T.btn, color: T.btnText,
+                fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle,
+                letterSpacing: "0.5px", boxShadow: T.glow,
+              } : {
+                minHeight: 68, color: T.muted,
+                fontFamily: FONT_D, fontWeight: 700, fontSize: FONT.body, textTransform: "none",
+              }}
+            >
+              {relatedSuggestion.addedIds.length > 0 ? "Concluir" : "Continuar sem adicionar"}
+            </Button>
+          </>
+        )}
+      </Dialog>
     </div>
   );
 }

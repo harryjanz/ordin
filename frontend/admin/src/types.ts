@@ -176,6 +176,18 @@ export interface ProductOptionGroup extends OptionGroup {
   max_selections_override: number | null;
 }
 
+// ORD-160 — cross-sell sem combo. `active` reflete o produto sugerido, não
+// a associação em si (a relação nunca é escondida — ver _get_product_related
+// no catalog-service): um item aqui com active:false continua na lista,
+// só marcado visivelmente como inativo.
+export interface RelatedProduct {
+  id: number;
+  name: string;
+  price: number;
+  image_url: string | null;
+  active: boolean;
+}
+
 export interface Product {
   id: number;
   company_id: number;
@@ -193,6 +205,7 @@ export interface Product {
   sort_order: number | null;
   allergens: Allergen[];
   option_groups: ProductOptionGroup[];
+  related_products: RelatedProduct[];
 }
 
 // ORD-125 — cardápio por horário: dias da semana (0=segunda..6=domingo,

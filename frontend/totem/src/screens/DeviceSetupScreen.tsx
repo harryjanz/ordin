@@ -1,6 +1,10 @@
 import { useState, FormEvent } from "react";
+import { Monitor } from "lucide-react";
 import type { Theme } from "../themes";
-import { RADIUS, FONT } from "../scale";
+import { FONT } from "../scale";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 const STORAGE_KEY = "ordin_terminal_id";
 
@@ -22,83 +26,46 @@ export default function DeviceSetupScreen({ T, onDone }: Props) {
   }
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: T.radial,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-    }}>
-      <div style={{
-        background: T.surface,
-        border: `1px solid ${T.border}`,
-        borderRadius: RADIUS.lg,
-        padding: "40px 48px",
-        width: 360,
-        boxShadow: "0 8px 40px rgba(153,0,255,0.12)",
-        textAlign: "center",
-      }}>
-        <div style={{ fontSize: FONT.headlineLg, marginBottom: 16 }}>🖥️</div>
-        <h2 style={{ color: T.text, fontSize: FONT.subtitle, fontWeight: 800, marginBottom: 8 }}>
-          Configuração do Dispositivo
-        </h2>
-        <p style={{ color: T.muted, fontSize: FONT.body, marginBottom: 28 }}>
-          Informe o ID do terminal configurado no Admin Panel.
-          Esta tela aparece apenas na primeira vez.
-        </p>
-        {error && (
-          <div style={{
-            color: T.errorText,
-            background: T.errorBg,
-            borderRadius: RADIUS.sm,
-            padding: "8px 12px",
-            fontSize: FONT.body,
-            marginBottom: 16,
-          }}>
-            {error}
-          </div>
-        )}
-        <form onSubmit={handleSubmit}>
-          <input
-            type="number"
-            min="1"
-            placeholder="ID do terminal (ex: 1)"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            autoFocus
-            style={{
-              width: "100%",
-              padding: "12px 16px",
-              background: T.numBg,
-              border: `1px solid ${T.border}`,
-              borderRadius: RADIUS.sm,
-              color: T.text,
-              fontSize: FONT.subtitle,
-              textAlign: "center",
-              outline: "none",
-              marginBottom: 16,
-            }}
-          />
-          <button
-            type="submit"
-            style={{
-              width: "100%",
-              padding: "16px",
-              background: T.btn,
-              color: T.btnText,
-              border: "none",
-              borderRadius: RADIUS.sm,
-              fontSize: FONT.bodyLg,
-              fontWeight: 700,
-              cursor: "pointer",
-              boxShadow: T.glow,
-            }}
-          >
-            Salvar e continuar
-          </button>
-        </form>
-      </div>
+    <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: T.radial }}>
+      <Card className="text-center" style={{ width: 360, boxShadow: "0 8px 40px rgba(153,0,255,0.12)" }}>
+        <CardContent>
+          <Monitor className="mx-auto mb-4" size={FONT.headlineLg} color={T.roxo} />
+          <h2 className="mb-2" style={{ color: T.text, fontSize: FONT.subtitle, fontWeight: 800 }}>
+            Configuração do Dispositivo
+          </h2>
+          <p className="mb-7" style={{ color: T.muted, fontSize: FONT.body }}>
+            Informe o ID do terminal configurado no Admin Panel.
+            Esta tela aparece apenas na primeira vez.
+          </p>
+          {error && (
+            <div
+              className="rounded-lg mb-4"
+              style={{ color: T.errorText, background: T.errorBg, padding: "8px 12px", fontSize: FONT.body }}
+            >
+              {error}
+            </div>
+          )}
+          <form onSubmit={handleSubmit}>
+            <Input
+              type="number"
+              min={1}
+              placeholder="ID do terminal (ex: 1)"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              autoFocus
+              className="mb-4 text-center"
+              style={{ height: "auto", padding: "12px 16px", background: T.numBg, color: T.text, fontSize: FONT.subtitle }}
+            />
+            <Button
+              type="submit"
+              className="w-full rounded-lg"
+              style={{ padding: 16, background: T.btn, color: T.btnText, fontSize: FONT.bodyLg, fontWeight: 700, boxShadow: T.glow }}
+            >
+              Salvar e continuar
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -244,6 +244,19 @@ class ComboItem(Base):
     # ex: burger indica o combo, refrigerante (item genérico) não.
     triggers_upsell = Column(Boolean, nullable=False, default=True)
 
+class RelatedProduct(Base):
+    """Produto correlacionado (ORD-160) — cross-sell sem combo, unidirecional
+    (A→B não implica B→A). Sem company_id próprio — isolamento via join com
+    Product nos dois lados, mesmo padrão de ComboItem/ProductAllergen,
+    validado na escrita em _set_product_related. Sem `deleted` própria: a
+    associação em si nunca é excluída automaticamente, só o produto do lado
+    `related_product_id` pode ficar inativo/excluído, escondendo-a da oferta
+    ao cliente sem apagar a linha (ver _get_product_related)."""
+    __tablename__ = "related_products"
+    product_id         = Column(Integer, ForeignKey("products.id"), primary_key=True)
+    related_product_id = Column(Integer, ForeignKey("products.id"), primary_key=True)
+    sort_order          = Column(Integer)
+
 class Menu(Base):
     """Cardápio por horário (ORD-124/125) — dias da semana + janela de
     horário únicos por cardápio (múltiplas janelas por dia ficaram pra v2,
@@ -297,6 +310,53 @@ async def _set_product_allergens(db: AsyncSession, product_id: int, allergen_ids
     await db.execute(delete(ProductAllergen).where(ProductAllergen.product_id == product_id))
     for allergen_id in unique_ids:
         db.add(ProductAllergen(product_id=product_id, allergen_id=allergen_id))
+
+async def _get_product_related(db: AsyncSession, product_id: int) -> list[dict]:
+    """Devolve a relação inteira, incluindo produtos inativos — a associação
+    nunca é escondida (admin precisa continuar vendo e gerenciando o par
+    mesmo com o correlacionado desativado). Filtra só `deleted`, que é
+    irreversível e já é escondido em todo o resto do catálogo. Quem decide
+    esconder o inativo da oferta ao cliente é o consumidor do dado (totem),
+    olhando o campo `active` de cada item — mesmo padrão de option_groups/
+    options (endpoint devolve tudo, totem filtra active no client)."""
+    result = await db.execute(
+        select(Product)
+        .join(RelatedProduct, RelatedProduct.related_product_id == Product.id)
+        .filter(RelatedProduct.product_id == product_id, Product.deleted == False)
+        .order_by(RelatedProduct.sort_order)
+    )
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "price": float(r.price),
+            "image_url": presigned_download_url(r.image_url) if r.image_url else None,
+            "active": r.active,
+            # ORD-160 (correção pós-QA manual): sem isso o totem adicionava o
+            # produto sugerido direto ao carrinho, pulando a escolha de opção
+            # obrigatória (ex.: sabor) quando o correlacionado tinha grupo de
+            # opção vinculado — mesmo dado que ProductOut já expõe.
+            "option_groups": await _get_product_option_groups(db, r.id),
+        }
+        for r in result.scalars().all()
+    ]
+
+async def _set_product_related(db: AsyncSession, company_id: int, product_id: int, related_ids: list[int]) -> None:
+    if product_id in related_ids:
+        raise HTTPException(400, detail="Produto não pode ser correlacionado a si mesmo")
+    unique_ids = list(dict.fromkeys(related_ids))  # dedup preservando ordem (vira sort_order)
+    if unique_ids:
+        result = await db.execute(
+            select(Product.id).filter(
+                Product.id.in_(unique_ids), Product.company_id == company_id, Product.deleted == False
+            )
+        )
+        found_ids = set(result.scalars().all())
+        if found_ids != set(unique_ids):
+            raise HTTPException(400, detail="related_product_ids contém id que não existe ou não pertence à empresa")
+    await db.execute(delete(RelatedProduct).where(RelatedProduct.product_id == product_id))
+    for index, related_id in enumerate(unique_ids):
+        db.add(RelatedProduct(product_id=product_id, related_product_id=related_id, sort_order=index))
 
 async def _get_option_allergens(db: AsyncSession, option_id: int) -> list[dict]:
     result = await db.execute(
@@ -685,6 +745,7 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "sort_order": p.sort_order,
         "allergens": await _get_product_allergens(db, p.id),
         "option_groups": await _get_product_option_groups(db, p.id),
+        "related_products": await _get_product_related(db, p.id),
     }
 
 # ── Response schemas ──────────────────────────────────────────────────────────
@@ -826,6 +887,20 @@ class ComboSummaryOut(BaseModel):
     id: int
     name: str
 
+class RelatedProductOut(BaseModel):
+    id: int
+    name: str
+    price: float
+    image_url: str | None = None
+    # ORD-160: relação nunca é escondida — é este campo que o totem usa pra
+    # decidir se oferece ou não (filtro fica no client, mesmo padrão de
+    # option_groups/options), não uma ausência na lista.
+    active: bool
+    # ORD-160 (correção pós-QA manual): sem isso o totem não sabia que o
+    # produto sugerido tinha opção obrigatória (ex.: sabor) e adicionava
+    # direto ao carrinho, pulando a escolha.
+    option_groups: list[ProductOptionGroupOut] = []
+
 class ProductOut(BaseModel):
     id: int
     category_id: int | None = None
@@ -846,6 +921,8 @@ class ProductOut(BaseModel):
     # demais endpoints que retornam ProductOut (list/get/create) deixam no
     # default vazio, sem custo de consulta extra.
     inactive_combos: list[ComboSummaryOut] = []
+    # ORD-160: sempre populado (list/get/create/update) — inclui inativos.
+    related_products: list[RelatedProductOut] = []
 
 class ProductListOut(BaseModel):
     products: list[ProductOut]
@@ -879,6 +956,9 @@ class ProductUpdate(BaseModel):
     calories: int | None = None
     sku: str | None = None
     allergen_ids: list[int] | None = None
+    # ORD-160: replace completo, mesma semântica de allergen_ids. Só na
+    # edição (Explorer não cobre cadastrar correlação já na criação).
+    related_product_ids: list[int] | None = None
     # ORD-151: precisa vir True pra confirmar a desativação em cascata dos
     # combos ativos vinculados — ver update_product().
     confirm_deactivate_combos: bool | None = None
@@ -1379,7 +1459,7 @@ async def update_product(
         )
 
     for field, value in body.model_dump(
-        exclude_none=True, exclude={"allergen_ids", "confirm_deactivate_combos"}
+        exclude_none=True, exclude={"allergen_ids", "related_product_ids", "confirm_deactivate_combos"}
     ).items():
         setattr(p, field, value)
     await _cascade_deactivate_combos(db, affected_combos)
@@ -1390,6 +1470,9 @@ async def update_product(
         raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
     if body.allergen_ids is not None:
         await _set_product_allergens(db, p.id, body.allergen_ids)
+        await db.commit()
+    if body.related_product_ids is not None:
+        await _set_product_related(db, company_id, p.id, body.related_product_ids)
         await db.commit()
     await db.refresh(p)
     out = await _serialize_product(db, p)

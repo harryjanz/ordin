@@ -165,6 +165,62 @@
   gap: 6px;
 }
 
+// ── Produtos correlacionados (ORD-160) ─────────────────────────────────────
+
+// Mesmo padrão de ComboFormScreen (.searchRow/.searchRowField) — grid fixo
+// pro Dropdown de categoria (200px) em vez de flex, com align-items: end
+// pra alinhar a base do input de texto com a do dropdown sem label.
+.relatedSearchRow {
+  display: grid;
+  grid-template-columns: 1fr 200px;
+  gap: 12px;
+  align-items: end;
+}
+
+.relatedSearchRowField {
+  min-width: 0;
+}
+
+.relatedSearchResults {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.relatedRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(var(--a-text-rgb), 0.02);
+  border: 1px solid var(--a-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.relatedRowInfo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mutedText {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.6);
+}
+
+.removeBtn {
+  background: none;
+  border: none;
+  color: var(--error-base);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px;
+}
+
 // Modal "Vincular grupo de opção" — mesmo padrão de CatalogScreen (.modalForm)
 .modalForm {
   display: flex;

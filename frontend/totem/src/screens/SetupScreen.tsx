@@ -1,10 +1,15 @@
 import { useState } from "react";
 import axios from "axios";
+import { Monitor, CheckCircle2, AlertTriangle, ArrowLeft } from "lucide-react";
 import type { Theme } from "../themes";
 import type { CompanyInfo, TerminalInfo, AvailableTerminal } from "../types";
-import { RADIUS, FONT } from "../scale";
+import { FONT } from "../scale";
 import { OrdinSymbol } from "../assets/OrdinSymbol";
 import DevicePairingScreen from "./DevicePairingScreen";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Spinner } from "@/components/ui/spinner";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -19,11 +24,12 @@ interface Props {
 
 function Numpad({ onPress, onDel, T }: { onPress: (v: string) => void; onDel: () => void; T: Theme }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+    <div className="grid grid-cols-3 gap-2">
       {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((k, i) => (
         <button
           key={i}
           onClick={() => k === "⌫" ? onDel() : k !== "" ? onPress(String(k)) : undefined}
+          className="rounded-lg"
           style={{
             padding: "24px 0",
             fontSize: FONT.subtitle,
@@ -31,7 +37,6 @@ function Numpad({ onPress, onDel, T }: { onPress: (v: string) => void; onDel: ()
             background: k === "" ? "transparent" : T.numBg,
             color: T.text,
             border: `1px solid ${k === "" ? "transparent" : T.border}`,
-            borderRadius: RADIUS.sm,
             cursor: k === "" ? "default" : "pointer",
           }}
         >
@@ -152,24 +157,6 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  const wrap: React.CSSProperties = {
-    minHeight: "100vh",
-    background: T.radial,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-  };
-
-  const card: React.CSSProperties = {
-    background: T.surface,
-    border: `1px solid ${T.border}`,
-    borderRadius: RADIUS.lg,
-    padding: 32,
-    width: 360,
-    boxShadow: "0 8px 40px rgba(153,0,255,0.12)",
-  };
-
   // Etapa 0 — Pareamento por código/QR
   if (step === "pairing") {
     return (
@@ -184,53 +171,44 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
   // Etapa 1 — PIN (fallback)
   if (step === "pin") {
     return (
-      <div style={wrap}>
-        <div style={{ marginBottom: 32, textAlign: "center" }}>
-          <div style={{ margin: "0 auto 16px", display: "flex", justifyContent: "center" }}>
+      <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: T.radial }}>
+        <div className="mb-8 text-center">
+          <div className="flex justify-center mb-4">
             <OrdinSymbol size={56} color="#9900ff" />
           </div>
           <div style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.title, color: "#9900ff", letterSpacing: "-0.5px" }}>ordin</div>
-          <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body, marginTop: 8 }}>Digite o PIN da empresa para começar</p>
+          <p className="mt-2" style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body }}>Digite o PIN da empresa para começar</p>
         </div>
-        <div style={card}>
-          <div style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: 16,
-            marginBottom: 24,
-            animation: shake ? "shake 0.4s" : "none",
-          }}>
-            {[0,1,2,3,4,5].map((i) => (
-              <div key={i} style={{
-                width: 16,
-                height: 16,
-                borderRadius: "50%",
-                background: pin.length > i ? T.roxo : T.border,
-                transition: "background 0.15s",
-                boxShadow: pin.length > i ? `0 0 10px ${T.roxo}` : "none",
-              }} />
-            ))}
-          </div>
-          {pinError && (
-            <p style={{ color: T.errorText, textAlign: "center", fontSize: FONT.body, marginBottom: 16 }}>
-              {pinError}
-            </p>
-          )}
-          {pinLoading ? (
-            <div style={{ textAlign: "center", padding: "24px 0" }}>
-              <div style={{
-                width: 40, height: 40,
-                border: `4px solid ${T.border}`,
-                borderTop: `4px solid ${T.roxo}`,
-                borderRadius: "50%",
-                animation: "spin 0.8s linear infinite",
-                margin: "0 auto",
-              }} />
+        <Card style={{ width: 360, boxShadow: "0 8px 40px rgba(153,0,255,0.12)" }}>
+          <CardContent>
+            <div className="flex justify-center gap-4 mb-6" style={{ animation: shake ? "shake 0.4s" : "none" }}>
+              {[0,1,2,3,4,5].map((i) => (
+                <div
+                  key={i}
+                  className="rounded-full"
+                  style={{
+                    width: 16, height: 16,
+                    background: pin.length > i ? T.roxo : T.border,
+                    transition: "background 0.15s",
+                    boxShadow: pin.length > i ? `0 0 10px ${T.roxo}` : "none",
+                  }}
+                />
+              ))}
             </div>
-          ) : (
-            <Numpad onPress={pressPin} onDel={() => { if (!blocked) setPin((p) => p.slice(0, -1)); }} T={T} />
-          )}
-        </div>
+            {pinError && (
+              <p className="text-center mb-4" style={{ color: T.errorText, fontSize: FONT.body }}>
+                {pinError}
+              </p>
+            )}
+            {pinLoading ? (
+              <div className="text-center" style={{ padding: "24px 0" }}>
+                <Spinner className="mx-auto size-10" style={{ color: T.roxo }} />
+              </div>
+            ) : (
+              <Numpad onPress={pressPin} onDel={() => { if (!blocked) setPin((p) => p.slice(0, -1)); }} T={T} />
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -238,175 +216,152 @@ export default function SetupScreen({ T, savedTerminalId, onDone }: Props) {
   // Etapa 2 — Selecionar terminal
   if (step === "terminal") {
     return (
-      <div style={wrap}>
-        <div style={{ ...card, width: 420 }}>
-          <div style={{ textAlign: "center", marginBottom: 24 }}>
-            <div style={{ fontSize: FONT.headline, marginBottom: 8 }}>🖥️</div>
-            <h2 style={{ fontFamily: FONT_D, color: T.text, fontSize: FONT.subtitle, fontWeight: 800, margin: 0 }}>
-              {company?.name}
-            </h2>
-            <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body, marginTop: 8 }}>
-              Selecione o terminal desta máquina
-            </p>
-          </div>
-
-          {terminalError && (
-            <div style={{
-              color: T.errorText, background: T.errorBg, borderRadius: RADIUS.sm,
-              padding: "8px 16px", fontSize: FONT.body, marginBottom: 16, textAlign: "center",
-            }}>
-              {terminalError}
-            </div>
-          )}
-
-          {terminals.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "24px 0" }}>
-              <p style={{ color: T.muted, fontSize: FONT.body, marginBottom: 16 }}>
-                Nenhum terminal disponível.<br/>
-                Verifique no Admin Panel se há terminais ativos.
+      <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: T.radial }}>
+        <Card style={{ width: 420, boxShadow: "0 8px 40px rgba(153,0,255,0.12)" }}>
+          <CardContent>
+            <div className="text-center mb-6">
+              <Monitor className="mx-auto mb-2" size={FONT.headline} color={T.roxo} />
+              <h2 style={{ fontFamily: FONT_D, color: T.text, fontSize: FONT.subtitle, fontWeight: 800 }}>
+                {company?.name}
+              </h2>
+              <p className="mt-2" style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body }}>
+                Selecione o terminal desta máquina
               </p>
-              <button
-                onClick={() => { setStep("pin"); setPin(""); setPinError(""); }}
-                style={{
-                  padding: "16px 24px", background: T.btn, color: T.btnText,
-                  border: "none", borderRadius: RADIUS.pill, fontFamily: FONT_D, fontSize: FONT.body, fontWeight: 700, cursor: "pointer",
-                  boxShadow: T.glow,
-                }}
-              >
-                Tentar novamente
-              </button>
             </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {terminals.map((t) => {
-                const isSaved = t.id === savedTerminalId;
-                return (
-                  <button
-                    key={t.id}
-                    disabled={terminalLoading}
-                    onClick={() => selectTerminal(t)}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 16,
-                      padding: 16,
-                      background: isSaved ? `${T.roxo}22` : T.numBg,
-                      border: `1px solid ${isSaved ? T.roxo : T.border}`,
-                      borderRadius: RADIUS.sm,
-                      color: T.text,
-                      cursor: terminalLoading ? "not-allowed" : "pointer",
-                      textAlign: "left",
-                      width: "100%",
-                    }}
-                  >
-                    <div style={{
-                      width: 36, height: 36, borderRadius: RADIUS.sm,
-                      background: `${T.roxo}33`,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: FONT.subtitle, flexShrink: 0,
-                    }}>
-                      🖥️
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: FONT.bodyLg }}>{t.label}</div>
-                      <div style={{ fontSize: FONT.label, color: T.muted, marginTop: 4 }}>
-                        {t.terminal_code && `Cód: ${t.terminal_code}`}
-                        {t.tef_number && ` · TEF: ${t.tef_number}`}
-                      </div>
-                    </div>
-                    {isSaved && (
-                      <span style={{
-                        fontSize: FONT.caption, fontWeight: 700, padding: "4px 8px",
-                        borderRadius: RADIUS.pill, background: `${T.roxo}33`, color: T.roxo,
-                      }}>
-                        ÚLTIMO
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
 
-          <button
-            onClick={() => { setStep("pin"); setPin(""); setPinError(""); }}
-            style={{
-              marginTop: 24, width: "100%", padding: 16,
-              background: "transparent", border: `1px solid ${T.borderNeutral}`,
-              borderRadius: RADIUS.pill, fontFamily: FONT_D, color: T.muted, fontSize: FONT.body, fontWeight: 600, cursor: "pointer",
-            }}
-          >
-            ← Voltar
-          </button>
-        </div>
+            {terminalError && (
+              <div
+                className="text-center rounded-lg mb-4"
+                style={{ color: T.errorText, background: T.errorBg, padding: "8px 16px", fontSize: FONT.body }}
+              >
+                {terminalError}
+              </div>
+            )}
+
+            {terminals.length === 0 ? (
+              <div className="text-center" style={{ padding: "24px 0" }}>
+                <p className="mb-4" style={{ color: T.muted, fontSize: FONT.body }}>
+                  Nenhum terminal disponível.<br/>
+                  Verifique no Admin Panel se há terminais ativos.
+                </p>
+                <Button
+                  onClick={() => { setStep("pin"); setPin(""); setPinError(""); }}
+                  className="rounded-full"
+                  style={{ padding: "16px 24px", background: T.btn, color: T.btnText, fontFamily: FONT_D, fontSize: FONT.body, fontWeight: 700, boxShadow: T.glow }}
+                >
+                  Tentar novamente
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {terminals.map((t) => {
+                  const isSaved = t.id === savedTerminalId;
+                  return (
+                    <button
+                      key={t.id}
+                      disabled={terminalLoading}
+                      onClick={() => selectTerminal(t)}
+                      className="flex items-center gap-4 rounded-lg w-full text-left"
+                      style={{
+                        padding: 16,
+                        background: isSaved ? `${T.roxo}22` : T.numBg,
+                        border: `1px solid ${isSaved ? T.roxo : T.border}`,
+                        color: T.text,
+                        cursor: terminalLoading ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      <div
+                        className="rounded-lg flex items-center justify-center shrink-0"
+                        style={{ width: 36, height: 36, background: `${T.roxo}33` }}
+                      >
+                        <Monitor size={18} color={T.roxo} />
+                      </div>
+                      <div className="flex-1">
+                        <div style={{ fontWeight: 700, fontSize: FONT.bodyLg }}>{t.label}</div>
+                        <div className="mt-1" style={{ fontSize: FONT.label, color: T.muted }}>
+                          {t.terminal_code && `Cód: ${t.terminal_code}`}
+                          {t.tef_number && ` · TEF: ${t.tef_number}`}
+                        </div>
+                      </div>
+                      {isSaved && (
+                        <Badge style={{ background: `${T.roxo}33`, color: T.roxo }}>
+                          ÚLTIMO
+                        </Badge>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <Button
+              variant="outline"
+              onClick={() => { setStep("pin"); setPin(""); setPinError(""); }}
+              className="mt-6 w-full rounded-full"
+              style={{ padding: 16, fontFamily: FONT_D, color: T.muted, fontSize: FONT.body, fontWeight: 600 }}
+            >
+              <ArrowLeft className="size-4" /> Voltar
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   // Etapa 3 — Teste de conexão
   return (
-    <div style={wrap}>
-      <div style={{ ...card, textAlign: "center" }}>
-        {testSuccess === null && (
-          <>
-            <div style={{
-              width: 48, height: 48,
-              border: `4px solid ${T.border}`,
-              borderTop: `4px solid ${T.roxo}`,
-              borderRadius: "50%",
-              animation: "spin 0.8s linear infinite",
-              margin: "0 auto 16px",
-            }} />
-            <h2 style={{ color: T.text, fontSize: FONT.subtitle, fontWeight: 700, margin: "0 0 8px" }}>
-              Testando conexão
-            </h2>
-            <p style={{ color: T.muted, fontSize: FONT.body, margin: 0 }}>{testDetail}</p>
-          </>
-        )}
+    <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: T.radial }}>
+      <Card className="text-center" style={{ boxShadow: "0 8px 40px rgba(153,0,255,0.12)" }}>
+        <CardContent>
+          {testSuccess === null && (
+            <>
+              <Spinner className="mx-auto mb-4 size-12" style={{ color: T.roxo }} />
+              <h2 className="mb-2" style={{ color: T.text, fontSize: FONT.subtitle, fontWeight: 700 }}>
+                Testando conexão
+              </h2>
+              <p style={{ color: T.muted, fontSize: FONT.body }}>{testDetail}</p>
+            </>
+          )}
 
-        {testSuccess === true && (
-          <>
-            <div style={{ fontSize: FONT.headlineLg, marginBottom: 16 }}>✅</div>
-            <h2 style={{ fontFamily: FONT_D, color: T.priceColor, fontSize: FONT.subtitle, fontWeight: 800, margin: "0 0 8px" }}>
-              Máquina OK!
-            </h2>
-            <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body }}>{testDetail}</p>
-            <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label, marginTop: 8 }}>Iniciando…</p>
-          </>
-        )}
+          {testSuccess === true && (
+            <>
+              <CheckCircle2 className="mx-auto mb-4" size={FONT.headlineLg} color={T.priceColor} />
+              <h2 className="mb-2" style={{ fontFamily: FONT_D, color: T.priceColor, fontSize: FONT.subtitle, fontWeight: 800 }}>
+                Máquina OK!
+              </h2>
+              <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body }}>{testDetail}</p>
+              <p className="mt-2" style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.label }}>Iniciando…</p>
+            </>
+          )}
 
-        {testSuccess === false && (
-          <>
-            <div style={{ fontSize: FONT.headlineLg, marginBottom: 16 }}>⚠️</div>
-            <h2 style={{ fontFamily: FONT_D, color: T.errorText, fontSize: FONT.subtitle, fontWeight: 700, margin: "0 0 8px" }}>
-              Falha na conexão
-            </h2>
-            <p style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body, marginBottom: 24 }}>{testDetail}</p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-              <button
-                onClick={retryTest}
-                style={{
-                  padding: "12px 24px", background: T.btn, color: T.btnText,
-                  border: "none", borderRadius: RADIUS.pill, fontFamily: FONT_D, fontSize: FONT.body, fontWeight: 700, cursor: "pointer",
-                  boxShadow: T.glow,
-                }}
-              >
-                Tentar novamente
-              </button>
-              <button
-                onClick={backToTerminals}
-                style={{
-                  padding: "12px 24px", background: "transparent",
-                  border: `1px solid ${T.borderNeutral}`, borderRadius: RADIUS.pill,
-                  fontFamily: FONT_D, color: T.muted, fontSize: FONT.body, fontWeight: 600, cursor: "pointer",
-                }}
-              >
-                Outro terminal
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+          {testSuccess === false && (
+            <>
+              <AlertTriangle className="mx-auto mb-4" size={FONT.headlineLg} color={T.errorText} />
+              <h2 className="mb-2" style={{ fontFamily: FONT_D, color: T.errorText, fontSize: FONT.subtitle, fontWeight: 700 }}>
+                Falha na conexão
+              </h2>
+              <p className="mb-6" style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.body }}>{testDetail}</p>
+              <div className="flex gap-2 justify-center">
+                <Button
+                  onClick={retryTest}
+                  className="rounded-full"
+                  style={{ padding: "12px 24px", background: T.btn, color: T.btnText, fontFamily: FONT_D, fontSize: FONT.body, fontWeight: 700, boxShadow: T.glow }}
+                >
+                  Tentar novamente
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={backToTerminals}
+                  className="rounded-full"
+                  style={{ padding: "12px 24px", fontFamily: FONT_D, color: T.muted, fontSize: FONT.body, fontWeight: 600 }}
+                >
+                  Outro terminal
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

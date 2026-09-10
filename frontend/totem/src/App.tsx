@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import api from "./api";
 import { useStore } from "./store";
 import { resolveTheme } from "./themes";
+import { applyShadcnThemeBridge } from "./lib/shadcnThemeBridge";
 import SetupScreen from "./screens/SetupScreen";
 import { getStoredTerminalId } from "./screens/DeviceSetupScreen";
 import WelcomeScreen from "./screens/WelcomeScreen";
@@ -61,6 +62,9 @@ export default function App() {
     company?.visual_theme ?? "ordin",
     company?.visual_mode  ?? "light",
   );
+  // EXPERIMENTO totem-shadcn-react-aria — sincroniza as CSS vars do
+  // shadcn/Tailwind com o mesmo T que os componentes inline-style já usam.
+  useEffect(() => { applyShadcnThemeBridge(T); }, [T]);
 
   const savedTerminalId = getStoredTerminalId();
   const [orderRef, setOrderRef] = useState<string | null>(null);

@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
-import { CreditCard, XCircle } from "lucide-react";
+import { CreditCard, XCircle, ArrowLeft } from "lucide-react";
 import { PixLogo } from "../assets/PixLogo";
 import api from "../api";
 import type { Theme } from "../themes";
 import type { CartItem, CompletedOrder } from "../types";
-import { RADIUS, FONT } from "../scale";
+import { FONT } from "../scale";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const CARD_TIMEOUT_S = 90;
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
 
@@ -23,13 +26,13 @@ function DebitCardIcon({ size, color }: { size: number; color: string }) {
 
 function DotsAnimation({ T }: { T: Theme }) {
   return (
-    <div style={{ display: "flex", gap: 16 }}>
+    <div className="flex gap-4">
       {[0, 1, 2].map((i) => (
-        <div key={i} style={{
-          width: 14, height: 14, borderRadius: "50%",
-          background: T.text, opacity: 0.35,
-          animation: `pulse 1.4s ease-in-out ${i * 0.28}s infinite`,
-        }} />
+        <div
+          key={i}
+          className="rounded-full"
+          style={{ width: 14, height: 14, background: T.text, opacity: 0.35, animation: `pulse 1.4s ease-in-out ${i * 0.28}s infinite` }}
+        />
       ))}
     </div>
   );
@@ -39,48 +42,45 @@ function CardProcessingView({ T, countdown, error, onRetry, onCancel, showMpHint
   T: Theme; countdown: number; error: string; onRetry: () => void; onCancel: () => void; showMpHint: boolean;
 }) {
   return (
-    <div style={{
-      height: "100vh", background: T.radial,
-      display: "flex", flexDirection: "column",
-      transition: "background 0.3s",
-    }}>
+    <div className="h-screen flex flex-col" style={{ background: T.radial, transition: "background 0.3s" }}>
       {/* Conteúdo central */}
-      <div style={{
-        flex: 1, display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center",
-        gap: 32, textAlign: "center", padding: "0 40px",
-      }}>
+      <div className="flex-1 flex flex-col items-center justify-center gap-8 text-center px-10">
         {error ? (
           <>
             <XCircle size={160} color={T.errorText} strokeWidth={1.2} />
-            <p style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 700, margin: 0 }}>
+            <p style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 700 }}>
               {error}
             </p>
-            <button onClick={onRetry} style={{
-              padding: "0 56px", height: 88,
-              background: T.btn, color: T.btnText, border: "none",
-              borderRadius: RADIUS.sm, fontFamily: FONT_D, fontSize: FONT.subtitle,
-              fontWeight: 800, cursor: "pointer", boxShadow: T.glow,
-              textTransform: "uppercase", letterSpacing: 1,
-            }}>
+            <Button
+              onClick={onRetry}
+              className="rounded-lg uppercase tracking-wide"
+              style={{ minHeight: 88, paddingLeft: 56, paddingRight: 56, background: T.btn, color: T.btnText, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 800, boxShadow: T.glow }}
+            >
               Tentar novamente
-            </button>
+            </Button>
           </>
         ) : (
           <>
             <CreditCard size={180} color={T.text} strokeWidth={1.2} />
-            <p style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 600, margin: 0 }}>
+            <p style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 600 }}>
               Insira ou aproxime o cartão
             </p>
             <DotsAnimation T={T} />
-            <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.3, margin: 0 }}>
-              Aguardando terminal… {countdown}s
-            </p>
+            <div style={{ width: "min(320px, 80vw)" }}>
+              <p className="mb-2" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.5 }}>
+                Aguardando terminal… {countdown}s
+              </p>
+              <Progress
+                value={countdown}
+                minValue={0}
+                maxValue={CARD_TIMEOUT_S}
+                aria-label="Tempo restante pra inserir o cartão"
+                className="[&_[data-slot=progress-track]]:h-2"
+                style={{ ["--primary" as string]: T.roxo }}
+              />
+            </div>
             {showMpHint && (
-              <p style={{
-                color: T.text, fontFamily: FONT_B, fontSize: FONT.body,
-                fontWeight: 700, margin: 0, opacity: 0.85,
-              }}>
+              <p style={{ color: T.text, fontFamily: FONT_B, fontSize: FONT.body, fontWeight: 700, opacity: 0.85 }}>
                 Se a maquininha não atualizar sozinha, toque em "Atualizar" na tela dela.
               </p>
             )}
@@ -90,15 +90,14 @@ function CardProcessingView({ T, countdown, error, onRetry, onCancel, showMpHint
 
       {/* Barra inferior com Voltar */}
       <div style={{ padding: "12px 24px 28px" }}>
-        <button onClick={onCancel} style={{
-          padding: "0 28px", height: 88, flexShrink: 0,
-          background: T.surface, border: `1.5px solid ${T.border}`,
-          borderRadius: RADIUS.sm, color: T.text, cursor: "pointer",
-          fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700,
-          textTransform: "uppercase", letterSpacing: 1,
-        }}>
-          ← Voltar
-        </button>
+        <Button
+          variant="outline"
+          onClick={onCancel}
+          className="shrink-0 rounded-lg uppercase tracking-wide"
+          style={{ minHeight: 88, paddingLeft: 28, paddingRight: 28, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700 }}
+        >
+          <ArrowLeft className="size-4" /> Voltar
+        </Button>
       </div>
     </div>
   );
@@ -126,7 +125,7 @@ interface Props {
 export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentProvider, onSuccess, onRefused, onPix, onBack }: Props) {
   const [method, setMethod] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [countdown, setCountdown] = useState(90);
+  const [countdown, setCountdown] = useState(CARD_TIMEOUT_S);
   const [error, setError] = useState("");
   const [idleCountdown, setIdleCountdown] = useState(60);
 
@@ -138,17 +137,24 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentPr
   useEffect(() => {
     if (processing) return;
     setIdleCountdown(60);
-    const t = setInterval(() => {
-      setIdleCountdown((c) => { if (c <= 1) { clearInterval(t); onBack(); } return c - 1; });
-    }, 1000);
-    return () => clearInterval(t);
   }, [processing]);
+
+  // onBack() troca a tela no store do App — mesma correção do SuccessScreen:
+  // efeito separado reagindo a idleCountdown<=0 em vez de chamar dentro do
+  // updater do setIdleCountdown (evita "Cannot update a component while
+  // rendering a different component").
+  useEffect(() => {
+    if (processing) return;
+    if (idleCountdown <= 0) { onBack(); return; }
+    const t = setTimeout(() => setIdleCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [processing, idleCountdown, onBack]);
 
   async function pay() {
     if (!method) return;
     setProcessing(true);
     setError("");
-    setCountdown(90);
+    setCountdown(CARD_TIMEOUT_S);
     const timer = setInterval(() => setCountdown((c) => c - 1), 1000);
 
     // Para cartão: aguarda no mínimo 10s na tela de processamento (cobre mock instantâneo)
@@ -184,7 +190,7 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentPr
     }
   }
 
-  function handleRetry() { setProcessing(false); setError(""); setMethod(null); setCountdown(90); }
+  function handleRetry() { setProcessing(false); setError(""); setMethod(null); setCountdown(CARD_TIMEOUT_S); }
 
   if (processing && method !== "pix") {
     return (
@@ -205,29 +211,27 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentPr
   };
 
   return (
-    <div style={{
-      minHeight: "100vh", background: T.radial,
-      display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
-      transition: "background 0.3s", padding: "32px 0 24px",
-    }}>
-      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 28 }}>
+    <div
+      className="min-h-screen flex flex-col items-center justify-center pt-8 pb-6"
+      style={{ background: T.radial, transition: "background 0.3s" }}
+    >
+      <div className="flex flex-col gap-7" style={{ width: "min(680px, 92vw)" }}>
 
         {/* Título */}
-        <div style={{ textAlign: "center" }}>
-          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800, margin: "0 0 8px" }}>
+        <div className="text-center">
+          <h2 className="mb-2" style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800 }}>
             Formas de Pagamento
           </h2>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle }}>
             Selecione qual forma de pagamento deseja utilizar.
           </p>
         </div>
 
         {/* Grid de métodos — mesmo padrão visual do numpad do CPF */}
-        <div style={{ border: `1px solid ${T.border}`, borderRadius: RADIUS.sm, overflow: "hidden" }}>
+        <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${T.border}` }}>
 
           {/* Linha 1: Crédito | Débito */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr" }}>
+          <div className="grid grid-cols-2">
             <button
               onClick={() => setMethod("credit")}
               style={{
@@ -265,10 +269,8 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentPr
           {/* Linha 2: PIX — largura total */}
           <button
             onClick={() => setMethod("pix")}
-            style={{
-              ...CELL, height: 160, width: "100%",
-              background: isSelected("pix") ? T.btn : T.numBg,
-            }}
+            className="w-full"
+            style={{ ...CELL, height: 160, background: isSelected("pix") ? T.btn : T.numBg }}
             onMouseEnter={(e) => { if (!isSelected("pix")) e.currentTarget.style.background = T.numHover; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = isSelected("pix") ? T.btn : T.numBg; }}
           >
@@ -280,50 +282,46 @@ export default function PaymentScreen({ T, cart, total, cpf, orderRef, paymentPr
         </div>
 
         {/* Total */}
-        <div style={{
-          padding: "20px 24px",
-          background: T.numBg,
-          border: `1px solid ${T.border}`,
-          borderRadius: RADIUS.sm,
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+        <div className="rounded-lg" style={{ padding: "20px 24px", background: T.numBg, border: `1px solid ${T.border}` }}>
+          <div className="flex justify-between mb-2">
             <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.subtitle }}>Subtotal</span>
             <span style={{ fontFamily: FONT_B, color: T.muted, fontSize: FONT.subtitle }}>{fmt(total)}</span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
+          <div className="flex justify-between">
             <span style={{ fontFamily: FONT_D, color: T.text, fontSize: FONT.subtitle, fontWeight: 800 }}>Total</span>
             <span style={{ fontFamily: FONT_D, color: T.priceColor, fontSize: FONT.subtitle, fontWeight: 800 }}>{fmt(total)}</span>
           </div>
         </div>
 
         {/* Botões: Voltar + Pagar */}
-        <div style={{ display: "flex", gap: 12 }}>
-          <button onClick={onBack} style={{
-            padding: "0 28px", height: 88, flexShrink: 0,
-            background: T.surface, border: `1.5px solid ${T.border}`,
-            borderRadius: RADIUS.sm, color: T.text, cursor: "pointer",
-            fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700,
-            textTransform: "uppercase", letterSpacing: 1, whiteSpace: "nowrap",
-          }}>
-            ← Voltar
-          </button>
-          <button onClick={pay} disabled={!method} style={{
-            flex: 1, height: 88,
-            background: method ? T.btn : T.surface,
-            color: method ? T.btnText : T.muted,
-            border: method ? "none" : `1.5px solid ${T.border}`,
-            borderRadius: RADIUS.sm, fontFamily: FONT_D, fontSize: FONT.subtitle,
-            fontWeight: 800, cursor: method ? "pointer" : "default",
-            boxShadow: method ? T.glow : "none",
-            textTransform: "uppercase", letterSpacing: 1,
-            transition: "all 0.15s",
-          }}>
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
+            onClick={onBack}
+            className="shrink-0 whitespace-nowrap rounded-lg uppercase tracking-wide"
+            style={{ minHeight: 88, paddingLeft: 28, paddingRight: 28, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700 }}
+          >
+            <ArrowLeft className="size-4" /> Voltar
+          </Button>
+          <Button
+            onClick={pay}
+            isDisabled={!method}
+            className="flex-1 rounded-lg uppercase tracking-wide"
+            style={{
+              minHeight: 88,
+              background: method ? T.btn : T.surface,
+              color: method ? T.btnText : T.muted,
+              border: method ? "none" : `1.5px solid ${T.border}`,
+              fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 800,
+              boxShadow: method ? T.glow : "none",
+            }}
+          >
             {method ? `Pagar ${fmt(total)}` : "Selecione uma forma de pagamento"}
-          </button>
+          </Button>
         </div>
 
         {!processing && (
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, textAlign: "center", opacity: 0.35, margin: 0 }}>
+          <p className="text-center" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.35 }}>
             Voltando ao catálogo em {idleCountdown}s…
           </p>
         )}

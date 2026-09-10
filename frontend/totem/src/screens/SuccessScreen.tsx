@@ -7,11 +7,16 @@ import { useStore } from "../store";
 import api from "../api";
 import { silentPrint, splitNameOption, stripComboSuffix } from "../lib/printService";
 import type { PrintMethod } from "../lib/printService";
-import { RADIUS, FONT } from "../scale";
+import { FONT } from "../scale";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Spinner } from "@/components/ui/spinner";
+import { Progress } from "@/components/ui/progress";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtMethod = (m: string) =>
   ({ credit: "Crédito", debit: "Débito", pix: "PIX", voucher: "Voucher" })[m] ?? m.toUpperCase();
+const NEW_ORDER_TIMEOUT_S = 30;
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -234,7 +239,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
   // ORD-118 — "por_item" (padrão) ou "retirada_unica" (ticket compacto, QR único).
   const fulfillmentMode = useStore((s) => s.company?.fulfillment_mode ?? "por_item");
   const compactPrint = fulfillmentMode === "retirada_unica" && !!order.order_qr_data;
-  const [countdown, setCountdown] = useState(30);
+  const [countdown, setCountdown] = useState(NEW_ORDER_TIMEOUT_S);
   const [printMethod, setPrintMethod] = useState<PrintMethod | "pending">("pending");
   // ORD-119 (item 4, análise de concorrentes 2026-08-24) — estimativa de
   // tempo de espera baseada em dado real (GET /orders/prep-stats, últimas
@@ -288,195 +293,167 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       .catch(() => setPrepEstimateMin(null));
   }, [fulfillmentMode]);
 
+  // newOrder() atualiza o store do App (troca `screen`) — chamar direto
+  // dentro do updater do setCountdown dispara "Cannot update a component
+  // while rendering a different component" (React pode invocar o updater
+  // na fase de render). Efeito separado reagindo a countdown<=0 evita isso.
   useEffect(() => {
-    const t = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) { clearInterval(t); newOrder(); }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(t);
-  }, []);
+    if (countdown <= 0) { newOrder(); return; }
+    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [countdown, newOrder]);
 
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: T.bg,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "32px 0 28px",
-    }}>
+    <div className="min-h-screen flex flex-col items-center justify-center pt-8 pb-7" style={{ background: T.bg }}>
       {/* QRs ocultos para extração de SVG */}
-      <div ref={qrContainerRef} style={{ position: "fixed", left: -9999, top: 0, opacity: 0, pointerEvents: "none" }} aria-hidden="true">
+      <div ref={qrContainerRef} className="fixed opacity-0 pointer-events-none" style={{ left: -9999, top: 0 }} aria-hidden="true">
         {order.tickets.map((tk) => (
           <QRCodeSVG key={tk.ticket_code} value={tk.qr_data} size={130} bgColor="#ffffff" fgColor="#000000" level="M" />
         ))}
       </div>
       {order.order_qr_data && (
-        <div ref={orderQrRef} style={{ position: "fixed", left: -9999, top: 0, opacity: 0, pointerEvents: "none" }} aria-hidden="true">
+        <div ref={orderQrRef} className="fixed opacity-0 pointer-events-none" style={{ left: -9999, top: 0 }} aria-hidden="true">
           <QRCodeSVG value={order.order_qr_data} size={150} bgColor="#ffffff" fgColor="#000000" level="M" />
         </div>
       )}
 
-      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", alignItems: "center", gap: 20, textAlign: "center" }}>
+      <div className="flex flex-col items-center gap-5 text-center" style={{ width: "min(680px, 92vw)" }}>
 
         {/* Ícone + título */}
         <CheckCircle2 size={88} color={T.successColor} strokeWidth={1.3} />
-        <h2 style={{ color: T.successColor, fontFamily: FONT_D, fontSize: FONT.headlineLg, fontWeight: 800, margin: 0 }}>
+        <h2 style={{ color: T.successColor, fontFamily: FONT_D, fontSize: FONT.headlineLg, fontWeight: 800 }}>
           Pagamento aprovado!
         </h2>
 
         {/* Número do pedido */}
-        <div style={{ lineHeight: 1 }}>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: "0 0 8px", letterSpacing: 2, textTransform: "uppercase" }}>
+        <div className="leading-none">
+          <p className="mb-2 uppercase tracking-widest" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle }}>
             Número do pedido
           </p>
-          <div style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.hero, lineHeight: 1, color: T.text, letterSpacing: "-2px" }}>
+          <div className="leading-none tracking-tighter" style={{ fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.hero, color: T.text }}>
             {orderNumber}
           </div>
         </div>
 
         {/* Estimativa de tempo — só retirada_unica, só com histórico real */}
         {fulfillmentMode === "retirada_unica" && prepEstimateMin !== null && (
-          <div style={{
-            width: "100%",
-            padding: "14px 24px",
-            background: T.roxoSubtle,
-            border: `1px solid ${T.border}`,
-            borderRadius: RADIUS.sm,
-            textAlign: "center",
-          }}>
-            <p style={{ color: T.text, fontFamily: FONT_B, fontSize: FONT.body, margin: 0 }}>
-              Seu pedido deve ficar pronto em aproximadamente{" "}
-              <strong style={{ color: T.roxo }}>{Math.round(prepEstimateMin)} min</strong>
-              {" "}— acompanhe no painel de retirada
-            </p>
-          </div>
+          <Card className="w-full text-center" style={{ background: T.roxoSubtle, border: `1px solid ${T.border}` }}>
+            <CardContent>
+              <p style={{ color: T.text, fontFamily: FONT_B, fontSize: FONT.body }}>
+                Seu pedido deve ficar pronto em aproximadamente{" "}
+                <strong style={{ color: T.roxo }}>{Math.round(prepEstimateMin)} min</strong>
+                {" "}— acompanhe no painel de retirada
+              </p>
+            </CardContent>
+          </Card>
         )}
 
         {/* Valor em destaque */}
-        <div style={{
-          width: "100%",
-          padding: "20px 28px",
-          background: T.surface,
-          border: `1px solid ${T.border}`,
-          borderRadius: RADIUS.sm,
-        }}>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.bodyLg, margin: "0 0 4px", textTransform: "uppercase", letterSpacing: 1 }}>
-            Valor pago
-          </p>
-          <p style={{ color: T.priceColor, fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.headlineLg, margin: "0 0 12px", lineHeight: 1 }}>
-            {fmt(order.total)}
-          </p>
-          <div style={{ display: "flex", justifyContent: "center", gap: 24, flexWrap: "wrap" }}>
-            <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, fontWeight: 600 }}>
-              {fmtMethod(order.method)}
-            </span>
-            {order.nsu && (
-              <span style={{ color: T.muted, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700 }}>
-                NSU {order.nsu}
+        <Card className="w-full">
+          <CardContent>
+            <p className="mb-1 uppercase tracking-wide" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.bodyLg }}>
+              Valor pago
+            </p>
+            <p className="mb-3 leading-none" style={{ color: T.priceColor, fontFamily: FONT_D, fontWeight: 900, fontSize: FONT.headlineLg }}>
+              {fmt(order.total)}
+            </p>
+            <div className="flex justify-center gap-6 flex-wrap">
+              <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, fontWeight: 600 }}>
+                {fmtMethod(order.method)}
               </span>
-            )}
-            <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.bodyLg, opacity: 0.6 }}>
-              {order.order_ref}
-            </span>
-          </div>
-        </div>
+              {order.nsu && (
+                <span style={{ color: T.muted, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700 }}>
+                  NSU {order.nsu}
+                </span>
+              )}
+              <span style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.bodyLg, opacity: 0.6 }}>
+                {order.order_ref}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Status de impressão */}
-        <div style={{
-          width: "100%",
-          padding: "20px 28px",
-          background: T.surface,
-          border: `1px solid ${T.border}`,
-          borderRadius: RADIUS.sm,
-          textAlign: "center",
-        }}>
-          {printMethod === "pending" && (
-            <>
-              <div style={{
-                width: 36, height: 36,
-                border: `3px solid ${T.border}`,
-                borderTop: `3px solid ${T.roxo}`,
-                borderRadius: "50%", animation: "spin 0.8s linear infinite",
-                margin: "0 auto 12px",
-              }} />
-              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>Enviando para impressora…</p>
-            </>
-          )}
+        <Card className="w-full text-center">
+          <CardContent>
+            {printMethod === "pending" && (
+              <>
+                <Spinner className="mx-auto mb-3 size-9" style={{ color: T.roxo }} />
+                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle }}>Enviando para impressora…</p>
+              </>
+            )}
 
-          {printMethod === "escpos" && (
-            <>
-              <Printer size={36} color={T.successColor} strokeWidth={1.5} style={{ marginBottom: 12 }} />
-              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
-                Ticket impresso!<br />Retire na impressora e apresente no balcão.
-              </p>
-            </>
-          )}
-
-          {printMethod === "browser" && (
-            <>
-              <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 12 }} />
-              {order.provider === "mock" ? (
-                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
-                  Preview aberto — modo mock.<br />
-                  <span style={{ fontSize: FONT.body, opacity: 0.6 }}>Em produção, imprime diretamente na impressora.</span>
+            {printMethod === "escpos" && (
+              <>
+                <Printer size={36} color={T.successColor} strokeWidth={1.5} className="mx-auto mb-3" />
+                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle }}>
+                  Ticket impresso!<br />Retire na impressora e apresente no balcão.
                 </p>
-              ) : (
-                <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
-                  Tickets enviados para impressão!<br />Retire na impressora e apresente no balcão.
-                </p>
-              )}
-            </>
-          )}
+              </>
+            )}
 
-          {printMethod === "blocked" && (
-            <>
-              <Printer size={36} color={T.muted} strokeWidth={1.5} style={{ marginBottom: 12 }} />
-              <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, marginBottom: 16 }}>
-                A impressão foi bloqueada pelo navegador.<br />Toque para imprimir manualmente.
-              </p>
-              <button
-                onClick={async () => {
-                  const svgs = Array.from(qrContainerRef.current?.querySelectorAll("svg") ?? []).map((el) => el.outerHTML);
-                  const orderQrSvg = orderQrRef.current?.querySelector("svg")?.outerHTML ?? "";
-                  const html = buildHtmlForMode(svgs, orderQrSvg);
-                  const w = window.open("", "_blank");
-                  if (w) { w.document.write(html); w.document.close(); setPrintMethod("browser"); }
-                }}
-                style={{
-                  padding: "0 40px", height: 72, background: T.btn, color: T.btnText,
-                  border: "none", borderRadius: RADIUS.sm, fontFamily: FONT_D,
-                  fontSize: FONT.subtitle, fontWeight: 800, cursor: "pointer", boxShadow: T.glow,
-                  textTransform: "uppercase", letterSpacing: 1,
-                }}
-              >
-                Imprimir tickets
-              </button>
-            </>
-          )}
-        </div>
+            {printMethod === "browser" && (
+              <>
+                <Printer size={36} color={T.muted} strokeWidth={1.5} className="mx-auto mb-3" />
+                {order.provider === "mock" ? (
+                  <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle }}>
+                    Preview aberto — modo mock.<br />
+                    <span style={{ fontSize: FONT.body, opacity: 0.6 }}>Em produção, imprime diretamente na impressora.</span>
+                  </p>
+                ) : (
+                  <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle }}>
+                    Tickets enviados para impressão!<br />Retire na impressora e apresente no balcão.
+                  </p>
+                )}
+              </>
+            )}
+
+            {printMethod === "blocked" && (
+              <>
+                <Printer size={36} color={T.muted} strokeWidth={1.5} className="mx-auto mb-3" />
+                <p className="mb-4" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle }}>
+                  A impressão foi bloqueada pelo navegador.<br />Toque para imprimir manualmente.
+                </p>
+                <Button
+                  onClick={async () => {
+                    const svgs = Array.from(qrContainerRef.current?.querySelectorAll("svg") ?? []).map((el) => el.outerHTML);
+                    const orderQrSvg = orderQrRef.current?.querySelector("svg")?.outerHTML ?? "";
+                    const html = buildHtmlForMode(svgs, orderQrSvg);
+                    const w = window.open("", "_blank");
+                    if (w) { w.document.write(html); w.document.close(); setPrintMethod("browser"); }
+                  }}
+                  className="rounded-lg uppercase tracking-wide"
+                  style={{ paddingLeft: 40, paddingRight: 40, minHeight: 72, background: T.btn, color: T.btnText, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 800, boxShadow: T.glow }}
+                >
+                  Imprimir tickets
+                </Button>
+              </>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Botão novo pedido */}
-        <button
+        <Button
           onClick={newOrder}
-          style={{
-            width: "100%", height: 88,
-            background: T.btn, color: T.btnText,
-            border: "none", borderRadius: RADIUS.sm,
-            fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800,
-            cursor: "pointer", boxShadow: T.glow,
-            textTransform: "uppercase", letterSpacing: 1,
-          }}
+          className="w-full rounded-lg uppercase tracking-wide"
+          style={{ minHeight: 88, background: T.btn, color: T.btnText, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800, boxShadow: T.glow }}
         >
           Novo pedido
-        </button>
+        </Button>
 
-        <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.4, margin: 0 }}>
-          Novo pedido em {countdown}s…
-        </p>
+        <div style={{ width: "min(320px, 92vw)" }}>
+          <p className="mb-2" style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.body, opacity: 0.5 }}>
+            Novo pedido em {countdown}s…
+          </p>
+          <Progress
+            value={countdown}
+            minValue={0}
+            maxValue={NEW_ORDER_TIMEOUT_S}
+            aria-label="Tempo até iniciar um novo pedido"
+            className="[&_[data-slot=progress-track]]:h-1.5"
+            style={{ ["--primary" as string]: T.roxo }}
+          />
+        </div>
 
       </div>
     </div>

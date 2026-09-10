@@ -1,6 +1,8 @@
+import { ArrowLeft, Utensils, ShoppingBag } from "lucide-react";
 import type { Theme } from "../themes";
 import type { ConsumptionType } from "../types";
-import { RADIUS, FONT } from "../scale";
+import { FONT } from "../scale";
+import { Button } from "@/components/ui/button";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -15,83 +17,54 @@ interface Props {
 // local" / "Para levar" é o padrão dominante (Goomer, KCMS, e o mesmo que
 // o McDonald's consagrou no Brasil desde ~2015). Não reinventar aqui é boa
 // UX: menos carga cognitiva num fluxo rápido de totem.
-const OPTIONS: { type: ConsumptionType; label: string; icon: string }[] = [
-  { type: "local",  label: "Comer no local", icon: "🍽️" },
-  { type: "viagem", label: "Para levar",     icon: "🥡" },
+const OPTIONS: { type: ConsumptionType; label: string; Icon: typeof Utensils }[] = [
+  { type: "local", label: "Comer no local", Icon: Utensils },
+  { type: "viagem", label: "Para levar", Icon: ShoppingBag },
 ];
 
 export default function ConsumptionTypeScreen({ T, onSelect, onBack }: Props) {
   return (
-    <div style={{
-      minHeight: "100vh",
-      background: T.radial,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      transition: "background 0.3s",
-      padding: "32px 0 24px",
-    }}>
-      <div style={{ width: "min(680px, 92vw)", display: "flex", flexDirection: "column", gap: 28 }}>
+    <div
+      className="min-h-screen flex flex-col items-center justify-center pt-8 pb-6"
+      style={{ background: T.radial, transition: "background 0.3s" }}
+    >
+      <div className="flex flex-col gap-7" style={{ width: "min(680px, 92vw)" }}>
 
-        <div style={{ textAlign: "center" }}>
-          <h2 style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800, margin: "0 0 8px" }}>
+        <div className="text-center">
+          <h2 className="mb-2" style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.headline, fontWeight: 800 }}>
             Como você vai consumir?
           </h2>
-          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle, margin: 0 }}>
+          <p style={{ color: T.muted, fontFamily: FONT_B, fontSize: FONT.subtitle }}>
             Escolha uma opção pra continuar
           </p>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          {OPTIONS.map((o) => (
+        <div className="grid grid-cols-2 gap-4">
+          {OPTIONS.map(({ type, label, Icon }) => (
             <button
-              key={o.type}
-              onClick={() => onSelect(o.type)}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 16,
-                height: 220,
-                background: T.numBg,
-                border: `2px solid ${T.border}`,
-                borderRadius: RADIUS.lg,
-                cursor: "pointer",
-                transition: "border-color 0.15s, background 0.15s",
-              }}
+              key={type}
+              onClick={() => onSelect(type)}
+              className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 transition-colors"
+              style={{ height: 220, background: T.numBg, borderColor: T.border }}
               onMouseEnter={(e) => { e.currentTarget.style.borderColor = T.roxo; e.currentTarget.style.background = T.numHover; }}
               onMouseLeave={(e) => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.numBg; }}
             >
-              <span style={{ fontSize: FONT.headlineLg }}>{o.icon}</span>
+              <Icon size={48} color={T.roxo} strokeWidth={1.5} />
               <span style={{ color: T.text, fontFamily: FONT_D, fontSize: FONT.title, fontWeight: 800 }}>
-                {o.label}
+                {label}
               </span>
             </button>
           ))}
         </div>
 
-        <button
+        <Button
+          variant="outline"
           onClick={onBack}
-          style={{
-            padding: "0 28px",
-            height: 88,
-            background: T.surface,
-            border: `1.5px solid ${T.border}`,
-            borderRadius: RADIUS.sm,
-            color: T.text,
-            cursor: "pointer",
-            fontFamily: FONT_D,
-            fontSize: FONT.subtitle,
-            textTransform: "uppercase",
-            letterSpacing: 1,
-            fontWeight: 700,
-            alignSelf: "flex-start",
-          }}
+          className="self-start rounded-lg uppercase tracking-wide"
+          style={{ minHeight: 88, paddingLeft: 28, paddingRight: 28, fontFamily: FONT_D, fontSize: FONT.subtitle, fontWeight: 700 }}
         >
-          ← Voltar
-        </button>
+          <ArrowLeft className="size-4" /> Voltar
+        </Button>
 
       </div>
     </div>
