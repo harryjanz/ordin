@@ -84,6 +84,15 @@
   margin-bottom: -2px;
 }
 
+// Alérgenos (RDC 727/2022) — lista fixa pequena (~19 itens), cabe numa
+// grade sempre visível, sem precisar do dropdown escondido do
+// CheckboxMultiselect (substituído por pedido do usuário, UX mais simples).
+.allergenGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 16px;
+}
+
 .formTitle {
   @include font('sm-emphasys');
 }
