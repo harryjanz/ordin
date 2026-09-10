@@ -640,27 +640,45 @@ export default function CatalogScreen({
                       {p.description}
                     </div>
                   )}
-                  {/* ORD-161 — badges de alérgeno: no máximo 2 diretos no card,
-                      "+N" abre o detalhe completo (produto pode ter mais
-                      alérgenos do que cabe compacto). */}
+                  {/* ORD-161 (correção pós-QA manual, lente de touch screen) —
+                      Badge do shadcn nunca é pensado como elemento clicável
+                      (nenhum demo oficial usa onClick nele) e é pequeno
+                      demais como alvo de toque (~24px, abaixo até do menor
+                      alvo já usado neste totem, 44px no carrinho). Só vira
+                      alvo de toque quando há de fato algo escondido (+2
+                      alérgenos) — nesse caso o conjunto inteiro vira um
+                      <button> de verdade, com área de toque expandida via
+                      padding invisível (-m-2 p-2) até 44px, sem alterar o
+                      visual compacto dos badges. Com 2 ou menos, fica só
+                      informativo — nada pra revelar, não devia parecer
+                      clicável. */}
                   {p.allergens && p.allergens.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1 mt-0.5">
-                      {p.allergens.slice(0, 2).map((a) => (
-                        <Badge key={a.id} variant="secondary" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
-                          {a.name}
-                        </Badge>
-                      ))}
-                      {p.allergens.length > 2 && (
-                        <Badge
-                          variant="outline"
-                          className="cursor-pointer"
-                          onClick={() => setAllergenDetail(p)}
-                          style={{ fontFamily: FONT_B, fontSize: FONT.label }}
-                        >
+                    p.allergens.length > 2 ? (
+                      <button
+                        type="button"
+                        onClick={() => setAllergenDetail(p)}
+                        aria-label={`Ver todos os ${p.allergens.length} alérgenos de ${p.name}`}
+                        className="flex flex-wrap items-center gap-1 mt-0.5 -m-2 p-2 rounded-lg text-left cursor-pointer"
+                        style={{ minHeight: 44 }}
+                      >
+                        {p.allergens.slice(0, 2).map((a) => (
+                          <Badge key={a.id} variant="secondary" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+                            {a.name}
+                          </Badge>
+                        ))}
+                        <Badge variant="outline" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
                           +{p.allergens.length - 2}
                         </Badge>
-                      )}
-                    </div>
+                      </button>
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-1 mt-0.5">
+                        {p.allergens.map((a) => (
+                          <Badge key={a.id} variant="secondary" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+                            {a.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    )
                   )}
                   <div className="flex items-baseline gap-2 mt-1">
                     <span className="text-price" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg }}>
