@@ -1,6 +1,6 @@
 ---
 id: ORD-161
-status: Explorer
+status: QA Explorer
 estimativa: null
 tipo: feature
 fase: 6
@@ -110,3 +110,63 @@ nome de cada alérgeno (isso fica disponível ao tocar/expandir, não obrigatór
 ### Wireframe / Mockup
 N/A — reaproveita o padrão visual já existente de `Badge` (shadcn) usado hoje pra tags e pro selo
 "Combo" no mesmo arquivo.
+
+## QA Explorer
+
+```gherkin
+Feature: Calorias, alérgenos e descrição do produto no totem
+  Como cliente final usando o totem
+  Quero ver calorias e alérgenos de cada produto na grade do cardápio
+  Para decidir meu pedido com informação de segurança alimentar e nutricional
+
+  Background:
+    Dado o produto ativo "Cheeseburger Clássico" na categoria "Lanches"
+
+  Scenario: Produto com calorias cadastradas mostra o valor no card
+    Dado "Cheeseburger Clássico" com calories: 650
+    Quando o cliente navega até a categoria "Lanches"
+    Então o card de "Cheeseburger Clássico" mostra "650 kcal" perto do preço
+
+  Scenario: Produto com um alérgeno cadastrado mostra o badge no card
+    Dado "Cheeseburger Clássico" com o alérgeno "Glúten" cadastrado
+    Quando o cliente navega até a categoria "Lanches"
+    Então o card mostra um badge identificando "Glúten"
+
+  Scenario: Produto com múltiplos alérgenos mostra todos que couberem, sem cortar informação
+    Dado "Cheeseburger Clássico" com os alérgenos "Glúten", "Leite" e "Ovo" cadastrados
+    Quando o cliente navega até a categoria "Lanches"
+    Então o card mostra badges pros alérgenos que couberem
+    E, se nem todos couberem, mostra um indicador (ex. "+1") que ao ser tocado exibe a lista
+    completa por extenso
+
+  Scenario: Produto sem calorias nem alérgenos não mostra nenhum elemento extra
+    Dado um produto ativo sem calories e sem allergens cadastrados
+    Quando o cliente navega até a categoria dele
+    Então o card não mostra nenhum badge de alérgeno nem texto de calorias
+    E o restante do card (nome, descrição, imagem, preço, botão de adicionar) aparece normalmente
+
+  Scenario: Produto com grupo de opção mostra calorias/alérgenos também no modal de seleção
+    Dado "Cheeseburger Clássico" com calories: 650, alérgeno "Glúten" e um grupo de opção
+    "Ponto da carne" vinculado
+    Quando o cliente toca no produto pra adicionar
+    Então o modal de seleção de opção abre
+    E mostra "650 kcal" e o badge de "Glúten" junto das informações do produto
+
+  Scenario: Produto sem grupo de opção continua indo direto pro carrinho
+    Dado "Suco de Laranja" sem grupo de opção, com calories cadastradas
+    Quando o cliente toca no botão de adicionar
+    Então o produto é adicionado ao carrinho normalmente, sem nenhum modal interposto
+    E a informação de calorias já era visível no card antes do toque
+
+  Scenario: Sem regressão visual nos demais elementos do card
+    Dado "Cheeseburger Clássico" com tags, descrição curta, imagem, calorias e alérgenos, todos
+    cadastrados ao mesmo tempo
+    Quando o cliente navega até a categoria "Lanches"
+    Então nome, descrição, imagem, tags, preço e botão de adicionar continuam aparecendo como
+    hoje, sem sobreposição nem corte de layout
+```
+
+**Cenários revisados e aprovados pelo PM:** sim — cobrem happy path (calorias e alérgenos
+aparecendo), a borda mais delicada (muitos alérgenos não cabendo no card compacto), o caso "nada
+cadastrado" (sem placeholder vazio, critério explícito do Explorer), o modal de opção herdando a
+mesma informação, e não-regressão do restante do card.
