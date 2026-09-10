@@ -193,6 +193,26 @@ Ao iniciar uma sprint ou receber um pedido de implementação:
 
 Referência completa: `docs/WORKFLOW.md`.
 
+## Regra de UX obrigatória — totem é touch screen
+
+**Todo elemento visual novo em `frontend/totem` precisa ser avaliado antes de ser usado: é o
+componente certo pra uma tela operada com o dedo do cliente, não mouse/teclado?** Dois pontos a
+checar sempre:
+
+1. **O componente é semanticamente interativo?** Não usar `Badge`, `span`, `div` com `onClick`
+   pra simular um botão — usar `Button` (ou outro componente shadcn já pensado pra interação).
+   Confirmado no ORD-161: nenhum exemplo oficial do shadcn usa `Badge` com `onClick`.
+2. **A área de toque é grande o suficiente pro dedo?** Mínimo já estabelecido neste totem:
+   **44px** (botões do carrinho lateral), **52px** nos de +/- da grade de produtos. Um elemento
+   visualmente menor que isso (ex. um `Badge` compacto) pode continuar pequeno visualmente, mas
+   se precisar virar clicável, expandir a área de toque via padding invisível (`-m-2 p-2` ou
+   equivalente) em vez de aumentar o elemento visual em si.
+
+**Sempre que houver dúvida se um componente do shadcn é apropriado pra um caso de uso
+interativo, consultar o MCP do shadcn** (`mcp__shadcn__view_items_in_registries`,
+`get_item_examples_from_registries`, `search_items_in_registries`) pra ver os exemplos oficiais
+de uso antes de decidir — não assumir pelo nome/aparência do componente.
+
 ## Documentação
 
 `docs/` é o repositório de decisões arquiteturais e contexto de trabalho:
