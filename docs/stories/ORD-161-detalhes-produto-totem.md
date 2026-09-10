@@ -1,7 +1,7 @@
 ---
 id: ORD-161
-status: QA Explorer
-estimativa: null
+status: Tech Explorer
+estimativa: 2 pontos (frontend/totem)
 tipo: feature
 fase: 6
 sprint: null
@@ -170,3 +170,134 @@ Feature: Calorias, alérgenos e descrição do produto no totem
 aparecendo), a borda mais delicada (muitos alérgenos não cabendo no card compacto), o caso "nada
 cadastrado" (sem placeholder vazio, critério explícito do Explorer), o modal de opção herdando a
 mesma informação, e não-regressão do restante do card.
+
+## Solução Técnica
+
+### Serviços impactados
+Só `frontend/totem` (`types.ts`, `CatalogScreen.tsx`). **Nenhuma mudança de backend** —
+`ProductOut` (catalog-service) já devolve `calories: int | None` e `allergens: list[AllergenOut]`
+desde ORD-075; `GET /catalog/products` já traz os dois campos hoje, o totem só nunca os tinha no
+tipo `Product` nem os renderizava.
+
+### Mudança de tipo (`frontend/totem/src/types.ts`)
+```ts
+// Mesmo formato de AllergenOut (catalog-service) — já existe idêntico em
+// frontend/admin/src/types.ts, replicado aqui porque totem e admin não
+// compartilham types.ts.
+export interface Allergen {
+  id: number;
+  code: string;
+  name: string;
+  category: string | null;
+}
+
+export interface Product {
+  id: number;
+  category_id: number;
+  name: string;
+  description: string | null;
+  price: number;
+  image_url: string | null;
+  tags?: string[] | null;
+  option_groups?: ProductOptionGroup[];
+  related_products?: RelatedProduct[];
+  // ORD-161
+  calories?: number | null;
+  allergens?: Allergen[];
+}
+```
+
+### Mudança de implementação (`CatalogScreen.tsx`)
+
+**Card do produto (grade) — badges de alérgeno + kcal perto do preço:**
+```tsx
+{p.allergens && p.allergens.length > 0 && (
+  <div className="flex flex-wrap items-center gap-1">
+    {p.allergens.slice(0, 2).map((a) => (
+      <Badge key={a.id} variant="secondary" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+        {a.name}
+      </Badge>
+    ))}
+    {p.allergens.length > 2 && (
+      <Badge
+        variant="outline"
+        className="cursor-pointer"
+        onClick={() => setAllergenDetail(p)}
+        style={{ fontFamily: FONT_B, fontSize: FONT.label }}
+      >
+        +{p.allergens.length - 2}
+      </Badge>
+    )}
+  </div>
+)}
+<div className="flex items-baseline gap-2">
+  <span className="text-price" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg }}>
+    {fmt(p.price)}
+  </span>
+  {p.calories != null && (
+    <span className="text-muted-foreground" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+      {p.calories} kcal
+    </span>
+  )}
+</div>
+```
+
+**Novo estado + Dialog compacto pra lista completa de alérgenos** (só quando não cabem 2 badges):
+```ts
+const [allergenDetail, setAllergenDetail] = useState<Product | null>(null);
+```
+```tsx
+<Dialog isOpen={!!allergenDetail} onOpenChange={(open) => !open && setAllergenDetail(null)} className="sm:max-w-[420px] p-8 flex flex-col gap-3">
+  {allergenDetail && (
+    <>
+      <DialogTitle style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.subtitle }}>
+        Alérgenos — {allergenDetail.name}
+      </DialogTitle>
+      <div className="flex flex-wrap gap-1.5">
+        {allergenDetail.allergens?.map((a) => (
+          <Badge key={a.id} variant="secondary">{a.name}</Badge>
+        ))}
+      </div>
+    </>
+  )}
+</Dialog>
+```
+
+**Modal de opção (`optionModal`) — mesma informação, junto do "A partir de R$X":**
+```tsx
+<div className="text-muted-foreground mt-1" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+  A partir de {fmt(optionModal.product.price)}
+  {"calories" in optionModal.product && optionModal.product.calories != null && ` · ${optionModal.product.calories} kcal`}
+</div>
+{"allergens" in optionModal.product && optionModal.product.allergens && optionModal.product.allergens.length > 0 && (
+  <div className="flex flex-wrap gap-1">
+    {optionModal.product.allergens.map((a) => <Badge key={a.id} variant="secondary">{a.name}</Badge>)}
+  </div>
+)}
+```
+`"calories" in optionModal.product` — necessário porque `optionModal.product` é `Product | RelatedProduct`
+(ORD-160) e `RelatedProduct` não tem esses campos; guarda de tipo evita erro de compilação sem
+precisar estender `RelatedProduct` (produto sugerido correlacionado não precisa mostrar
+calorias/alérgenos nesta história — decisão de escopo, ver seção de riscos).
+
+### Eventos de fila
+Nenhum.
+
+### Impacto em outros serviços
+Nenhum — puramente exibição, nenhum dado novo é lido, gravado ou transformado.
+
+### Estimativa
+- Totem: 2 pontos (tipo + badges no card + Dialog de detalhe + mesma info no modal de opção).
+
+### Riscos
+- **`RelatedProduct` (ORD-160) não ganha calorias/alérgenos nesta história** — produto sugerido
+  como correlacionado não mostra essa informação no modal de sugestão. Decisão deliberada de
+  escopo (evita reabrir e re-testar o ORD-160 recém-fechado); se o usuário quiser paridade total,
+  vira ajuste pequeno depois (mesmo padrão de `option_groups` que já foi adicionado ao
+  `RelatedProductOut`).
+- **Card mais cheio visualmente** — produto com tags E alérgenos E calorias ao mesmo tempo pode
+  deixar o card denso. Mitigado pelo limite de 2 badges + "+N" (critério de aceite já cobre isso),
+  mas vale validação visual manual depois de implementado, com um produto que tenha os três ao
+  mesmo tempo (nenhum produto de seed hoje tem isso simultaneamente, precisa cadastrar um de teste).
+- **Nenhum risco de regressão de dado** — campos já existem e já são populados pelo backend desde
+  ORD-075; é estritamente aditivo do lado do totem.
