@@ -3654,11 +3654,21 @@ async def activate_price_table(
             "Tabela precisa ter preço do 1º totem e ao menos uma faixa de transação para ser ativada",
         )
 
-    # Lock na(s) tabela(s) atualmente vigente(s) — no máximo uma, garantido
-    # por este mesmo fluxo — antes de decidir, pra evitar corrida entre duas
-    # ativações concorrentes (risco documentado no Tech Explorer).
-    result = await db.execute(select(PriceTable).where(PriceTable.status == "active").with_for_update())
-    current_active = result.scalar_one_or_none()
+    # Lock em TODAS as linhas de price_tables (sem filtro de status) antes de
+    # decidir — não só na(s) atualmente vigente(s). Um FOR UPDATE filtrado
+    # por status="active" não protege a primeira ativação do sistema (0
+    # linhas vigentes): duas ativações concorrentes, cada uma vendo "nenhuma
+    # vigente" ao mesmo tempo, poderiam terminar com duas tabelas "active"
+    # simultâneas — o FOR UPDATE só serializa acesso a linhas que já
+    # existem, nunca a ausência de uma linha. Lockar a tabela inteira
+    # resolve isso: toda chamada de ativação passa a serializar contra
+    # qualquer outra, incluindo o próprio `pt` (que sempre existe, já foi
+    # criado via POST antes). Achado na revisão de código desta PR — não
+    # coberto pelos testes automatizados porque eles são sequenciais, não
+    # concorrentes.
+    result = await db.execute(select(PriceTable).with_for_update())
+    all_tables = result.scalars().all()
+    current_active = next((t for t in all_tables if t.status == "active"), None)
 
     if current_active is not None and not body.confirm_replace:
         raise HTTPException(
