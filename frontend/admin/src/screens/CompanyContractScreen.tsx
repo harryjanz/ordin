@@ -511,37 +511,45 @@ export default function CompanyContractScreen() {
             ) : (
               <div className={styles.miniDetail}>Nenhum plano comercial encontrado pra esta empresa.</div>
             )}
-            {plan && availableTables.length > 0 && (
+            {plan && (
               <>
-                <div style={{ maxWidth: 320, marginTop: 12 }}>
-                  <Dropdown
-                    label="Tabela de preço"
-                    options={availableTables.map((t) => ({
-                      value: String(t.id),
-                      label: t.status === "active" ? `${t.name} (vigente)` : `${t.name} (${t.kind === "promocional" ? "promocional" : "alternativa"})`,
-                    }))}
-                    value={(() => {
-                      const t = availableTables.find((t) => t.id === selectedTableId);
-                      return t
-                        ? { value: String(t.id), label: t.status === "active" ? `${t.name} (vigente)` : `${t.name} (${t.kind === "promocional" ? "promocional" : "alternativa"})` }
-                        : null;
-                    })()}
-                    onValueSelected={(opt) => setSelectedTableId(Number(opt.value))}
-                  />
-                </div>
+                {/* ORD-164: "Renovar plano" não depende de availableTables —
+                    já funcionava com qualquer plano antes desta história; se
+                    o fetch da lista falhar, cai no padrão (usa a active). Só
+                    o seletor e "Aplicar tabela" dependem da lista de fato. */}
+                {availableTables.length > 0 && (
+                  <div style={{ maxWidth: 320, marginTop: 12 }}>
+                    <Dropdown
+                      label="Tabela de preço"
+                      options={availableTables.map((t) => ({
+                        value: String(t.id),
+                        label: t.status === "active" ? `${t.name} (vigente)` : `${t.name} (${t.kind === "promocional" ? "promocional" : "alternativa"})`,
+                      }))}
+                      value={(() => {
+                        const t = availableTables.find((t) => t.id === selectedTableId);
+                        return t
+                          ? { value: String(t.id), label: t.status === "active" ? `${t.name} (vigente)` : `${t.name} (${t.kind === "promocional" ? "promocional" : "alternativa"})` }
+                          : null;
+                      })()}
+                      onValueSelected={(opt) => setSelectedTableId(Number(opt.value))}
+                    />
+                  </div>
+                )}
                 <div className={styles.actionsRow}>
                   <Button size="small" variant="secondary" onClick={renewPlan} loading={renewingPlan}>
                     Renovar plano (+365 dias)
                   </Button>
-                  <Button
-                    size="small"
-                    variant="secondary"
-                    onClick={applyTable}
-                    loading={applyingTable}
-                    disabled={selectedTableId === plan.price_table.id}
-                  >
-                    Aplicar tabela (sem alterar vencimento)
-                  </Button>
+                  {availableTables.length > 0 && (
+                    <Button
+                      size="small"
+                      variant="secondary"
+                      onClick={applyTable}
+                      loading={applyingTable}
+                      disabled={selectedTableId === plan.price_table.id}
+                    >
+                      Aplicar tabela (sem alterar vencimento)
+                    </Button>
+                  )}
                 </div>
               </>
             )}
