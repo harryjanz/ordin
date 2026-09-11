@@ -53,6 +53,12 @@ export default function PriceTableListScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null);
+  // ORD-164 (ajuste de UX pós-feedback) — select solto na linha da tabela
+  // trocado por modal com confirmação explícita, mesmo padrão já usado nas
+  // outras ações desta tela (ativar/excluir via ConfirmDialog).
+  const [kindTarget, setKindTarget] = useState<PriceTableSummary | null>(null);
+  const [pendingKind, setPendingKind] = useState<PriceTableKind>(null);
+  const [savingKind, setSavingKind] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -100,13 +106,26 @@ export default function PriceTableListScreen() {
     });
   }
 
-  async function setKind(table: PriceTableSummary, kind: PriceTableKind) {
+  function openKindModal(table: PriceTableSummary) {
+    setKindTarget(table);
+    setPendingKind(table.kind);
+  }
+
+  async function confirmKind() {
+    if (!kindTarget) return;
+    setSavingKind(true);
     try {
-      await api.patch(`/commercial/price-tables/${table.id}/kind`, { kind });
-      makeToast("success", kind ? `"${table.name}" marcada como ${KIND_LABEL[kind]}` : `"${table.name}" sem categoria especial`);
+      await api.patch(`/commercial/price-tables/${kindTarget.id}/kind`, { kind: pendingKind });
+      makeToast(
+        "success",
+        pendingKind ? `"${kindTarget.name}" marcada como ${KIND_LABEL[pendingKind]}` : `"${kindTarget.name}" sem categoria especial`
+      );
+      setKindTarget(null);
       load();
     } catch (err) {
       makeToast("error", parseApiError(err).message);
+    } finally {
+      setSavingKind(false);
     }
   }
 
@@ -144,13 +163,9 @@ export default function PriceTableListScreen() {
       key: "action", header: "", render: (t) => (
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
           {t.status !== "draft" && (
-            <div style={{ width: 150 }} onClick={(e) => e.stopPropagation()}>
-              <Dropdown
-                options={KIND_OPTIONS}
-                value={KIND_OPTIONS.find((o) => o.value === (t.kind ?? "")) ?? KIND_OPTIONS[0]}
-                onValueSelected={(opt) => setKind(t, (opt.value || null) as PriceTableKind)}
-              />
-            </div>
+            <Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); openKindModal(t); }}>
+              Categoria
+            </Button>
           )}
           {t.editable && (
             <Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); navigate(`/commercial/price-tables/${t.id}/edit`); }}>
@@ -203,6 +218,23 @@ export default function PriceTableListScreen() {
         onConfirm={() => confirmState?.onConfirm()}
         onCancel={() => setConfirmState(null)}
       />
+
+      <ConfirmDialog
+        open={!!kindTarget}
+        title="Categoria da tabela"
+        message={`Marcar "${kindTarget?.name ?? ""}" como alternativa ou promocional pra ficar disponível em contratos específicos, sem virar a tabela vigente padrão.`}
+        confirmLabel="Confirmar"
+        onConfirm={confirmKind}
+        onCancel={() => setKindTarget(null)}
+        confirmDisabled={savingKind}
+      >
+        <Dropdown
+          label="Categoria"
+          options={KIND_OPTIONS}
+          value={KIND_OPTIONS.find((o) => o.value === (pendingKind ?? "")) ?? KIND_OPTIONS[0]}
+          onValueSelected={(opt) => setPendingKind((opt.value || null) as PriceTableKind)}
+        />
+      </ConfirmDialog>
     </div>
   );
 }

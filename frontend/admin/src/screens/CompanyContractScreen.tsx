@@ -162,12 +162,17 @@ export default function CompanyContractScreen() {
   }, [companyId]);
 
   async function renewPlan() {
-    // ORD-164 — escolha manual: se o admin selecionou uma tabela diferente
-    // da vigente, ela é usada; caso contrário mantém o comportamento
-    // original da ORD-163 (usa a vigente do momento).
+    // ORD-164 — escolha manual: só manda price_table_id se a seleção atual
+    // for de fato uma tabela elegível (QA manual achou o bug: selectedTableId
+    // nasce igual à tabela já vinculada ao plano, mesmo que ela tenha
+    // deixado de ser elegível nesse meio-tempo — ex. teve o kind removido.
+    // Mandar esse id "obsoleto" quebrava a renovação com 422 mesmo sem o
+    // admin ter tocado no seletor. Validar contra availableTables antes de
+    // enviar garante o comportamento padrão da ORD-163 (usa a vigente).
+    const selectionIsEligible = availableTables.some((t) => t.id === selectedTableId);
     setRenewingPlan(true);
     try {
-      setPlan(await renewCompanyPlan(companyId, selectedTableId ?? undefined));
+      setPlan(await renewCompanyPlan(companyId, selectionIsEligible ? selectedTableId ?? undefined : undefined));
       makeToast("success", "Plano comercial renovado — vencimento adiado 365 dias");
     } catch (err) {
       makeToast("error", parseApiError(err).message);
@@ -512,15 +517,21 @@ export default function CompanyContractScreen() {
               <div className={styles.miniDetail}>Nenhum plano comercial encontrado pra esta empresa.</div>
             )}
             {plan && (
-              <>
+              <div className={styles.changeTable}>
+                <div className={styles.changeTableHeading}>Trocar tabela de preço</div>
+                <div className={styles.changeTableNote}>
+                  {availableTables.length > 0
+                    ? "Escolha a tabela vigente ou uma marcada como alternativa/promocional. “Renovar” também adianta o vencimento em 365 dias; “Aplicar tabela” só troca a tabela do plano, sem mexer no vencimento."
+                    : "Nenhuma tabela alternativa/promocional disponível no momento — renovar usa a tabela vigente automaticamente."}
+                </div>
                 {/* ORD-164: "Renovar plano" não depende de availableTables —
                     já funcionava com qualquer plano antes desta história; se
                     o fetch da lista falhar, cai no padrão (usa a active). Só
                     o seletor e "Aplicar tabela" dependem da lista de fato. */}
                 {availableTables.length > 0 && (
-                  <div style={{ maxWidth: 320, marginTop: 12 }}>
+                  <div style={{ maxWidth: 320, marginBottom: 16 }}>
                     <Dropdown
-                      label="Tabela de preço"
+                      label="Nova tabela"
                       options={availableTables.map((t) => ({
                         value: String(t.id),
                         label: t.status === "active" ? `${t.name} (vigente)` : `${t.name} (${t.kind === "promocional" ? "promocional" : "alternativa"})`,
@@ -535,7 +546,7 @@ export default function CompanyContractScreen() {
                     />
                   </div>
                 )}
-                <div className={styles.actionsRow}>
+                <div className={styles.actionsRow} style={{ marginTop: 0 }}>
                   <Button size="small" variant="secondary" onClick={renewPlan} loading={renewingPlan}>
                     Renovar plano (+365 dias)
                   </Button>
@@ -551,7 +562,7 @@ export default function CompanyContractScreen() {
                     </Button>
                   )}
                 </div>
-              </>
+              </div>
             )}
           </div>
 
