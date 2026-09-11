@@ -535,7 +535,7 @@ do clique; caso contrário, omite o campo e deixa o backend aplicar o padrão. R
 end-to-end — `08-bug-corrigido-renovar-cai-no-padrao.jpg`: mesmo cenário, agora renova
 corretamente usando a tabela vigente, sem erro.
 
-PR de correção: [#132](#) *(preencher após abrir)*.
+PR de correção: [#132](https://github.com/harryjanz/ordin/pull/132).
 
 ### Fluxos críticos de regressão
 Não aplicável a esta história — não mexe no fluxo PIN → pedido → pagamento → coleta, rate
