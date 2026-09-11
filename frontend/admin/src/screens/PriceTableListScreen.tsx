@@ -157,6 +157,12 @@ export default function PriceTableListScreen() {
       key: "kind", header: "Categoria",
       render: (t) => t.kind ? <Tag variant="emphasys">{KIND_LABEL[t.kind]}</Tag> : "—",
     },
+    {
+      // ORD-165 — visibilidade antes de qualquer ação (editar, excluir,
+      // trocar categoria): quantas empresas dependem desta tabela agora.
+      key: "linked_companies_count", header: "Empresas", mono: true,
+      render: (t) => t.linked_companies_count,
+    },
     { key: "created_at", header: "Criada em", mono: true, render: (t) => fmtDate(t.created_at) },
     { key: "activated_at", header: "Ativada em", mono: true, render: (t) => fmtDate(t.activated_at) },
     {

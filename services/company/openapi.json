@@ -3864,6 +3864,53 @@
         }
       }
     },
+    "/companies/{company_id}/plan/history": {
+      "get": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Histórico de troca de tabela de preço do plano comercial",
+        "operationId": "get_company_plan_history_companies__company_id__plan_history_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyPlanHistoryOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -4732,6 +4779,49 @@
           "price_table_id"
         ],
         "title": "CompanyPlanApplyTableIn"
+      },
+      "CompanyPlanHistoryEntryOut": {
+        "properties": {
+          "from_price_table": {
+            "$ref": "#/components/schemas/CompanyPlanPriceTableOut"
+          },
+          "to_price_table": {
+            "$ref": "#/components/schemas/CompanyPlanPriceTableOut"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "from_price_table",
+          "to_price_table",
+          "action",
+          "created_at"
+        ],
+        "title": "CompanyPlanHistoryEntryOut"
+      },
+      "CompanyPlanHistoryOut": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/CompanyPlanHistoryEntryOut"
+            },
+            "type": "array",
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "CompanyPlanHistoryOut"
       },
       "CompanyPlanOut": {
         "properties": {
@@ -5816,6 +5906,11 @@
             "type": "boolean",
             "title": "Editable",
             "default": true
+          },
+          "linked_companies_count": {
+            "type": "integer",
+            "title": "Linked Companies Count",
+            "default": 0
           }
         },
         "type": "object",
@@ -5878,6 +5973,11 @@
             "type": "boolean",
             "title": "Editable",
             "default": true
+          },
+          "linked_companies_count": {
+            "type": "integer",
+            "title": "Linked Companies Count",
+            "default": 0
           }
         },
         "type": "object",

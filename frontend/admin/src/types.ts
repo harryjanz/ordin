@@ -319,8 +319,13 @@ export interface PriceTable {
   transaction_tiers: PriceTableTransactionTier[];
   // ORD-163 (revisão) — não é sobre status: uma tabela vigente sem nenhuma
   // empresa vinculada ainda pode ser editada/excluída; uma com empresa
-  // vinculada, não, mesmo que rascunho nunca chegue a ter vínculo.
+  // vinculada, não, mesmo que rascunho nunca chegue a ter vínculo. ORD-165
+  // — passa a incluir histórico: uma tabela já vinculada alguma vez, mesmo
+  // sem vínculo hoje, também fica travada pra sempre.
   editable: boolean;
+  // ORD-165 — quantas empresas estão vinculadas a esta tabela AGORA (não é
+  // o histórico completo, só o presente).
+  linked_companies_count: number;
 }
 
 // Resumo devolvido por GET /commercial/price-tables (lista) — sem faixas
@@ -333,6 +338,7 @@ export interface PriceTableSummary {
   created_at: string;
   activated_at: string | null;
   editable: boolean;
+  linked_companies_count: number;
 }
 
 // ORD-163 — plano comercial da empresa, vinculado à tabela de preço vigente
@@ -348,6 +354,22 @@ export interface CompanyPlan {
   expires_at: string;
   renewed_at: string | null;
   status: CompanyPlanStatus;
+}
+
+// ORD-165 — registro de toda troca de price_table_id do plano comercial,
+// consultável por empresa. action distingue renovação (adianta vencimento)
+// de aplicação direta (só troca a tabela).
+export type CompanyPlanHistoryAction = "renew" | "apply";
+
+export interface CompanyPlanHistoryEntry {
+  from_price_table: { id: number; name: string; kind: PriceTableKind };
+  to_price_table: { id: number; name: string; kind: PriceTableKind };
+  action: CompanyPlanHistoryAction;
+  created_at: string;
+}
+
+export interface CompanyPlanHistory {
+  entries: CompanyPlanHistoryEntry[];
 }
 
 export interface Order {
