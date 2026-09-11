@@ -311,6 +311,10 @@ export interface PriceTable {
   activated_at: string | null;
   archived_at: string | null;
   transaction_tiers: PriceTableTransactionTier[];
+  // ORD-163 (revisão) — não é sobre status: uma tabela vigente sem nenhuma
+  // empresa vinculada ainda pode ser editada/excluída; uma com empresa
+  // vinculada, não, mesmo que rascunho nunca chegue a ter vínculo.
+  editable: boolean;
 }
 
 // Resumo devolvido por GET /commercial/price-tables (lista) — sem faixas
@@ -321,6 +325,22 @@ export interface PriceTableSummary {
   status: PriceTableStatus;
   created_at: string;
   activated_at: string | null;
+  editable: boolean;
+}
+
+// ORD-163 — plano comercial da empresa, vinculado à tabela de preço vigente
+// no momento da criação/renovação. Nome "Plan", não "Contract": já existe
+// o contrato JURÍDICO (CompanyContractScreen, upload de PDF), entidade
+// completamente diferente — evitar confundir os dois no código.
+export type CompanyPlanStatus = "Ativo" | "Vencido";
+
+export interface CompanyPlan {
+  company_id: number;
+  price_table: { id: number; name: string };
+  started_at: string;
+  expires_at: string;
+  renewed_at: string | null;
+  status: CompanyPlanStatus;
 }
 
 export interface Order {

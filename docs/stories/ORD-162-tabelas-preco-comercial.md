@@ -448,3 +448,14 @@ Implementada em `feature/ORD-162-tabelas-preco-comercial`, PR [#129](https://git
 **Achado da revisão de código (bloqueador, corrigido antes do merge):** `SELECT ... FOR UPDATE` filtrado por `status='active'` não protegia a primeira ativação do sistema — sem nenhuma linha vigente ainda, duas ativações concorrentes poderiam ambas ver "nenhuma vigente" e terminar com duas tabelas `active` simultâneas. Corrigido travando todas as linhas de `price_tables` (sem filtro), serializando qualquer ativação concorrente pela própria linha do alvo (commit `ff08208`). Não coberto por teste automatizado (suíte é sequencial, não concorrente) — achado só por leitura crítica do código.
 
 19 testes novos + 363 da suíte inteira do company-service passando sem regressão. CI (Security, Lint & type check, Testes + cobertura, Build Docker images) 100% verde. Mergeado em `main` (fast-forward, `41d9b60`) em 2026-09-11, branch deletada.
+
+## Revisão pós-merge (2026-09-11) — critério de "editável" deixou de ser o status
+
+**Motivação, levantada pelo usuário ao testar:** com a regra original (só `draft` edita/exclui), uma tabela `active` ficava travada mesmo se **nenhuma empresa ainda dependesse dela** — cenário real: ativar uma tabela, perceber um erro de digitação antes de qualquer empresa ser criada com ela, e não ter como corrigir sem duplicar. A regra por status protegia contra o caso certo (empresa já vinculada) usando o proxy errado (status).
+
+**Nova regra:** editável/excluível passa a depender de **existir ou não algum `CompanyPlan` (ORD-163) vinculado ao `price_table_id`** — não do status. Na prática:
+- Rascunho nunca tem plano vinculado (só tabela `active` é atribuída em criação/renovação de empresa), então continua sempre editável, como antes.
+- Vigente **sem** nenhuma empresa ainda → agora editável/excluível.
+- Vigente ou histórica **com** pelo menos uma empresa vinculada → bloqueada, como antes (a garantia central da ORD-163 continua intacta: quem já depende de uma tabela nunca é afetado por edição).
+
+Implementado como parte da PR #130 (ORD-163), porque a checagem depende de `company_plans` existir — helper `_price_table_has_linked_plans()`, novo campo `editable: bool` em `PriceTableOut`/`PriceTableSummaryOut` (calculado, não armazenado), consumido no frontend pra decidir se mostra Editar/Excluir. Critérios de aceite e cenários Gherkin desta história (linhas 114-136 e seção QA Explorer) ficam **desatualizados nesse ponto específico** — o texto original documentava a regra por status; o comportamento real agora é o descrito aqui. Testes atualizados em `test_ord162_tabelas_preco.py` (4 cenários antigos de bloqueio por status viraram: 2 de "sem empresa vinculada, permitido" + 2 de "com empresa vinculada, bloqueado").

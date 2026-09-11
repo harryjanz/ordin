@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Checkbox, CurrencyInput, InputBase, NumberSpinInput } from "design-system";
+import { Alert, Button, Checkbox, CurrencyInput, InputBase, NumberSpinInput, Tag } from "design-system";
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
 import { parseApiError } from "../lib/apiErrors";
@@ -74,7 +74,7 @@ export default function PriceTableFormScreen() {
               })
             : [newTierRow()]
         );
-        setReadOnly(t.status !== "draft");
+        setReadOnly(!t.editable);
       } catch {
         if (!cancelled) setLoadError("Erro ao carregar tabela de preço.");
       } finally {
@@ -95,11 +95,24 @@ export default function PriceTableFormScreen() {
   }
 
   function addTier() {
-    // Sugere o próximo min_transactions logo depois do teto da última faixa,
-    // pra já nascer contíguo na maioria dos casos — usuário pode ajustar.
-    const last = tiers[tiers.length - 1];
-    const suggestedMin = last && last.max_transactions !== null ? last.max_transactions + 1 : 0;
-    setTiers((prev) => [...prev, newTierRow(suggestedMin)]);
+    // Só a última faixa pode ficar "sem teto" — ao adicionar uma nova faixa
+    // depois dela, a que era a última perde essa marcação automaticamente
+    // (não faz mais sentido, e evita reabrir o bug de mais de uma faixa
+    // aberta ao mesmo tempo). Sugere o próximo min_transactions logo depois
+    // do teto resultante, pra já nascer contíguo — usuário pode ajustar.
+    setTiers((prev) => {
+      const last = prev[prev.length - 1];
+      if (!last) return [...prev, newTierRow(0)];
+      if (!last.openEnded) {
+        const suggestedMin = (last.max_transactions ?? last.min_transactions) + 1;
+        return [...prev, newTierRow(suggestedMin)];
+      }
+      const demotedMax = last.min_transactions;
+      const demoted = prev.map((t) =>
+        t.key === last.key ? { ...t, openEnded: false, max_transactions: demotedMax } : t
+      );
+      return [...demoted, newTierRow(demotedMax + 1)];
+    });
   }
 
   const canSave =
@@ -169,7 +182,7 @@ export default function PriceTableFormScreen() {
 
       {readOnly && (
         <div className={styles.alertBox}>
-          <Alert variant="warning" text="Esta tabela não está em rascunho — não pode ser editada. Duplique-a na lista para criar uma cópia editável." fullWidth />
+          <Alert variant="warning" text="Já existe empresa com plano comercial vinculado a esta tabela — não pode ser editada. Duplique-a na lista para criar uma cópia editável." fullWidth />
         </div>
       )}
 
@@ -189,29 +202,39 @@ export default function PriceTableFormScreen() {
             <CurrencyInput label="Preço do 1º totem" value={totemPrice1} onChange={(v: number) => setTotemPrice1(v)} disabled={readOnly} />
           </div>
           <div className={styles.formRowField}>
-            <div className={styles.formLabel}>Multiplicador do 2º totem</div>
             <NumberSpinInput
+              label="Multiplicador do 2º totem"
               typeable
-              step={0.05}
-              minValue={0.01}
-              maxValue={1}
+              step={5}
+              minValue={1}
+              maxValue={100}
+              suffix="%"
               disabled={readOnly}
-              helperMessage="ex: 0,5 = metade do preço do 1º totem"
-              value={multiplier2 ?? 0.5}
-              onChange={(v?: number) => setMultiplier2(v ?? null)}
+              helperMessage="ex: 50% = metade do preço do 1º totem"
+              // Digitado/exibido em porcentagem inteira (1-100), não em
+              // fração decimal — o campo decimal (NumberSpinInput com
+              // decimalDigits) tem uma armadilha real de digitação: digitar
+              // "0,5" do jeito natural descarta a vírgula e vira "05" → 0,05
+              // em vez de 0,5 (achado testando a tela, sem nenhum erro de
+              // validação pra pegar o engano). Porcentagem inteira evita a
+              // ambiguidade inteira — o valor enviado pra API continua
+              // fração decimal (0-1), só a conversão é feita aqui.
+              value={multiplier2 !== null ? Math.round(multiplier2 * 100) : 50}
+              onChange={(v?: number) => setMultiplier2(v !== undefined ? v / 100 : null)}
             />
           </div>
           <div className={styles.formRowField}>
-            <div className={styles.formLabel}>Multiplicador do 3º ao 5º totem</div>
             <NumberSpinInput
+              label="Multiplicador do 3º ao 5º totem"
               typeable
-              step={0.05}
-              minValue={0.01}
-              maxValue={1}
+              step={5}
+              minValue={1}
+              maxValue={100}
+              suffix="%"
               disabled={readOnly}
-              helperMessage="ex: 0,3 = 30% do preço do 1º totem, cada"
-              value={multiplier35 ?? 0.3}
-              onChange={(v?: number) => setMultiplier35(v ?? null)}
+              helperMessage="ex: 30% = 30% do preço do 1º totem, cada"
+              value={multiplier35 !== null ? Math.round(multiplier35 * 100) : 30}
+              onChange={(v?: number) => setMultiplier35(v !== undefined ? v / 100 : null)}
             />
           </div>
         </div>
@@ -221,50 +244,67 @@ export default function PriceTableFormScreen() {
         <div className={styles.formLabel}>
           Faixas de taxa transacional (por volume de transações/mês)
         </div>
-        {tiers.map((t) => (
-          <div key={t.key} className={styles.formRow}>
-            <div className={styles.formRowField}>
-              <NumberSpinInput
-                typeable
-                step={1}
-                minValue={0}
-                disabled={readOnly}
-                helperMessage="De (transações/mês)"
-                value={t.min_transactions}
-                onChange={(v?: number) => updateTier(t.key, { min_transactions: v ?? 0 })}
-              />
+        {tiers.map((t, index) => {
+          // "Sem teto" só existe de verdade na última faixa — em vez de um
+          // checkbox em toda linha (permitindo, sem querer, mais de uma
+          // faixa aberta ao mesmo tempo, achado testando a tela), só a
+          // última mostra a opção. addTier() já cuida de "despromover" a
+          // faixa anterior quando uma nova é adicionada depois dela.
+          const isLast = index === tiers.length - 1;
+          return (
+            <div key={t.key} className={styles.formRow}>
+              <div className={styles.formRowField}>
+                <NumberSpinInput
+                  label="De (transações/mês)"
+                  typeable
+                  step={1}
+                  minValue={0}
+                  disabled={readOnly}
+                  value={t.min_transactions}
+                  onChange={(v?: number) => updateTier(t.key, { min_transactions: v ?? 0 })}
+                />
+              </div>
+              <div className={styles.formRowField}>
+                {t.openEnded ? (
+                  <div className={styles.openEndedBadge}>
+                    <span className={styles.formLabel}>Até (transações/mês)</span>
+                    <Tag variant="neutral">Sem teto — última faixa</Tag>
+                  </div>
+                ) : (
+                  <NumberSpinInput
+                    label="Até (transações/mês)"
+                    typeable
+                    step={1}
+                    minValue={t.min_transactions}
+                    disabled={readOnly}
+                    value={t.max_transactions ?? t.min_transactions}
+                    onChange={(v?: number) => updateTier(t.key, { max_transactions: v ?? null })}
+                  />
+                )}
+                {isLast && (
+                  <Checkbox
+                    id={`tier-open-${t.key}`}
+                    label="Esta é a última faixa (sem teto)"
+                    checked={t.openEnded}
+                    disabled={readOnly}
+                    onChange={(checked) => updateTier(t.key, { openEnded: checked, max_transactions: checked ? null : t.min_transactions })}
+                  />
+                )}
+              </div>
+              <div className={styles.formRowField}>
+                <CurrencyInput
+                  label="Preço por transação"
+                  value={t.price_per_transaction}
+                  onChange={(v: number) => updateTier(t.key, { price_per_transaction: v })}
+                  disabled={readOnly}
+                />
+              </div>
+              {!readOnly && (
+                <button type="button" className={styles.removeBtn} onClick={() => removeTier(t.key)} title="Remover faixa">✕</button>
+              )}
             </div>
-            <div className={styles.formRowField}>
-              <NumberSpinInput
-                typeable
-                step={1}
-                minValue={t.min_transactions}
-                disabled={readOnly || t.openEnded}
-                helperMessage="Até (transações/mês)"
-                value={t.max_transactions ?? t.min_transactions}
-                onChange={(v?: number) => updateTier(t.key, { max_transactions: v ?? null })}
-              />
-              <Checkbox
-                id={`tier-open-${t.key}`}
-                label="Sem teto (última faixa)"
-                checked={t.openEnded}
-                disabled={readOnly}
-                onChange={(checked) => updateTier(t.key, { openEnded: checked, max_transactions: checked ? null : t.min_transactions })}
-              />
-            </div>
-            <div className={styles.formRowField}>
-              <CurrencyInput
-                label="Preço por transação"
-                value={t.price_per_transaction}
-                onChange={(v: number) => updateTier(t.key, { price_per_transaction: v })}
-                disabled={readOnly}
-              />
-            </div>
-            {!readOnly && (
-              <button type="button" className={styles.removeBtn} onClick={() => removeTier(t.key)} title="Remover faixa">✕</button>
-            )}
-          </div>
-        ))}
+          );
+        })}
         {!readOnly && (
           <Button type="button" size="small" variant="secondary" onClick={addTier}>+ Adicionar faixa</Button>
         )}

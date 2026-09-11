@@ -42,6 +42,14 @@ export default defineConfig({
           if (req.headers["sec-fetch-dest"] === "document") return req.url;
         },
       },
+      // ORD-162: mesmo caso de /companies — rota de API e de página do SPA
+      // (PriceTableListScreen/PriceTableFormScreen) ao mesmo tempo.
+      "/commercial": {
+        target: "http://localhost:8000",
+        bypass(req) {
+          if (req.headers["sec-fetch-dest"] === "document") return req.url;
+        },
+      },
       // ORD-119 — primeiro cliente WebSocket do admin (FulfillmentScreen).
       "/ws": {
         target: "ws://localhost:8000",

@@ -114,7 +114,7 @@ export default function PriceTableListScreen() {
     {
       key: "action", header: "", render: (t) => (
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          {t.status === "draft" && (
+          {t.editable && (
             <Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); navigate(`/commercial/price-tables/${t.id}/edit`); }}>
               Editar
             </Button>
@@ -127,7 +127,7 @@ export default function PriceTableListScreen() {
               Ativar
             </Button>
           )}
-          {t.status === "draft" && (
+          {t.editable && (
             <Button size="small" variant="secondary" style={{ color: "var(--error-base)" }} onClick={(e) => { e.stopPropagation(); remove(t); }}>
               Excluir
             </Button>

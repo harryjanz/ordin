@@ -3447,7 +3447,7 @@
         "tags": [
           "Comercial"
         ],
-        "summary": "Editar tabela de preço (só rascunho)",
+        "summary": "Editar tabela de preço (sem empresa vinculada)",
         "operationId": "update_price_table_commercial_price_tables__price_table_id__put",
         "security": [
           {
@@ -3502,7 +3502,7 @@
         "tags": [
           "Comercial"
         ],
-        "summary": "Excluir tabela de preço (só rascunho)",
+        "summary": "Excluir tabela de preço (sem empresa vinculada)",
         "operationId": "delete_price_table_commercial_price_tables__price_table_id__delete",
         "security": [
           {
@@ -3624,6 +3624,100 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PriceTableOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/plan": {
+      "get": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Consultar plano comercial da empresa",
+        "operationId": "get_company_plan_companies__company_id__plan_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyPlanOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/companies/{company_id}/plan/renew": {
+      "post": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Renovar plano comercial, assumindo a tabela de preço vigente atual",
+        "operationId": "renew_company_plan_companies__company_id__plan_renew_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyPlanOut"
                 }
               }
             }
@@ -4496,6 +4590,71 @@
           "active"
         ],
         "title": "CompanyOut"
+      },
+      "CompanyPlanOut": {
+        "properties": {
+          "company_id": {
+            "type": "integer",
+            "title": "Company Id"
+          },
+          "price_table": {
+            "$ref": "#/components/schemas/CompanyPlanPriceTableOut"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expires At"
+          },
+          "renewed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Renewed At"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "company_id",
+          "price_table",
+          "started_at",
+          "expires_at",
+          "renewed_at",
+          "status"
+        ],
+        "title": "CompanyPlanOut"
+      },
+      "CompanyPlanPriceTableOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "CompanyPlanPriceTableOut"
       },
       "CompanyUpdate": {
         "properties": {
@@ -5453,6 +5612,11 @@
             "type": "array",
             "title": "Transaction Tiers",
             "default": []
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "default": true
           }
         },
         "type": "object",
@@ -5499,6 +5663,11 @@
               }
             ],
             "title": "Activated At"
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "default": true
           }
         },
         "type": "object",

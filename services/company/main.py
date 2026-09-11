@@ -379,6 +379,23 @@ class PriceTableTransactionTier(Base):
     )
 
 
+class CompanyPlan(Base):
+    # ORD-163: plano comercial da empresa — vincula à price_table vigente no
+    # momento da criação/renovação. Nome "Plan" (não "Contract") de
+    # propósito: já existe CompanyContractScreen/infrastructure.contract_storage
+    # pro contrato JURÍDICO (upload de PDF) — entidade totalmente diferente,
+    # "Contract" colidiria conceitualmente. Sem ForeignKey real — mesmo
+    # padrão de integridade referencial em nível de aplicação da ORD-162.
+    __tablename__ = "company_plans"
+    id              = Column(Integer, primary_key=True)
+    company_id      = Column(Integer, nullable=False, unique=True, index=True)
+    price_table_id  = Column(Integer, nullable=False, index=True)
+    started_at      = Column(DateTime, nullable=False)
+    expires_at      = Column(DateTime, nullable=False)
+    renewed_at      = Column(DateTime, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
@@ -900,6 +917,11 @@ class PriceTableOut(BaseModel):
     activated_at: datetime | None
     archived_at: datetime | None
     transaction_tiers: list[PriceTableTierOut] = []
+    # ORD-163 (revisão): editável não é sobre status (rascunho/vigente/
+    # histórica) — é sobre ter ou não algum CompanyPlan vinculado. Uma
+    # tabela vigente sem nenhuma empresa apontando pra ela ainda pode ser
+    # ajustada; uma tabela histórica com empresas vinculadas, não.
+    editable: bool = True
 
 
 class PriceTableSummaryOut(BaseModel):
@@ -908,7 +930,7 @@ class PriceTableSummaryOut(BaseModel):
     status: str
     created_at: datetime
     activated_at: datetime | None
-    model_config = {"from_attributes": True}
+    editable: bool = True
 
 
 class PriceTableListOut(BaseModel):
@@ -917,6 +939,20 @@ class PriceTableListOut(BaseModel):
 
 class PriceTableActivateIn(BaseModel):
     confirm_replace: bool = False
+
+
+class CompanyPlanPriceTableOut(BaseModel):
+    id: int
+    name: str
+
+
+class CompanyPlanOut(BaseModel):
+    company_id: int
+    price_table: CompanyPlanPriceTableOut
+    started_at: datetime
+    expires_at: datetime
+    renewed_at: datetime | None
+    status: str  # "Ativo" | "Vencido" — calculado, nunca armazenado (ORD-163)
 
 
 class HealthOut(BaseModel):
@@ -1228,6 +1264,18 @@ async def create_company(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_platform_admin(current_user)
+    # ORD-163: toda empresa nova precisa nascer com um plano vinculado à
+    # tabela de preço vigente. Checagem dentro da MESMA transação da
+    # criação da empresa (não antes, numa query separada) — evita corrida
+    # com uma troca de tabela vigente concorrente entre o check e o commit.
+    active_table = (
+        await db.execute(select(PriceTable).where(PriceTable.status == "active"))
+    ).scalar_one_or_none()
+    if active_table is None:
+        raise HTTPException(
+            400,
+            "Nenhuma tabela de preço vigente configurada. Configure uma tabela de preço antes de criar empresas.",
+        )
     cadastral_status = "NAO_VERIFICADA"
     if body.document:
         # reconsulta server-side — nunca confia apenas no que o front enviou (janela lookup → submit)
@@ -1270,6 +1318,15 @@ async def create_company(
     )
     db.add(co)
     try:
+        await db.flush()
+        # ORD-163: plano criado na mesma transação — se o commit abaixo
+        # falhar (ex. CNPJ duplicado), o rollback desfaz os dois juntos.
+        db.add(CompanyPlan(
+            company_id=co.id,
+            price_table_id=active_table.id,
+            started_at=datetime.utcnow(),
+            expires_at=datetime.utcnow() + timedelta(days=365),
+        ))
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -3436,8 +3493,21 @@ async def _get_price_table_tiers(db: AsyncSession, price_table_id: int) -> list[
     return list(result.scalars().all())
 
 
+async def _price_table_has_linked_plans(db: AsyncSession, price_table_id: int) -> bool:
+    # ORD-163 (revisão): critério de "pode editar/excluir" não é o status da
+    # tabela — é se alguma empresa (CompanyPlan) depende dela. Draft nunca
+    # tem plano vinculado (só price_table "active" é atribuída a plano
+    # novo/renovado); active/historical só ficam bloqueadas se de fato
+    # tiverem pelo menos uma empresa apontando pra elas.
+    result = await db.execute(
+        select(CompanyPlan.id).where(CompanyPlan.price_table_id == price_table_id).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
     tiers = await _get_price_table_tiers(db, pt.id)
+    has_plans = await _price_table_has_linked_plans(db, pt.id)
     return {
         "id": pt.id,
         "name": pt.name,
@@ -3457,6 +3527,7 @@ async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
             }
             for t in tiers
         ],
+        "editable": not has_plans,
     }
 
 
@@ -3513,7 +3584,25 @@ async def list_price_tables(
 ):
     _require_platform_admin(current_user)
     result = await db.execute(select(PriceTable).order_by(PriceTable.created_at.desc()))
-    return {"price_tables": result.scalars().all()}
+    tables = result.scalars().all()
+    # Um SELECT só pra saber quais price_table_id têm plano vinculado, em vez
+    # de uma query por linha (N+1) — lista de tabelas costuma ser pequena,
+    # mas não custa nada evitar.
+    linked_result = await db.execute(select(CompanyPlan.price_table_id).distinct())
+    linked_ids = {row[0] for row in linked_result.all()}
+    return {
+        "price_tables": [
+            {
+                "id": pt.id,
+                "name": pt.name,
+                "status": pt.status,
+                "created_at": pt.created_at,
+                "activated_at": pt.activated_at,
+                "editable": pt.id not in linked_ids,
+            }
+            for pt in tables
+        ]
+    }
 
 
 @app.get(
@@ -3538,7 +3627,7 @@ async def get_price_table(
     "/commercial/price-tables/{price_table_id}",
     response_model=PriceTableOut,
     tags=["Comercial"],
-    summary="Editar tabela de preço (só rascunho)",
+    summary="Editar tabela de preço (sem empresa vinculada)",
 )
 async def update_price_table(
     price_table_id: int,
@@ -3550,8 +3639,8 @@ async def update_price_table(
     pt = await db.get(PriceTable, price_table_id)
     if not pt:
         raise HTTPException(404, "Tabela de preço não encontrada")
-    if pt.status != "draft":
-        raise HTTPException(409, "Só é possível editar uma tabela em rascunho")
+    if await _price_table_has_linked_plans(db, pt.id):
+        raise HTTPException(409, "Não é possível editar — já existe empresa com plano vinculado a esta tabela")
     pt.name = body.name
     pt.totem_price_1 = body.totem_price_1
     pt.totem_multiplier_2 = body.totem_multiplier_2
@@ -3566,7 +3655,7 @@ async def update_price_table(
     "/commercial/price-tables/{price_table_id}",
     status_code=204,
     tags=["Comercial"],
-    summary="Excluir tabela de preço (só rascunho)",
+    summary="Excluir tabela de preço (sem empresa vinculada)",
 )
 async def delete_price_table(
     price_table_id: int,
@@ -3577,8 +3666,8 @@ async def delete_price_table(
     pt = await db.get(PriceTable, price_table_id)
     if not pt:
         raise HTTPException(404, "Tabela de preço não encontrada")
-    if pt.status != "draft":
-        raise HTTPException(409, "Só é possível excluir uma tabela em rascunho")
+    if await _price_table_has_linked_plans(db, pt.id):
+        raise HTTPException(409, "Não é possível excluir — já existe empresa com plano vinculado a esta tabela")
     await db.execute(delete(PriceTableTransactionTier).where(PriceTableTransactionTier.price_table_id == price_table_id))
     await db.delete(pt)
     await db.commit()
@@ -3687,6 +3776,73 @@ async def activate_price_table(
     await db.commit()
     await db.refresh(pt)
     return await _serialize_price_table(db, pt)
+
+
+# ── Plano comercial da empresa (ORD-163) ────────────────────────────────────
+
+async def _serialize_company_plan(db: AsyncSession, plan: CompanyPlan) -> dict:
+    price_table = await db.get(PriceTable, plan.price_table_id)
+    now = datetime.utcnow()
+    return {
+        "company_id": plan.company_id,
+        "price_table": {"id": price_table.id, "name": price_table.name},
+        "started_at": plan.started_at,
+        "expires_at": plan.expires_at,
+        "renewed_at": plan.renewed_at,
+        "status": "Ativo" if plan.expires_at > now else "Vencido",
+    }
+
+
+@app.get(
+    "/companies/{company_id}/plan",
+    response_model=CompanyPlanOut,
+    tags=["Empresas"],
+    summary="Consultar plano comercial da empresa",
+)
+async def get_company_plan(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # superadmin/admin veem qualquer empresa; owner/manager só a própria
+    # (mesma regra já usada em outros endpoints de gestão de empresa).
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(CompanyPlan).where(CompanyPlan.company_id == company_id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Empresa não tem plano comercial")
+    return await _serialize_company_plan(db, plan)
+
+
+@app.post(
+    "/companies/{company_id}/plan/renew",
+    response_model=CompanyPlanOut,
+    tags=["Empresas"],
+    summary="Renovar plano comercial, assumindo a tabela de preço vigente atual",
+)
+async def renew_company_plan(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    result = await db.execute(select(CompanyPlan).where(CompanyPlan.company_id == company_id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Empresa não tem plano comercial")
+    active_table = (
+        await db.execute(select(PriceTable).where(PriceTable.status == "active"))
+    ).scalar_one_or_none()
+    if active_table is None:
+        raise HTTPException(400, "Nenhuma tabela de preço vigente configurada.")
+    now = datetime.utcnow()
+    # Renovação antecipada permitida — não checa se já venceu (Explorer/QA).
+    plan.price_table_id = active_table.id
+    plan.renewed_at = now
+    plan.expires_at = now + timedelta(days=365)
+    await db.commit()
+    await db.refresh(plan)
+    return await _serialize_company_plan(db, plan)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
