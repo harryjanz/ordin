@@ -58,6 +58,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     Integer,
+    Numeric,
     String,
     UniqueConstraint,
     delete,
@@ -341,6 +342,41 @@ class CompanyLegalRepresentative(Base):
     email_enc   = Column(String(500), nullable=False)
     phone_enc   = Column(String(500), nullable=True)
     created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+class PriceTable(Base):
+    # ORD-162: tabela de preço comercial da própria plataforma Ordin — sem
+    # company_id, não é dado de tenant. status: draft | active | historical.
+    # Só pode existir uma "active" por vez (garantido na aplicação, ver
+    # activate_price_table — MySQL/Aurora não tem partial unique index).
+    __tablename__ = "price_tables"
+    id                    = Column(Integer, primary_key=True)
+    name                  = Column(String(120), nullable=False)
+    status                = Column(String(20), nullable=False, default="draft")
+    totem_price_1         = Column(Numeric(10, 2), nullable=False)
+    totem_multiplier_2    = Column(Numeric(4, 2), nullable=False)
+    totem_multiplier_3_5  = Column(Numeric(4, 2), nullable=False)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+    activated_at          = Column(DateTime, nullable=True)
+    archived_at           = Column(DateTime, nullable=True)
+    created_by_user_id    = Column(Integer, nullable=True)
+
+
+class PriceTableTransactionTier(Base):
+    # ORD-162: faixas de taxa transacional de uma PriceTable. max_transactions
+    # NULL = faixa aberta (sem teto), só permitido na última faixa (ordenada
+    # por sort_order). Sem ForeignKey real — mesmo padrão do resto do
+    # company-service (integridade referencial em nível de aplicação).
+    __tablename__ = "price_table_transaction_tiers"
+    id                     = Column(Integer, primary_key=True)
+    price_table_id         = Column(Integer, nullable=False, index=True)
+    min_transactions       = Column(Integer, nullable=False)
+    max_transactions       = Column(Integer, nullable=True)
+    price_per_transaction  = Column(Numeric(6, 4), nullable=False)
+    sort_order             = Column(Integer, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("price_table_id", "sort_order", name="uq_price_table_tier_sort"),
+    )
 
 
 async def get_db():
@@ -806,6 +842,83 @@ class LegalRepresentativeOut(BaseModel):
     created_at: datetime
 
 
+class PriceTableTierIn(BaseModel):
+    min_transactions: int = Field(ge=0)
+    max_transactions: int | None = Field(default=None, ge=0)
+    price_per_transaction: float = Field(gt=0)
+
+
+class PriceTableTierOut(BaseModel):
+    id: int
+    min_transactions: int
+    max_transactions: int | None
+    price_per_transaction: float
+
+
+class PriceTableIn(BaseModel):
+    name: str
+    totem_price_1: float = Field(gt=0)
+    totem_multiplier_2: float = Field(gt=0, le=1)
+    totem_multiplier_3_5: float = Field(gt=0, le=1)
+    transaction_tiers: list[PriceTableTierIn] = Field(default_factory=list)
+
+    @field_validator("transaction_tiers")
+    @classmethod
+    def validate_tiers(cls, tiers: list[PriceTableTierIn]) -> list[PriceTableTierIn]:
+        # ORD-162: faixas precisam ser contíguas, sem sobreposição e sem
+        # lacuna — validado aqui (na entrada), não só na ativação, conforme
+        # os cenários Gherkin "faixas sobrepostas"/"faixas com lacuna" do
+        # QA Explorer (bloqueiam o salvamento, mesmo em rascunho).
+        if not tiers:
+            return tiers
+        ordered = sorted(tiers, key=lambda t: t.min_transactions)
+        for i, tier in enumerate(ordered):
+            is_last = i == len(ordered) - 1
+            if tier.max_transactions is None and not is_last:
+                raise ValueError("Só a última faixa de transação pode ficar sem teto (max_transactions)")
+            if tier.max_transactions is not None and tier.max_transactions < tier.min_transactions:
+                raise ValueError("max_transactions não pode ser menor que min_transactions")
+            if i > 0:
+                previous = ordered[i - 1]
+                if previous.max_transactions is None:
+                    raise ValueError("Faixa sem teto não pode vir antes de outra faixa")
+                if tier.min_transactions <= previous.max_transactions:
+                    raise ValueError("Faixas de transação não podem se sobrepor")
+                if tier.min_transactions != previous.max_transactions + 1:
+                    raise ValueError("Faixas de transação não podem ter lacuna entre elas")
+        return ordered
+
+
+class PriceTableOut(BaseModel):
+    id: int
+    name: str
+    status: str
+    totem_price_1: float
+    totem_multiplier_2: float
+    totem_multiplier_3_5: float
+    created_at: datetime
+    activated_at: datetime | None
+    archived_at: datetime | None
+    transaction_tiers: list[PriceTableTierOut] = []
+
+
+class PriceTableSummaryOut(BaseModel):
+    id: int
+    name: str
+    status: str
+    created_at: datetime
+    activated_at: datetime | None
+    model_config = {"from_attributes": True}
+
+
+class PriceTableListOut(BaseModel):
+    price_tables: list[PriceTableSummaryOut]
+
+
+class PriceTableActivateIn(BaseModel):
+    confirm_replace: bool = False
+
+
 class HealthOut(BaseModel):
     service: str
     status: str
@@ -820,6 +933,7 @@ _tags = [
     {"name": "Pagamento",      "description": "Configuração de provider TEF/PIX por empresa (owner/superadmin)."},
     {"name": "MFA",            "description": "Duplo fator de autenticação (TOTP) — setup pessoal e recuperação assistida."},
     {"name": "Usuários da Plataforma", "description": "CRUD separado pra superadmin/admin (equipe da Ordin, não de cliente) — ver ORD-093."},
+    {"name": "Comercial", "description": "Tabelas de preço comercial da plataforma (superadmin/admin) — ver ORD-162."},
 ]
 
 app = FastAPI(
@@ -3309,6 +3423,260 @@ async def approve_panel(
     }), ex=60)
 
     return {"ok": True}
+
+
+# ── Comercial (ORD-162) ─────────────────────────────────────────────────────
+
+async def _get_price_table_tiers(db: AsyncSession, price_table_id: int) -> list[PriceTableTransactionTier]:
+    result = await db.execute(
+        select(PriceTableTransactionTier)
+        .filter(PriceTableTransactionTier.price_table_id == price_table_id)
+        .order_by(PriceTableTransactionTier.sort_order)
+    )
+    return list(result.scalars().all())
+
+
+async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
+    tiers = await _get_price_table_tiers(db, pt.id)
+    return {
+        "id": pt.id,
+        "name": pt.name,
+        "status": pt.status,
+        "totem_price_1": pt.totem_price_1,
+        "totem_multiplier_2": pt.totem_multiplier_2,
+        "totem_multiplier_3_5": pt.totem_multiplier_3_5,
+        "created_at": pt.created_at,
+        "activated_at": pt.activated_at,
+        "archived_at": pt.archived_at,
+        "transaction_tiers": [
+            {
+                "id": t.id,
+                "min_transactions": t.min_transactions,
+                "max_transactions": t.max_transactions,
+                "price_per_transaction": t.price_per_transaction,
+            }
+            for t in tiers
+        ],
+    }
+
+
+async def _replace_price_table_tiers(db: AsyncSession, price_table_id: int, tiers_in: list[PriceTableTierIn]) -> None:
+    await db.execute(delete(PriceTableTransactionTier).where(PriceTableTransactionTier.price_table_id == price_table_id))
+    for index, tier in enumerate(tiers_in):
+        db.add(PriceTableTransactionTier(
+            price_table_id=price_table_id,
+            min_transactions=tier.min_transactions,
+            max_transactions=tier.max_transactions,
+            price_per_transaction=tier.price_per_transaction,
+            sort_order=index,
+        ))
+
+
+@app.post(
+    "/commercial/price-tables",
+    status_code=201,
+    response_model=PriceTableOut,
+    tags=["Comercial"],
+    summary="Criar tabela de preço (rascunho)",
+)
+async def create_price_table(
+    body: PriceTableIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    pt = PriceTable(
+        name=body.name,
+        status="draft",
+        totem_price_1=body.totem_price_1,
+        totem_multiplier_2=body.totem_multiplier_2,
+        totem_multiplier_3_5=body.totem_multiplier_3_5,
+        created_by_user_id=int(current_user.sub) if current_user.sub.isdigit() else None,
+    )
+    db.add(pt)
+    await db.flush()
+    await _replace_price_table_tiers(db, pt.id, body.transaction_tiers)
+    await db.commit()
+    await db.refresh(pt)
+    return await _serialize_price_table(db, pt)
+
+
+@app.get(
+    "/commercial/price-tables",
+    response_model=PriceTableListOut,
+    tags=["Comercial"],
+    summary="Listar tabelas de preço",
+)
+async def list_price_tables(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    result = await db.execute(select(PriceTable).order_by(PriceTable.created_at.desc()))
+    return {"price_tables": result.scalars().all()}
+
+
+@app.get(
+    "/commercial/price-tables/{price_table_id}",
+    response_model=PriceTableOut,
+    tags=["Comercial"],
+    summary="Detalhe da tabela de preço",
+)
+async def get_price_table(
+    price_table_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    pt = await db.get(PriceTable, price_table_id)
+    if not pt:
+        raise HTTPException(404, "Tabela de preço não encontrada")
+    return await _serialize_price_table(db, pt)
+
+
+@app.put(
+    "/commercial/price-tables/{price_table_id}",
+    response_model=PriceTableOut,
+    tags=["Comercial"],
+    summary="Editar tabela de preço (só rascunho)",
+)
+async def update_price_table(
+    price_table_id: int,
+    body: PriceTableIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    pt = await db.get(PriceTable, price_table_id)
+    if not pt:
+        raise HTTPException(404, "Tabela de preço não encontrada")
+    if pt.status != "draft":
+        raise HTTPException(409, "Só é possível editar uma tabela em rascunho")
+    pt.name = body.name
+    pt.totem_price_1 = body.totem_price_1
+    pt.totem_multiplier_2 = body.totem_multiplier_2
+    pt.totem_multiplier_3_5 = body.totem_multiplier_3_5
+    await _replace_price_table_tiers(db, pt.id, body.transaction_tiers)
+    await db.commit()
+    await db.refresh(pt)
+    return await _serialize_price_table(db, pt)
+
+
+@app.delete(
+    "/commercial/price-tables/{price_table_id}",
+    status_code=204,
+    tags=["Comercial"],
+    summary="Excluir tabela de preço (só rascunho)",
+)
+async def delete_price_table(
+    price_table_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    pt = await db.get(PriceTable, price_table_id)
+    if not pt:
+        raise HTTPException(404, "Tabela de preço não encontrada")
+    if pt.status != "draft":
+        raise HTTPException(409, "Só é possível excluir uma tabela em rascunho")
+    await db.execute(delete(PriceTableTransactionTier).where(PriceTableTransactionTier.price_table_id == price_table_id))
+    await db.delete(pt)
+    await db.commit()
+
+
+@app.post(
+    "/commercial/price-tables/{price_table_id}/duplicate",
+    status_code=201,
+    response_model=PriceTableOut,
+    tags=["Comercial"],
+    summary="Duplicar tabela de preço (gera novo rascunho)",
+)
+async def duplicate_price_table(
+    price_table_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    source = await db.get(PriceTable, price_table_id)
+    if not source:
+        raise HTTPException(404, "Tabela de preço não encontrada")
+    tiers = await _get_price_table_tiers(db, source.id)
+    new_table = PriceTable(
+        name=f"{source.name} (cópia)",
+        status="draft",
+        totem_price_1=source.totem_price_1,
+        totem_multiplier_2=source.totem_multiplier_2,
+        totem_multiplier_3_5=source.totem_multiplier_3_5,
+        created_by_user_id=int(current_user.sub) if current_user.sub.isdigit() else None,
+    )
+    db.add(new_table)
+    await db.flush()
+    for index, t in enumerate(tiers):
+        db.add(PriceTableTransactionTier(
+            price_table_id=new_table.id,
+            min_transactions=t.min_transactions,
+            max_transactions=t.max_transactions,
+            price_per_transaction=t.price_per_transaction,
+            sort_order=index,
+        ))
+    await db.commit()
+    await db.refresh(new_table)
+    return await _serialize_price_table(db, new_table)
+
+
+@app.post(
+    "/commercial/price-tables/{price_table_id}/activate",
+    response_model=PriceTableOut,
+    tags=["Comercial"],
+    summary="Ativar tabela de preço como vigente",
+)
+async def activate_price_table(
+    price_table_id: int,
+    body: PriceTableActivateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    pt = await db.get(PriceTable, price_table_id)
+    if not pt:
+        raise HTTPException(404, "Tabela de preço não encontrada")
+    if pt.status == "active":
+        # já é a vigente — no-op idempotente, não é erro.
+        return await _serialize_price_table(db, pt)
+
+    tiers = await _get_price_table_tiers(db, pt.id)
+    if not tiers:
+        # totem_price_1 é NOT NULL desde a criação (ver PriceTableIn), então
+        # só a ausência de faixas é de fato alcançável aqui — mantido o
+        # critério de aceite do Explorer também pro preço, por completude.
+        raise HTTPException(
+            400,
+            "Tabela precisa ter preço do 1º totem e ao menos uma faixa de transação para ser ativada",
+        )
+
+    # Lock na(s) tabela(s) atualmente vigente(s) — no máximo uma, garantido
+    # por este mesmo fluxo — antes de decidir, pra evitar corrida entre duas
+    # ativações concorrentes (risco documentado no Tech Explorer).
+    result = await db.execute(select(PriceTable).where(PriceTable.status == "active").with_for_update())
+    current_active = result.scalar_one_or_none()
+
+    if current_active is not None and not body.confirm_replace:
+        raise HTTPException(
+            409,
+            f"Já existe uma tabela vigente ('{current_active.name}'). "
+            "Envie confirm_replace=true para substituí-la.",
+        )
+
+    now = datetime.utcnow()
+    if current_active is not None:
+        current_active.status = "historical"
+        current_active.archived_at = now
+
+    pt.status = "active"
+    pt.activated_at = now
+    await db.commit()
+    await db.refresh(pt)
+    return await _serialize_price_table(db, pt)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

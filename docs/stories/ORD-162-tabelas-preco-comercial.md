@@ -1,6 +1,6 @@
 ---
 id: ORD-162
-status: Ready
+status: In Progress
 estimativa: 5 pontos (3 backend + 2 admin)
 tipo: feature
 fase: null

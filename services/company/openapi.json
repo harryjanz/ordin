@@ -3327,6 +3327,320 @@
         }
       }
     },
+    "/commercial/price-tables": {
+      "get": {
+        "tags": [
+          "Comercial"
+        ],
+        "summary": "Listar tabelas de preço",
+        "operationId": "list_price_tables_commercial_price_tables_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceTableListOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Comercial"
+        ],
+        "summary": "Criar tabela de preço (rascunho)",
+        "operationId": "create_price_table_commercial_price_tables_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceTableIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceTableOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/commercial/price-tables/{price_table_id}": {
+      "get": {
+        "tags": [
+          "Comercial"
+        ],
+        "summary": "Detalhe da tabela de preço",
+        "operationId": "get_price_table_commercial_price_tables__price_table_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "price_table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Price Table Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceTableOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Comercial"
+        ],
+        "summary": "Editar tabela de preço (só rascunho)",
+        "operationId": "update_price_table_commercial_price_tables__price_table_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "price_table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Price Table Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceTableIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceTableOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Comercial"
+        ],
+        "summary": "Excluir tabela de preço (só rascunho)",
+        "operationId": "delete_price_table_commercial_price_tables__price_table_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "price_table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Price Table Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/commercial/price-tables/{price_table_id}/duplicate": {
+      "post": {
+        "tags": [
+          "Comercial"
+        ],
+        "summary": "Duplicar tabela de preço (gera novo rascunho)",
+        "operationId": "duplicate_price_table_commercial_price_tables__price_table_id__duplicate_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "price_table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Price Table Id"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceTableOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/commercial/price-tables/{price_table_id}/activate": {
+      "post": {
+        "tags": [
+          "Comercial"
+        ],
+        "summary": "Ativar tabela de preço como vigente",
+        "operationId": "activate_price_table_commercial_price_tables__price_table_id__activate_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "price_table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Price Table Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceTableActivateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceTableOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/health": {
       "get": {
         "tags": [
@@ -5010,6 +5324,260 @@
         "type": "object",
         "title": "PlatformUserUpdate"
       },
+      "PriceTableActivateIn": {
+        "properties": {
+          "confirm_replace": {
+            "type": "boolean",
+            "title": "Confirm Replace",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "PriceTableActivateIn"
+      },
+      "PriceTableIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "totem_price_1": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Totem Price 1"
+          },
+          "totem_multiplier_2": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Totem Multiplier 2"
+          },
+          "totem_multiplier_3_5": {
+            "type": "number",
+            "maximum": 1.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Totem Multiplier 3 5"
+          },
+          "transaction_tiers": {
+            "items": {
+              "$ref": "#/components/schemas/PriceTableTierIn"
+            },
+            "type": "array",
+            "title": "Transaction Tiers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "totem_price_1",
+          "totem_multiplier_2",
+          "totem_multiplier_3_5"
+        ],
+        "title": "PriceTableIn"
+      },
+      "PriceTableListOut": {
+        "properties": {
+          "price_tables": {
+            "items": {
+              "$ref": "#/components/schemas/PriceTableSummaryOut"
+            },
+            "type": "array",
+            "title": "Price Tables"
+          }
+        },
+        "type": "object",
+        "required": [
+          "price_tables"
+        ],
+        "title": "PriceTableListOut"
+      },
+      "PriceTableOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "totem_price_1": {
+            "type": "number",
+            "title": "Totem Price 1"
+          },
+          "totem_multiplier_2": {
+            "type": "number",
+            "title": "Totem Multiplier 2"
+          },
+          "totem_multiplier_3_5": {
+            "type": "number",
+            "title": "Totem Multiplier 3 5"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "transaction_tiers": {
+            "items": {
+              "$ref": "#/components/schemas/PriceTableTierOut"
+            },
+            "type": "array",
+            "title": "Transaction Tiers",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "totem_price_1",
+          "totem_multiplier_2",
+          "totem_multiplier_3_5",
+          "created_at",
+          "activated_at",
+          "archived_at"
+        ],
+        "title": "PriceTableOut"
+      },
+      "PriceTableSummaryOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "status",
+          "created_at",
+          "activated_at"
+        ],
+        "title": "PriceTableSummaryOut"
+      },
+      "PriceTableTierIn": {
+        "properties": {
+          "min_transactions": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Min Transactions"
+          },
+          "max_transactions": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Transactions"
+          },
+          "price_per_transaction": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Price Per Transaction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "min_transactions",
+          "price_per_transaction"
+        ],
+        "title": "PriceTableTierIn"
+      },
+      "PriceTableTierOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "min_transactions": {
+            "type": "integer",
+            "title": "Min Transactions"
+          },
+          "max_transactions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Transactions"
+          },
+          "price_per_transaction": {
+            "type": "number",
+            "title": "Price Per Transaction"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "min_transactions",
+          "max_transactions",
+          "price_per_transaction"
+        ],
+        "title": "PriceTableTierOut"
+      },
       "RegeneratePinOut": {
         "properties": {
           "pin": {
@@ -5689,6 +6257,10 @@
     {
       "name": "Usuários da Plataforma",
       "description": "CRUD separado pra superadmin/admin (equipe da Ordin, não de cliente) — ver ORD-093."
+    },
+    {
+      "name": "Comercial",
+      "description": "Tabelas de preço comercial da plataforma (superadmin/admin) — ver ORD-162."
     }
   ]
 }
