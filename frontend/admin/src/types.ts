@@ -287,6 +287,42 @@ export interface Combo {
   items: ComboItem[];
 }
 
+// ORD-162 — tabela de preço comercial da plataforma (superadmin/admin), não
+// confundir com CompanyContractScreen (contrato jurídico por empresa, outra
+// entidade). status: draft (rascunho, editável) | active (vigente, só uma
+// por vez) | historical (substituída, somente-leitura).
+export type PriceTableStatus = "draft" | "active" | "historical";
+
+export interface PriceTableTransactionTier {
+  id: number;
+  min_transactions: number;
+  max_transactions: number | null; // null = faixa aberta, só permitido na última
+  price_per_transaction: number;
+}
+
+export interface PriceTable {
+  id: number;
+  name: string;
+  status: PriceTableStatus;
+  totem_price_1: number;
+  totem_multiplier_2: number;
+  totem_multiplier_3_5: number;
+  created_at: string;
+  activated_at: string | null;
+  archived_at: string | null;
+  transaction_tiers: PriceTableTransactionTier[];
+}
+
+// Resumo devolvido por GET /commercial/price-tables (lista) — sem faixas
+// nem multiplicadores, só o suficiente pra listar.
+export interface PriceTableSummary {
+  id: number;
+  name: string;
+  status: PriceTableStatus;
+  created_at: string;
+  activated_at: string | null;
+}
+
 export interface Order {
   order_ref: string;
   status: string;

@@ -23,6 +23,10 @@ const MENU = [
   // ORD-093: só pra equipe da própria Ordin — não confundir com "Clientes"
   // (empresas) nem com "Empresa" (equipe de UMA empresa cliente específica).
   { to: "/platform-users", label: "Equipe Ordin", icon: "user-check",  roles: ["superadmin", "admin"] },
+  // ORD-162: tabela de preço comercial da PLATAFORMA (mensalidade por
+  // totem + taxa transacional) — não confundir com "/companies/:id/contract"
+  // (CompanyContractScreen, contrato jurídico de UMA empresa cliente).
+  { to: "/commercial/price-tables", label: "Tabelas de preço", icon: "percent", roles: ["superadmin", "admin"] },
 ] as const;
 
 const W_OPEN = 220;
