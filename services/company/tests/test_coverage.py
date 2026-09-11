@@ -74,6 +74,17 @@ async def db_session():
     svc.AsyncSessionLocal = test_session
     async with test_engine.begin() as conn:
         await conn.run_sync(svc.Base.metadata.create_all)
+    # ORD-163: create_company() agora exige uma price_table "active" — seed
+    # mínimo pra não quebrar os testes deste arquivo que chamam a função
+    # direto, sem se importar com o modelo comercial em si.
+    async with test_session() as _db:
+        _pt = svc.PriceTable(name="Tabela Teste", status="active", totem_price_1=249.00,
+                              totem_multiplier_2=0.5, totem_multiplier_3_5=0.3)
+        _db.add(_pt)
+        await _db.flush()
+        _db.add(svc.PriceTableTransactionTier(price_table_id=_pt.id, min_transactions=0,
+                                               max_transactions=None, price_per_transaction=0.10, sort_order=0))
+        await _db.commit()
     yield test_session
     await test_engine.dispose()
     svc.engine, svc.AsyncSessionLocal = orig_engine, orig_session

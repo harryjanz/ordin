@@ -379,6 +379,23 @@ class PriceTableTransactionTier(Base):
     )
 
 
+class CompanyPlan(Base):
+    # ORD-163: plano comercial da empresa — vincula à price_table vigente no
+    # momento da criação/renovação. Nome "Plan" (não "Contract") de
+    # propósito: já existe CompanyContractScreen/infrastructure.contract_storage
+    # pro contrato JURÍDICO (upload de PDF) — entidade totalmente diferente,
+    # "Contract" colidiria conceitualmente. Sem ForeignKey real — mesmo
+    # padrão de integridade referencial em nível de aplicação da ORD-162.
+    __tablename__ = "company_plans"
+    id              = Column(Integer, primary_key=True)
+    company_id      = Column(Integer, nullable=False, unique=True, index=True)
+    price_table_id  = Column(Integer, nullable=False, index=True)
+    started_at      = Column(DateTime, nullable=False)
+    expires_at      = Column(DateTime, nullable=False)
+    renewed_at      = Column(DateTime, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
@@ -919,6 +936,20 @@ class PriceTableActivateIn(BaseModel):
     confirm_replace: bool = False
 
 
+class CompanyPlanPriceTableOut(BaseModel):
+    id: int
+    name: str
+
+
+class CompanyPlanOut(BaseModel):
+    company_id: int
+    price_table: CompanyPlanPriceTableOut
+    started_at: datetime
+    expires_at: datetime
+    renewed_at: datetime | None
+    status: str  # "Ativo" | "Vencido" — calculado, nunca armazenado (ORD-163)
+
+
 class HealthOut(BaseModel):
     service: str
     status: str
@@ -1228,6 +1259,18 @@ async def create_company(
     current_user: TokenPayload = Depends(get_current_user),
 ):
     _require_platform_admin(current_user)
+    # ORD-163: toda empresa nova precisa nascer com um plano vinculado à
+    # tabela de preço vigente. Checagem dentro da MESMA transação da
+    # criação da empresa (não antes, numa query separada) — evita corrida
+    # com uma troca de tabela vigente concorrente entre o check e o commit.
+    active_table = (
+        await db.execute(select(PriceTable).where(PriceTable.status == "active"))
+    ).scalar_one_or_none()
+    if active_table is None:
+        raise HTTPException(
+            400,
+            "Nenhuma tabela de preço vigente configurada. Configure uma tabela de preço antes de criar empresas.",
+        )
     cadastral_status = "NAO_VERIFICADA"
     if body.document:
         # reconsulta server-side — nunca confia apenas no que o front enviou (janela lookup → submit)
@@ -1270,6 +1313,15 @@ async def create_company(
     )
     db.add(co)
     try:
+        await db.flush()
+        # ORD-163: plano criado na mesma transação — se o commit abaixo
+        # falhar (ex. CNPJ duplicado), o rollback desfaz os dois juntos.
+        db.add(CompanyPlan(
+            company_id=co.id,
+            price_table_id=active_table.id,
+            started_at=datetime.utcnow(),
+            expires_at=datetime.utcnow() + timedelta(days=365),
+        ))
         await db.commit()
     except IntegrityError:
         await db.rollback()
@@ -3687,6 +3739,73 @@ async def activate_price_table(
     await db.commit()
     await db.refresh(pt)
     return await _serialize_price_table(db, pt)
+
+
+# ── Plano comercial da empresa (ORD-163) ────────────────────────────────────
+
+async def _serialize_company_plan(db: AsyncSession, plan: CompanyPlan) -> dict:
+    price_table = await db.get(PriceTable, plan.price_table_id)
+    now = datetime.utcnow()
+    return {
+        "company_id": plan.company_id,
+        "price_table": {"id": price_table.id, "name": price_table.name},
+        "started_at": plan.started_at,
+        "expires_at": plan.expires_at,
+        "renewed_at": plan.renewed_at,
+        "status": "Ativo" if plan.expires_at > now else "Vencido",
+    }
+
+
+@app.get(
+    "/companies/{company_id}/plan",
+    response_model=CompanyPlanOut,
+    tags=["Empresas"],
+    summary="Consultar plano comercial da empresa",
+)
+async def get_company_plan(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # superadmin/admin veem qualquer empresa; owner/manager só a própria
+    # (mesma regra já usada em outros endpoints de gestão de empresa).
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(select(CompanyPlan).where(CompanyPlan.company_id == company_id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Empresa não tem plano comercial")
+    return await _serialize_company_plan(db, plan)
+
+
+@app.post(
+    "/companies/{company_id}/plan/renew",
+    response_model=CompanyPlanOut,
+    tags=["Empresas"],
+    summary="Renovar plano comercial, assumindo a tabela de preço vigente atual",
+)
+async def renew_company_plan(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    result = await db.execute(select(CompanyPlan).where(CompanyPlan.company_id == company_id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Empresa não tem plano comercial")
+    active_table = (
+        await db.execute(select(PriceTable).where(PriceTable.status == "active"))
+    ).scalar_one_or_none()
+    if active_table is None:
+        raise HTTPException(400, "Nenhuma tabela de preço vigente configurada.")
+    now = datetime.utcnow()
+    # Renovação antecipada permitida — não checa se já venceu (Explorer/QA).
+    plan.price_table_id = active_table.id
+    plan.renewed_at = now
+    plan.expires_at = now + timedelta(days=365)
+    await db.commit()
+    await db.refresh(plan)
+    return await _serialize_company_plan(db, plan)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

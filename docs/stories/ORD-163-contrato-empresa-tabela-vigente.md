@@ -1,6 +1,6 @@
 ---
 id: ORD-163
-status: Ready
+status: In Progress
 estimativa: 4,5 pontos (3 backend + 1,5 admin)
 tipo: feature
 fase: null

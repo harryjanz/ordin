@@ -44,6 +44,29 @@
   margin-left: 8px;
 }
 
+// ORD-163 — aba "Plano" (somente leitura, owner/manager).
+.planPanel {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+  @include padding('l', 'xl', 'l', 'xl');
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 480px;
+}
+
+.planRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.planLabel {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.5);
+}
+
 // Conteúdo do Modal de terminal — sem o "cartão" (fundo/borda/padding) do
 // .form solto na página, o próprio Modal já cuida disso.
 .modalForm {

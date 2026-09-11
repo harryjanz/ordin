@@ -1,9 +1,21 @@
 import api from "../api";
-import type { CepLookupResult, CnpjLookupResult, Company, CompanyStatusSummary, Contact, ContactType, LegalRepresentative, Terminal, User } from "../types";
+import type { CepLookupResult, CnpjLookupResult, Company, CompanyPlan, CompanyStatusSummary, Contact, ContactType, LegalRepresentative, Terminal, User } from "../types";
 import { normalizeCnpj } from "../lib/validators";
 
 export async function lookupCnpj(cnpj: string): Promise<CnpjLookupResult> {
   const r = await api.get<CnpjLookupResult>(`/companies/cnpj-lookup/${encodeURIComponent(cnpj)}`);
+  return r.data;
+}
+
+// ORD-163 — plano comercial (não confundir com CompanyContractScreen, que é
+// o contrato jurídico da empresa).
+export async function getCompanyPlan(companyId: number): Promise<CompanyPlan> {
+  const r = await api.get<CompanyPlan>(`/companies/${companyId}/plan`);
+  return r.data;
+}
+
+export async function renewCompanyPlan(companyId: number): Promise<CompanyPlan> {
+  const r = await api.post<CompanyPlan>(`/companies/${companyId}/plan/renew`);
   return r.data;
 }
 

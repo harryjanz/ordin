@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, InputBase, Tag, type DropdownOptions } from "design-system";
-import { getCompany, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, updateCompany, updateContractStatus } from "../api/companies";
+import { Alert, Button, Dropdown, InputBase, Tag, makeToast, type DropdownOptions } from "design-system";
+import { getCompany, getCompanyPlan, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
 import { isValidCep, normalizeCep, UF_VALUES } from "../lib/validators";
 import { companyToEditForm, diffFields, type CompanyEditForm } from "../lib/companyEdit";
 import { useStore } from "../store";
-import type { CepLookupResult, Company, Contact, LegalRepresentative } from "../types";
+import type { CepLookupResult, Company, CompanyPlan, Contact, LegalRepresentative } from "../types";
 import styles from "./CompanyContractScreen.module.scss";
 
 const STAGES = ["pendente", "enviado", "assinado"] as const;
@@ -40,6 +40,8 @@ export default function CompanyContractScreen() {
   const [company, setCompany] = useState<Company | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [legalRep, setLegalRep] = useState<LegalRepresentative | null>(null);
+  const [plan, setPlan] = useState<CompanyPlan | null>(null);
+  const [renewingPlan, setRenewingPlan] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -123,12 +125,32 @@ export default function CompanyContractScreen() {
     } finally {
       setLoading(false);
     }
+    // ORD-163 — plano comercial busca separada: toda empresa deveria ter um
+    // (criado junto na criação), mas não é motivo pra travar o resto da
+    // tela se, por algum motivo, não existir.
+    try {
+      setPlan(await getCompanyPlan(companyId));
+    } catch {
+      setPlan(null);
+    }
   }
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [companyId]);
+
+  async function renewPlan() {
+    setRenewingPlan(true);
+    try {
+      setPlan(await renewCompanyPlan(companyId));
+      makeToast("success", "Plano comercial renovado");
+    } catch (err) {
+      makeToast("error", parseApiError(err).message);
+    } finally {
+      setRenewingPlan(false);
+    }
+  }
 
   async function markSent() {
     setUpdating(true);
@@ -425,6 +447,38 @@ export default function CompanyContractScreen() {
                 </>
               )}
             </div>
+          </div>
+
+          <div className={styles.panel}>
+            <h3 className={`${styles.h3} ${styles.h3Mb}`}>Plano comercial</h3>
+            {plan ? (
+              <div className={styles.contactsGrid}>
+                <div className={styles.miniCard}>
+                  <div className={styles.miniType}>Status</div>
+                  <div className={styles.miniName}>
+                    <Tag variant={plan.status === "Ativo" ? "success" : "warning"}>{plan.status}</Tag>
+                  </div>
+                </div>
+                <div className={styles.miniCard}>
+                  <div className={styles.miniType}>Tabela de preço</div>
+                  <div className={styles.miniName}>{plan.price_table.name}</div>
+                </div>
+                <div className={styles.miniCard}>
+                  <div className={styles.miniType}>Vencimento</div>
+                  <div className={styles.miniName}>{fmtDate(plan.expires_at)}</div>
+                  <div className={styles.miniDetail}>{plan.renewed_at ? `Renovado em ${fmtDate(plan.renewed_at)}` : "Nunca renovado"}</div>
+                </div>
+              </div>
+            ) : (
+              <div className={styles.miniDetail}>Nenhum plano comercial encontrado pra esta empresa.</div>
+            )}
+            {plan && (
+              <div className={styles.actionsRow}>
+                <Button size="small" variant="secondary" onClick={renewPlan} loading={renewingPlan}>
+                  Renovar plano
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className={styles.panel}>

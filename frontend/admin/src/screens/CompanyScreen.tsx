@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
 import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
-import { listCompanies } from "../api/companies";
+import { getCompanyPlan, listCompanies } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { useStore } from "../store";
-import type { Terminal, User, Role, PaymentConfig, Company, MpTerminal } from "../types";
+import type { CompanyPlan, Terminal, User, Role, PaymentConfig, Company, MpTerminal } from "../types";
 import styles from "./CompanyScreen.module.scss";
 
 // ── Provider catalog ─────────────────────────────────────────────────────────
@@ -164,6 +164,57 @@ function credentialLines(c: PaymentConfig, def: ProviderDef): string[] {
 }
 
 // ── PaymentTab ───────────────────────────────────────────────────────────────
+
+interface PlanTabProps {
+  companyId: number;
+}
+
+// ORD-163 — plano comercial, somente leitura pro owner/manager (não
+// confundir com o contrato jurídico, que é uma tela separada só de
+// superadmin/admin — ver CompanyContractScreen).
+function PlanTab({ companyId }: PlanTabProps) {
+  const [plan, setPlan] = useState<CompanyPlan | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    getCompanyPlan(companyId)
+      .then(setPlan)
+      .catch((e) => setErr(parseApiError(e).message))
+      .finally(() => setLoading(false));
+  }, [companyId]);
+
+  if (loading) return <div className={styles.muted}>Carregando…</div>;
+  if (err) return <Alert variant="error" text={err} fullWidth />;
+  if (!plan) return <div className={styles.muted}>Nenhum plano comercial encontrado.</div>;
+
+  function fmtDate(iso: string | null): string {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleString("pt-BR");
+  }
+
+  return (
+    <div className={styles.planPanel}>
+      <div className={styles.planRow}>
+        <span className={styles.planLabel}>Status</span>
+        <Tag variant={plan.status === "Ativo" ? "success" : "warning"}>{plan.status}</Tag>
+      </div>
+      <div className={styles.planRow}>
+        <span className={styles.planLabel}>Tabela de preço</span>
+        <span>{plan.price_table.name}</span>
+      </div>
+      <div className={styles.planRow}>
+        <span className={styles.planLabel}>Vencimento</span>
+        <span>{fmtDate(plan.expires_at)}</span>
+      </div>
+      <div className={styles.planRow}>
+        <span className={styles.planLabel}>Última renovação</span>
+        <span>{plan.renewed_at ? fmtDate(plan.renewed_at) : "Nunca renovado"}</span>
+      </div>
+    </div>
+  );
+}
 
 interface PaymentTabProps {
   companyId: number;
@@ -510,7 +561,7 @@ export default function CompanyScreen() {
   // sessão ativa, seleciona aqui; com sessão ativa (vinda de Config ou
   // desta própria tela), usa pra carregar os dados da empresa.
   const companyId = isPlatformAdmin ? selectedCompanyId : ownCompanyId;
-  const [tab, setTab] = useState<"terminals" | "users" | "payment">("users");
+  const [tab, setTab] = useState<"terminals" | "users" | "payment" | "plan">("users");
 
   const [companies, setCompanies] = useState<Company[]>([]);
   useEffect(() => {
@@ -964,10 +1015,11 @@ export default function CompanyScreen() {
       {companySelector}
 
       <div className={styles.tabs}>
-        <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as "terminals" | "users" | "payment")}>
+        <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as "terminals" | "users" | "payment" | "plan")}>
           <Tab value="users" label="Usuários" />
           <Tab value="terminals" label="Terminais" />
           <Tab value="payment" label="Pagamento" />
+          <Tab value="plan" label="Plano" />
         </Tabs>
       </div>
 
@@ -1254,6 +1306,7 @@ export default function CompanyScreen() {
 
       {/* ── Pagamento ── */}
       {tab === "payment" && <PaymentTab companyId={companyId} />}
+      {tab === "plan" && <PlanTab companyId={companyId} />}
 
       <ConfirmDialog
         open={!!confirmState}

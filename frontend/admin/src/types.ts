@@ -323,6 +323,21 @@ export interface PriceTableSummary {
   activated_at: string | null;
 }
 
+// ORD-163 — plano comercial da empresa, vinculado à tabela de preço vigente
+// no momento da criação/renovação. Nome "Plan", não "Contract": já existe
+// o contrato JURÍDICO (CompanyContractScreen, upload de PDF), entidade
+// completamente diferente — evitar confundir os dois no código.
+export type CompanyPlanStatus = "Ativo" | "Vencido";
+
+export interface CompanyPlan {
+  company_id: number;
+  price_table: { id: number; name: string };
+  started_at: string;
+  expires_at: string;
+  renewed_at: string | null;
+  status: CompanyPlanStatus;
+}
+
 export interface Order {
   order_ref: string;
   status: string;
