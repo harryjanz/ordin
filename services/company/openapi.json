@@ -3641,6 +3641,63 @@
         }
       }
     },
+    "/commercial/price-tables/{price_table_id}/kind": {
+      "patch": {
+        "tags": [
+          "Comercial"
+        ],
+        "summary": "Marcar/desmarcar tabela como alternativa ou promocional",
+        "operationId": "set_price_table_kind_commercial_price_tables__price_table_id__kind_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "price_table_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Price Table Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceTableKindIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceTableOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/companies/{company_id}/plan": {
       "get": {
         "tags": [
@@ -3686,6 +3743,61 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "Empresas"
+        ],
+        "summary": "Trocar a tabela de preço do plano sem renovar (started_at/expires_at inalterados)",
+        "operationId": "apply_company_plan_table_companies__company_id__plan_patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompanyPlanApplyTableIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompanyPlanOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/companies/{company_id}/plan/renew": {
@@ -3693,7 +3805,7 @@
         "tags": [
           "Empresas"
         ],
-        "summary": "Renovar plano comercial, assumindo a tabela de preço vigente atual",
+        "summary": "Renovar plano comercial (vigente por padrão, ou tabela escolhida manualmente)",
         "operationId": "renew_company_plan_companies__company_id__plan_renew_post",
         "security": [
           {
@@ -3711,6 +3823,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CompanyPlanRenewIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -4591,6 +4720,19 @@
         ],
         "title": "CompanyOut"
       },
+      "CompanyPlanApplyTableIn": {
+        "properties": {
+          "price_table_id": {
+            "type": "integer",
+            "title": "Price Table Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "price_table_id"
+        ],
+        "title": "CompanyPlanApplyTableIn"
+      },
       "CompanyPlanOut": {
         "properties": {
           "company_id": {
@@ -4647,6 +4789,17 @@
           "name": {
             "type": "string",
             "title": "Name"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
           }
         },
         "type": "object",
@@ -4655,6 +4808,23 @@
           "name"
         ],
         "title": "CompanyPlanPriceTableOut"
+      },
+      "CompanyPlanRenewIn": {
+        "properties": {
+          "price_table_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Table Id"
+          }
+        },
+        "type": "object",
+        "title": "CompanyPlanRenewIn"
       },
       "CompanyUpdate": {
         "properties": {
@@ -5534,6 +5704,24 @@
         ],
         "title": "PriceTableIn"
       },
+      "PriceTableKindIn": {
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(alternativa|promocional)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "title": "PriceTableKindIn"
+      },
       "PriceTableListOut": {
         "properties": {
           "price_tables": {
@@ -5563,6 +5751,17 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
           },
           "totem_price_1": {
             "type": "number",
@@ -5646,6 +5845,17 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
           },
           "created_at": {
             "type": "string",

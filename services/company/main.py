@@ -349,10 +349,14 @@ class PriceTable(Base):
     # company_id, não é dado de tenant. status: draft | active | historical.
     # Só pode existir uma "active" por vez (garantido na aplicação, ver
     # activate_price_table — MySQL/Aurora não tem partial unique index).
+    # ORD-164: kind (alternativa/promocional/null) é independente de status —
+    # marca uma tabela já ativada (active ou historical) como disponível pra
+    # uso manual em contratos específicos, sem virar a vigente padrão.
     __tablename__ = "price_tables"
     id                    = Column(Integer, primary_key=True)
     name                  = Column(String(120), nullable=False)
     status                = Column(String(20), nullable=False, default="draft")
+    kind                  = Column(String(20), nullable=True)
     totem_price_1         = Column(Numeric(10, 2), nullable=False)
     totem_multiplier_2    = Column(Numeric(4, 2), nullable=False)
     totem_multiplier_3_5  = Column(Numeric(4, 2), nullable=False)
@@ -910,6 +914,8 @@ class PriceTableOut(BaseModel):
     id: int
     name: str
     status: str
+    # ORD-164: independente do status — null | "alternativa" | "promocional".
+    kind: str | None = None
     totem_price_1: float
     totem_multiplier_2: float
     totem_multiplier_3_5: float
@@ -920,7 +926,8 @@ class PriceTableOut(BaseModel):
     # ORD-163 (revisão): editável não é sobre status (rascunho/vigente/
     # histórica) — é sobre ter ou não algum CompanyPlan vinculado. Uma
     # tabela vigente sem nenhuma empresa apontando pra ela ainda pode ser
-    # ajustada; uma tabela histórica com empresas vinculadas, não.
+    # ajustada; uma tabela histórica com empresas vinculadas, não. ORD-164
+    # não muda esse cálculo — kind e editable são atributos independentes.
     editable: bool = True
 
 
@@ -928,6 +935,7 @@ class PriceTableSummaryOut(BaseModel):
     id: int
     name: str
     status: str
+    kind: str | None = None
     created_at: datetime
     activated_at: datetime | None
     editable: bool = True
@@ -941,9 +949,16 @@ class PriceTableActivateIn(BaseModel):
     confirm_replace: bool = False
 
 
+class PriceTableKindIn(BaseModel):
+    # ORD-164: null desmarca. Regex em vez de Literal — mesmo padrão já usado
+    # pra outros campos de categoria fechada neste arquivo (ex: UserIn.role).
+    kind: str | None = Field(default=None, pattern="^(alternativa|promocional)$")
+
+
 class CompanyPlanPriceTableOut(BaseModel):
     id: int
     name: str
+    kind: str | None = None
 
 
 class CompanyPlanOut(BaseModel):
@@ -953,6 +968,20 @@ class CompanyPlanOut(BaseModel):
     expires_at: datetime
     renewed_at: datetime | None
     status: str  # "Ativo" | "Vencido" — calculado, nunca armazenado (ORD-163)
+
+
+class CompanyPlanRenewIn(BaseModel):
+    # ORD-164: opcional — sem informar, mantém o comportamento original da
+    # ORD-163 (usa a tabela active do momento). Se informado, precisa ser a
+    # active atual ou uma tabela com kind definido (ver
+    # _validate_plan_price_table_choice).
+    price_table_id: int | None = None
+
+
+class CompanyPlanApplyTableIn(BaseModel):
+    # ORD-164: troca a tabela do plano SEM renovar (started_at/expires_at/
+    # renewed_at inalterados) — ação distinta de POST /plan/renew.
+    price_table_id: int
 
 
 class HealthOut(BaseModel):
@@ -3512,6 +3541,7 @@ async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
         "id": pt.id,
         "name": pt.name,
         "status": pt.status,
+        "kind": pt.kind,
         "totem_price_1": pt.totem_price_1,
         "totem_multiplier_2": pt.totem_multiplier_2,
         "totem_multiplier_3_5": pt.totem_multiplier_3_5,
@@ -3596,6 +3626,7 @@ async def list_price_tables(
                 "id": pt.id,
                 "name": pt.name,
                 "status": pt.status,
+                "kind": pt.kind,
                 "created_at": pt.created_at,
                 "activated_at": pt.activated_at,
                 "editable": pt.id not in linked_ids,
@@ -3778,6 +3809,38 @@ async def activate_price_table(
     return await _serialize_price_table(db, pt)
 
 
+@app.patch(
+    "/commercial/price-tables/{price_table_id}/kind",
+    response_model=PriceTableOut,
+    tags=["Comercial"],
+    summary="Marcar/desmarcar tabela como alternativa ou promocional",
+)
+async def set_price_table_kind(
+    price_table_id: int,
+    body: PriceTableKindIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # ORD-164: independente da regra de `editable` — marcar/desmarcar kind
+    # não depende de a tabela ter (ou não) CompanyPlan vinculado, só do
+    # status não ser "draft". Sem checar _price_table_has_linked_plans aqui
+    # de propósito (kind e editable são atributos independentes).
+    _require_platform_admin(current_user)
+    pt = await db.get(PriceTable, price_table_id)
+    if not pt:
+        raise HTTPException(404, "Tabela de preço não encontrada")
+    if pt.status == "draft":
+        raise HTTPException(
+            422,
+            "Tabela em rascunho não pode ser marcada como alternativa/promocional — "
+            "precisa ter sido ativada ao menos uma vez.",
+        )
+    pt.kind = body.kind
+    await db.commit()
+    await db.refresh(pt)
+    return await _serialize_price_table(db, pt)
+
+
 # ── Plano comercial da empresa (ORD-163) ────────────────────────────────────
 
 async def _serialize_company_plan(db: AsyncSession, plan: CompanyPlan) -> dict:
@@ -3785,12 +3848,29 @@ async def _serialize_company_plan(db: AsyncSession, plan: CompanyPlan) -> dict:
     now = datetime.utcnow()
     return {
         "company_id": plan.company_id,
-        "price_table": {"id": price_table.id, "name": price_table.name},
+        "price_table": {"id": price_table.id, "name": price_table.name, "kind": price_table.kind},
         "started_at": plan.started_at,
         "expires_at": plan.expires_at,
         "renewed_at": plan.renewed_at,
         "status": "Ativo" if plan.expires_at > now else "Vencido",
     }
+
+
+async def _validate_plan_price_table_choice(db: AsyncSession, price_table_id: int) -> PriceTable:
+    # ORD-164: helper compartilhado por POST /plan/renew (quando price_table_id
+    # é informado) e PATCH /plan — uma tabela só é válida para uso em contrato
+    # se for a active atual OU tiver kind definido (alternativa/promocional).
+    # Draft e historical "órfã" (sem kind) são rejeitados com 422.
+    price_table = await db.get(PriceTable, price_table_id)
+    if not price_table:
+        raise HTTPException(404, "Tabela de preço não encontrada")
+    if price_table.status == "active" or price_table.kind is not None:
+        return price_table
+    raise HTTPException(
+        422,
+        "Tabela inválida para uso em contrato — precisa ser a tabela vigente "
+        "ou ter kind definido (alternativa/promocional).",
+    )
 
 
 @app.get(
@@ -3818,10 +3898,11 @@ async def get_company_plan(
     "/companies/{company_id}/plan/renew",
     response_model=CompanyPlanOut,
     tags=["Empresas"],
-    summary="Renovar plano comercial, assumindo a tabela de preço vigente atual",
+    summary="Renovar plano comercial (vigente por padrão, ou tabela escolhida manualmente)",
 )
 async def renew_company_plan(
     company_id: int,
+    body: CompanyPlanRenewIn | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
@@ -3830,16 +3911,51 @@ async def renew_company_plan(
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(404, "Empresa não tem plano comercial")
-    active_table = (
-        await db.execute(select(PriceTable).where(PriceTable.status == "active"))
-    ).scalar_one_or_none()
-    if active_table is None:
-        raise HTTPException(400, "Nenhuma tabela de preço vigente configurada.")
+
+    if body is not None and body.price_table_id is not None:
+        # ORD-164: escolha manual — vigente ou tabela com kind definido.
+        chosen_table = await _validate_plan_price_table_choice(db, body.price_table_id)
+    else:
+        # Comportamento original da ORD-163: sem escolha explícita, usa a
+        # tabela active do momento.
+        chosen_table = (
+            await db.execute(select(PriceTable).where(PriceTable.status == "active"))
+        ).scalar_one_or_none()
+        if chosen_table is None:
+            raise HTTPException(400, "Nenhuma tabela de preço vigente configurada.")
+
     now = datetime.utcnow()
     # Renovação antecipada permitida — não checa se já venceu (Explorer/QA).
-    plan.price_table_id = active_table.id
+    plan.price_table_id = chosen_table.id
     plan.renewed_at = now
     plan.expires_at = now + timedelta(days=365)
+    await db.commit()
+    await db.refresh(plan)
+    return await _serialize_company_plan(db, plan)
+
+
+@app.patch(
+    "/companies/{company_id}/plan",
+    response_model=CompanyPlanOut,
+    tags=["Empresas"],
+    summary="Trocar a tabela de preço do plano sem renovar (started_at/expires_at inalterados)",
+)
+async def apply_company_plan_table(
+    company_id: int,
+    body: CompanyPlanApplyTableIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # ORD-164: ação distinta de /plan/renew — só troca price_table_id, sem
+    # adiantar o vencimento do contrato. Útil pra aplicar uma tabela
+    # alternativa/promocional negociada no meio do ciclo vigente.
+    _require_platform_admin(current_user)
+    result = await db.execute(select(CompanyPlan).where(CompanyPlan.company_id == company_id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(404, "Empresa não tem plano comercial")
+    chosen_table = await _validate_plan_price_table_choice(db, body.price_table_id)
+    plan.price_table_id = chosen_table.id
     await db.commit()
     await db.refresh(plan)
     return await _serialize_company_plan(db, plan)

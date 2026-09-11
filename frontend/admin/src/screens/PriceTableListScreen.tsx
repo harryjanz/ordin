@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, Tag, makeToast } from "design-system";
+import { Alert, Button, Dropdown, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
-import type { PriceTableStatus, PriceTableSummary } from "../types";
+import type { PriceTableKind, PriceTableStatus, PriceTableSummary } from "../types";
 // Reaproveita o mesmo stylesheet de CompanyListScreen (.page, .pageHead,
 // .eyebrow, .title) — mesmo padrão de PlatformUsersScreen reaproveitando
 // CompanyScreen.module.scss pra uma tela de lista simples nova.
@@ -26,6 +26,21 @@ const STATUS_VARIANT: Record<PriceTableStatus, "neutral" | "success" | "warning"
   active: "success",
   historical: "neutral",
 };
+
+// ORD-164 — independente do status: marca a tabela como disponível pra uso
+// manual em contratos específicos (renovação ou troca sem renovar), sem
+// virar a vigente padrão. "" representa null (Dropdown não trabalha com
+// null como value).
+const KIND_LABEL: Record<"alternativa" | "promocional", string> = {
+  alternativa: "Alternativa",
+  promocional: "Promocional",
+};
+
+const KIND_OPTIONS: DropdownOptions[] = [
+  { value: "", label: "Nenhuma" },
+  { value: "alternativa", label: "Alternativa" },
+  { value: "promocional", label: "Promocional" },
+];
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
@@ -85,6 +100,16 @@ export default function PriceTableListScreen() {
     });
   }
 
+  async function setKind(table: PriceTableSummary, kind: PriceTableKind) {
+    try {
+      await api.patch(`/commercial/price-tables/${table.id}/kind`, { kind });
+      makeToast("success", kind ? `"${table.name}" marcada como ${KIND_LABEL[kind]}` : `"${table.name}" sem categoria especial`);
+      load();
+    } catch (err) {
+      makeToast("error", parseApiError(err).message);
+    }
+  }
+
   function remove(table: PriceTableSummary) {
     setConfirmState({
       message: `Excluir o rascunho "${table.name}"? Essa ação não pode ser desfeita.`,
@@ -109,11 +134,24 @@ export default function PriceTableListScreen() {
       key: "status", header: "Status",
       render: (t) => <Tag variant={STATUS_VARIANT[t.status]}>{STATUS_LABEL[t.status]}</Tag>,
     },
+    {
+      key: "kind", header: "Categoria",
+      render: (t) => t.kind ? <Tag variant="emphasys">{KIND_LABEL[t.kind]}</Tag> : "—",
+    },
     { key: "created_at", header: "Criada em", mono: true, render: (t) => fmtDate(t.created_at) },
     { key: "activated_at", header: "Ativada em", mono: true, render: (t) => fmtDate(t.activated_at) },
     {
       key: "action", header: "", render: (t) => (
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
+          {t.status !== "draft" && (
+            <div style={{ width: 150 }} onClick={(e) => e.stopPropagation()}>
+              <Dropdown
+                options={KIND_OPTIONS}
+                value={KIND_OPTIONS.find((o) => o.value === (t.kind ?? "")) ?? KIND_OPTIONS[0]}
+                onValueSelected={(opt) => setKind(t, (opt.value || null) as PriceTableKind)}
+              />
+            </div>
+          )}
           {t.editable && (
             <Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); navigate(`/commercial/price-tables/${t.id}/edit`); }}>
               Editar
