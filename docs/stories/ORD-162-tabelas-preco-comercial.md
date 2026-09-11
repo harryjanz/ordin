@@ -1,6 +1,6 @@
 ---
 id: ORD-162
-status: In Progress
+status: QA
 estimativa: 5 pontos (3 backend + 2 admin)
 tipo: feature
 fase: null
@@ -440,3 +440,11 @@ reaproveitar `company-service` (com o risco de futura extração pra `billing-se
 não bloqueante) e a estimativa de 5 pontos (3 backend + 2 admin). Checklist completo de Explorer,
 QA Explorer e Tech Explorer verificado — sem bloqueios não resolvidos. `Ready` — apta a entrar no
 sprint backlog.
+
+## In Progress / Code Review / Merge
+
+Implementada em `feature/ORD-162-tabelas-preco-comercial`, PR [#129](https://github.com/harryjanz/ordin/pull/129). Backend (`price_tables`/`price_table_transaction_tiers` em `company-service`, 6 endpoints, migration `20260910_2200_price_tables.py`), frontend (`PriceTableListScreen`/`PriceTableFormScreen`, gated superadmin/admin), rota `/commercial` no `nginx.conf` (Kong ainda não existe no projeto).
+
+**Achado da revisão de código (bloqueador, corrigido antes do merge):** `SELECT ... FOR UPDATE` filtrado por `status='active'` não protegia a primeira ativação do sistema — sem nenhuma linha vigente ainda, duas ativações concorrentes poderiam ambas ver "nenhuma vigente" e terminar com duas tabelas `active` simultâneas. Corrigido travando todas as linhas de `price_tables` (sem filtro), serializando qualquer ativação concorrente pela própria linha do alvo (commit `ff08208`). Não coberto por teste automatizado (suíte é sequencial, não concorrente) — achado só por leitura crítica do código.
+
+19 testes novos + 363 da suíte inteira do company-service passando sem regressão. CI (Security, Lint & type check, Testes + cobertura, Build Docker images) 100% verde. Mergeado em `main` (fast-forward, `41d9b60`) em 2026-09-11, branch deletada.
