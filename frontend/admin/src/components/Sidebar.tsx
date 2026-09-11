@@ -26,7 +26,7 @@ const MENU = [
   // ORD-162: tabela de preço comercial da PLATAFORMA (mensalidade por
   // totem + taxa transacional) — não confundir com "/companies/:id/contract"
   // (CompanyContractScreen, contrato jurídico de UMA empresa cliente).
-  { to: "/commercial/price-tables", label: "Tabelas de preço", icon: "percent", roles: ["superadmin", "admin"] },
+  { to: "/commercial/price-tables", label: "Tabelas de preço", icon: "coin", roles: ["superadmin", "admin"] },
 ] as const;
 
 const W_OPEN = 220;

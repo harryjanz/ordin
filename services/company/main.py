@@ -917,6 +917,11 @@ class PriceTableOut(BaseModel):
     activated_at: datetime | None
     archived_at: datetime | None
     transaction_tiers: list[PriceTableTierOut] = []
+    # ORD-163 (revisão): editável não é sobre status (rascunho/vigente/
+    # histórica) — é sobre ter ou não algum CompanyPlan vinculado. Uma
+    # tabela vigente sem nenhuma empresa apontando pra ela ainda pode ser
+    # ajustada; uma tabela histórica com empresas vinculadas, não.
+    editable: bool = True
 
 
 class PriceTableSummaryOut(BaseModel):
@@ -925,7 +930,7 @@ class PriceTableSummaryOut(BaseModel):
     status: str
     created_at: datetime
     activated_at: datetime | None
-    model_config = {"from_attributes": True}
+    editable: bool = True
 
 
 class PriceTableListOut(BaseModel):
@@ -3488,8 +3493,21 @@ async def _get_price_table_tiers(db: AsyncSession, price_table_id: int) -> list[
     return list(result.scalars().all())
 
 
+async def _price_table_has_linked_plans(db: AsyncSession, price_table_id: int) -> bool:
+    # ORD-163 (revisão): critério de "pode editar/excluir" não é o status da
+    # tabela — é se alguma empresa (CompanyPlan) depende dela. Draft nunca
+    # tem plano vinculado (só price_table "active" é atribuída a plano
+    # novo/renovado); active/historical só ficam bloqueadas se de fato
+    # tiverem pelo menos uma empresa apontando pra elas.
+    result = await db.execute(
+        select(CompanyPlan.id).where(CompanyPlan.price_table_id == price_table_id).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
     tiers = await _get_price_table_tiers(db, pt.id)
+    has_plans = await _price_table_has_linked_plans(db, pt.id)
     return {
         "id": pt.id,
         "name": pt.name,
@@ -3509,6 +3527,7 @@ async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
             }
             for t in tiers
         ],
+        "editable": not has_plans,
     }
 
 
@@ -3565,7 +3584,25 @@ async def list_price_tables(
 ):
     _require_platform_admin(current_user)
     result = await db.execute(select(PriceTable).order_by(PriceTable.created_at.desc()))
-    return {"price_tables": result.scalars().all()}
+    tables = result.scalars().all()
+    # Um SELECT só pra saber quais price_table_id têm plano vinculado, em vez
+    # de uma query por linha (N+1) — lista de tabelas costuma ser pequena,
+    # mas não custa nada evitar.
+    linked_result = await db.execute(select(CompanyPlan.price_table_id).distinct())
+    linked_ids = {row[0] for row in linked_result.all()}
+    return {
+        "price_tables": [
+            {
+                "id": pt.id,
+                "name": pt.name,
+                "status": pt.status,
+                "created_at": pt.created_at,
+                "activated_at": pt.activated_at,
+                "editable": pt.id not in linked_ids,
+            }
+            for pt in tables
+        ]
+    }
 
 
 @app.get(
@@ -3590,7 +3627,7 @@ async def get_price_table(
     "/commercial/price-tables/{price_table_id}",
     response_model=PriceTableOut,
     tags=["Comercial"],
-    summary="Editar tabela de preço (só rascunho)",
+    summary="Editar tabela de preço (sem empresa vinculada)",
 )
 async def update_price_table(
     price_table_id: int,
@@ -3602,8 +3639,8 @@ async def update_price_table(
     pt = await db.get(PriceTable, price_table_id)
     if not pt:
         raise HTTPException(404, "Tabela de preço não encontrada")
-    if pt.status != "draft":
-        raise HTTPException(409, "Só é possível editar uma tabela em rascunho")
+    if await _price_table_has_linked_plans(db, pt.id):
+        raise HTTPException(409, "Não é possível editar — já existe empresa com plano vinculado a esta tabela")
     pt.name = body.name
     pt.totem_price_1 = body.totem_price_1
     pt.totem_multiplier_2 = body.totem_multiplier_2
@@ -3618,7 +3655,7 @@ async def update_price_table(
     "/commercial/price-tables/{price_table_id}",
     status_code=204,
     tags=["Comercial"],
-    summary="Excluir tabela de preço (só rascunho)",
+    summary="Excluir tabela de preço (sem empresa vinculada)",
 )
 async def delete_price_table(
     price_table_id: int,
@@ -3629,8 +3666,8 @@ async def delete_price_table(
     pt = await db.get(PriceTable, price_table_id)
     if not pt:
         raise HTTPException(404, "Tabela de preço não encontrada")
-    if pt.status != "draft":
-        raise HTTPException(409, "Só é possível excluir uma tabela em rascunho")
+    if await _price_table_has_linked_plans(db, pt.id):
+        raise HTTPException(409, "Não é possível excluir — já existe empresa com plano vinculado a esta tabela")
     await db.execute(delete(PriceTableTransactionTier).where(PriceTableTransactionTier.price_table_id == price_table_id))
     await db.delete(pt)
     await db.commit()

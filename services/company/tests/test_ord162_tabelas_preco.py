@@ -47,6 +47,22 @@ def _payload(name: str = "Tabela 2026-Q4", tiers=None) -> dict:
     }
 
 
+async def _seed_company_plan_linked_to(price_table_id: int, company_id: int = 999) -> None:
+    # ORD-163 — usado só pra testar a regra "editável = sem empresa
+    # vinculada" da ORD-162, revisada depois que company_plans passou a
+    # existir. pin_hash é placeholder — nada aqui valida formato de hash.
+    from datetime import datetime, timedelta
+
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        db.add(svc.Company(id=company_id, name="Empresa Vinculada", pin_hash="x" * 60, state="SP"))
+        db.add(svc.CompanyPlan(
+            company_id=company_id, price_table_id=price_table_id,
+            started_at=datetime.utcnow(), expires_at=datetime.utcnow() + timedelta(days=365),
+        ))
+        await db.commit()
+
+
 async def _seed_price_table(status: str, name: str = "Tabela", activated_at=None, archived_at=None):
     from datetime import datetime
 
@@ -128,14 +144,25 @@ async def test_editar_tabela_em_rascunho(client, token_superadmin):
     assert float(r.json()["totem_price_1"]) == 259.00
 
 
-async def test_editar_tabela_vigente_bloqueado(client, token_superadmin):
+async def test_editar_tabela_ativa_sem_empresa_vinculada_permitido(client, token_superadmin):
+    # ORD-163 (revisão): não é o status que trava edição — é ter ou não
+    # empresa vinculada. Tabela vigente sem nenhum plano ainda pode ser
+    # ajustada.
     table_id = await _seed_price_table(status="active")
-    r = await client.put(f"/commercial/price-tables/{table_id}", json=_payload(), headers=auth(token_superadmin))
-    assert r.status_code == 409
+    r = await client.put(f"/commercial/price-tables/{table_id}", json=_payload(name="Ajustada"), headers=auth(token_superadmin))
+    assert r.status_code == 200
+    assert r.json()["name"] == "Ajustada"
 
 
-async def test_editar_tabela_historica_bloqueado(client, token_superadmin):
+async def test_editar_tabela_historica_sem_empresa_vinculada_permitido(client, token_superadmin):
     table_id = await _seed_price_table(status="historical")
+    r = await client.put(f"/commercial/price-tables/{table_id}", json=_payload(), headers=auth(token_superadmin))
+    assert r.status_code == 200
+
+
+async def test_editar_tabela_com_empresa_vinculada_bloqueado(client, token_superadmin):
+    table_id = await _seed_price_table(status="active")
+    await _seed_company_plan_linked_to(table_id)
     r = await client.put(f"/commercial/price-tables/{table_id}", json=_payload(), headers=auth(token_superadmin))
     assert r.status_code == 409
 
@@ -207,14 +234,15 @@ async def test_excluir_tabela_em_rascunho(client, token_superadmin):
     assert r.status_code == 404
 
 
-async def test_excluir_tabela_vigente_bloqueado(client, token_superadmin):
+async def test_excluir_tabela_ativa_sem_empresa_vinculada_permitido(client, token_superadmin):
     table_id = await _seed_price_table(status="active")
     r = await client.delete(f"/commercial/price-tables/{table_id}", headers=auth(token_superadmin))
-    assert r.status_code == 409
+    assert r.status_code == 204
 
 
-async def test_excluir_tabela_historica_bloqueado(client, token_superadmin):
-    table_id = await _seed_price_table(status="historical")
+async def test_excluir_tabela_com_empresa_vinculada_bloqueado(client, token_superadmin):
+    table_id = await _seed_price_table(status="active")
+    await _seed_company_plan_linked_to(table_id)
     r = await client.delete(f"/commercial/price-tables/{table_id}", headers=auth(token_superadmin))
     assert r.status_code == 409
 

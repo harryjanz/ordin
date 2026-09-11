@@ -311,6 +311,10 @@ export interface PriceTable {
   activated_at: string | null;
   archived_at: string | null;
   transaction_tiers: PriceTableTransactionTier[];
+  // ORD-163 (revisão) — não é sobre status: uma tabela vigente sem nenhuma
+  // empresa vinculada ainda pode ser editada/excluída; uma com empresa
+  // vinculada, não, mesmo que rascunho nunca chegue a ter vínculo.
+  editable: boolean;
 }
 
 // Resumo devolvido por GET /commercial/price-tables (lista) — sem faixas
@@ -321,6 +325,7 @@ export interface PriceTableSummary {
   status: PriceTableStatus;
   created_at: string;
   activated_at: string | null;
+  editable: boolean;
 }
 
 // ORD-163 — plano comercial da empresa, vinculado à tabela de preço vigente

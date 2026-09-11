@@ -3447,7 +3447,7 @@
         "tags": [
           "Comercial"
         ],
-        "summary": "Editar tabela de preço (só rascunho)",
+        "summary": "Editar tabela de preço (sem empresa vinculada)",
         "operationId": "update_price_table_commercial_price_tables__price_table_id__put",
         "security": [
           {
@@ -3502,7 +3502,7 @@
         "tags": [
           "Comercial"
         ],
-        "summary": "Excluir tabela de preço (só rascunho)",
+        "summary": "Excluir tabela de preço (sem empresa vinculada)",
         "operationId": "delete_price_table_commercial_price_tables__price_table_id__delete",
         "security": [
           {
@@ -5612,6 +5612,11 @@
             "type": "array",
             "title": "Transaction Tiers",
             "default": []
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "default": true
           }
         },
         "type": "object",
@@ -5658,6 +5663,11 @@
               }
             ],
             "title": "Activated At"
+          },
+          "editable": {
+            "type": "boolean",
+            "title": "Editable",
+            "default": true
           }
         },
         "type": "object",

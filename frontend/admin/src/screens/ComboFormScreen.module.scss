@@ -80,6 +80,16 @@
   color: rgba(var(--a-text-rgb), 0.5);
 }
 
+// ORD-162 — substitui o campo "Até" da faixa de transação quando ela está
+// marcada "sem teto" (só a última faixa pode); mantém a mesma altura visual
+// aproximada do NumberSpinInput ao lado, em vez de um input desabilitado.
+.openEndedBadge {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 0 4px;
+}
+
 .muted {
   color: rgba(var(--a-text-rgb), 0.5);
 }
