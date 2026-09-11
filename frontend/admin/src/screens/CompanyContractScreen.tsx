@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Alert, Button, Dropdown, InputBase, Tag, makeToast, type DropdownOptions } from "design-system";
-import { getCompany, getCompanyPlan, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus } from "../api/companies";
+import api from "../api";
+import { applyCompanyPlanTable, getCompany, getCompanyPlan, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
 import { isValidCep, normalizeCep, UF_VALUES } from "../lib/validators";
 import { companyToEditForm, diffFields, type CompanyEditForm } from "../lib/companyEdit";
 import { useStore } from "../store";
-import type { CepLookupResult, Company, CompanyPlan, Contact, LegalRepresentative } from "../types";
+import type { CepLookupResult, Company, CompanyPlan, Contact, LegalRepresentative, PriceTableSummary } from "../types";
 import styles from "./CompanyContractScreen.module.scss";
 
 const STAGES = ["pendente", "enviado", "assinado"] as const;
@@ -42,6 +43,12 @@ export default function CompanyContractScreen() {
   const [legalRep, setLegalRep] = useState<LegalRepresentative | null>(null);
   const [plan, setPlan] = useState<CompanyPlan | null>(null);
   const [renewingPlan, setRenewingPlan] = useState(false);
+  // ORD-164 — tabelas elegíveis pra escolha manual: a vigente + qualquer
+  // marcada como alternativa/promocional (mesma regra de validação do
+  // backend em _validate_plan_price_table_choice).
+  const [availableTables, setAvailableTables] = useState<PriceTableSummary[]>([]);
+  const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
+  const [applyingTable, setApplyingTable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -128,10 +135,24 @@ export default function CompanyContractScreen() {
     // ORD-163 — plano comercial busca separada: toda empresa deveria ter um
     // (criado junto na criação), mas não é motivo pra travar o resto da
     // tela se, por algum motivo, não existir.
+    let currentPlan: CompanyPlan | null = null;
     try {
-      setPlan(await getCompanyPlan(companyId));
+      currentPlan = await getCompanyPlan(companyId);
+      setPlan(currentPlan);
     } catch {
       setPlan(null);
+    }
+    // ORD-164 — mesma busca da lista de tabelas, filtrada pras elegíveis
+    // (vigente ou com kind definido) — não trava a tela se falhar.
+    try {
+      const r = await api.get("/commercial/price-tables");
+      const eligible: PriceTableSummary[] = (r.data.price_tables ?? []).filter(
+        (t: PriceTableSummary) => t.status === "active" || t.kind !== null
+      );
+      setAvailableTables(eligible);
+      setSelectedTableId(currentPlan?.price_table.id ?? eligible.find((t) => t.status === "active")?.id ?? null);
+    } catch {
+      setAvailableTables([]);
     }
   }
 
@@ -141,14 +162,32 @@ export default function CompanyContractScreen() {
   }, [companyId]);
 
   async function renewPlan() {
+    // ORD-164 — escolha manual: se o admin selecionou uma tabela diferente
+    // da vigente, ela é usada; caso contrário mantém o comportamento
+    // original da ORD-163 (usa a vigente do momento).
     setRenewingPlan(true);
     try {
-      setPlan(await renewCompanyPlan(companyId));
-      makeToast("success", "Plano comercial renovado");
+      setPlan(await renewCompanyPlan(companyId, selectedTableId ?? undefined));
+      makeToast("success", "Plano comercial renovado — vencimento adiado 365 dias");
     } catch (err) {
       makeToast("error", parseApiError(err).message);
     } finally {
       setRenewingPlan(false);
+    }
+  }
+
+  async function applyTable() {
+    // ORD-164 — troca só a tabela, sem adiantar o vencimento (ação
+    // distinta de renovar).
+    if (!selectedTableId) return;
+    setApplyingTable(true);
+    try {
+      setPlan(await applyCompanyPlanTable(companyId, selectedTableId));
+      makeToast("success", "Tabela aplicada — vencimento do contrato não foi alterado");
+    } catch (err) {
+      makeToast("error", parseApiError(err).message);
+    } finally {
+      setApplyingTable(false);
     }
   }
 
@@ -472,12 +511,39 @@ export default function CompanyContractScreen() {
             ) : (
               <div className={styles.miniDetail}>Nenhum plano comercial encontrado pra esta empresa.</div>
             )}
-            {plan && (
-              <div className={styles.actionsRow}>
-                <Button size="small" variant="secondary" onClick={renewPlan} loading={renewingPlan}>
-                  Renovar plano
-                </Button>
-              </div>
+            {plan && availableTables.length > 0 && (
+              <>
+                <div style={{ maxWidth: 320, marginTop: 12 }}>
+                  <Dropdown
+                    label="Tabela de preço"
+                    options={availableTables.map((t) => ({
+                      value: String(t.id),
+                      label: t.status === "active" ? `${t.name} (vigente)` : `${t.name} (${t.kind === "promocional" ? "promocional" : "alternativa"})`,
+                    }))}
+                    value={(() => {
+                      const t = availableTables.find((t) => t.id === selectedTableId);
+                      return t
+                        ? { value: String(t.id), label: t.status === "active" ? `${t.name} (vigente)` : `${t.name} (${t.kind === "promocional" ? "promocional" : "alternativa"})` }
+                        : null;
+                    })()}
+                    onValueSelected={(opt) => setSelectedTableId(Number(opt.value))}
+                  />
+                </div>
+                <div className={styles.actionsRow}>
+                  <Button size="small" variant="secondary" onClick={renewPlan} loading={renewingPlan}>
+                    Renovar plano (+365 dias)
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={applyTable}
+                    loading={applyingTable}
+                    disabled={selectedTableId === plan.price_table.id}
+                  >
+                    Aplicar tabela (sem alterar vencimento)
+                  </Button>
+                </div>
+              </>
             )}
           </div>
 

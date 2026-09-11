@@ -293,6 +293,11 @@ export interface Combo {
 // por vez) | historical (substituída, somente-leitura).
 export type PriceTableStatus = "draft" | "active" | "historical";
 
+// ORD-164 — independente do status: marca uma tabela já ativada (active ou
+// historical) como disponível pra uso manual em contratos específicos, sem
+// virar a vigente padrão. null = tabela comum, sem categoria especial.
+export type PriceTableKind = "alternativa" | "promocional" | null;
+
 export interface PriceTableTransactionTier {
   id: number;
   min_transactions: number;
@@ -304,6 +309,7 @@ export interface PriceTable {
   id: number;
   name: string;
   status: PriceTableStatus;
+  kind: PriceTableKind;
   totem_price_1: number;
   totem_multiplier_2: number;
   totem_multiplier_3_5: number;
@@ -323,6 +329,7 @@ export interface PriceTableSummary {
   id: number;
   name: string;
   status: PriceTableStatus;
+  kind: PriceTableKind;
   created_at: string;
   activated_at: string | null;
   editable: boolean;
@@ -336,7 +343,7 @@ export type CompanyPlanStatus = "Ativo" | "Vencido";
 
 export interface CompanyPlan {
   company_id: number;
-  price_table: { id: number; name: string };
+  price_table: { id: number; name: string; kind: PriceTableKind };
   started_at: string;
   expires_at: string;
   renewed_at: string | null;

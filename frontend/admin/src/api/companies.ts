@@ -14,8 +14,20 @@ export async function getCompanyPlan(companyId: number): Promise<CompanyPlan> {
   return r.data;
 }
 
-export async function renewCompanyPlan(companyId: number): Promise<CompanyPlan> {
-  const r = await api.post<CompanyPlan>(`/companies/${companyId}/plan/renew`);
+export async function renewCompanyPlan(companyId: number, priceTableId?: number): Promise<CompanyPlan> {
+  // ORD-164 — priceTableId omitido mantém o comportamento original (usa a
+  // tabela vigente); informado, precisa ser a vigente ou ter kind definido.
+  const r = await api.post<CompanyPlan>(
+    `/companies/${companyId}/plan/renew`,
+    priceTableId !== undefined ? { price_table_id: priceTableId } : undefined
+  );
+  return r.data;
+}
+
+// ORD-164 — troca a tabela do plano SEM renovar (started_at/expires_at
+// inalterados). Ação distinta de renewCompanyPlan.
+export async function applyCompanyPlanTable(companyId: number, priceTableId: number): Promise<CompanyPlan> {
+  const r = await api.patch<CompanyPlan>(`/companies/${companyId}/plan`, { price_table_id: priceTableId });
   return r.data;
 }
 
