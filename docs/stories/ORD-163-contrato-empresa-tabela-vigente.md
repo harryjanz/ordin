@@ -217,13 +217,21 @@ pelo usuário em 2026-09-10.
 
 ## Solução Técnica
 
+**Nota de nomenclatura (2026-09-11, antes de implementar):** durante a ORD-162 descobrimos que já
+existe `CompanyContractScreen` (`/companies/:id/contract`) — o contrato **jurídico** da empresa
+(upload de PDF, `infrastructure/contract_storage`). Pra não colidir conceitualmente, o modelo e as
+rotas técnicas desta história usam **`CompanyPlan`/`company_plans`/`/plan`** em vez de
+`Contract`/`contracts`/`/contract`. O termo "contrato" nas seções de negócio acima (História,
+Explorer, QA) continua correto como linguagem de produto — é só o nome técnico que muda, pra não
+colidir com o outro model/tela já existente.
+
 ### Serviços impactados
-- `company-service`: nova tabela `contracts` (com `company_id`); extensão transacional do
-  endpoint de criação de empresa (`POST /companies`, já existente) pra criar o contrato junto;
-  dois endpoints novos (consulta + renovação). Reaproveita `_require_platform_admin` (ORD-162)
-  pra renovação, e o dependency de auth padrão (`TokenPayload`, `services/shared/auth.py`) pra
+- `company-service`: nova tabela `company_plans` (com `company_id`); extensão transacional do
+  endpoint de criação de empresa (`POST /companies`, já existente) pra criar o plano junto; dois
+  endpoints novos (consulta + renovação). Reaproveita `_require_platform_admin` (ORD-162) pra
+  renovação, e o dependency de auth padrão (`TokenPayload`, `services/shared/auth.py`) pra
   consulta com regra de acesso condicional por role.
-- `frontend/admin`: tela de detalhe de empresa (visão superadmin) ganha seção "Contrato";
+- `frontend/admin`: tela de detalhe de empresa (visão superadmin) ganha seção "Plano comercial";
   painel da empresa cliente (owner/manager) ganha card equivalente, somente leitura.
 
 ### Endpoints
@@ -234,14 +242,15 @@ pelo usuário em 2026-09-10.
 
 Mudança de comportamento, sem mudança de payload de entrada: antes de criar a empresa, o handler
 busca `price_tables` com `status='active'` **dentro da mesma transação** (evita corrida com uma
-ativação/troca concorrente). Se não existir, aborta antes de criar qualquer coisa. Se existir,
-cria `Company` e, na mesma transação, cria o `Contract` vinculado:
-`price_table_id = tabela ativa`, `started_at = now()`, `expires_at = now() + 1 ano`.
+ativação/troca concorrente — mesmo cuidado que o bug corrigido na revisão da ORD-162). Se não
+existir, aborta antes de criar qualquer coisa. Se existir, cria `Company` e, na mesma transação,
+cria o `CompanyPlan` vinculado: `price_table_id = tabela ativa`, `started_at = now()`,
+`expires_at = now() + 1 ano`.
 
 Erro novo: `400` — `"Nenhuma tabela de preço vigente configurada. Configure uma tabela de preço
 antes de criar empresas."` (cenário Gherkin de bloqueio de criação).
 
-#### GET /companies/{company_id}/contract
+#### GET /companies/{company_id}/plan
 **Serviço:** company-service
 **Auth:** JWT obrigatório
 **Regra de acesso:** role `superadmin`/`admin` → qualquer `company_id`. Role `owner`/`manager` →
@@ -262,31 +271,30 @@ Response `200`:
 `status` é **calculado na resposta** (`"Ativo"` se `expires_at > now()`, senão `"Vencido"`), nunca
 armazenado — evita staleness sem precisar de job pra manter atualizado.
 
-Erros: `401`, `403` (role sem permissão pra esse `company_id`), `404` (empresa sem contrato —
+Erros: `401`, `403` (role sem permissão pra esse `company_id`), `404` (empresa sem plano —
 defensivo, não deveria acontecer se toda criação de empresa sempre gera um).
 
-#### POST /companies/{company_id}/contract/renew
+#### POST /companies/{company_id}/plan/renew
 **Serviço:** company-service
 **Auth:** JWT obrigatório | role: superadmin/admin (`_require_platform_admin`, reaproveitado da
 ORD-162)
 
-Sem payload — a ação busca a `price_table` `active` no momento e atualiza o contrato:
+Sem payload — a ação busca a `price_table` `active` no momento e atualiza o plano:
 `price_table_id = tabela ativa`, `renewed_at = now()`, `expires_at = now() + 1 ano`. Permitida
-independente do contrato estar vencido ou não (renovação antecipada, cenário Gherkin
-correspondente).
+independente do plano estar vencido ou não (renovação antecipada, cenário Gherkin correspondente).
 
 Response `200`: mesmo shape do `GET`, já refletindo os novos valores.
 
 Erros: `400` (nenhuma tabela `active` no momento — defensivo), `403` (role diferente de
-superadmin/admin), `404` (empresa sem contrato).
+superadmin/admin), `404` (empresa sem plano).
 
 ### Migrations
 
-`contracts` (com `company_id` — é dado de tenant, diferente de `price_tables`):
+`company_plans` (com `company_id` — é dado de tenant, diferente de `price_tables`):
 ```
 id                 INTEGER PK AUTO_INCREMENT
-company_id         INTEGER NOT NULL UNIQUE REFERENCES companies(id)
-price_table_id     INTEGER NOT NULL REFERENCES price_tables(id)
+company_id         INTEGER NOT NULL UNIQUE
+price_table_id     INTEGER NOT NULL
 started_at         DATETIME NOT NULL
 expires_at         DATETIME NOT NULL
 renewed_at         DATETIME NULL
@@ -294,9 +302,10 @@ created_at         DATETIME NOT NULL DEFAULT NOW()
 INDEX (company_id)
 INDEX (price_table_id)
 ```
-`company_id UNIQUE` — modelo assume **1 contrato por empresa nesta versão** (renovação é
-`UPDATE` in-place no mesmo registro, não cria um novo). Ver risco de histórico de renovações
-abaixo.
+Sem `ForeignKey` real — mesmo padrão de integridade referencial em nível de aplicação já usado no
+resto do company-service (confirmado na ORD-162). `company_id UNIQUE` — modelo assume **1 plano
+por empresa nesta versão** (renovação é `UPDATE` in-place no mesmo registro, não cria um novo).
+Ver risco de histórico de renovações abaixo.
 
 ### Eventos de fila
 Nenhum — criação/renovação de contrato é síncrona, dentro da mesma transação da criação de
@@ -304,7 +313,7 @@ empresa (create) ou uma chamada direta do superadmin (renew). Não há necessida
 assíncrona identificada nesta história.
 
 ### Impacto em outros serviços
-Nenhum — `price_tables` e `contracts` vivem no mesmo serviço (`company-service`), então a
+Nenhum — `price_tables` e `company_plans` vivem no mesmo serviço (`company-service`), então a
 checagem de tabela ativa na criação de empresa é uma query no mesmo processo/transação, sem
 chamada HTTP entre serviços. Benefício direto da decisão de reuso de serviço já tomada na
 ORD-162.
@@ -322,18 +331,21 @@ ORD-162.
   pediu só tabela × contrato × vencimento), mas é um risco real olhando pra frente: os temas
   futuros de controle de custo e fechamento/faturamento provavelmente vão precisar reconstruir
   "quanto essa empresa pagou em cada período", o que exige histórico. Se isso for confirmado como
-  necessidade real, a solução é uma tabela `contract_renewals` (histórico append-only) numa
+  necessidade real, a solução é uma tabela `company_plan_renewals` (histórico append-only) numa
   história futura — não implementada aqui por escopo, registrada pra decisão consciente.
-- **Transação atômica na criação de empresa**: criar `Company` + `Contract` precisa acontecer na
-  mesma transação (rollback conjunto se qualquer parte falhar) — mesmo padrão já usado em outros
-  fluxos multi-tabela do projeto.
+- **Transação atômica na criação de empresa**: criar `Company` + `CompanyPlan` precisa acontecer
+  na mesma transação (rollback conjunto se qualquer parte falhar) — mesmo padrão já usado em
+  outros fluxos multi-tabela do projeto.
 - **Corrida entre criação de empresa e troca de tabela vigente**: mitigada lendo a tabela `active`
   dentro da mesma transação da criação da empresa (não antes, numa query separada) — evita cenário
-  raro de criar contrato vinculado a uma tabela que virou histórica um instante depois.
-- **`company_id UNIQUE` em `contracts`** assume que uma empresa nunca tem mais de um contrato
+  raro de criar plano vinculado a uma tabela que virou histórica um instante depois.
+- **Corrida na ativação de tabela de preço em si**: já corrigida na ORD-162 (lock em todas as
+  linhas de `price_tables`, não só nas `active`) — essa história não precisa repetir a mitigação,
+  só se beneficia dela.
+- **`company_id UNIQUE` em `company_plans`** assume que uma empresa nunca tem mais de um plano
   simultâneo — consistente com o escopo atual (renovação é update, não criação de novo registro),
-  mas fecha a porta pra modelos futuros de múltiplos contratos por empresa (ex. downgrade/upgrade
-  no meio do período) sem migration adicional. Aceitável pro escopo de hoje.
+  mas fecha a porta pra modelos futuros de múltiplos planos por empresa (ex. downgrade/upgrade no
+  meio do período) sem migration adicional. Aceitável pro escopo de hoje.
 
 **Aprovação final (2026-09-10):** usuário confirmou a solução técnica, incluindo o risco de
 ausência de histórico de renovações (decisão consciente, revisitar quando o tema de custo/
