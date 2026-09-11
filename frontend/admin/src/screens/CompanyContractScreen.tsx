@@ -517,15 +517,21 @@ export default function CompanyContractScreen() {
               <div className={styles.miniDetail}>Nenhum plano comercial encontrado pra esta empresa.</div>
             )}
             {plan && (
-              <>
+              <div className={styles.changeTable}>
+                <div className={styles.changeTableHeading}>Trocar tabela de preço</div>
+                <div className={styles.changeTableNote}>
+                  {availableTables.length > 0
+                    ? "Escolha a tabela vigente ou uma marcada como alternativa/promocional. “Renovar” também adianta o vencimento em 365 dias; “Aplicar tabela” só troca a tabela do plano, sem mexer no vencimento."
+                    : "Nenhuma tabela alternativa/promocional disponível no momento — renovar usa a tabela vigente automaticamente."}
+                </div>
                 {/* ORD-164: "Renovar plano" não depende de availableTables —
                     já funcionava com qualquer plano antes desta história; se
                     o fetch da lista falhar, cai no padrão (usa a active). Só
                     o seletor e "Aplicar tabela" dependem da lista de fato. */}
                 {availableTables.length > 0 && (
-                  <div style={{ maxWidth: 320, marginTop: 12 }}>
+                  <div style={{ maxWidth: 320, marginBottom: 16 }}>
                     <Dropdown
-                      label="Tabela de preço"
+                      label="Nova tabela"
                       options={availableTables.map((t) => ({
                         value: String(t.id),
                         label: t.status === "active" ? `${t.name} (vigente)` : `${t.name} (${t.kind === "promocional" ? "promocional" : "alternativa"})`,
@@ -540,7 +546,7 @@ export default function CompanyContractScreen() {
                     />
                   </div>
                 )}
-                <div className={styles.actionsRow}>
+                <div className={styles.actionsRow} style={{ marginTop: 0 }}>
                   <Button size="small" variant="secondary" onClick={renewPlan} loading={renewingPlan}>
                     Renovar plano (+365 dias)
                   </Button>
@@ -556,7 +562,7 @@ export default function CompanyContractScreen() {
                     </Button>
                   )}
                 </div>
-              </>
+              </div>
             )}
           </div>
 

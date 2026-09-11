@@ -161,6 +161,27 @@
   font-family: "Courier New", monospace;
 }
 
+// ORD-164 (ajuste de UX pós-QA) — a troca de tabela é uma AÇÃO, não um dado
+// de leitura como os miniCard acima; precisa de separação visual clara e de
+// contexto próprio, senão o seletor fica "boiando" sem explicar o que faz.
+.changeTable {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px dashed rgba(var(--a-neutral-rgb), 0.14);
+}
+
+.changeTableHeading {
+  @include font('sm-emphasys');
+  margin-bottom: 4px;
+}
+
+.changeTableNote {
+  @include font('xs');
+  color: rgba(var(--a-text-rgb), 0.5);
+  margin-bottom: 14px;
+  max-width: 60ch;
+}
+
 .grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
