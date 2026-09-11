@@ -485,3 +485,67 @@ sprint, não uma lacuna de análise — a história pode ser priorizada no backl
 mas o Dev só deve criar a branch (`docs/WORKFLOW.md` — step To Do) depois do merge da ORD-163.
 
 ✅ História priorizada no sprint backlog — condicionada ao merge da ORD-163.
+
+## In Progress / Code Review / Merge
+
+Implementada em `feature/ORD-164-tabelas-preco-alternativas`, PR
+[#131](https://github.com/harryjanz/ordin/pull/131). Code Review encontrou e corrigiu 1 bug
+antes do merge: o botão "Renovar plano" tinha ficado condicionado a `availableTables.length >
+0` — regressão sobre o comportamento incondicional já existente desde a ORD-163 (commit
+`6e6110e`). CI 100% verde, mergeada em `main` (`3b9af64`), branch deletada.
+
+## QA
+
+Validação manual local (sem staging), superadmin, stack rebuildada (`docker compose up -d
+--build company-service admin`) a partir do `main` pós-merge. Evidências em
+`docs/stories/ORD-164/evidencias/manual/`.
+
+| # | Cenário (QA Explorer) | Resultado |
+|---|---|---|
+| 1 | Marcar tabela `active` como alternativa | ✅ `01-marcar-alternativa-lista.jpg` |
+| 2 | Bloqueado marcar `kind` em rascunho | ✅ confirmado visualmente — linha em rascunho não exibe o seletor de categoria |
+| 3 | Ativar tabela marcada como alternativa preserva o `kind` (inclusive ao ser **demovida** de `active` pra `historical`, cenário mais forte que o do QA Explorer original) | ✅ `02-preserva-kind-ao-ativar-outra-e-troca-promocional.jpg` |
+| 4 | Recategorizar `kind` (alternativa → promocional) | ✅ mesma evidência #3 |
+| 5 | Seletor de tabela no contrato mostra vigente + marcadas, com sufixo correto (vigente/alternativa/promocional) | ✅ |
+| 6 | Aplicar tabela sem renovar — `expires_at`/`renewed_at` inalterados | ✅ `03-aplicar-tabela-sem-alterar-vencimento.jpg` — toast "vencimento do contrato não foi alterado", data idêntica antes/depois |
+| 7 | Renovar escolhendo explicitamente uma tabela promocional | ✅ `04-renovar-com-escolha-manual-tabela-promocional.jpg` — `expires_at` avançou 365 dias, `renewed_at` atualizado |
+| 8 | Desmarcar `kind` de tabela vinculada não desfaz o vínculo do `CompanyPlan` existente | ✅ `05-desmarcar-kind-lista.jpg` / `06-desmarcar-kind-nao-desfaz-vinculo-plano.jpg` |
+| 9 | Renovar/aplicar com tabela sem `kind` e não-vigente → 422 | ✅ validado pela suíte automatizada (`test_renovar_escolhendo_tabela_sem_kind_e_nao_vigente_bloqueado`, `test_aplicar_tabela_invalida_bloqueado`) — não repetido manualmente por não ser alcançável pela UI (o seletor só lista tabelas elegíveis) |
+| 10 | Controle de acesso (owner → 403) | ✅ validado pela suíte automatizada |
+
+### 🐛 Bug encontrado no QA — corrigido
+
+**Cenário**: desmarcar o `kind` de uma tabela que está atualmente vinculada ao `CompanyPlan` de
+uma empresa (permitido, não desfaz o vínculo — item 8 acima) e, **sem tocar no seletor**,
+clicar em "Renovar plano".
+
+**Esperado** (critério de aceite da ORD-164): renovar sem escolha explícita cai no padrão (usa
+a tabela `active`).
+
+**Obtido**: erro 422 — `07-BUG-renovar-com-selecao-obsoleta.jpg`. Causa raiz: o estado
+`selectedTableId` no `CompanyContractScreen` é inicializado com o id da tabela **já vinculada
+ao plano**, independente de ela continuar elegível. Ao desmarcar o `kind`, a tabela vinculada
+deixa de ser elegível, mas o front continuava mandando esse id "obsoleto" pro
+`POST /plan/renew` — nunca de fato exercitava o caminho "sem `price_table_id`, backend usa a
+`active`", mesmo quando o admin não tinha tocado em nada.
+
+**Correção** (`frontend/admin/src/screens/CompanyContractScreen.tsx`, `renewPlan()`): só envia
+`price_table_id` se `selectedTableId` estiver de fato presente em `availableTables` no momento
+do clique; caso contrário, omite o campo e deixa o backend aplicar o padrão. Revalidado
+end-to-end — `08-bug-corrigido-renovar-cai-no-padrao.jpg`: mesmo cenário, agora renova
+corretamente usando a tabela vigente, sem erro.
+
+PR de correção: [#132](#) *(preencher após abrir)*.
+
+### Fluxos críticos de regressão
+Não aplicável a esta história — não mexe no fluxo PIN → pedido → pagamento → coleta, rate
+limiting, dupla coleta ou cancelamento. Escopo é só o módulo comercial (`price_tables` /
+`company_plans`) do company-service.
+
+### Critério de saída
+- [x] Todos os cenários do QA Explorer executados (manual + suíte automatizada)
+- [x] Happy path, bordas e erros passando
+- [x] Isolamento por papel passando (owner → 403; `PriceTable` não tem isolamento multi-tenant por ser recurso global da plataforma, conforme já justificado no QA Explorer)
+- [x] Regressão nos fluxos críticos — não aplicável, fora do escopo desta história
+- [x] Evidências salvas em `docs/stories/ORD-164/evidencias/manual/`
+- [ ] Nenhum bug bloqueador em aberto — **1 bug encontrado e corrigido durante este QA**, aguardando merge da PR de correção antes de fechar definitivamente o step
