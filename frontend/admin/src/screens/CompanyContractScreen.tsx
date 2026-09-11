@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Alert, Button, Dropdown, InputBase, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
-import { applyCompanyPlanTable, getCompany, getCompanyPlan, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus } from "../api/companies";
+import { applyCompanyPlanTable, getCompany, getCompanyPlan, getCompanyPlanHistory, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus } from "../api/companies";
+import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
 import { isValidCep, normalizeCep, UF_VALUES } from "../lib/validators";
 import { companyToEditForm, diffFields, type CompanyEditForm } from "../lib/companyEdit";
 import { useStore } from "../store";
-import type { CepLookupResult, Company, CompanyPlan, Contact, LegalRepresentative, PriceTableSummary } from "../types";
+import type { CepLookupResult, Company, CompanyPlan, CompanyPlanHistoryEntry, Contact, LegalRepresentative, PriceTableSummary } from "../types";
 import styles from "./CompanyContractScreen.module.scss";
 
 const STAGES = ["pendente", "enviado", "assinado"] as const;
@@ -34,6 +35,12 @@ function fmtDate(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString("pt-BR");
 }
 
+// ORD-165 — rótulo da ação registrada no histórico do plano.
+const HISTORY_ACTION_LABEL: Record<CompanyPlanHistoryEntry["action"], string> = {
+  renew: "Renovação",
+  apply: "Aplicação",
+};
+
 export default function CompanyContractScreen() {
   const { id } = useParams<{ id: string }>();
   const companyId = Number(id);
@@ -47,6 +54,8 @@ export default function CompanyContractScreen() {
   // marcada como alternativa/promocional (mesma regra de validação do
   // backend em _validate_plan_price_table_choice).
   const [availableTables, setAvailableTables] = useState<PriceTableSummary[]>([]);
+  // ORD-165 — histórico consultável de toda troca de tabela do plano.
+  const [planHistory, setPlanHistory] = useState<CompanyPlanHistoryEntry[]>([]);
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
   const [applyingTable, setApplyingTable] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -154,6 +163,13 @@ export default function CompanyContractScreen() {
     } catch {
       setAvailableTables([]);
     }
+    // ORD-165 — histórico não trava o resto da tela se falhar, mesmo padrão
+    // do plano e das tabelas elegíveis acima.
+    try {
+      setPlanHistory((await getCompanyPlanHistory(companyId)).entries);
+    } catch {
+      setPlanHistory([]);
+    }
   }
 
   useEffect(() => {
@@ -174,6 +190,7 @@ export default function CompanyContractScreen() {
     try {
       setPlan(await renewCompanyPlan(companyId, selectionIsEligible ? selectedTableId ?? undefined : undefined));
       makeToast("success", "Plano comercial renovado — vencimento adiado 365 dias");
+      refreshHistory();
     } catch (err) {
       makeToast("error", parseApiError(err).message);
     } finally {
@@ -189,10 +206,22 @@ export default function CompanyContractScreen() {
     try {
       setPlan(await applyCompanyPlanTable(companyId, selectedTableId));
       makeToast("success", "Tabela aplicada — vencimento do contrato não foi alterado");
+      refreshHistory();
     } catch (err) {
       makeToast("error", parseApiError(err).message);
     } finally {
       setApplyingTable(false);
+    }
+  }
+
+  async function refreshHistory() {
+    // ORD-165 — a gravação do histórico é best-effort mas síncrona dentro
+    // da mesma requisição de renovar/aplicar; buscar de novo logo depois já
+    // reflete o registro novo (ou a ausência dele, se a gravação falhou).
+    try {
+      setPlanHistory((await getCompanyPlanHistory(companyId)).entries);
+    } catch {
+      // silencioso — não é motivo pra atrapalhar o toast de sucesso da ação principal
     }
   }
 
@@ -292,6 +321,14 @@ export default function CompanyContractScreen() {
   const financeiro = contacts.find((c) => c.contact_type === "financeiro");
   const status = company.contract_status ?? "pendente";
   const currentIndex = STAGES.indexOf(status as (typeof STAGES)[number]);
+
+  // ORD-165 — colunas do histórico de troca de tabela do plano comercial.
+  const planHistoryColumns: TableColumn<CompanyPlanHistoryEntry>[] = [
+    { key: "created_at", header: "Quando", mono: true, render: (e) => fmtDate(e.created_at) },
+    { key: "action", header: "Ação", render: (e) => HISTORY_ACTION_LABEL[e.action] },
+    { key: "from", header: "Tabela anterior", render: (e) => e.from_price_table.name },
+    { key: "to", header: "Tabela nova", render: (e) => e.to_price_table.name },
+  ];
 
   return (
     <div className={styles.page}>
@@ -563,6 +600,20 @@ export default function CompanyContractScreen() {
                   )}
                 </div>
               </div>
+            )}
+          </div>
+
+          <div className={styles.panel}>
+            <h3 className={`${styles.h3} ${styles.h3Mb}`}>Histórico do plano</h3>
+            {planHistory.length > 0 ? (
+              <Table
+                variant="compact"
+                columns={planHistoryColumns}
+                rows={planHistory}
+                rowKey={(entry) => `${entry.created_at}-${entry.to_price_table.id}`}
+              />
+            ) : (
+              <div className={styles.miniDetail}>Nenhuma troca de tabela registrada ainda.</div>
             )}
           </div>
 

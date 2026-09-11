@@ -37,6 +37,10 @@ export default function PriceTableFormScreen() {
   const [loading, setLoading] = useState(editingId !== null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [readOnly, setReadOnly] = useState(false);
+  // ORD-165 — contador presente pra dar contexto no aviso de somente-leitura
+  // (pode ser 0 mesmo com readOnly=true: tabela já foi usada no passado,
+  // mas nenhuma empresa está vinculada a ela agora).
+  const [linkedCompaniesCount, setLinkedCompaniesCount] = useState(0);
 
   const [name, setName] = useState("");
   const [totemPrice1, setTotemPrice1] = useState<number | null>(null);
@@ -75,6 +79,7 @@ export default function PriceTableFormScreen() {
             : [newTierRow()]
         );
         setReadOnly(!t.editable);
+        setLinkedCompaniesCount(t.linked_companies_count);
       } catch {
         if (!cancelled) setLoadError("Erro ao carregar tabela de preço.");
       } finally {
@@ -182,7 +187,15 @@ export default function PriceTableFormScreen() {
 
       {readOnly && (
         <div className={styles.alertBox}>
-          <Alert variant="warning" text="Já existe empresa com plano comercial vinculado a esta tabela — não pode ser editada. Duplique-a na lista para criar uma cópia editável." fullWidth />
+          <Alert
+            variant="warning"
+            text={
+              linkedCompaniesCount > 0
+                ? `${linkedCompaniesCount} ${linkedCompaniesCount === 1 ? "empresa está" : "empresas estão"} usando esta tabela agora — não pode ser editada. Duplique-a na lista para criar uma cópia editável.`
+                : "Esta tabela já foi usada por alguma empresa no passado — mesmo sem nenhum vínculo hoje, ela não pode mais ser editada. Duplique-a na lista para criar uma cópia editável."
+            }
+            fullWidth
+          />
         </div>
       )}
 

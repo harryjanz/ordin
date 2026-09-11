@@ -400,6 +400,24 @@ class CompanyPlan(Base):
     created_at      = Column(DateTime, default=datetime.utcnow)
 
 
+class CompanyPlanHistory(Base):
+    # ORD-165: registro append-only de toda troca de price_table_id de um
+    # CompanyPlan (via renovação ou aplicação direta) — não referencia
+    # CompanyPlan.id de propósito, sobrevive mesmo se o CompanyPlan for
+    # recriado no futuro. company_id duplicado do CompanyPlan pra consulta
+    # direta por empresa sem join, mesmo padrão de outras tabelas do serviço.
+    # Gravação é best-effort (ver _record_plan_history) — nunca bloqueia a
+    # troca de tabela em si se a gravação aqui falhar.
+    __tablename__ = "company_plan_history"
+    id                    = Column(Integer, primary_key=True)
+    company_id            = Column(Integer, nullable=False, index=True)
+    from_price_table_id   = Column(Integer, nullable=False, index=True)
+    to_price_table_id     = Column(Integer, nullable=False, index=True)
+    action                = Column(String(20), nullable=False)  # "renew" | "apply"
+    actor_user_id         = Column(Integer, nullable=True)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+
+
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
@@ -924,11 +942,16 @@ class PriceTableOut(BaseModel):
     archived_at: datetime | None
     transaction_tiers: list[PriceTableTierOut] = []
     # ORD-163 (revisão): editável não é sobre status (rascunho/vigente/
-    # histórica) — é sobre ter ou não algum CompanyPlan vinculado. Uma
-    # tabela vigente sem nenhuma empresa apontando pra ela ainda pode ser
-    # ajustada; uma tabela histórica com empresas vinculadas, não. ORD-164
-    # não muda esse cálculo — kind e editable são atributos independentes.
+    # histórica) — é sobre ter ou não algum CompanyPlan vinculado. ORD-165
+    # (revisão): "vinculado" passa a incluir histórico — uma tabela que já
+    # foi vinculada alguma vez, mesmo sem nenhuma empresa hoje, também fica
+    # travada (ver _price_table_ever_linked). ORD-164 não muda esse cálculo
+    # — kind e editable continuam atributos independentes.
     editable: bool = True
+    # ORD-165: quantas empresas estão vinculadas a esta tabela AGORA (não é
+    # o histórico completo — só o presente, pra dar visibilidade antes de
+    # qualquer ação de edição/exclusão/categoria).
+    linked_companies_count: int = 0
 
 
 class PriceTableSummaryOut(BaseModel):
@@ -939,6 +962,7 @@ class PriceTableSummaryOut(BaseModel):
     created_at: datetime
     activated_at: datetime | None
     editable: bool = True
+    linked_companies_count: int = 0
 
 
 class PriceTableListOut(BaseModel):
@@ -982,6 +1006,17 @@ class CompanyPlanApplyTableIn(BaseModel):
     # ORD-164: troca a tabela do plano SEM renovar (started_at/expires_at/
     # renewed_at inalterados) — ação distinta de POST /plan/renew.
     price_table_id: int
+
+
+class CompanyPlanHistoryEntryOut(BaseModel):
+    from_price_table: CompanyPlanPriceTableOut
+    to_price_table: CompanyPlanPriceTableOut
+    action: str  # "renew" | "apply"
+    created_at: datetime
+
+
+class CompanyPlanHistoryOut(BaseModel):
+    entries: list[CompanyPlanHistoryEntryOut]
 
 
 class HealthOut(BaseModel):
@@ -3527,16 +3562,48 @@ async def _price_table_has_linked_plans(db: AsyncSession, price_table_id: int) -
     # tabela — é se alguma empresa (CompanyPlan) depende dela. Draft nunca
     # tem plano vinculado (só price_table "active" é atribuída a plano
     # novo/renovado); active/historical só ficam bloqueadas se de fato
-    # tiverem pelo menos uma empresa apontando pra elas.
+    # tiverem pelo menos uma empresa apontando pra elas. ORD-165: continua
+    # sendo o critério de vínculo ATUAL — ver _price_table_ever_linked pro
+    # critério completo (atual OU histórico) usado em editable/exclusão.
     result = await db.execute(
         select(CompanyPlan.id).where(CompanyPlan.price_table_id == price_table_id).limit(1)
     )
     return result.scalar_one_or_none() is not None
 
 
+async def _price_table_ever_linked(
+    db: AsyncSession, price_table_id: int, *, currently_linked: bool | None = None
+) -> bool:
+    # ORD-165: uma tabela que já foi vinculada a algum CompanyPlan alguma vez
+    # — mesmo sem nenhum vínculo hoje — nunca mais volta a ficar 100% livre
+    # pra editar/excluir. `currently_linked` é opcional pra quem já calculou
+    # isso em batch (ver list_price_tables) evitar repetir a query.
+    if currently_linked is None:
+        currently_linked = await _price_table_has_linked_plans(db, price_table_id)
+    if currently_linked:
+        return True
+    result = await db.execute(
+        select(CompanyPlanHistory.id)
+        .where(or_(
+            CompanyPlanHistory.from_price_table_id == price_table_id,
+            CompanyPlanHistory.to_price_table_id == price_table_id,
+        ))
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _count_price_table_companies(db: AsyncSession, price_table_id: int) -> int:
+    result = await db.execute(
+        select(func.count(CompanyPlan.id)).where(CompanyPlan.price_table_id == price_table_id)
+    )
+    return result.scalar_one()
+
+
 async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
     tiers = await _get_price_table_tiers(db, pt.id)
-    has_plans = await _price_table_has_linked_plans(db, pt.id)
+    linked_count = await _count_price_table_companies(db, pt.id)
+    ever_linked = await _price_table_ever_linked(db, pt.id, currently_linked=linked_count > 0)
     return {
         "id": pt.id,
         "name": pt.name,
@@ -3557,7 +3624,8 @@ async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
             }
             for t in tiers
         ],
-        "editable": not has_plans,
+        "editable": not ever_linked,
+        "linked_companies_count": linked_count,
     }
 
 
@@ -3615,25 +3683,29 @@ async def list_price_tables(
     _require_platform_admin(current_user)
     result = await db.execute(select(PriceTable).order_by(PriceTable.created_at.desc()))
     tables = result.scalars().all()
-    # Um SELECT só pra saber quais price_table_id têm plano vinculado, em vez
-    # de uma query por linha (N+1) — lista de tabelas costuma ser pequena,
-    # mas não custa nada evitar.
-    linked_result = await db.execute(select(CompanyPlan.price_table_id).distinct())
-    linked_ids = {row[0] for row in linked_result.all()}
-    return {
-        "price_tables": [
-            {
-                "id": pt.id,
-                "name": pt.name,
-                "status": pt.status,
-                "kind": pt.kind,
-                "created_at": pt.created_at,
-                "activated_at": pt.activated_at,
-                "editable": pt.id not in linked_ids,
-            }
-            for pt in tables
-        ]
-    }
+    # Um SELECT só pra contar empresas vinculadas por tabela, em vez de uma
+    # query por linha (N+1) — lista de tabelas costuma ser pequena, mas não
+    # custa nada evitar. ORD-165: GROUP BY em vez do DISTINCT anterior, pra
+    # também alimentar o contador linked_companies_count.
+    counts_result = await db.execute(
+        select(CompanyPlan.price_table_id, func.count(CompanyPlan.id)).group_by(CompanyPlan.price_table_id)
+    )
+    counts_by_table = {row[0]: row[1] for row in counts_result.all()}
+    price_tables = []
+    for pt in tables:
+        linked_count = counts_by_table.get(pt.id, 0)
+        ever_linked = await _price_table_ever_linked(db, pt.id, currently_linked=linked_count > 0)
+        price_tables.append({
+            "id": pt.id,
+            "name": pt.name,
+            "status": pt.status,
+            "kind": pt.kind,
+            "created_at": pt.created_at,
+            "activated_at": pt.activated_at,
+            "editable": not ever_linked,
+            "linked_companies_count": linked_count,
+        })
+    return {"price_tables": price_tables}
 
 
 @app.get(
@@ -3670,8 +3742,8 @@ async def update_price_table(
     pt = await db.get(PriceTable, price_table_id)
     if not pt:
         raise HTTPException(404, "Tabela de preço não encontrada")
-    if await _price_table_has_linked_plans(db, pt.id):
-        raise HTTPException(409, "Não é possível editar — já existe empresa com plano vinculado a esta tabela")
+    if await _price_table_ever_linked(db, pt.id):
+        raise HTTPException(409, "Não é possível editar — esta tabela já foi (ou está) vinculada a uma empresa")
     pt.name = body.name
     pt.totem_price_1 = body.totem_price_1
     pt.totem_multiplier_2 = body.totem_multiplier_2
@@ -3697,8 +3769,8 @@ async def delete_price_table(
     pt = await db.get(PriceTable, price_table_id)
     if not pt:
         raise HTTPException(404, "Tabela de preço não encontrada")
-    if await _price_table_has_linked_plans(db, pt.id):
-        raise HTTPException(409, "Não é possível excluir — já existe empresa com plano vinculado a esta tabela")
+    if await _price_table_ever_linked(db, pt.id):
+        raise HTTPException(409, "Não é possível excluir — esta tabela já foi (ou está) vinculada a uma empresa")
     await db.execute(delete(PriceTableTransactionTier).where(PriceTableTransactionTier.price_table_id == price_table_id))
     await db.delete(pt)
     await db.commit()
@@ -3873,6 +3945,33 @@ async def _validate_plan_price_table_choice(db: AsyncSession, price_table_id: in
     )
 
 
+async def _record_plan_history(
+    db: AsyncSession, request: Request, *, company_id: int, from_id: int, to_id: int,
+    action: str, actor: TokenPayload,
+) -> None:
+    # ORD-165: chamado DEPOIS do commit principal de renew/apply já ter sido
+    # feito com sucesso — nunca deixa uma falha aqui derrubar a troca de
+    # tabela em si (mesma filosofia do audit best-effort do Mongo no
+    # payment-service). Transação própria, isolada da transação principal.
+    actor_id = int(actor.sub) if actor.sub.isdigit() else None
+    try:
+        db.add(CompanyPlanHistory(
+            company_id=company_id, from_price_table_id=from_id, to_price_table_id=to_id,
+            action=action, actor_user_id=actor_id,
+        ))
+        await db.commit()
+        emit_audit(
+            "company_plan_renewed" if action == "renew" else "company_plan_table_applied",
+            request, actor=actor.role, actor_id=actor_id, company_id=company_id,
+            result="success", detail={"from_price_table_id": from_id, "to_price_table_id": to_id},
+        )
+    except Exception:
+        await db.rollback()
+        logging.getLogger(__name__).warning(
+            "ORD-165: falha ao gravar company_plan_history (company_id=%s)", company_id, exc_info=True
+        )
+
+
 @app.get(
     "/companies/{company_id}/plan",
     response_model=CompanyPlanOut,
@@ -3902,6 +4001,7 @@ async def get_company_plan(
 )
 async def renew_company_plan(
     company_id: int,
+    request: Request,
     body: CompanyPlanRenewIn | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
@@ -3911,6 +4011,7 @@ async def renew_company_plan(
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(404, "Empresa não tem plano comercial")
+    previous_price_table_id = plan.price_table_id
 
     if body is not None and body.price_table_id is not None:
         # ORD-164: escolha manual — vigente ou tabela com kind definido.
@@ -3931,6 +4032,18 @@ async def renew_company_plan(
     plan.expires_at = now + timedelta(days=365)
     await db.commit()
     await db.refresh(plan)
+    # ORD-165: best-effort — roda depois do commit principal, nunca bloqueia
+    # a renovação em si. _record_plan_history já protege as próprias falhas
+    # de gravação; o try/except aqui é defesa extra pra garantir que NENHUMA
+    # exceção vinda dela (nem de um teste que a substitui inteira) derruba a
+    # resposta já concluída da renovação.
+    try:
+        await _record_plan_history(
+            db, request, company_id=company_id, from_id=previous_price_table_id,
+            to_id=chosen_table.id, action="renew", actor=current_user,
+        )
+    except Exception:
+        logging.getLogger(__name__).warning("ORD-165: _record_plan_history falhou (renew)", exc_info=True)
     return await _serialize_company_plan(db, plan)
 
 
@@ -3943,6 +4056,7 @@ async def renew_company_plan(
 async def apply_company_plan_table(
     company_id: int,
     body: CompanyPlanApplyTableIn,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
@@ -3954,11 +4068,67 @@ async def apply_company_plan_table(
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(404, "Empresa não tem plano comercial")
+    previous_price_table_id = plan.price_table_id
     chosen_table = await _validate_plan_price_table_choice(db, body.price_table_id)
     plan.price_table_id = chosen_table.id
     await db.commit()
     await db.refresh(plan)
+    # ORD-165: best-effort — mesma lógica de proteção do renew (ver ali o
+    # porquê do try/except também aqui, além do que já existe dentro de
+    # _record_plan_history).
+    try:
+        await _record_plan_history(
+            db, request, company_id=company_id, from_id=previous_price_table_id,
+            to_id=chosen_table.id, action="apply", actor=current_user,
+        )
+    except Exception:
+        logging.getLogger(__name__).warning("ORD-165: _record_plan_history falhou (apply)", exc_info=True)
     return await _serialize_company_plan(db, plan)
+
+
+@app.get(
+    "/companies/{company_id}/plan/history",
+    response_model=CompanyPlanHistoryOut,
+    tags=["Empresas"],
+    summary="Histórico de troca de tabela de preço do plano comercial",
+)
+async def get_company_plan_history(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # ORD-165: mesma regra de acesso do GET /plan — owner/manager só a
+    # própria empresa, admin/superadmin qualquer uma.
+    _require_company_admin(current_user, company_id)
+    result = await db.execute(
+        select(CompanyPlan.id).where(CompanyPlan.company_id == company_id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(404, "Empresa não tem plano comercial")
+
+    history_result = await db.execute(
+        select(CompanyPlanHistory)
+        .where(CompanyPlanHistory.company_id == company_id)
+        .order_by(CompanyPlanHistory.created_at.desc())
+    )
+    entries = list(history_result.scalars().all())
+    # Volume esperado é baixo (histórico de UMA empresa, não a plataforma
+    # toda) — resolver o nome de cada tabela por linha não é o mesmo risco
+    # de N+1 que seria em list_price_tables.
+    # Tabelas referenciadas em company_plan_history nunca são excluídas — uma
+    # vez que uma tabela aparece aqui, _price_table_ever_linked trava sua
+    # exclusão pra sempre (é justamente essa a garantia desta história).
+    out_entries = []
+    for entry in entries:
+        from_table = await db.get(PriceTable, entry.from_price_table_id)
+        to_table = await db.get(PriceTable, entry.to_price_table_id)
+        out_entries.append({
+            "from_price_table": {"id": from_table.id, "name": from_table.name, "kind": from_table.kind},
+            "to_price_table": {"id": to_table.id, "name": to_table.name, "kind": to_table.kind},
+            "action": entry.action,
+            "created_at": entry.created_at,
+        })
+    return {"entries": out_entries}
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

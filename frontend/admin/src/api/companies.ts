@@ -1,5 +1,5 @@
 import api from "../api";
-import type { CepLookupResult, CnpjLookupResult, Company, CompanyPlan, CompanyStatusSummary, Contact, ContactType, LegalRepresentative, Terminal, User } from "../types";
+import type { CepLookupResult, CnpjLookupResult, Company, CompanyPlan, CompanyPlanHistory, CompanyStatusSummary, Contact, ContactType, LegalRepresentative, Terminal, User } from "../types";
 import { normalizeCnpj } from "../lib/validators";
 
 export async function lookupCnpj(cnpj: string): Promise<CnpjLookupResult> {
@@ -28,6 +28,13 @@ export async function renewCompanyPlan(companyId: number, priceTableId?: number)
 // inalterados). Ação distinta de renewCompanyPlan.
 export async function applyCompanyPlanTable(companyId: number, priceTableId: number): Promise<CompanyPlan> {
   const r = await api.patch<CompanyPlan>(`/companies/${companyId}/plan`, { price_table_id: priceTableId });
+  return r.data;
+}
+
+// ORD-165 — histórico de toda troca de tabela de preço do plano, mais
+// recente primeiro.
+export async function getCompanyPlanHistory(companyId: number): Promise<CompanyPlanHistory> {
+  const r = await api.get<CompanyPlanHistory>(`/companies/${companyId}/plan/history`);
   return r.data;
 }
 
