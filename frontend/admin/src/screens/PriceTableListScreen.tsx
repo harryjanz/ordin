@@ -173,11 +173,11 @@ export default function PriceTableListScreen() {
               Categoria
             </Button>
           )}
-          {t.editable && (
-            <Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); navigate(`/commercial/price-tables/${t.id}/edit`); }}>
-              Editar
-            </Button>
-          )}
+          {/* ORD-167 — "Ver" quando não editável, mesma rota: a tela dedicada
+              já sabe renderizar em somente-leitura quando editable=false. */}
+          <Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); navigate(`/commercial/price-tables/${t.id}/edit`); }}>
+            {t.editable ? "Editar" : "Ver"}
+          </Button>
           <Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); duplicate(t.id); }}>
             Duplicar
           </Button>

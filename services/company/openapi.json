@@ -5432,6 +5432,24 @@
         ],
         "title": "LegalRepresentativeOut"
       },
+      "LinkedCompanyOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "LinkedCompanyOut"
+      },
       "MfaConfirmIn": {
         "properties": {
           "code": {
@@ -5911,6 +5929,14 @@
             "type": "integer",
             "title": "Linked Companies Count",
             "default": 0
+          },
+          "linked_companies": {
+            "items": {
+              "$ref": "#/components/schemas/LinkedCompanyOut"
+            },
+            "type": "array",
+            "title": "Linked Companies",
+            "default": []
           }
         },
         "type": "object",

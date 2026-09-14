@@ -378,6 +378,10 @@ export interface PriceTable {
   // ORD-165 — quantas empresas estão vinculadas a esta tabela AGORA (não é
   // o histórico completo, só o presente).
   linked_companies_count: number;
+  // ORD-167 — nomes das empresas vinculadas AGORA (mesmo critério de
+  // linked_companies_count), só no detalhe — usado na visualização
+  // somente-leitura de tabela não editável.
+  linked_companies: { id: number; name: string }[];
 }
 
 // Resumo devolvido por GET /commercial/price-tables (lista) — sem faixas
