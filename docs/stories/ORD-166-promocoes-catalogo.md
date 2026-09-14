@@ -1,6 +1,6 @@
 ---
 id: ORD-166
-status: Explorer
+status: QA Explorer
 fase: 6
 sprint: null
 responsavel: Backend SR + Frontend (admin + totem)
@@ -52,9 +52,9 @@ implementada (fidelidade, cashback etc.) — encaixa direto no catálogo existen
 - **Timezone**: horário do servidor.
 - **Expiração**: automática, sem ação manual, ao passar da data/hora final.
 
-Ainda em aberto, não bloqueia o avanço pro QA Explorer: **como a UI do admin deixa visualmente
-claro**, pra um item de uma categoria com desconto geral, se ele está usando o percentual da
-categoria ou um override próprio — fica como decisão de design a resolver no Tech Explorer.
+**Resolvido no QA Explorer**: cada item da composição sempre mostra o desconto efetivo já
+calculado (geral por padrão); quando há override, o item ganha marcação visual distinta
+(cor/selo) — ver seção QA Explorer abaixo.
 
 ## Explorer
 
@@ -153,3 +153,171 @@ novas (admin: formulário + listagem de promoções; totem: indicador visual de 
 isso é pendência explícita pro critério de saída do Explorer. Recomendo tratar como item a
 produzir antes do QA Explorer, ou logo no início dele — especialmente a decisão de design ainda
 em aberto (categoria com desconto geral vs. produto com override, clareza visual no admin).
+
+## QA Explorer
+
+### Regra de precedência e representação visual (resolve a pendência de design do Explorer)
+Pra escrever os cenários de override sem ambiguidade, fica definida a regra funcional: **o
+percentual mais específico sempre vence** — override de produto > override de categoria >
+percentual geral da promoção.
+
+Representação visual definida pelo usuário nesta etapa: cada categoria/produto/combo listado na
+composição da promoção **sempre exibe o desconto efetivo já calculado** (o percentual geral,
+por padrão) — quando há override, o item mostra o valor sobrescrito **com uma marcação visual**
+(cor ou selo diferente) indicando que aquele item não está usando o percentual geral. Aplica-se
+tanto na listagem/formulário do admin quanto, de forma equivalente, no indicador de promoção do
+totem. Isso fecha a pendência de design — resta só a falta de wireframe (item 1 dos blockers
+abaixo) como pendência de representação exata (cores/componente específico), não mais de regra.
+
+### Cenários Gherkin
+
+```gherkin
+Feature: Promoções no catálogo
+  Como admin da empresa
+  Quero criar e gerenciar promoções por período com desconto percentual
+  Para impulsionar vendas em momentos específicos sem alterar o preço-base do catálogo
+
+  Background:
+    Dado que a empresa "Burger House" está autenticada no painel admin
+    E o catálogo tem categorias, produtos e combos cadastrados
+
+  # --- Criação ---
+
+  Scenario: Admin cria promoção válida com desconto geral
+    Dado que o admin está na aba Promoções do catálogo
+    Quando ele cria uma promoção com nome "Happy Hour", início "2026-09-20 18:00",
+      fim "2026-09-20 20:00" e desconto geral de 20%
+    E adiciona a categoria "Bebidas" à composição
+    Então a promoção é salva com status "rascunho"
+    E nenhum desconto é aplicado no totem, pois a promoção ainda não foi ativada
+
+  Scenario: Admin sobrescreve o percentual de um item específico
+    Dado uma promoção "Combo do Dia" com desconto geral de 10% e a categoria "Lanches" na composição
+    Quando o admin define um override de 25% pro produto "X-Bacon", que pertence à categoria "Lanches"
+    E ativa a promoção sem conflito
+    Então no totem o "X-Bacon" aparece com 25% de desconto
+    E os demais produtos da categoria "Lanches" aparecem com 10% de desconto
+
+  Scenario: Desconto de combo vale só pro combo completo, não pro produto avulso
+    Dado uma promoção ativa que inclui o combo "Combo Família" com 15% de desconto
+    E o produto "Refrigerante 350ml" faz parte desse combo mas também é vendido avulso
+    Quando o cliente compra o "Combo Família" no totem
+    Então o preço do combo aparece com 15% de desconto
+    Quando o cliente compra o "Refrigerante 350ml" avulso, fora do combo
+    Então nenhum desconto é aplicado ao produto avulso
+
+  # --- Validação de cadastro ---
+
+  Scenario Outline: Criação com dados inválidos é rejeitada
+    Quando o admin tenta salvar uma promoção com "<campo_invalido>"
+    Então o sistema rejeita o cadastro com uma mensagem de erro específica
+
+    Examples:
+      | campo_invalido                                         |
+      | nome vazio                                             |
+      | data de fim anterior à data de início                  |
+      | percentual de desconto negativo                        |
+      | percentual de desconto acima de 100                    |
+      | nenhum item de composição selecionado                  |
+
+  # --- Conflito ---
+
+  Scenario: Cadastro é permitido mesmo com conflito de outra promoção ativa
+    Dado uma promoção "Promo A" já ativa cobrindo o produto "X-Bacon" entre
+      "2026-09-20 12:00" e "2026-09-20 23:59"
+    Quando o admin cria uma nova promoção "Promo B" que também inclui o produto "X-Bacon"
+      no mesmo intervalo
+    Então "Promo B" é salva com sucesso
+
+  Scenario: Ativação é bloqueada quando há conflito de item e período
+    Dado a "Promo B" em conflito com "Promo A" no produto "X-Bacon"
+    Quando o admin tenta ativar "Promo B"
+    Então a ativação é bloqueada
+    E o sistema informa que o produto "X-Bacon" já está coberto pela "Promo A" nesse período
+
+  Scenario: Ativação é aceita quando não há conflito
+    Dado uma promoção "Promo C" cuja composição não colide com nenhuma promoção ativa no mesmo período
+    Quando o admin ativa "Promo C"
+    Então a promoção passa a status "ativa"
+    E os itens da composição passam a exibir o preço promocional no totem
+
+  Scenario: Conflito deixa de existir depois que a promoção concorrente expira
+    Dado "Promo A" ativa cobrindo "X-Bacon" até "2026-09-20 23:59", e "Promo B" em conflito com ela
+    Quando o horário do servidor passa de "2026-09-20 23:59" ("Promo A" expira)
+    E o admin tenta ativar "Promo B" novamente
+    Então a ativação é aceita, pois não há mais conflito
+
+  # --- Expiração automática ---
+
+  Scenario: Promoção expira automaticamente sem ação manual
+    Dado uma promoção ativa com fim marcado para "2026-09-20 20:00" (horário do servidor)
+    Quando o horário do servidor passa de "2026-09-20 20:00"
+    Então a promoção passa a status "expirada" automaticamente
+    E os itens afetados voltam ao preço normal no totem, sem intervenção do admin
+
+  Scenario: Promoção com início no futuro não aplica desconto antes da hora
+    Dado uma promoção ativa com início marcado para "2026-09-21 18:00"
+    Quando o horário atual do servidor é "2026-09-21 17:59"
+    Então nenhum desconto é aplicado no totem ainda
+
+  # --- Isolamento multi-tenant ---
+
+  Scenario: Empresa não acessa nem ativa promoção de outra empresa
+    Dado a "Promo X" pertence à empresa "Pasta & Co"
+    Quando um admin autenticado como empresa "Burger House" tenta consultar, editar ou ativar
+      a "Promo X"
+    Então o sistema retorna erro 403
+    E nenhum dado da "Promo X" é exposto na resposta
+
+  # --- Evidência visual no totem (nível funcional — sem asserção de layout, ver blockers) ---
+
+  Scenario: Totem evidencia visualmente o preço promocional
+    Dado um produto com promoção ativa e desconto de 20%
+    Quando o cliente visualiza esse produto no catálogo do totem
+    Então o preço original aparece riscado
+    E o novo preço com desconto aparece em destaque
+    E existe algum indicador visual de que o item está em promoção
+```
+
+### Critérios de aceite testáveis
+- [ ] Promoção é criada com nome, período e percentual geral válidos
+- [ ] Cadastro com dados inválidos (nome vazio, período invertido, percentual fora de 0-100,
+      composição vazia) é rejeitado com mensagem específica por campo
+- [ ] Override de item respeita a precedência produto > categoria > geral
+- [ ] Desconto de combo nunca vaza pro produto avulso vendido fora do combo
+- [ ] Cadastro de promoção conflitante é aceito; ativação de promoção conflitante é bloqueada
+      com mensagem que identifica item(ns) e promoção concorrente
+- [ ] Promoção conflitante pode ser ativada assim que o conflito deixar de existir
+- [ ] Promoção ativa aplica o desconto correto (geral ou override) no preço exibido no totem
+- [ ] Promoção expira automaticamente na data/hora final, sem job manual, e o item volta ao
+      preço normal na consulta seguinte
+- [ ] Promoção com início futuro não aplica desconto antes do horário de início
+- [ ] Empresa A não consegue ler, editar ou ativar promoção de empresa B (403, sem vazamento de dado)
+
+### O que ainda impede o avanço pro Tech Explorer
+Resolvido nesta etapa: a regra de precedência (produto > categoria > geral) **e** a
+representação visual (item sempre mostra o desconto efetivo; override ganha marcação visual
+distinta, cor/selo) — ver seção acima. Segue só como lembrete pro Tech Explorer decidir o
+componente exato (não é mais decisão de produto, é implementação).
+
+Ainda em aberto:
+1. **Wireframe/mockup ausente** — a regra visual já está definida (ponto acima), mas não existe
+   peça gráfica ainda. Sem ela, o cenário "Totem evidencia visualmente o preço promocional"
+   segue no nível funcional (riscado + novo preço + marcação de override), sem poder virar
+   asserção de pixel/componente exato. Não bloqueia entendimento do comportamento, só a
+   especificação fina de UI.
+
+Novos, levantados durante a escrita dos cenários desta etapa:
+2. **Produto/categoria/combo excluído do catálogo depois de compor uma promoção ativa** — não
+   há cenário definido: a promoção deveria ignorar o item silenciosamente, invalidar a
+   promoção inteira, ou bloquear a exclusão enquanto a promoção estiver ativa? Precisa de
+   decisão antes do Tech Explorer, porque muda o modelo de dados (FK com que comportamento de
+   delete).
+3. **Edição de promoção já ativa introduzindo um conflito novo** (ex.: admin adiciona um item
+   já coberto por outra promoção ativa) — o Explorer já tinha marcado isso como "decisão de UX
+   a confirmar", continua sem decisão: a edição deveria ser bloqueada, ou a promoção deveria
+   ser desativada automaticamente?
+
+Cenários Gherkin (happy path, borda, erro e isolamento multi-tenant) estão completos e
+aprovados — a lacuna é só nesses 3 pontos, que não impedem escrever os testes de fluxo de
+dados, mas impedem fechar 100% a especificação antes do Tech Explorer.
