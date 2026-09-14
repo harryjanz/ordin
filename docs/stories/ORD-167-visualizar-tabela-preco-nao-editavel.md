@@ -1,6 +1,7 @@
 ---
 id: ORD-167
-status: Tech Explorer
+status: Ready
+estimativa: 1,5 ponto (0,5 backend + 1 frontend)
 fase: 6
 sprint: null
 responsavel: Backend SR + Frontend
@@ -305,3 +306,32 @@ Nenhum — tudo dentro do company-service, sem chamada a outro serviço.
 ### O que ainda impede o avanço pro Ready
 Nada bloqueante. Todos os itens do critério de saída do Tech Explorer estão cobertos. Wireframe
 segue como débito de UI de baixo risco, não como bloqueio — decisão do usuário de seguir o fluxo.
+
+## Ready
+
+**Explorer:** [x] história Como/quero/para · [x] contexto e motivação · [x] fluxo principal (5
+passos) · [x] dependências identificadas (só company-service, sem histórias bloqueantes) ·
+[ ] wireframe — **não produzido**, decisão explícita do usuário de seguir o fluxo sem parar pra
+isso; mitigado no Tech Explorer reaproveitando componente visual já existente
+(`comboItemsBox`/`comboItemRow`), tratado como débito de baixo risco, não bloqueio · [x]
+critérios de aceite funcionais.
+
+**QA Explorer:** [x] happy path (Ver + empresas vinculadas listadas) · [x] bordas (sem empresa
+vinculada mas não editável, muitas empresas, tabela editável sem mudança) · [x] erros/regressão
+de acesso (owner/manager 403, PUT bloqueado em tabela não editável — controles já existentes,
+não requisitos novos) · [x] esclarecido por que isolamento multi-tenant tradicional não se aplica
+(PriceTable não é dado de empresa) · [x] cenários aprovados.
+
+**Tech Explorer:** [x] serviços impactados (só `company-service`) · [x] endpoint alterado com
+payload completo (`linked_companies` aditivo em `GET /commercial/price-tables/{id}`) · [x]
+migrations — nenhuma necessária · [x] eventos de fila — nenhum · [x] estimativa (1,5 ponto) ·
+[x] riscos com mitigação (falta de wireframe mitigada por reuso de componente; atenção ao
+`stopPropagation` na consolidação do botão Editar/Ver).
+
+**Aprovação final:** [x] solução técnica revisada e aprovada pelo usuário · [x] estimativa 1,5
+ponto acordada · [x] sem bloqueios não resolvidos (wireframe é débito registrado, não bloqueio)
+· [ ] sprint específico — ainda não atribuída, mesma situação de outras histórias Ready sem
+sprint definido no momento da aprovação (ex. ORD-166).
+
+**Status: Ready.** Pode começar a implementação — backend primeiro (função + campo de schema),
+depois frontend (lista + tela dedicada).
