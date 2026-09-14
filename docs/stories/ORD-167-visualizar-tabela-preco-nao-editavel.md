@@ -1,6 +1,6 @@
 ---
 id: ORD-167
-status: Ready
+status: Code Review
 estimativa: 1,5 ponto (0,5 backend + 1 frontend)
 fase: 6
 sprint: null
@@ -349,4 +349,9 @@ aberta:
    tabela com empresa vinculada mostra o nome real, tabela sem vínculo mas travada mostra estado
    vazio, tabela editável preserva comportamento normal sem a seção nova. `tsc`/build limpos.
 
-**Pendente**: push da branch e abertura da PR.
+**PR aberta**: [#135](https://github.com/harryjanz/ordin/pull/135) — aguardando code review.
+
+Ajuste pós-teste manual (`e27bd7d`): modo somente-leitura inicialmente reaproveitava inputs com
+`disabled=true`, mas ficou de baixo contraste (texto acinzentado sobre fundo acinzentado —
+convenção visual de "campo desligado", não de "dado pra consulta"). Trocado por texto simples
+(rótulo + valor em negrito), mesmo padrão já usado no `.openEndedBadge` da própria tela.
