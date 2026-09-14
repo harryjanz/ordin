@@ -335,3 +335,18 @@ sprint definido no momento da aprovação (ex. ORD-166).
 
 **Status: Ready.** Pode começar a implementação — backend primeiro (função + campo de schema),
 depois frontend (lista + tela dedicada).
+
+## Implementação
+
+Implementada na branch `feature/ORD-167-visualizar-tabela-preco-nao-editavel`, ainda sem PR
+aberta:
+
+1. **Backend** (`d4a4ce3`) — `GET /commercial/price-tables/{id}` ganha `linked_companies`
+   (join `CompanyPlan`→`Company`), aditivo, listagem não muda. 4 testes novos, suíte completa do
+   company-service sem regressão (419 passando). `ruff` limpo.
+2. **Admin** (`e270089`) — botão Editar/Ver consolidado na listagem, título dinâmico e seção
+   "Empresas vinculadas" reaproveitando componentes já existentes. Testado ao vivo no navegador:
+   tabela com empresa vinculada mostra o nome real, tabela sem vínculo mas travada mostra estado
+   vazio, tabela editável preserva comportamento normal sem a seção nova. `tsc`/build limpos.
+
+**Pendente**: push da branch e abertura da PR.
