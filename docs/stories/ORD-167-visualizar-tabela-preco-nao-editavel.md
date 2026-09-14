@@ -1,6 +1,6 @@
 ---
 id: ORD-167
-status: Explorer
+status: QA Explorer
 fase: 6
 sprint: null
 responsavel: Backend SR + Frontend
@@ -104,3 +104,96 @@ Mudança mínima na lista: quando `!t.editable`, mostrar um botão **"Ver"** no 
 **Faltando** — é mudança de UI (botão novo na lista + seção nova na tela dedicada), mesmo sendo
 pequena. Recomendo produzir um wireframe simples no QA Explorer ou logo antes dele, focado só na
 nova seção "Empresas vinculadas" (o resto da tela já existe e não muda visualmente).
+
+## QA Explorer
+
+### Sobre isolamento multi-tenant nesta história
+`PriceTable` **não é dado de empresa cliente** — é o catálogo comercial da própria plataforma
+Ordin (o que o Ordin cobra da empresa), administrado só por `superadmin`/`admin`. Não existe
+"empresa A vê tabela de empresa B" porque tabela não pertence a empresa nenhuma. O equivalente
+de isolamento aqui é **por role da plataforma**: `owner`/`manager` (equipe da empresa cliente)
+não deveriam nunca acessar esse endpoint — e isso **já está implementado** hoje
+(`_require_platform_admin` no backend, rota ausente do array de role no frontend). Registrado
+abaixo como cenário de regressão (confirmar que a mudança desta história não afrouxa esse
+controle), não como requisito novo.
+
+### Cenários Gherkin
+
+```gherkin
+Feature: Visualizar tabela de preço não editável
+  Como Admin/Super Admin
+  Quero visualizar a configuração e as empresas vinculadas de uma tabela já em uso
+  Para conferir os dados e avaliar impacto sem poder editá-la
+
+  Background:
+    Dado que o admin está autenticado com role "superadmin" ou "admin"
+
+  # --- Happy path ---
+
+  Scenario: Ver tabela não editável com empresas vinculadas
+    Dado uma tabela de preço "Tabela 2026-Q4" com editable=false
+    E as empresas "Burger House" e "Pasta & Co" vinculadas a ela agora
+    Quando o admin abre a listagem de tabelas de preço
+    Então a linha da "Tabela 2026-Q4" mostra o botão "Ver" (não "Editar")
+    Quando o admin clica em "Ver"
+    Então a tela abre em `/commercial/price-tables/{id}/edit` no modo somente-leitura
+    E o título é "Ver tabela de preço"
+    E todos os campos (nome, preços de totem, faixas de transação) aparecem preenchidos e desabilitados
+    E não há botão "Salvar"
+    E a seção "Empresas vinculadas" lista "Burger House" e "Pasta & Co"
+
+  # --- Bordas ---
+
+  Scenario: Tabela não editável sem nenhuma empresa vinculada agora
+    Dado uma tabela de preço "Tabela Antiga" com editable=false
+    E nenhuma empresa vinculada a ela no momento (foi usada no passado, "editable grudento" da ORD-165)
+    Quando o admin abre a tela de visualização dessa tabela
+    Então a seção "Empresas vinculadas" mostra um estado vazio explicativo
+    E não é tratado como erro
+
+  Scenario: Tabela editável continua com o comportamento atual, sem mudança
+    Dado uma tabela de preço "Tabela Rascunho" com editable=true
+    Quando o admin abre a listagem de tabelas de preço
+    Então a linha da "Tabela Rascunho" mostra o botão "Editar" (não "Ver")
+    Quando o admin clica em "Editar"
+    Então a tela abre em modo de edição normal, com botão "Salvar" disponível
+    E a seção "Empresas vinculadas" não aparece
+
+  Scenario: Tabela não editável com muitas empresas vinculadas
+    Dado uma tabela de preço "Tabela Padrão" com editable=false
+    E 15 empresas vinculadas a ela agora
+    Quando o admin abre a tela de visualização dessa tabela
+    Então as 15 empresas aparecem listadas de forma legível, sem quebrar o layout da tela
+
+  # --- Erros / regressão de controle de acesso já existente ---
+
+  Scenario: Owner/manager não acessa o detalhe de uma tabela de preço
+    Dado um usuário autenticado com role "owner" ou "manager"
+    Quando esse usuário tenta acessar `GET /commercial/price-tables/{id}` diretamente
+    Então o sistema retorna 403
+    E nenhum dado da tabela (preços, faixas, empresas vinculadas) é exposto
+
+  Scenario: Tentativa de salvar uma tabela não editável continua bloqueada
+    Dado uma tabela de preço com editable=false
+    Quando alguém tenta `PUT /commercial/price-tables/{id}` mesmo assim (fora da UI, ex. via API direta)
+    Então o sistema rejeita a alteração (comportamento já existente da ORD-162, não regride com esta história)
+```
+
+### Critérios de aceite testáveis
+- [ ] Listagem mostra "Ver" quando `editable=false` e "Editar" quando `editable=true`, nunca os dois
+- [ ] Botão "Ver" navega pra mesma rota de edição, renderizada em modo somente-leitura
+- [ ] Título da tela muda pra "Ver tabela de preço" no modo somente-leitura
+- [ ] Todos os campos existentes (nome, preços, faixas) aparecem preenchidos e desabilitados no modo somente-leitura
+- [ ] Nenhum botão "Salvar" aparece no modo somente-leitura
+- [ ] Seção "Empresas vinculadas" lista os nomes reais das empresas com `CompanyPlan` apontando pra essa tabela agora
+- [ ] Tabela sem empresa vinculada agora (mas não editável) mostra estado vazio, não erro
+- [ ] Seção "Empresas vinculadas" não aparece quando a tabela é editável
+- [ ] `owner`/`manager` continuam recebendo 403 ao tentar acessar o detalhe de uma tabela de preço (regressão, controle já existente)
+- [ ] `PUT` numa tabela não editável continua rejeitado (regressão, controle já existente da ORD-162)
+
+### O que ainda impede o avanço pro Tech Explorer
+Nada bloqueante pros cenários de comportamento — todos foram derivados de regras já decididas no
+Explorer. Segue pendente, carregado do Explorer: **falta o wireframe** da nova seção "Empresas
+vinculadas" (layout exato — lista simples, tabela, chips — ainda não definido). Não impede
+escrever os testes de dado/comportamento acima, mas impede fechar 100% a especificação visual
+antes do Tech Explorer.
