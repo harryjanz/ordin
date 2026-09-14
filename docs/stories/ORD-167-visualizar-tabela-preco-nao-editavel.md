@@ -1,6 +1,6 @@
 ---
 id: ORD-167
-status: QA Explorer
+status: Tech Explorer
 fase: 6
 sprint: null
 responsavel: Backend SR + Frontend
@@ -197,3 +197,111 @@ Explorer. Segue pendente, carregado do Explorer: **falta o wireframe** da nova s
 vinculadas" (layout exato — lista simples, tabela, chips — ainda não definido). Não impede
 escrever os testes de dado/comportamento acima, mas impede fechar 100% a especificação visual
 antes do Tech Explorer.
+
+## Tech Explorer
+
+### Serviços impactados
+- **company-service**: `_serialize_price_table` passa a incluir a lista de empresas vinculadas
+  (não só a contagem) via join simples com `Company`, sem chamada externa. Nenhum schema de
+  banco muda.
+- **frontend/admin**: `PriceTableListScreen.tsx` (botão único "Editar"/"Ver" condicional) e
+  `PriceTableFormScreen.tsx` (título dinâmico + seção nova de empresas vinculadas).
+
+### Endpoint alterado (aditivo, sem quebrar contrato existente)
+
+#### `GET /commercial/price-tables/{price_table_id}` (já existe)
+**Serviço:** company-service · **Auth:** JWT · role `superadmin`/`admin` (`_require_platform_admin`, já implementado)
+
+Response 200 (campo novo em negrito):
+```json
+{
+  "id": 3,
+  "name": "Tabela 2026-Q4",
+  "status": "active",
+  "editable": false,
+  "linked_companies_count": 2,
+  "linked_companies": [
+    { "id": 1, "name": "Burger House" },
+    { "id": 7, "name": "Pasta & Co" }
+  ]
+}
+```
+`linked_companies_count` continua existindo (usado hoje pela listagem) — `linked_companies` é
+aditivo. `GET /commercial/price-tables` (listagem) **não muda** — a lista de nomes só é
+necessária na tela de detalhe/visualização, manter a listagem só com a contagem evita N+1 joins
+numa tela que já lista várias tabelas de uma vez.
+
+Como `_serialize_price_table` é reaproveitada por `POST`/`PUT`/`activate`/`kind` também, todos
+esses endpoints passam a devolver `linked_companies` de brinde — inofensivo (lista vazia pra
+tabela recém-criada/editável), não exige tratamento especial.
+
+### Mudança no backend
+
+```python
+async def _get_price_table_linked_companies(db: AsyncSession, price_table_id: int) -> list[dict]:
+    """Nomes das empresas com CompanyPlan apontando pra essa tabela agora —
+    complementa _count_price_table_companies (que já existe e continua sendo
+    usado pela listagem, sem esta query extra)."""
+    result = await db.execute(
+        select(Company.id, Company.name)
+        .join(CompanyPlan, CompanyPlan.company_id == Company.id)
+        .where(CompanyPlan.price_table_id == price_table_id)
+        .order_by(Company.name)
+    )
+    return [{"id": cid, "name": name} for cid, name in result.all()]
+```
+Chamada dentro de `_serialize_price_table`, adicionando `"linked_companies": await
+_get_price_table_linked_companies(db, pt.id)` ao dict retornado. Schema `PriceTableOut` ganha
+`linked_companies: list[LinkedCompanyOut] = []` (novo `LinkedCompanyOut(BaseModel): id: int;
+name: str`). `PriceTableSummaryOut` (usado só pela listagem) **não muda**.
+
+### Mudança no frontend
+
+**`PriceTableListScreen.tsx`** — substitui o bloco condicional `{t.editable && <Button>Editar</Button>}`
+por um botão único, sempre visível, com rótulo condicional:
+```tsx
+<Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); navigate(`/commercial/price-tables/${t.id}/edit`); }}>
+  {t.editable ? "Editar" : "Ver"}
+</Button>
+```
+O botão "Excluir" (linha 189-193 hoje) continua gated só por `t.editable`, sem mudança — excluir
+uma tabela em uso continua impossível, só a visualização muda.
+
+**`PriceTableFormScreen.tsx`**:
+- Título: `editingId === null ? "Nova tabela de preço" : readOnly ? "Ver tabela de preço" : "Editar tabela de preço"`.
+- Novo estado `linkedCompanies` (setado em `load()` a partir de `t.linked_companies`).
+- Nova seção, renderizada só quando `readOnly`, reaproveitando as mesmas classes genéricas de
+  "lista de itens" já usadas em `ComboFormScreen.module.scss`/`PromotionFormScreen.tsx`
+  (`comboItemsBox`/`comboItemRow`) — sem CSS novo: uma linha por empresa, só o nome (sem ação,
+  é somente leitura). Lista vazia mostra o texto explicativo definido no QA Explorer ("Nenhuma
+  empresa usa esta tabela agora, mas ela já foi usada — por isso continua bloqueada pra edição").
+
+**`types.ts`**: `PriceTable`/`PriceTableSummary` ganham `linked_companies: { id: number; name: string }[]`.
+
+### Migrations
+Nenhuma — `Company` e `CompanyPlan` já existem, join simples dentro do mesmo serviço.
+
+### Eventos de fila
+Nenhum.
+
+### Impacto em outros serviços
+Nenhum — tudo dentro do company-service, sem chamada a outro serviço.
+
+### Estimativa
+- Backend: **~0,5 ponto** — uma função nova + um campo de schema.
+- Frontend: **~1 ponto** — consolidar botão Editar/Ver, título dinâmico, seção nova reaproveitando
+  classes existentes.
+- **Total: ~1,5 ponto.**
+
+### Riscos
+1. **Sem wireframe da seção nova** (pendência carregada do QA Explorer) — mitigado reaproveitando
+   um componente visual já existente (`comboItemsBox`/`comboItemRow`) em vez de desenhar algo do
+   zero; risco baixo porque é só leitura, sem interação a acertar. Vale testar no navegador antes
+   de considerar pronto (mesma lição da ORD-166: bug de texto só apareceu no teste visual).
+2. **Consolidar o botão Editar/Ver** é uma mudança na mesma linha de código que hoje tem
+   `stopPropagation` — atenção pra não perder esse detalhe (evita que o clique no botão também
+   dispare o clique da linha, se houver).
+
+### O que ainda impede o avanço pro Ready
+Nada bloqueante. Todos os itens do critério de saída do Tech Explorer estão cobertos. Wireframe
+segue como débito de UI de baixo risco, não como bloqueio — decisão do usuário de seguir o fluxo.
