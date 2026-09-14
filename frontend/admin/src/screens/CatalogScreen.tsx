@@ -21,7 +21,7 @@ import ConfirmDialog, { type ConfirmDialogProps } from "../components/ConfirmDia
 import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useStore } from "../store";
-import type { Category, Combo, Company, Menu, OptionGroup, Product } from "../types";
+import type { Category, Combo, Company, Menu, OptionGroup, Product, Promotion } from "../types";
 import styles from "./CatalogScreen.module.scss";
 
 // Variant semântica por tag conhecida — o resto cai no default (neutral).
@@ -116,8 +116,8 @@ export default function CatalogScreen() {
   // "categories". ?tab= preserva de qual aba o usuário saiu.
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const initialTab = tabParam === "products" || tabParam === "menus" || tabParam === "options" || tabParam === "combos" ? tabParam : "categories";
-  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus" | "options" | "combos">(initialTab);
+  const initialTab = tabParam === "products" || tabParam === "menus" || tabParam === "options" || tabParam === "combos" || tabParam === "promotions" ? tabParam : "categories";
+  const [activeTab, setActiveTab] = useState<"categories" | "products" | "menus" | "options" | "combos" | "promotions">(initialTab);
 
   const [confirmState, setConfirmState] = useState<{
     message: string;
@@ -720,6 +720,92 @@ export default function CatalogScreen() {
     });
   }
 
+  // ── Promoções (ORD-166) ──────────────────────────────────────────────────
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [errPromotions, setErrPromotions] = useState<string | null>(null);
+  const [promotionNameFilter, setPromotionNameFilter] = useState("");
+  const promotionRequestId = useRef(0);
+
+  async function loadPromotions() {
+    if (!hasCompanyContext) return;
+    const thisRequest = ++promotionRequestId.current;
+    try {
+      const r = await api.get("/catalog/promotions", catalogParams());
+      if (thisRequest !== promotionRequestId.current) return; // resposta obsoleta, ignorar
+      setPromotions(r.data.promotions ?? r.data);
+      setErrPromotions(null);
+    } catch {
+      if (thisRequest !== promotionRequestId.current) return;
+      setErrPromotions("Erro ao carregar promoções.");
+    }
+  }
+
+  useEffect(() => {
+    if (!hasCompanyContext) { setPromotions([]); return; }
+    loadPromotions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCompanyContext, companyId]);
+
+  const filteredPromotions = promotions.filter((p) => {
+    if (promotionNameFilter && !p.name.toLowerCase().includes(promotionNameFilter.toLowerCase())) return false;
+    return true;
+  });
+
+  function clearPromotionFilters() {
+    setPromotionNameFilter("");
+  }
+
+  const PROMOTION_STATUS_VARIANT: Record<Promotion["status"], TagProps["variant"]> = {
+    rascunho: "warning", ativa: "success", expirada: "neutral", conflito: "error",
+  };
+  const PROMOTION_STATUS_LABEL: Record<Promotion["status"], string> = {
+    rascunho: "Rascunho", ativa: "Ativa", expirada: "Expirada", conflito: "Conflito",
+  };
+
+  // Ativação passa pela mesma validação de conflito do backend (409 se
+  // colidir) — sem confirmação prévia aqui, o erro já vem com o detalhe de
+  // qual promoção conflita, mostrado via toast.
+  async function activatePromotion(id: number) {
+    try {
+      await api.patch(`/catalog/promotions/${id}`, { is_enabled: true }, catalogParams());
+      loadPromotions();
+    } catch (err) {
+      makeToast("error", parseApiError(err).message);
+    }
+  }
+
+  function deactivatePromotion(id: number, name: string) {
+    setConfirmState({
+      message: `Inativar a promoção "${name}"? Ela deixa de aplicar desconto até ser ativada de novo.`,
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          await api.patch(`/catalog/promotions/${id}`, { is_enabled: false }, catalogParams());
+          loadPromotions();
+        } catch (err) {
+          makeToast("error", parseApiError(err).message);
+        }
+      },
+    });
+  }
+
+  function deletePromotionPermanently(id: number, name: string) {
+    setConfirmState({
+      message: `Excluir definitivamente a promoção "${name}"? Essa ação NÃO pode ser desfeita.`,
+      alertVariant: "warning",
+      alertIcon: "alert-triangle",
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          await api.delete(`/catalog/promotions/${id}`, catalogParams());
+          loadPromotions();
+        } catch (err) {
+          makeToast("error", parseApiError(err).message);
+        }
+      },
+    });
+  }
+
   return (
     <div className={styles.page}>
       <div className={styles.title}>Catálogo</div>
@@ -747,6 +833,7 @@ export default function CatalogScreen() {
           <Tab value="menus" label="Cardápios" totalizer={menus.length} />
           <Tab value="options" label="Opções" totalizer={optionGroups.length} />
           <Tab value="combos" label="Combos" totalizer={combos.length} />
+          <Tab value="promotions" label="Promoções" totalizer={promotions.length} />
         </Tabs>
       </div>
 
@@ -1184,6 +1271,83 @@ export default function CatalogScreen() {
               },
             ]}
             rows={filteredCombos}
+          />
+        </>
+      )}
+
+      {/* ── Promoções (ORD-166) ── */}
+      {activeTab === "promotions" && (
+        <>
+          {errPromotions && (
+            <div className={styles.errorRow}>
+              <span className={styles.muted}>{errPromotions}</span>
+              <Button size="small" variant="secondary" onClick={loadPromotions}>Tentar novamente</Button>
+            </div>
+          )}
+
+          <div className={styles.filterBar}>
+            <InputBase
+              label="Promoção"
+              placeholder="Buscar por nome…"
+              value={promotionNameFilter}
+              onChange={(e) => setPromotionNameFilter(e.target.value)}
+            />
+            <Button type="button" variant="secondary" onClick={clearPromotionFilters}>Limpar filtros</Button>
+            <Button type="button" onClick={() => navigate("/catalog/promotions/new")}>+ Nova promoção</Button>
+          </div>
+
+          <Table
+            variant="compact"
+            rowKey={(p: Promotion) => p.id}
+            emptyMessage="Nenhuma promoção encontrada."
+            columns={[
+              { key: "name", header: "Promoção", render: (p: Promotion) => p.name },
+              {
+                key: "period", header: "Período",
+                render: (p: Promotion) => (
+                  <span className={styles.muted}>
+                    {new Date(p.starts_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                    {" → "}
+                    {new Date(p.ends_at).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                  </span>
+                ),
+              },
+              {
+                key: "discount", header: "Desconto geral",
+                render: (p: Promotion) => `${p.general_discount_percent}%`,
+              },
+              {
+                key: "items", header: "Itens",
+                render: (p: Promotion) => <span className={styles.muted}>{p.items.length}</span>,
+              },
+              {
+                key: "status", header: "Status",
+                render: (p: Promotion) => (
+                  <Tag variant={PROMOTION_STATUS_VARIANT[p.status]}>{PROMOTION_STATUS_LABEL[p.status]}</Tag>
+                ),
+              },
+              {
+                key: "action", header: "", render: (p: Promotion) => (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    {p.status === "ativa" ? (
+                      <>
+                        <Button size="small" variant="secondary" onClick={() => navigate(`/catalog/promotions/${p.id}/edit`)}>Ver</Button>
+                        <Button size="small" variant="secondary" onClick={() => deactivatePromotion(p.id, p.name)}>Inativar</Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button size="small" variant="secondary" onClick={() => navigate(`/catalog/promotions/${p.id}/edit`)}>Editar</Button>
+                        <Button size="small" variant="secondary" onClick={() => activatePromotion(p.id)}>Ativar</Button>
+                        <Button size="small" variant="secondary" style={DANGER_BTN_STYLE} onClick={() => deletePromotionPermanently(p.id, p.name)}>
+                          Excluir
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                ),
+              },
+            ]}
+            rows={filteredPromotions}
           />
         </>
       )}

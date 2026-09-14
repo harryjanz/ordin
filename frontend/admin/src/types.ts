@@ -188,6 +188,16 @@ export interface RelatedProduct {
   active: boolean;
 }
 
+// ORD-166 — anotação aditiva vinda de GET /catalog/products e /catalog/combos
+// quando o item está coberto por uma promoção em vigor agora. final_price já
+// vem com o desconto aplicado.
+export interface PromotionAnnotation {
+  promotion_id: number;
+  promotion_name: string;
+  discount_percent: number;
+  final_price: number;
+}
+
 export interface Product {
   id: number;
   company_id: number;
@@ -206,6 +216,7 @@ export interface Product {
   allergens: Allergen[];
   option_groups: ProductOptionGroup[];
   related_products: RelatedProduct[];
+  promotion: PromotionAnnotation | null;
 }
 
 // ORD-125 — cardápio por horário: dias da semana (0=segunda..6=domingo,
@@ -285,6 +296,47 @@ export interface Combo {
   // sugestão de upsell desligada.
   upsell_enabled: boolean;
   items: ComboItem[];
+  promotion: PromotionAnnotation | null;
+}
+
+// ORD-166 — promoção por período. Status é sempre computado pelo backend
+// (nunca editável direto): rascunho (criada, nunca ativada) · ativa
+// (is_enabled=true, dentro ou ainda antes do período — o desconto só passa a
+// valer quando now cai dentro de [starts_at, ends_at]) · expirada (passou do
+// fim) · conflito (algum item colide com outra promoção ativa no mesmo
+// período — bloqueia ativação, mas nunca bloqueia o cadastro).
+export type PromotionStatus = "rascunho" | "ativa" | "expirada" | "conflito";
+
+export interface PromotionItem {
+  id: number;
+  item_type: "category" | "product" | "combo";
+  category_id: number | null;
+  product_id: number | null;
+  combo_id: number | null;
+  discount_percent_override: number | null;
+  // false quando a categoria/produto/combo referenciado foi inativado ou
+  // excluído do catálogo depois de compor a promoção — some do totem, mas
+  // não invalida a promoção nem os demais itens.
+  available: boolean;
+}
+
+export interface PromotionConflict {
+  promotion_id: number;
+  promotion_name: string;
+  product_ids: number[];
+  combo_ids: number[];
+}
+
+export interface Promotion {
+  id: number;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  general_discount_percent: number;
+  is_enabled: boolean;
+  status: PromotionStatus;
+  items: PromotionItem[];
+  conflicts: PromotionConflict[];
 }
 
 // ORD-162 — tabela de preço comercial da plataforma (superadmin/admin), não
