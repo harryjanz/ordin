@@ -29,6 +29,23 @@ function newTierRow(min = 0): TierRow {
   return { key: `new-${rowSeq}`, min_transactions: min, max_transactions: null, openEnded: false, price_per_transaction: null };
 }
 
+const fmtBRL = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+// ORD-167 (ajuste pós-teste manual) — o modo somente-leitura inicialmente
+// reaproveitava os mesmos inputs com `disabled`, mas ficou de baixo
+// contraste/difícil de ler (texto acinzentado sobre fundo acinzentado,
+// convenção visual de "campo desligado", não de "dado pra consulta"). Mesmo
+// racional já usado no `.openEndedBadge` desta tela (ORD-162): trocar o
+// controle interativo por texto simples quando não há edição possível.
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={styles.formRowField}>
+      <span className={styles.formLabel}>{label}</span>
+      <div style={{ fontWeight: 700 }}>{value}</div>
+    </div>
+  );
+}
+
 export default function PriceTableFormScreen() {
   const { id } = useParams<{ id: string }>();
   const editingId = id ? Number(id) : null;
@@ -234,55 +251,65 @@ export default function PriceTableFormScreen() {
       {formError && <div className={styles.alertBox}><Alert variant="error" text={formError} fullWidth /></div>}
 
       <div className={styles.panel}>
-        <InputBase
-          label="Nome da tabela"
-          placeholder="ex: Tabela 2026-Q4"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          disabled={readOnly}
-          autoFocus
-        />
-        <div className={styles.formRow}>
-          <div className={styles.formRowField}>
-            <CurrencyInput label="Preço do 1º totem" value={totemPrice1} onChange={(v: number) => setTotemPrice1(v)} disabled={readOnly} />
-          </div>
-          <div className={styles.formRowField}>
-            <NumberSpinInput
-              label="Multiplicador do 2º totem"
-              typeable
-              step={5}
-              minValue={1}
-              maxValue={100}
-              suffix="%"
-              disabled={readOnly}
-              helperMessage="ex: 50% = metade do preço do 1º totem"
-              // Digitado/exibido em porcentagem inteira (1-100), não em
-              // fração decimal — o campo decimal (NumberSpinInput com
-              // decimalDigits) tem uma armadilha real de digitação: digitar
-              // "0,5" do jeito natural descarta a vírgula e vira "05" → 0,05
-              // em vez de 0,5 (achado testando a tela, sem nenhum erro de
-              // validação pra pegar o engano). Porcentagem inteira evita a
-              // ambiguidade inteira — o valor enviado pra API continua
-              // fração decimal (0-1), só a conversão é feita aqui.
-              value={multiplier2 !== null ? Math.round(multiplier2 * 100) : 50}
-              onChange={(v?: number) => setMultiplier2(v !== undefined ? v / 100 : null)}
+        {readOnly ? (
+          <>
+            <ReadOnlyField label="Nome da tabela" value={name} />
+            <div className={styles.formRow}>
+              <ReadOnlyField label="Preço do 1º totem" value={fmtBRL(totemPrice1 ?? 0)} />
+              <ReadOnlyField label="Multiplicador do 2º totem" value={`${Math.round((multiplier2 ?? 0.5) * 100)}%`} />
+              <ReadOnlyField label="Multiplicador do 3º ao 5º totem" value={`${Math.round((multiplier35 ?? 0.3) * 100)}%`} />
+            </div>
+          </>
+        ) : (
+          <>
+            <InputBase
+              label="Nome da tabela"
+              placeholder="ex: Tabela 2026-Q4"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
             />
-          </div>
-          <div className={styles.formRowField}>
-            <NumberSpinInput
-              label="Multiplicador do 3º ao 5º totem"
-              typeable
-              step={5}
-              minValue={1}
-              maxValue={100}
-              suffix="%"
-              disabled={readOnly}
-              helperMessage="ex: 30% = 30% do preço do 1º totem, cada"
-              value={multiplier35 !== null ? Math.round(multiplier35 * 100) : 30}
-              onChange={(v?: number) => setMultiplier35(v !== undefined ? v / 100 : null)}
-            />
-          </div>
-        </div>
+            <div className={styles.formRow}>
+              <div className={styles.formRowField}>
+                <CurrencyInput label="Preço do 1º totem" value={totemPrice1} onChange={(v: number) => setTotemPrice1(v)} />
+              </div>
+              <div className={styles.formRowField}>
+                <NumberSpinInput
+                  label="Multiplicador do 2º totem"
+                  typeable
+                  step={5}
+                  minValue={1}
+                  maxValue={100}
+                  suffix="%"
+                  helperMessage="ex: 50% = metade do preço do 1º totem"
+                  // Digitado/exibido em porcentagem inteira (1-100), não em
+                  // fração decimal — o campo decimal (NumberSpinInput com
+                  // decimalDigits) tem uma armadilha real de digitação: digitar
+                  // "0,5" do jeito natural descarta a vírgula e vira "05" → 0,05
+                  // em vez de 0,5 (achado testando a tela, sem nenhum erro de
+                  // validação pra pegar o engano). Porcentagem inteira evita a
+                  // ambiguidade inteira — o valor enviado pra API continua
+                  // fração decimal (0-1), só a conversão é feita aqui.
+                  value={multiplier2 !== null ? Math.round(multiplier2 * 100) : 50}
+                  onChange={(v?: number) => setMultiplier2(v !== undefined ? v / 100 : null)}
+                />
+              </div>
+              <div className={styles.formRowField}>
+                <NumberSpinInput
+                  label="Multiplicador do 3º ao 5º totem"
+                  typeable
+                  step={5}
+                  minValue={1}
+                  maxValue={100}
+                  suffix="%"
+                  helperMessage="ex: 30% = 30% do preço do 1º totem, cada"
+                  value={multiplier35 !== null ? Math.round(multiplier35 * 100) : 30}
+                  onChange={(v?: number) => setMultiplier35(v !== undefined ? v / 100 : null)}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       <div className={styles.panel}>
@@ -296,6 +323,18 @@ export default function PriceTableFormScreen() {
           // última mostra a opção. addTier() já cuida de "despromover" a
           // faixa anterior quando uma nova é adicionada depois dela.
           const isLast = index === tiers.length - 1;
+          if (readOnly) {
+            return (
+              <div key={t.key} className={styles.formRow}>
+                <ReadOnlyField label="De (transações/mês)" value={String(t.min_transactions)} />
+                <ReadOnlyField
+                  label="Até (transações/mês)"
+                  value={t.openEnded ? "Sem teto — última faixa" : String(t.max_transactions ?? t.min_transactions)}
+                />
+                <ReadOnlyField label="Preço por transação" value={fmtBRL(t.price_per_transaction ?? 0)} />
+              </div>
+            );
+          }
           return (
             <div key={t.key} className={styles.formRow}>
               <div className={styles.formRowField}>
@@ -304,7 +343,6 @@ export default function PriceTableFormScreen() {
                   typeable
                   step={1}
                   minValue={0}
-                  disabled={readOnly}
                   value={t.min_transactions}
                   onChange={(v?: number) => updateTier(t.key, { min_transactions: v ?? 0 })}
                 />
@@ -321,7 +359,6 @@ export default function PriceTableFormScreen() {
                     typeable
                     step={1}
                     minValue={t.min_transactions}
-                    disabled={readOnly}
                     value={t.max_transactions ?? t.min_transactions}
                     onChange={(v?: number) => updateTier(t.key, { max_transactions: v ?? null })}
                   />
@@ -331,7 +368,6 @@ export default function PriceTableFormScreen() {
                     id={`tier-open-${t.key}`}
                     label="Esta é a última faixa (sem teto)"
                     checked={t.openEnded}
-                    disabled={readOnly}
                     onChange={(checked) => updateTier(t.key, { openEnded: checked, max_transactions: checked ? null : t.min_transactions })}
                   />
                 )}
@@ -341,12 +377,9 @@ export default function PriceTableFormScreen() {
                   label="Preço por transação"
                   value={t.price_per_transaction}
                   onChange={(v: number) => updateTier(t.key, { price_per_transaction: v })}
-                  disabled={readOnly}
                 />
               </div>
-              {!readOnly && (
-                <button type="button" className={styles.removeBtn} onClick={() => removeTier(t.key)} title="Remover faixa">✕</button>
-              )}
+              <button type="button" className={styles.removeBtn} onClick={() => removeTier(t.key)} title="Remover faixa">✕</button>
             </div>
           );
         })}
