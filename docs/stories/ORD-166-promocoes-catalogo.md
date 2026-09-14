@@ -1,6 +1,7 @@
 ---
 id: ORD-166
-status: Tech Explorer
+status: Ready
+estimativa: 7,5 pontos (3 backend + 3 admin + 1,5 totem)
 fase: 6
 sprint: null
 responsavel: Backend SR + Frontend (admin + totem)
@@ -543,3 +544,32 @@ outro serviço.
 Nada bloqueante. Todos os itens do critério de saída do Tech Explorer estão cobertos: serviços
 impactados, endpoints (payload completo), migrations, impacto em outros serviços, estimativa e
 riscos com mitigação proposta. Segue pra aprovação final (step Ready).
+
+## Ready
+
+**Explorer:** [x] história Como/quero/para (admin + cliente no totem) · [x] contexto e
+motivação · [x] fluxo principal (8 passos) · [x] dependências identificadas (só
+`catalog-service`, sem depender de ORD-162 a 165) · [x] wireframe publicado
+([artifact](https://claude.ai/code/artifact/aa3b5215-45c7-4746-848e-202ffb8429a3)) · [x]
+critérios de aceite funcionais.
+
+**QA Explorer:** [x] happy path · [x] bordas (validação de dados, promoção com início futuro,
+conflito que se resolve quando a promoção concorrente expira) · [x] erros (Scenario Outline de
+cadastro inválido) · [x] isolamento multi-tenant (empresa A não acessa promoção de empresa B) ·
+[x] item indisponível e ciclo inativar→editar→ativar · [x] cenários aprovados.
+
+**Tech Explorer:** [x] serviços impactados (`catalog-service`; sem mudança em order/payment) ·
+[x] endpoints com payload completo (CRUD + activate/deactivate) · [x] migration descrita
+(`promotions`/`promotion_items` em `fk_catalog`) · [x] eventos de fila — nenhum necessário,
+justificado · [x] estimativa (7,5 pontos) · [x] 5 riscos técnicos, todos com mitigação proposta
+(destaque: condição de corrida na ativação, e o achado de que order-service já confia no preço
+enviado pelo totem sem revalidação — padrão pré-existente, não é risco novo desta história).
+
+**Aprovação final:** [x] solução técnica revisada e aprovada pelo usuário · [x] estimativa
+7,5 pontos acordada · [x] sem bloqueios não resolvidos · [ ] sprint específico — ainda não
+atribuída a um sprint do backlog (mesma situação de outras histórias Ready sem sprint definido
+no momento da aprovação, ex. ORD-060); fica pra priorização quando o usuário decidir encaixar no
+calendário.
+
+**Status: Ready.** Pode começar a implementação (backend primeiro — modelo/migration/algoritmo
+de conflito — depois admin, depois totem, na ordem sugerida pela estimativa).
