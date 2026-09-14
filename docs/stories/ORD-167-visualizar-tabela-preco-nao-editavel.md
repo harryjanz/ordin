@@ -1,6 +1,6 @@
 ---
 id: ORD-167
-status: Code Review
+status: Done
 estimativa: 1,5 ponto (0,5 backend + 1 frontend)
 fase: 6
 sprint: null
@@ -349,7 +349,14 @@ aberta:
    tabela com empresa vinculada mostra o nome real, tabela sem vínculo mas travada mostra estado
    vazio, tabela editável preserva comportamento normal sem a seção nova. `tsc`/build limpos.
 
-**PR aberta**: [#135](https://github.com/harryjanz/ordin/pull/135) — aguardando code review.
+**PR mergeada**: [#135](https://github.com/harryjanz/ordin/pull/135) — CI verde (build Docker,
+lint, segurança, testes+cobertura), merge direto pra `main` a pedido do usuário.
+
+Ajuste adicional pós-merge da revisão visual (`22dcc66`, incluído na mesma PR antes do merge):
+ícone da sidebar trocado de "coin" pra "tag" — o glifo anterior renderizava visivelmente
+deslocado à esquerda dentro do espaço reservado (bearing assimétrico do próprio icon-font,
+confirmado comparando com o ícone de "Empresa", que centraliza bem). "tag" também é mais claro
+semanticamente pra "tabela de preço" do que uma moeda genérica.
 
 Ajuste pós-teste manual (`e27bd7d`): modo somente-leitura inicialmente reaproveitava inputs com
 `disabled=true`, mas ficou de baixo contraste (texto acinzentado sobre fundo acinzentado —
