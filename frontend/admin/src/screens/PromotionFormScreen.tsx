@@ -316,13 +316,19 @@ export default function PromotionFormScreen() {
       {!readOnly && (
         <div className={styles.panel}>
           <div className={styles.formLabel}>Buscar categoria, produto ou combo pra adicionar</div>
-          <div className={styles.searchRow}>
-            <Dropdown
-              label=""
-              value={searchTypeOptions.find((o) => o.value === searchType) ?? searchTypeOptions[0]}
-              onValueSelected={(opt) => { setSearchType(opt.value as ItemType); setSearchName(""); }}
-              options={searchTypeOptions}
-            />
+          {/* ORD-166 (ajuste pós-teste manual) — .searchRow do ComboFormScreen
+              é "1fr 200px" (pensado pro filtro de categoria estreito do
+              combo); aqui os dois campos precisam de 50/50 — override local
+              via style, sem mexer na classe compartilhada. */}
+          <div className={styles.searchRow} style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className={styles.searchRowField}>
+              <Dropdown
+                label=""
+                value={searchTypeOptions.find((o) => o.value === searchType) ?? searchTypeOptions[0]}
+                onValueSelected={(opt) => { setSearchType(opt.value as ItemType); setSearchName(""); }}
+                options={searchTypeOptions}
+              />
+            </div>
             <div className={styles.searchRowField}>
               <InputBase placeholder="Buscar por nome…" value={searchName} onChange={(e) => setSearchName(e.target.value)} />
             </div>
