@@ -109,9 +109,11 @@ manter essa distinção clara pro Tech Explorer, pra não confundir os dois dom�
 - **Conflito no cadastro**: promoção é salva normalmente, mas fica com status "em conflito" ou
   equivalente até o conflito ser resolvido (editar período/composição, ou a promoção
   conflitante expirar) — não trava o admin, só impede ativação.
-- **Edição de promoção já ativa**: se a edição introduzir um conflito novo (ex.: adicionar um
-  item já coberto por outra promoção ativa), a promoção deve ser desativada automaticamente ou a
-  edição bloqueada — decisão de UX a confirmar no QA Explorer.
+- **Edição de promoção já ativa**: não existe edição direta. Pra alterar qualquer campo de uma
+  promoção ativa (período, composição, percentuais), o admin precisa **inativá-la primeiro**,
+  editar, e ativá-la de novo — passando pela validação de conflito normalmente nesse novo ciclo
+  de ativação. Isso elimina por construção o cenário de "edição introduz conflito em uma
+  promoção que já está valendo" — resolvido pelo usuário no QA Explorer.
 - **Promoção expirada**: fica visível no histórico (não é excluída), com status "expirada";
   reativar exigiria editar o período pra um novo intervalo futuro.
 - **Combo com produto que também está em promoção individual**: como o desconto de combo só
@@ -148,11 +150,13 @@ manter essa distinção clara pro Tech Explorer, pra não confundir os dois dom�
 - [ ] Aba de Promoções segue o mesmo padrão visual/estrutural das demais abas do catálogo
 
 ### Wireframe / Mockup
-**Faltando** — não existe wireframe/mockup pra esta história ainda. Como envolve dois telas
-novas (admin: formulário + listagem de promoções; totem: indicador visual de preço promocional),
-isso é pendência explícita pro critério de saída do Explorer. Recomendo tratar como item a
-produzir antes do QA Explorer, ou logo no início dele — especialmente a decisão de design ainda
-em aberto (categoria com desconto geral vs. produto com override, clareza visual no admin).
+**Publicado**: [ORD-166 — Wireframe: Promoções no catálogo](https://claude.ai/code/artifact/aa3b5215-45c7-4746-848e-202ffb8429a3) — cobre os dois contextos (admin: aba Promoções na mesma
+`Tabs`/`Table` do catálogo, listagem com chips de status, editor com banner de conflito e
+composição com precedência produto > categoria > geral marcada visualmente; totem: vitrine com
+preço riscado + preço promocional + selo, item sem promoção ao lado pra contraste), usando os
+tokens de cor/tipografia reais do projeto (`themes.ts`, tema Ordin: roxo `#9900ff`, teal
+`#1a9999`/`#33cccc` de preço, Lexend/Inter/Courier New). É wireframe de comportamento — a peça
+final de UI fica pro Tech Explorer/implementação.
 
 ## QA Explorer
 
@@ -269,14 +273,38 @@ Feature: Promoções no catálogo
     Então o sistema retorna erro 403
     E nenhum dado da "Promo X" é exposto na resposta
 
-  # --- Evidência visual no totem (nível funcional — sem asserção de layout, ver blockers) ---
+  # --- Evidência visual no totem ---
 
   Scenario: Totem evidencia visualmente o preço promocional
     Dado um produto com promoção ativa e desconto de 20%
     Quando o cliente visualiza esse produto no catálogo do totem
     Então o preço original aparece riscado
     E o novo preço com desconto aparece em destaque
-    E existe algum indicador visual de que o item está em promoção
+    E um selo de promoção fica visível no card do produto (ver wireframe)
+
+  # --- Item indisponível depois de compor a promoção ---
+
+  Scenario: Produto excluído/inativado some do totem e é marcado como indisponível na promoção
+    Dado uma promoção ativa que inclui o produto "Milk-shake Morango"
+    Quando o admin exclui ou inativa o produto "Milk-shake Morango" no catálogo
+    Então o "Milk-shake Morango" não aparece mais no totem (nem com nem sem desconto)
+    E a promoção continua ativa normalmente pros demais itens da composição
+    E a tela da promoção, no admin, marca o "Milk-shake Morango" como "Indisponível"
+
+  # --- Edição de promoção ativa ---
+
+  Scenario: Promoção ativa não pode ser editada diretamente
+    Dado uma promoção com status "ativa"
+    Quando o admin tenta editar período, composição ou percentuais
+    Então a ação de edição direta não está disponível — só "Ver" e "Inativar"
+
+  Scenario: Editar uma promoção exige inativar antes
+    Dado uma promoção ativa "Happy Hour Bebidas"
+    Quando o admin a inativa
+    E edita o percentual geral de 20% para 30%
+    E ativa a promoção novamente
+    Então a nova ativação passa pela validação de conflito normalmente
+    E, sem conflito, a promoção volta a "ativa" já com o percentual atualizado
 ```
 
 ### Critérios de aceite testáveis
@@ -293,31 +321,22 @@ Feature: Promoções no catálogo
       preço normal na consulta seguinte
 - [ ] Promoção com início futuro não aplica desconto antes do horário de início
 - [ ] Empresa A não consegue ler, editar ou ativar promoção de empresa B (403, sem vazamento de dado)
+- [ ] Item excluído/inativado do catálogo some do totem e é marcado "Indisponível" na tela da
+      promoção, sem interromper os demais itens da composição
+- [ ] Promoção ativa não oferece edição direta — só "Ver"/"Inativar"; editar exige
+      inativar → editar → ativar, revalidando conflito no novo ciclo de ativação
 
-### O que ainda impede o avanço pro Tech Explorer
-Resolvido nesta etapa: a regra de precedência (produto > categoria > geral) **e** a
-representação visual (item sempre mostra o desconto efetivo; override ganha marcação visual
-distinta, cor/selo) — ver seção acima. Segue só como lembrete pro Tech Explorer decidir o
-componente exato (não é mais decisão de produto, é implementação).
+### Status — todos os pontos em aberto resolvidos nesta etapa
+1. **Wireframe** — publicado (link na seção Explorer acima), cobrindo admin e totem com os
+   tokens reais de cor/tipografia do projeto.
+2. **Item excluído/inativado depois de compor uma promoção ativa** — resolvido: fica
+   indisponível só naquela promoção (some do totem, sem quebrar o restante da composição) e é
+   marcado como "Indisponível" na tela da promoção no admin. Não bloqueia a operação nem exige
+   exclusão em cascata.
+3. **Edição de promoção ativa** — resolvido: não existe edição direta. É preciso inativar,
+   editar, e ativar de novo (passando pela validação de conflito nesse novo ciclo) — elimina por
+   construção o caso de "edição introduz conflito numa promoção que já está valendo".
 
-Ainda em aberto:
-1. **Wireframe/mockup ausente** — a regra visual já está definida (ponto acima), mas não existe
-   peça gráfica ainda. Sem ela, o cenário "Totem evidencia visualmente o preço promocional"
-   segue no nível funcional (riscado + novo preço + marcação de override), sem poder virar
-   asserção de pixel/componente exato. Não bloqueia entendimento do comportamento, só a
-   especificação fina de UI.
-
-Novos, levantados durante a escrita dos cenários desta etapa:
-2. **Produto/categoria/combo excluído do catálogo depois de compor uma promoção ativa** — não
-   há cenário definido: a promoção deveria ignorar o item silenciosamente, invalidar a
-   promoção inteira, ou bloquear a exclusão enquanto a promoção estiver ativa? Precisa de
-   decisão antes do Tech Explorer, porque muda o modelo de dados (FK com que comportamento de
-   delete).
-3. **Edição de promoção já ativa introduzindo um conflito novo** (ex.: admin adiciona um item
-   já coberto por outra promoção ativa) — o Explorer já tinha marcado isso como "decisão de UX
-   a confirmar", continua sem decisão: a edição deveria ser bloqueada, ou a promoção deveria
-   ser desativada automaticamente?
-
-Cenários Gherkin (happy path, borda, erro e isolamento multi-tenant) estão completos e
-aprovados — a lacuna é só nesses 3 pontos, que não impedem escrever os testes de fluxo de
-dados, mas impedem fechar 100% a especificação antes do Tech Explorer.
+Cenários Gherkin (happy path, borda, erro, isolamento multi-tenant, item indisponível e ciclo de
+edição) estão completos e aprovados. Critério de saída do QA Explorer atendido — pronta pra
+avançar ao **Tech Explorer**.
