@@ -41,6 +41,9 @@ export default function PriceTableFormScreen() {
   // (pode ser 0 mesmo com readOnly=true: tabela já foi usada no passado,
   // mas nenhuma empresa está vinculada a ela agora).
   const [linkedCompaniesCount, setLinkedCompaniesCount] = useState(0);
+  // ORD-167 — nomes das empresas vinculadas agora, pra seção de visualização
+  // (linkedCompaniesCount acima já existia, só pro texto do aviso).
+  const [linkedCompanies, setLinkedCompanies] = useState<{ id: number; name: string }[]>([]);
 
   const [name, setName] = useState("");
   const [totemPrice1, setTotemPrice1] = useState<number | null>(null);
@@ -80,6 +83,7 @@ export default function PriceTableFormScreen() {
         );
         setReadOnly(!t.editable);
         setLinkedCompaniesCount(t.linked_companies_count);
+        setLinkedCompanies(t.linked_companies);
       } catch {
         if (!cancelled) setLoadError("Erro ao carregar tabela de preço.");
       } finally {
@@ -174,11 +178,13 @@ export default function PriceTableFormScreen() {
         items={[
           { label: "Comercial", href: "/commercial/price-tables" },
           { label: "Tabelas de preço", href: "/commercial/price-tables" },
-          { label: editingId === null ? "Nova tabela" : "Editar tabela" },
+          { label: editingId === null ? "Nova tabela" : readOnly ? "Ver tabela" : "Editar tabela" },
         ]}
       />
       <div className={styles.header}>
-        <h1 className={styles.h1}>{editingId === null ? "Nova tabela de preço" : "Editar tabela de preço"}</h1>
+        <h1 className={styles.h1}>
+          {editingId === null ? "Nova tabela de preço" : readOnly ? "Ver tabela de preço" : "Editar tabela de preço"}
+        </h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/commercial/price-tables")}>Voltar</Button>
           {!readOnly && <Button onClick={save} disabled={!canSave} loading={saving}>Salvar tabela</Button>}
@@ -196,6 +202,32 @@ export default function PriceTableFormScreen() {
             }
             fullWidth
           />
+        </div>
+      )}
+
+      {/* ORD-167 — só faz sentido pra justificar o bloqueio de edição, por
+          isso só aparece em readOnly (nunca numa tabela editável). */}
+      {readOnly && (
+        <div className={styles.panel}>
+          <div className={styles.formLabel}>
+            Empresas vinculadas{linkedCompaniesCount > 0 ? ` (${linkedCompaniesCount})` : ""}
+          </div>
+          <div className={styles.comboItemsBox}>
+            {linkedCompanies.length === 0 ? (
+              <div className={styles.searchEmpty}>
+                Nenhuma empresa usa esta tabela agora, mas ela já foi usada — por isso continua
+                bloqueada pra edição.
+              </div>
+            ) : (
+              linkedCompanies.map((c) => (
+                <div key={c.id} className={styles.comboItemRow}>
+                  <div className={styles.comboItemInfo}>
+                    <span>{c.name}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
