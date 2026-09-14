@@ -928,6 +928,11 @@ class PriceTableIn(BaseModel):
         return ordered
 
 
+class LinkedCompanyOut(BaseModel):
+    id: int
+    name: str
+
+
 class PriceTableOut(BaseModel):
     id: int
     name: str
@@ -952,6 +957,12 @@ class PriceTableOut(BaseModel):
     # o histórico completo — só o presente, pra dar visibilidade antes de
     # qualquer ação de edição/exclusão/categoria).
     linked_companies_count: int = 0
+    # ORD-167: nomes das empresas vinculadas AGORA (mesmo critério de
+    # linked_companies_count) — só no detalhe (PriceTableOut), não na
+    # listagem (PriceTableSummaryOut), pra não fazer N+1 join na tela que
+    # lista várias tabelas de uma vez. Usado pela tela de visualização
+    # somente-leitura de uma tabela não editável.
+    linked_companies: list[LinkedCompanyOut] = []
 
 
 class PriceTableSummaryOut(BaseModel):
@@ -3600,6 +3611,19 @@ async def _count_price_table_companies(db: AsyncSession, price_table_id: int) ->
     return result.scalar_one()
 
 
+async def _get_price_table_linked_companies(db: AsyncSession, price_table_id: int) -> list[dict]:
+    """ORD-167: nomes das empresas com CompanyPlan apontando pra essa tabela
+    agora — complementa _count_price_table_companies (que continua sendo
+    usada sozinha pela listagem, sem este join extra)."""
+    result = await db.execute(
+        select(Company.id, Company.name)
+        .join(CompanyPlan, CompanyPlan.company_id == Company.id)
+        .where(CompanyPlan.price_table_id == price_table_id)
+        .order_by(Company.name)
+    )
+    return [{"id": cid, "name": name} for cid, name in result.all()]
+
+
 async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
     tiers = await _get_price_table_tiers(db, pt.id)
     linked_count = await _count_price_table_companies(db, pt.id)
@@ -3626,6 +3650,7 @@ async def _serialize_price_table(db: AsyncSession, pt: PriceTable) -> dict:
         ],
         "editable": not ever_linked,
         "linked_companies_count": linked_count,
+        "linked_companies": await _get_price_table_linked_companies(db, pt.id),
     }
 
 
