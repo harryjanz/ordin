@@ -2221,6 +2221,415 @@
         }
       }
     },
+    "/catalog/promotions": {
+      "post": {
+        "tags": [
+          "Promoções"
+        ],
+        "summary": "Criar promoção (sempre como rascunho)",
+        "description": "Cadastro é sempre permitido, mesmo com conflito de item/período com\noutra promoção — o conflito só bloqueia a ATIVAÇÃO (ver Tech Explorer de\nORD-166). Promoção nasce sempre com is_enabled=False.",
+        "operationId": "create_promotion_catalog_promotions_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromotionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromotionOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nome vazio, período inválido, percentual fora de 0-100, composição vazia ou item duplicado"
+          },
+          "404": {
+            "description": "Algum item da composição não existe ou não pertence à empresa"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Promoções"
+        ],
+        "summary": "Listar promoções da empresa",
+        "description": "Status (rascunho/ativa/expirada/conflito) é computado por promoção a\ncada chamada, inclusive o conflito — mostrado proativamente mesmo numa\npromoção que nunca tentou ativar, pra o admin ver antes de tentar.",
+        "operationId": "list_promotions_catalog_promotions_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromotionListOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/promotions/{promotion_id}": {
+      "get": {
+        "tags": [
+          "Promoções"
+        ],
+        "summary": "Detalhes de uma promoção",
+        "operationId": "get_promotion_catalog_promotions__promotion_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "promotion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Promotion Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromotionOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Promoção não encontrada ou de outra empresa"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Promoções"
+        ],
+        "summary": "Editar promoção (replace completo da composição)",
+        "description": "Sem edição direta de promoção ativa (ver Tech Explorer) — o admin\nprecisa inativar via PATCH primeiro.",
+        "operationId": "update_promotion_catalog_promotions__promotion_id__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "promotion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Promotion Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromotionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromotionOut"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Nome vazio, período inválido, percentual fora de 0-100, composição vazia ou item duplicado"
+          },
+          "404": {
+            "description": "Promoção não encontrada, ou algum item da composição não existe/não pertence à empresa"
+          },
+          "409": {
+            "description": "Promoção ativa precisa ser inativada antes de editar"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Promoções"
+        ],
+        "summary": "Ativar/inativar uma promoção sem reeditar o resto",
+        "description": "Mesmo padrão de set_combo_active. Ativar revalida conflito dentro da\nmesma transação, com lock (`SELECT ... FOR UPDATE`) na própria promoção\ne nas promoções concorrentes candidatas — fecha a condição de corrida de\nduas ativações conflitantes simultâneas (ver Tech Explorer risco #2,\nmesmo padrão já usado em collect_ticket do order-service).",
+        "operationId": "set_promotion_enabled_catalog_promotions__promotion_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "promotion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Promotion Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromotionActiveIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromotionOut"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Promoção não encontrada"
+          },
+          "409": {
+            "description": "Ativar recusado: conflito de item/período com outra promoção ativa"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Promoções"
+        ],
+        "summary": "Excluir definitivamente uma promoção",
+        "operationId": "delete_promotion_catalog_promotions__promotion_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "promotion_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Promotion Id"
+            }
+          },
+          {
+            "name": "company_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Company Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "Promoção não encontrada"
+          },
+          "409": {
+            "description": "Promoção ativa precisa ser inativada antes de excluir"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/catalog/menus": {
       "post": {
         "tags": [
@@ -2940,6 +3349,14 @@
           "triggers_upsell": {
             "type": "boolean",
             "title": "Triggers Upsell"
+          },
+          "option_groups": {
+            "items": {
+              "$ref": "#/components/schemas/ProductOptionGroupOut"
+            },
+            "type": "array",
+            "title": "Option Groups",
+            "default": []
           }
         },
         "type": "object",
@@ -3040,6 +3457,16 @@
             "type": "array",
             "title": "Items",
             "default": []
+          },
+          "promotion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PromotionAnnotationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -4086,6 +4513,24 @@
             "type": "array",
             "title": "Inactive Combos",
             "default": []
+          },
+          "related_products": {
+            "items": {
+              "$ref": "#/components/schemas/RelatedProductOut"
+            },
+            "type": "array",
+            "title": "Related Products",
+            "default": []
+          },
+          "promotion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PromotionAnnotationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -4214,6 +4659,20 @@
             ],
             "title": "Allergen Ids"
           },
+          "related_product_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Product Ids"
+          },
           "confirm_deactivate_combos": {
             "anyOf": [
               {
@@ -4228,6 +4687,368 @@
         },
         "type": "object",
         "title": "ProductUpdate"
+      },
+      "PromotionActiveIn": {
+        "properties": {
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "is_enabled"
+        ],
+        "title": "PromotionActiveIn"
+      },
+      "PromotionAnnotationOut": {
+        "properties": {
+          "promotion_id": {
+            "type": "integer",
+            "title": "Promotion Id"
+          },
+          "promotion_name": {
+            "type": "string",
+            "title": "Promotion Name"
+          },
+          "discount_percent": {
+            "type": "number",
+            "title": "Discount Percent"
+          },
+          "final_price": {
+            "type": "number",
+            "title": "Final Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "promotion_id",
+          "promotion_name",
+          "discount_percent",
+          "final_price"
+        ],
+        "title": "PromotionAnnotationOut",
+        "description": "Anotação aditiva (ORD-166) em ProductOut/ComboOut — null quando não há\npromoção em vigor agora pro item. final_price já vem com o desconto\naplicado sobre `price`, pronto pro totem exibir riscado + novo preço."
+      },
+      "PromotionConflictOut": {
+        "properties": {
+          "promotion_id": {
+            "type": "integer",
+            "title": "Promotion Id"
+          },
+          "promotion_name": {
+            "type": "string",
+            "title": "Promotion Name"
+          },
+          "product_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Product Ids"
+          },
+          "combo_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Combo Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "promotion_id",
+          "promotion_name",
+          "product_ids",
+          "combo_ids"
+        ],
+        "title": "PromotionConflictOut"
+      },
+      "PromotionIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ends At"
+          },
+          "general_discount_percent": {
+            "type": "number",
+            "title": "General Discount Percent"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PromotionItemIn"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "starts_at",
+          "ends_at",
+          "general_discount_percent",
+          "items"
+        ],
+        "title": "PromotionIn"
+      },
+      "PromotionItemIn": {
+        "properties": {
+          "item_type": {
+            "type": "string",
+            "title": "Item Type"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "combo_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combo Id"
+          },
+          "discount_percent_override": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Percent Override"
+          }
+        },
+        "type": "object",
+        "required": [
+          "item_type"
+        ],
+        "title": "PromotionItemIn"
+      },
+      "PromotionItemOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "item_type": {
+            "type": "string",
+            "title": "Item Type"
+          },
+          "category_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Id"
+          },
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id"
+          },
+          "combo_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combo Id"
+          },
+          "discount_percent_override": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Discount Percent Override"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "item_type",
+          "available"
+        ],
+        "title": "PromotionItemOut"
+      },
+      "PromotionListOut": {
+        "properties": {
+          "promotions": {
+            "items": {
+              "$ref": "#/components/schemas/PromotionOut"
+            },
+            "type": "array",
+            "title": "Promotions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "promotions"
+        ],
+        "title": "PromotionListOut"
+      },
+      "PromotionOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Ends At"
+          },
+          "general_discount_percent": {
+            "type": "number",
+            "title": "General Discount Percent"
+          },
+          "is_enabled": {
+            "type": "boolean",
+            "title": "Is Enabled"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PromotionItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "conflicts": {
+            "items": {
+              "$ref": "#/components/schemas/PromotionConflictOut"
+            },
+            "type": "array",
+            "title": "Conflicts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "starts_at",
+          "ends_at",
+          "general_discount_percent",
+          "is_enabled",
+          "status",
+          "items",
+          "conflicts"
+        ],
+        "title": "PromotionOut"
+      },
+      "RelatedProductOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "price": {
+            "type": "number",
+            "title": "Price"
+          },
+          "image_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image Url"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "option_groups": {
+            "items": {
+              "$ref": "#/components/schemas/ProductOptionGroupOut"
+            },
+            "type": "array",
+            "title": "Option Groups",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "price",
+          "active"
+        ],
+        "title": "RelatedProductOut"
       },
       "ReorderIn": {
         "properties": {
@@ -4295,6 +5116,10 @@
     {
       "name": "Catálogo",
       "description": "Catálogo de produtos e categorias da empresa autenticada. Todos os endpoints são filtrados automaticamente por `company_id` do JWT — nunca é possível acessar o catálogo de outra empresa."
+    },
+    {
+      "name": "Promoções",
+      "description": "Promoções por período (ORD-166) — desconto percentual aplicado a categorias, produtos e/ou combos, com vigência de data/hora. Cadastro é sempre permitido; ativação é bloqueada quando há conflito de item/período com outra promoção já ativa. Expira automaticamente, sem job manual."
     },
     {
       "name": "Cardápios",

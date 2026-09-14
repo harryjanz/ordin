@@ -31,8 +31,10 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    and_,
     delete,
     func,
+    or_,
     select,
     update,
 )
@@ -243,6 +245,45 @@ class ComboItem(Base):
     # precisar ter triggers_upsell=True pra disparar a sugestão. Permite
     # ex: burger indica o combo, refrigerante (item genérico) não.
     triggers_upsell = Column(Boolean, nullable=False, default=True)
+
+class Promotion(Base):
+    """Promoção por período (ORD-166) — desconto percentual aplicado a um
+    conjunto de categorias/produtos/combos, com vigência de data/hora.
+    `is_enabled` é o toggle do admin (equivalente a "ativa"/"inativa");
+    o status exibido ao usuário (rascunho/ativa/expirada/conflito) é sempre
+    CALCULADO em runtime (ver `_compute_promotion_status`), nunca persistido
+    — mesma decisão já tomada pra expiração automática: comparar contra
+    `func.now()` do banco a cada consulta, sem scheduler novo no projeto
+    (ver Tech Explorer). Editar exige inativar primeiro (`is_enabled=False`)
+    — não existe edição direta de promoção ativa."""
+    __tablename__ = "promotions"
+    id                       = Column(Integer, primary_key=True)
+    company_id               = Column(Integer, nullable=False, index=True)
+    name                     = Column(String(120), nullable=False)
+    starts_at                = Column(DateTime, nullable=False)
+    ends_at                  = Column(DateTime, nullable=False)
+    general_discount_percent = Column(Numeric(5, 2), nullable=False)
+    is_enabled               = Column(Boolean, nullable=False, default=False)
+    deleted                  = Column(Boolean, nullable=False, default=False)
+    created_at               = Column(DateTime, default=datetime.utcnow)
+
+class PromotionItem(Base):
+    """Composição da promoção. Exatamente um entre category_id/product_id/
+    combo_id é preenchido, condizente com item_type — validado na aplicação
+    (Pydantic + endpoint), não via CHECK constraint de banco: mais simples e
+    portátil no MySQL, mesmo racional já usado pra unicidade de item
+    duplicado (ver Tech Explorer). `discount_percent_override=None` = usa o
+    `general_discount_percent` da promoção; combo NUNCA é afetado por um
+    item_type="category" (decisão explícita: desconto de combo vale só pro
+    combo completo, nunca cascade de categoria)."""
+    __tablename__ = "promotion_items"
+    id                         = Column(Integer, primary_key=True)
+    promotion_id               = Column(Integer, ForeignKey("promotions.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_type                  = Column(String(20), nullable=False)  # "category" | "product" | "combo"
+    category_id                = Column(Integer, ForeignKey("categories.id"), nullable=True)
+    product_id                 = Column(Integer, ForeignKey("products.id"), nullable=True)
+    combo_id                   = Column(Integer, ForeignKey("combos.id"), nullable=True)
+    discount_percent_override  = Column(Numeric(5, 2), nullable=True)
 
 class RelatedProduct(Base):
     """Produto correlacionado (ORD-160) — cross-sell sem combo, unidirecional
@@ -543,6 +584,7 @@ async def _serialize_combo(db: AsyncSession, c: "Combo") -> dict:
         "thumbnail_url": presigned_download_url(c.thumbnail_url) if c.thumbnail_url else None,
         "upsell_enabled": c.upsell_enabled,
         "items": items,
+        "promotion": await _resolve_combo_promotion(db, c),
     }
 
 async def _validate_combo_category(db: AsyncSession, company_id: int, category_id: int | None) -> None:
@@ -746,6 +788,214 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "allergens": await _get_product_allergens(db, p.id),
         "option_groups": await _get_product_option_groups(db, p.id),
         "related_products": await _get_product_related(db, p.id),
+        "promotion": await _resolve_product_promotion(db, p),
+    }
+
+# ── Promoções (ORD-166) ──────────────────────────────────────────────────────
+
+async def _db_now(db: AsyncSession) -> datetime:
+    """NOW() do servidor MySQL, não o relógio da aplicação — evita drift
+    entre réplicas do catalog-service na hora de decidir status "expirada"
+    (ver Tech Explorer risco #3). A gate de preço promocional em si já usa
+    func.now() direto na query, sem passar por aqui."""
+    return (await db.execute(select(func.now()))).scalar_one()
+
+async def _resolve_affected_ids(db: AsyncSession, promotion_id: int) -> tuple[set[int], set[int]]:
+    """(product_ids, combo_ids) efetivamente afetados por uma promoção —
+    expande item_type="category" pros produtos ativos/não-excluídos daquela
+    categoria. Combo NUNCA é afetado por expansão de categoria (decisão
+    explícita: desconto de combo vale só pro combo completo). Usado tanto
+    pra checar conflito quanto, indiretamente, documenta a mesma regra que
+    _resolve_product_promotion aplica na resolução de preço."""
+    result = await db.execute(select(PromotionItem).filter_by(promotion_id=promotion_id))
+    items = result.scalars().all()
+    product_ids: set[int] = set()
+    combo_ids: set[int] = set()
+    category_ids = {i.category_id for i in items if i.item_type == "category"}
+    for i in items:
+        if i.item_type == "product":
+            product_ids.add(i.product_id)
+        elif i.item_type == "combo":
+            combo_ids.add(i.combo_id)
+    if category_ids:
+        result = await db.execute(
+            select(Product.id).filter(
+                Product.category_id.in_(category_ids),
+                Product.active == True, Product.deleted == False,
+            )
+        )
+        product_ids |= set(result.scalars().all())
+    return product_ids, combo_ids
+
+async def _find_promotion_conflicts(
+    db: AsyncSession, company_id: int, promotion: "Promotion", for_update: bool = False,
+) -> list[dict]:
+    """Compara a promoção candidata contra toda promoção habilitada
+    (is_enabled=True, deleted=False) **e ainda não expirada** da mesma
+    empresa cujo período sobrepõe o dela — uma promoção com is_enabled=True
+    mas ends_at no passado não conta mais como concorrente (é isso que
+    resolve o cenário "conflito deixa de existir quando a promoção
+    concorrente expira": o intervalo armazenado das duas pode continuar se
+    sobrepondo pra sempre, o que muda com o tempo é só se a "outra" ainda
+    está em vigor agora). Produto e combo são namespaces independentes —
+    nunca conflitam entre si. `for_update=True` (usado só na ativação, não
+    em leitura) trava as promoções concorrentes candidatas pra fechar a
+    condição de corrida de duas ativações conflitantes simultâneas (ver
+    Tech Explorer risco #2)."""
+    my_products, my_combos = await _resolve_affected_ids(db, promotion.id)
+    if not my_products and not my_combos:
+        return []
+    q = select(Promotion).filter(
+        Promotion.company_id == company_id,
+        Promotion.id != promotion.id,
+        Promotion.is_enabled == True,
+        Promotion.deleted == False,
+        Promotion.ends_at >= func.now(),
+        Promotion.starts_at <= promotion.ends_at,
+        Promotion.ends_at >= promotion.starts_at,
+    )
+    if for_update:
+        q = q.with_for_update()
+    others = (await db.execute(q)).scalars().all()
+    conflicts = []
+    for other in others:
+        other_products, other_combos = await _resolve_affected_ids(db, other.id)
+        overlap_products = my_products & other_products
+        overlap_combos = my_combos & other_combos
+        if overlap_products or overlap_combos:
+            conflicts.append({
+                "promotion_id": other.id,
+                "promotion_name": other.name,
+                "product_ids": sorted(overlap_products),
+                "combo_ids": sorted(overlap_combos),
+            })
+    return conflicts
+
+def _compute_promotion_status(promo: "Promotion", now: datetime, has_conflict: bool) -> str:
+    if not promo.is_enabled:
+        return "conflito" if has_conflict else "rascunho"
+    if now > promo.ends_at:
+        return "expirada"
+    return "ativa"
+
+async def _promotion_item_is_available(db: AsyncSession, item: "PromotionItem") -> bool:
+    """Item "indisponível" = a categoria/produto/combo referenciado foi
+    inativado ou excluído do catálogo depois de compor a promoção — não
+    invalida a promoção, só marca esse item (ver Tech Explorer)."""
+    if item.item_type == "category":
+        row = (await db.execute(select(Category).filter_by(id=item.category_id, active=True, deleted=False))).scalars().first()
+    elif item.item_type == "product":
+        row = (await db.execute(select(Product).filter_by(id=item.product_id, active=True, deleted=False))).scalars().first()
+    else:
+        row = (await db.execute(select(Combo).filter_by(id=item.combo_id, active=True, deleted=False))).scalars().first()
+    return row is not None
+
+async def _serialize_promotion(db: AsyncSession, promo: "Promotion", now: datetime) -> dict:
+    result = await db.execute(select(PromotionItem).filter_by(promotion_id=promo.id))
+    items = result.scalars().all()
+    conflicts = await _find_promotion_conflicts(db, promo.company_id, promo)
+    item_out = []
+    for i in items:
+        item_out.append({
+            "id": i.id,
+            "item_type": i.item_type,
+            "category_id": i.category_id,
+            "product_id": i.product_id,
+            "combo_id": i.combo_id,
+            "discount_percent_override": float(i.discount_percent_override) if i.discount_percent_override is not None else None,
+            "available": await _promotion_item_is_available(db, i),
+        })
+    return {
+        "id": promo.id,
+        "name": promo.name,
+        "starts_at": promo.starts_at,
+        "ends_at": promo.ends_at,
+        "general_discount_percent": float(promo.general_discount_percent),
+        "is_enabled": promo.is_enabled,
+        "status": _compute_promotion_status(promo, now, bool(conflicts)),
+        "items": item_out,
+        "conflicts": conflicts,
+    }
+
+async def _validate_promotion_items(db: AsyncSession, company_id: int, items: list) -> None:
+    """Cada item precisa existir, pertencer à empresa e estar ativo/não-
+    excluído — mesmo racional de _validate_combo_products/
+    _validate_combo_category. Rejeita item duplicado na composição (faz as
+    vezes de uma UNIQUE constraint difícil de expressar em MySQL sem índice
+    funcional, ver Tech Explorer)."""
+    if not items:
+        raise HTTPException(400, detail="Promoção precisa de ao menos 1 item na composição")
+    seen = set()
+    for it in items:
+        key = (it.item_type, it.category_id, it.product_id, it.combo_id)
+        if key in seen:
+            raise HTTPException(400, detail="Item duplicado na composição da promoção")
+        seen.add(key)
+        if it.item_type == "category":
+            found = (await db.execute(select(Category).filter_by(id=it.category_id, company_id=company_id, deleted=False))).scalars().first()
+        elif it.item_type == "product":
+            found = (await db.execute(select(Product).filter_by(id=it.product_id, company_id=company_id, deleted=False))).scalars().first()
+        else:
+            found = (await db.execute(select(Combo).filter_by(id=it.combo_id, company_id=company_id, deleted=False))).scalars().first()
+        if not found:
+            raise HTTPException(404, detail=f"Item da composição não existe ou não pertence à empresa: {it.item_type}")
+
+async def _resolve_product_promotion(db: AsyncSession, product: "Product") -> dict | None:
+    """Anota o produto com a promoção em vigor agora, se houver — usado por
+    _serialize_product. Precedência produto > categoria > geral dentro da
+    MESMA promoção; o gate de conflito garante no máximo uma promoção
+    habilitada cobrindo um item num dado período, então não há critério de
+    desempate entre promoções diferentes (ver Tech Explorer)."""
+    conditions = [and_(PromotionItem.item_type == "product", PromotionItem.product_id == product.id)]
+    if product.category_id is not None:
+        conditions.append(and_(PromotionItem.item_type == "category", PromotionItem.category_id == product.category_id))
+    result = await db.execute(
+        select(Promotion, PromotionItem)
+        .join(PromotionItem, PromotionItem.promotion_id == Promotion.id)
+        .filter(
+            Promotion.company_id == product.company_id,
+            Promotion.is_enabled == True,
+            Promotion.deleted == False,
+            Promotion.starts_at <= func.now(),
+            Promotion.ends_at >= func.now(),
+            or_(*conditions),
+        )
+    )
+    rows = result.all()
+    if not rows:
+        return None
+    direct = [(p, i) for p, i in rows if i.item_type == "product"]
+    promo, item = direct[0] if direct else rows[0]
+    discount = float(item.discount_percent_override if item.discount_percent_override is not None else promo.general_discount_percent)
+    return {
+        "promotion_id": promo.id, "promotion_name": promo.name,
+        "discount_percent": discount, "final_price": round(float(product.price) * (1 - discount / 100), 2),
+    }
+
+async def _resolve_combo_promotion(db: AsyncSession, combo: "Combo") -> dict | None:
+    """Mesmo racional de _resolve_product_promotion, mas sem camada de
+    categoria — combo só é afetado por um item_type="combo" direto."""
+    result = await db.execute(
+        select(Promotion, PromotionItem)
+        .join(PromotionItem, PromotionItem.promotion_id == Promotion.id)
+        .filter(
+            Promotion.company_id == combo.company_id,
+            Promotion.is_enabled == True,
+            Promotion.deleted == False,
+            Promotion.starts_at <= func.now(),
+            Promotion.ends_at >= func.now(),
+            PromotionItem.item_type == "combo",
+            PromotionItem.combo_id == combo.id,
+        )
+    )
+    row = result.first()
+    if not row:
+        return None
+    promo, item = row
+    discount = float(item.discount_percent_override if item.discount_percent_override is not None else promo.general_discount_percent)
+    return {
+        "promotion_id": promo.id, "promotion_name": promo.name,
+        "discount_percent": discount, "final_price": round(float(combo.price) * (1 - discount / 100), 2),
     }
 
 # ── Response schemas ──────────────────────────────────────────────────────────
@@ -901,6 +1151,15 @@ class RelatedProductOut(BaseModel):
     # direto ao carrinho, pulando a escolha.
     option_groups: list[ProductOptionGroupOut] = []
 
+class PromotionAnnotationOut(BaseModel):
+    """Anotação aditiva (ORD-166) em ProductOut/ComboOut — null quando não há
+    promoção em vigor agora pro item. final_price já vem com o desconto
+    aplicado sobre `price`, pronto pro totem exibir riscado + novo preço."""
+    promotion_id: int
+    promotion_name: str
+    discount_percent: float
+    final_price: float
+
 class ProductOut(BaseModel):
     id: int
     category_id: int | None = None
@@ -923,6 +1182,8 @@ class ProductOut(BaseModel):
     inactive_combos: list[ComboSummaryOut] = []
     # ORD-160: sempre populado (list/get/create/update) — inclui inativos.
     related_products: list[RelatedProductOut] = []
+    # ORD-166: promoção em vigor agora, se houver — ver PromotionAnnotationOut.
+    promotion: PromotionAnnotationOut | None = None
 
 class ProductListOut(BaseModel):
     products: list[ProductOut]
@@ -1059,6 +1320,8 @@ class ComboOut(BaseModel):
     thumbnail_url: str | None = None
     upsell_enabled: bool
     items: list[ComboItemOut] = []
+    # ORD-166: promoção em vigor agora, se houver — ver PromotionAnnotationOut.
+    promotion: PromotionAnnotationOut | None = None
 
 class ComboListOut(BaseModel):
     combos: list[ComboOut]
@@ -1092,6 +1355,96 @@ class ComboIn(BaseModel):
 class ComboActiveIn(BaseModel):
     active: bool
 
+class PromotionItemIn(BaseModel):
+    item_type: str  # "category" | "product" | "combo"
+    category_id: int | None = None
+    product_id: int | None = None
+    combo_id: int | None = None
+    discount_percent_override: float | None = None
+
+    @field_validator("item_type")
+    @classmethod
+    def item_type_valid(cls, v: str) -> str:
+        if v not in ("category", "product", "combo"):
+            raise ValueError('item_type deve ser "category", "product" ou "combo"')
+        return v
+
+    @field_validator("discount_percent_override")
+    @classmethod
+    def override_range(cls, v: float | None) -> float | None:
+        if v is not None and not (0 <= v <= 100):
+            raise ValueError("discount_percent_override deve estar entre 0 e 100")
+        return v
+
+    @model_validator(mode="after")
+    def exactly_one_id(self) -> "PromotionItemIn":
+        ids = {"category": self.category_id, "product": self.product_id, "combo": self.combo_id}
+        filled = [k for k, v in ids.items() if v is not None]
+        if len(filled) != 1:
+            raise ValueError("Exatamente um entre category_id/product_id/combo_id deve ser preenchido")
+        if filled[0] != self.item_type:
+            raise ValueError("O id preenchido precisa corresponder ao item_type")
+        return self
+
+class PromotionItemOut(BaseModel):
+    id: int
+    item_type: str
+    category_id: int | None = None
+    product_id: int | None = None
+    combo_id: int | None = None
+    discount_percent_override: float | None = None
+    available: bool
+
+class PromotionConflictOut(BaseModel):
+    promotion_id: int
+    promotion_name: str
+    product_ids: list[int]
+    combo_ids: list[int]
+
+class PromotionIn(BaseModel):
+    name: str
+    starts_at: datetime
+    ends_at: datetime
+    general_discount_percent: float
+    items: list[PromotionItemIn]
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Nome não pode ser vazio")
+        return v
+
+    @field_validator("general_discount_percent")
+    @classmethod
+    def discount_range(cls, v: float) -> float:
+        if not (0 <= v <= 100):
+            raise ValueError("general_discount_percent deve estar entre 0 e 100")
+        return v
+
+    @model_validator(mode="after")
+    def ends_after_starts(self) -> "PromotionIn":
+        if self.ends_at <= self.starts_at:
+            raise ValueError("ends_at precisa ser depois de starts_at")
+        return self
+
+class PromotionOut(BaseModel):
+    id: int
+    name: str
+    starts_at: datetime
+    ends_at: datetime
+    general_discount_percent: float
+    is_enabled: bool
+    status: str
+    items: list[PromotionItemOut]
+    conflicts: list[PromotionConflictOut]
+
+class PromotionListOut(BaseModel):
+    promotions: list[PromotionOut]
+
+class PromotionActiveIn(BaseModel):
+    is_enabled: bool
+
 class HealthOut(BaseModel):
     service: str
     status: str
@@ -1105,6 +1458,15 @@ _tags = [
             "Catálogo de produtos e categorias da empresa autenticada. "
             "Todos os endpoints são filtrados automaticamente por `company_id` do JWT — "
             "nunca é possível acessar o catálogo de outra empresa."
+        ),
+    },
+    {
+        "name": "Promoções",
+        "description": (
+            "Promoções por período (ORD-166) — desconto percentual aplicado a categorias, "
+            "produtos e/ou combos, com vigência de data/hora. Cadastro é sempre permitido; "
+            "ativação é bloqueada quando há conflito de item/período com outra promoção já "
+            "ativa. Expira automaticamente, sem job manual."
         ),
     },
     {
@@ -2143,6 +2505,174 @@ async def delete_combo_image(
     combo.thumbnail_url = None
     await db.commit(); await db.refresh(combo)
     return await _serialize_combo(db, combo)
+
+@app.post(
+    "/catalog/promotions",
+    status_code=201,
+    response_model=PromotionOut,
+    tags=["Promoções"],
+    summary="Criar promoção (sempre como rascunho)",
+    responses={
+        400: {"description": "Nome vazio, período inválido, percentual fora de 0-100, composição vazia ou item duplicado"},
+        404: {"description": "Algum item da composição não existe ou não pertence à empresa"},
+    },
+)
+async def create_promotion(
+    body: PromotionIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """Cadastro é sempre permitido, mesmo com conflito de item/período com
+    outra promoção — o conflito só bloqueia a ATIVAÇÃO (ver Tech Explorer de
+    ORD-166). Promoção nasce sempre com is_enabled=False."""
+    await _validate_promotion_items(db, company_id, body.items)
+    promo = Promotion(
+        company_id=company_id, name=body.name, starts_at=body.starts_at, ends_at=body.ends_at,
+        general_discount_percent=body.general_discount_percent, is_enabled=False,
+    )
+    db.add(promo)
+    await db.flush()
+    for it in body.items:
+        db.add(PromotionItem(
+            promotion_id=promo.id, item_type=it.item_type,
+            category_id=it.category_id, product_id=it.product_id, combo_id=it.combo_id,
+            discount_percent_override=it.discount_percent_override,
+        ))
+    await db.commit(); await db.refresh(promo)
+    return await _serialize_promotion(db, promo, await _db_now(db))
+
+@app.get(
+    "/catalog/promotions",
+    response_model=PromotionListOut,
+    tags=["Promoções"],
+    summary="Listar promoções da empresa",
+)
+async def list_promotions(
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id),
+):
+    """Status (rascunho/ativa/expirada/conflito) é computado por promoção a
+    cada chamada, inclusive o conflito — mostrado proativamente mesmo numa
+    promoção que nunca tentou ativar, pra o admin ver antes de tentar."""
+    result = await db.execute(
+        select(Promotion).filter_by(company_id=company_id, deleted=False).order_by(Promotion.id.asc())
+    )
+    promos = result.scalars().all()
+    now = await _db_now(db)
+    return {"promotions": [await _serialize_promotion(db, p, now) for p in promos]}
+
+@app.get(
+    "/catalog/promotions/{promotion_id}",
+    response_model=PromotionOut,
+    tags=["Promoções"],
+    summary="Detalhes de uma promoção",
+    responses={404: {"description": "Promoção não encontrada ou de outra empresa"}},
+)
+async def get_promotion(
+    promotion_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id),
+):
+    promo = (await db.execute(select(Promotion).filter_by(id=promotion_id, company_id=company_id, deleted=False))).scalars().first()
+    if not promo: raise HTTPException(404)
+    return await _serialize_promotion(db, promo, await _db_now(db))
+
+@app.put(
+    "/catalog/promotions/{promotion_id}",
+    response_model=PromotionOut,
+    tags=["Promoções"],
+    summary="Editar promoção (replace completo da composição)",
+    responses={
+        400: {"description": "Nome vazio, período inválido, percentual fora de 0-100, composição vazia ou item duplicado"},
+        404: {"description": "Promoção não encontrada, ou algum item da composição não existe/não pertence à empresa"},
+        409: {"description": "Promoção ativa precisa ser inativada antes de editar"},
+    },
+)
+async def update_promotion(
+    promotion_id: int,
+    body: PromotionIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """Sem edição direta de promoção ativa (ver Tech Explorer) — o admin
+    precisa inativar via PATCH primeiro."""
+    promo = (await db.execute(select(Promotion).filter_by(id=promotion_id, company_id=company_id, deleted=False))).scalars().first()
+    if not promo: raise HTTPException(404)
+    if promo.is_enabled:
+        raise HTTPException(409, detail="Promoção ativa precisa ser inativada antes de editar")
+    await _validate_promotion_items(db, company_id, body.items)
+    promo.name = body.name
+    promo.starts_at = body.starts_at
+    promo.ends_at = body.ends_at
+    promo.general_discount_percent = body.general_discount_percent
+    await db.execute(delete(PromotionItem).where(PromotionItem.promotion_id == promotion_id))
+    for it in body.items:
+        db.add(PromotionItem(
+            promotion_id=promotion_id, item_type=it.item_type,
+            category_id=it.category_id, product_id=it.product_id, combo_id=it.combo_id,
+            discount_percent_override=it.discount_percent_override,
+        ))
+    await db.commit(); await db.refresh(promo)
+    return await _serialize_promotion(db, promo, await _db_now(db))
+
+@app.patch(
+    "/catalog/promotions/{promotion_id}",
+    response_model=PromotionOut,
+    tags=["Promoções"],
+    summary="Ativar/inativar uma promoção sem reeditar o resto",
+    responses={
+        404: {"description": "Promoção não encontrada"},
+        409: {"description": "Ativar recusado: conflito de item/período com outra promoção ativa"},
+    },
+)
+async def set_promotion_enabled(
+    promotion_id: int,
+    body: PromotionActiveIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """Mesmo padrão de set_combo_active. Ativar revalida conflito dentro da
+    mesma transação, com lock (`SELECT ... FOR UPDATE`) na própria promoção
+    e nas promoções concorrentes candidatas — fecha a condição de corrida de
+    duas ativações conflitantes simultâneas (ver Tech Explorer risco #2,
+    mesmo padrão já usado em collect_ticket do order-service)."""
+    promo = (await db.execute(
+        select(Promotion).filter_by(id=promotion_id, company_id=company_id, deleted=False).with_for_update()
+    )).scalars().first()
+    if not promo: raise HTTPException(404)
+    if body.is_enabled:
+        conflicts = await _find_promotion_conflicts(db, company_id, promo, for_update=True)
+        if conflicts:
+            detail = "; ".join(
+                f'conflita com "{c["promotion_name"]}" nos itens {c["product_ids"] + c["combo_ids"]}'
+                for c in conflicts
+            )
+            raise HTTPException(409, detail=f"Ativação bloqueada por conflito: {detail}")
+    promo.is_enabled = body.is_enabled
+    await db.commit(); await db.refresh(promo)
+    return await _serialize_promotion(db, promo, await _db_now(db))
+
+@app.delete(
+    "/catalog/promotions/{promotion_id}",
+    status_code=204,
+    tags=["Promoções"],
+    summary="Excluir definitivamente uma promoção",
+    responses={
+        404: {"description": "Promoção não encontrada"},
+        409: {"description": "Promoção ativa precisa ser inativada antes de excluir"},
+    },
+)
+async def delete_promotion(
+    promotion_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    promo = (await db.execute(select(Promotion).filter_by(id=promotion_id, company_id=company_id, deleted=False))).scalars().first()
+    if not promo: raise HTTPException(404)
+    if promo.is_enabled:
+        raise HTTPException(409, detail="Promoção ativa precisa ser inativada antes de excluir")
+    promo.deleted = True
+    await db.commit()
 
 def _parse_time(value: str):
     from datetime import time

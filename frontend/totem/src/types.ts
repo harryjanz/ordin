@@ -95,6 +95,16 @@ export interface Allergen {
   category: string | null;
 }
 
+// ORD-166 — anotação aditiva vinda de GET /catalog/products e /catalog/combos
+// quando o item está coberto por uma promoção em vigor agora. final_price já
+// vem com o desconto aplicado — o totem só precisa exibir, não recalcular.
+export interface PromotionAnnotation {
+  promotion_id: number;
+  promotion_name: string;
+  discount_percent: number;
+  final_price: number;
+}
+
 export interface Product {
   id: number;
   category_id: number;
@@ -110,6 +120,7 @@ export interface Product {
   // chegado ao tipo do totem nem sido exibidos.
   calories?: number | null;
   allergens?: Allergen[];
+  promotion?: PromotionAnnotation | null;
 }
 
 // ORD-150 — combo/bundle: conjunto de produtos existentes vendido com preço
@@ -150,6 +161,7 @@ export interface Combo {
   // normalmente pelo próprio card no catálogo).
   upsell_enabled: boolean;
   items: ComboItemRef[];
+  promotion?: PromotionAnnotation | null;
 }
 
 // `key` distingue produto de combo no carrinho (`product:<id>` ou

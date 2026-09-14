@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Home, ShoppingCart, Plus, Minus, X, UtensilsCrossed, PartyPopper, Tag, Check } from "lucide-react";
 import api from "../api";
 import type { Theme } from "../themes";
-import type { Category, Product, CartItem, Combo, ComboItemRef, ProductOptionGroup, SelectedOption, RelatedProduct } from "../types";
+import type { Category, Product, CartItem, Combo, ComboItemRef, ProductOptionGroup, PromotionAnnotation, SelectedOption, RelatedProduct } from "../types";
 import { RADIUS, FONT } from "../scale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,6 +15,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 
 const fmt = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+// ORD-166 — preço já com o desconto da promoção em vigor (se houver)
+// aplicado, pronto pra ir pro carrinho/pedido. Aceita Product, Combo ou
+// RelatedProduct (que nunca tem `promotion` — cai direto no preço cru,
+// correlacionado fica fora do escopo desta história).
+function effectivePrice(item: { price: number; promotion?: PromotionAnnotation | null }): number {
+  return item.promotion?.final_price ?? item.price;
+}
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
 
@@ -154,7 +161,7 @@ export default function CatalogScreen({
   const combosForActiveCat = activeCat ? combos.filter((c) => c.category_id === activeCat.id) : [];
 
   function addProductToCart(p: Product) {
-    onAdd({ key: `product:${p.id}`, kind: "product", id: p.id, name: p.name, price: p.price, qty: 1 });
+    onAdd({ key: `product:${p.id}`, kind: "product", id: p.id, name: p.name, price: effectivePrice(p), qty: 1 });
   }
 
   // ORD-141 — mesma ideia de addProductToCart, mas com a(s) opção(ões)
@@ -204,7 +211,7 @@ export default function CatalogScreen({
   }
 
   function addComboToCart(c: Combo, comboItems?: ComboItemRef[], key?: string) {
-    onAdd({ key: key ?? `combo:${c.id}`, kind: "combo", id: c.id, name: c.name, price: c.price, qty: 1, comboItems: comboItems ?? c.items });
+    onAdd({ key: key ?? `combo:${c.id}`, kind: "combo", id: c.id, name: c.name, price: effectivePrice(c), qty: 1, comboItems: comboItems ?? c.items });
   }
 
   // ORD-141 — grupos de opção "de verdade" pro produto: ativos e com pelo
@@ -327,7 +334,7 @@ export default function CatalogScreen({
       setOptionModal({ product: p, selections: {} });
       return;
     }
-    maybeUpsellOrAdd(p, [], p.price, `product:${p.id}`);
+    maybeUpsellOrAdd(p, [], effectivePrice(p), `product:${p.id}`);
   }
 
   function toggleOption(groupId: number, optionId: number, max: number) {
@@ -376,11 +383,11 @@ export default function CatalogScreen({
     // em cadeia: já estamos dentro de uma sugestão, não é o ponto de
     // entrada normal do catálogo.
     if (fromRelated) {
-      addProductWithOptionsToCart(product, selectedOptions, product.price + priceExtra, key);
+      addProductWithOptionsToCart(product, selectedOptions, effectivePrice(product) + priceExtra, key);
       markRelatedAdded(product.id);
       return;
     }
-    maybeUpsellOrAdd(product as Product, selectedOptions, product.price + priceExtra, key);
+    maybeUpsellOrAdd(product as Product, selectedOptions, effectivePrice(product) + priceExtra, key);
   }
 
   const canConfirmOptionModal = optionModal
@@ -395,7 +402,7 @@ export default function CatalogScreen({
   // cliente só via o acréscimo de cada opção isolado, nunca quanto o
   // produto ficava no total — feedback explícito de precisar ficar visível.
   const optionModalTotal = optionModal
-    ? optionModal.product.price + selectableOptionGroups(optionModal.product).reduce(
+    ? effectivePrice(optionModal.product) + selectableOptionGroups(optionModal.product).reduce(
         (sum, g) => sum + (optionModal.selections[g.id] ?? []).reduce(
           (s, optId) => s + (g.options.find((o) => o.id === optId)?.price_delta ?? 0), 0,
         ), 0,
@@ -506,7 +513,10 @@ export default function CatalogScreen({
                 const comboNeedsSelection = c.items.some((i) => selectableOptionGroups(i).length > 0);
                 const comboQty = comboNeedsSelection ? 0 : getQty(`combo:${c.id}`);
                 const sumAvulso = c.items.reduce((s, i) => s + i.price, 0);
-                const savings = sumAvulso - c.price;
+                // ORD-166 — se o combo também estiver em promoção, "economize"
+                // passa a refletir a economia total real (bundling + desconto
+                // da promoção), não só o desconto do combo por si.
+                const savings = sumAvulso - effectivePrice(c);
                 return (
                   <Card
                     key={`combo-${c.id}`}
@@ -527,6 +537,13 @@ export default function CatalogScreen({
                           <UtensilsCrossed className="size-10 text-white/70" />
                         </div>
                       )}
+                      {/* ORD-166 — selo de promoção fica à esquerda pra não
+                          colidir com o badge "Combo" (direita). */}
+                      {c.promotion && (
+                        <Badge className="absolute top-3.5 left-3.5 uppercase tracking-wide gap-1" style={{ background: "#f0b84a", color: "#2a1a00", fontFamily: FONT_B }}>
+                          <Tag className="size-3" />-{c.promotion.discount_percent}%
+                        </Badge>
+                      )}
                       <Badge className="absolute top-3.5 right-3.5 uppercase tracking-wide" style={{ background: T.btn, color: T.btnText, fontFamily: FONT_B }}>
                         Combo
                       </Badge>
@@ -539,7 +556,7 @@ export default function CatalogScreen({
                         {c.items.map((i) => i.name).join(" + ")}
                       </div>
                       <div className="flex items-baseline gap-2 flex-wrap">
-                        <span className="text-price" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg }}>{fmt(c.price)}</span>
+                        <span className="text-price" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg }}>{fmt(effectivePrice(c))}</span>
                         <span className="text-muted-foreground line-through" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>{fmt(sumAvulso)}</span>
                         {savings > 0 && (
                           <Badge variant="secondary" className="text-[#1c8a53] bg-[#e4f6ec]">
@@ -618,6 +635,12 @@ export default function CatalogScreen({
                       <UtensilsCrossed className="size-12 text-white/70" />
                     </div>
                   )}
+                  {/* ORD-166 — mesmo selo amber usado no card de combo. */}
+                  {p.promotion && (
+                    <Badge className="absolute top-3.5 right-3.5 uppercase tracking-wide gap-1" style={{ background: "#f0b84a", color: "#2a1a00", fontFamily: FONT_B }}>
+                      <Tag className="size-3" />-{p.promotion.discount_percent}%
+                    </Badge>
+                  )}
                   {p.tags && p.tags.length > 0 && (
                     <div className="absolute left-0 right-0 bottom-0 flex flex-wrap gap-1 px-2.5 pt-5 pb-2" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0))" }}>
                       {p.tags.slice(0, 2).map((tag) => (
@@ -680,10 +703,15 @@ export default function CatalogScreen({
                       </div>
                     )
                   )}
-                  <div className="flex items-baseline gap-2 mt-1">
+                  <div className="flex items-baseline gap-2 mt-1 flex-wrap">
                     <span className="text-price" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.bodyLg }}>
-                      {fmt(p.price)}
+                      {fmt(effectivePrice(p))}
                     </span>
+                    {p.promotion && (
+                      <span className="text-muted-foreground line-through" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
+                        {fmt(p.price)}
+                      </span>
+                    )}
                     {p.calories != null && (
                       <span className="text-muted-foreground" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
                         {p.calories} kcal
@@ -831,7 +859,10 @@ export default function CatalogScreen({
                 {optionModal.product.name}
               </DialogTitle>
               <div className="text-muted-foreground mt-1" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
-                A partir de {fmt(optionModal.product.price)}
+                A partir de {fmt(effectivePrice(optionModal.product))}
+                {"promotion" in optionModal.product && optionModal.product.promotion && (
+                  <span className="line-through ml-1.5">{fmt(optionModal.product.price)}</span>
+                )}
                 {/* ORD-161 — guarda de tipo: optionModal.product é
                     Product | RelatedProduct (ORD-160), e RelatedProduct não
                     tem calories/allergens (decisão de escopo, ver Tech
@@ -941,7 +972,10 @@ export default function CatalogScreen({
                 {comboOptionModal.combo.name}
               </DialogTitle>
               <div className="text-muted-foreground mt-1" style={{ fontFamily: FONT_B, fontSize: FONT.label }}>
-                {fmt(comboOptionModal.combo.price)}
+                {fmt(effectivePrice(comboOptionModal.combo))}
+                {comboOptionModal.combo.promotion && (
+                  <span className="line-through ml-1.5">{fmt(comboOptionModal.combo.price)}</span>
+                )}
               </div>
             </div>
             {comboOptionModal.combo.items.filter((item) => selectableOptionGroups(item).length > 0).map((item) => (
@@ -1045,11 +1079,11 @@ export default function CatalogScreen({
             )}
             <DialogTitle className="leading-tight pr-10" style={{ fontFamily: FONT_D, color: T.text, fontWeight: 800, fontSize: FONT.title }}>
               Leve o {upsell.combo.name}
-              {upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price > 0 && (
+              {upsell.combo.items.reduce((s, i) => s + i.price, 0) - effectivePrice(upsell.combo) > 0 && (
                 <>
                   {" "}e{" "}
                   <span className="rounded-full whitespace-nowrap inline-block" style={{ color: "#1c8a53", background: "#e4f6ec", padding: "2px 12px" }}>
-                    economize {fmt(upsell.combo.items.reduce((s, i) => s + i.price, 0) - upsell.combo.price)}
+                    economize {fmt(upsell.combo.items.reduce((s, i) => s + i.price, 0) - effectivePrice(upsell.combo))}
                   </span>
                 </>
               )}
@@ -1063,7 +1097,10 @@ export default function CatalogScreen({
               ))}
               <div className="flex justify-between pt-2.5 border-t border-dashed" style={{ fontFamily: FONT_D, fontWeight: 800, fontSize: FONT.subtitle, color: T.text }}>
                 <span>{upsell.combo.name}</span>
-                <span>{fmt(upsell.combo.price)}</span>
+                <span>
+                  {fmt(effectivePrice(upsell.combo))}
+                  {upsell.combo.promotion && <span className="line-through ml-1.5">{fmt(upsell.combo.price)}</span>}
+                </span>
               </div>
             </div>
             <div className="flex flex-col gap-2.5 mt-1">

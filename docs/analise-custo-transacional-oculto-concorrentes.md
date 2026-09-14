@@ -24,6 +24,19 @@ A pesquisa anterior (`docs/analise-concorrente-goomer.md`) já tinha registrado 
 
 Isso mostra o padrão na prática, dentro de um único fornecedor: **o modelo de hardware que o cliente escolhe determina se ele fica preso a uma adquirente ou não** — e a página de venda do totem "livre" (Mini) usa linguagem de libertação ("fuja das altas taxas", "flexibilidade total") sem nunca citar % de taxa concreta nem comparar contra o modelo Clover da própria casa. A escolha de qual SKU comprar é, na prática, a escolha de ficar preso ou não — e isso não é destacado na página de vendas.
 
+## Segundo caso do mesmo padrão dual: Genesis PRO e a parceria com a Stone (2026-09-14, aprofundado)
+
+O levantamento do Genesis PRO (`docs/analise-concorrente-genesispro.md`, motivado por um link de demo enviado pelo usuário) encontrou uma estrutura parecida com o par Mini/Mini Clover da Goomer — mas uma segunda visita à página de preços, buscando especificamente qualquer menção a taxa/MDR (2026-09-14), trouxe citação literal que muda a leitura.
+
+**Confirmado, com o texto exato da página (`genesis.pro.br/pricing`):**
+- No plano **Essencial** (R$250/mês, o de entrada), um item de feature lista **"Taxas Competitivas"** — *"Acesso a taxas reduzidas através da parceria PRO Franchising e Stone"*.
+- Numa tabela comparativa de infraestrutura, aparece de novo como **"Taxas Exclusivas — Condições comerciais diferenciadas Stone"**.
+- No FAQ: *"Na parte de pagamentos, temos parceria oficial com a Stone (dá para operar só com totem e maquininha POS, que imprime e cobra) e TEF integrado com qualquer adquirente."*
+
+**Isso não é lock-in** — diferente do Totem Mini Clover da Goomer (travado especificamente na BIN/Fiserv), o Genesis PRO confirma explicitamente que o TEF integrado aceita **qualquer** adquirente, não só Stone. A escolha de usar a via "Stone integrada" ou "TEF genérico" fica com o cliente.
+
+**O que fica obscuro é outra coisa, mais sutil que lock-in: a taxa em si vira argumento de venda sem nunca virar número.** "Taxas Competitivas"/"Taxas Exclusivas" são vendidas como *benefício do plano pago* — linha de feature ao lado de KDS, PDV, etc. — mas em nenhum lugar da página aparece um percentual, faixa ou comparação concreta. É uma versão mais agressiva do mesmo mecanismo estrutural já descrito acima (MDR negociado por volume, não publicável como tabela única): aqui a opacidade **virou material de marketing ativo**, não só ausência de informação. O cliente vê "taxa reduzida/exclusiva" como diferencial do plano, mas não tem como comparar isso contra nenhuma outra oferta antes de assinar — o dado que faria a comparação possível é justamente o que nunca aparece.
+
 ## Por que o número nunca aparece publicado — não é sonegação, é estrutura de negociação
 
 O comparativo honesto de maquininhas do SisFood (`sisfood.com.br/.../maquininha-cartao-restaurante-comparativo`) deixa isso explícito:
@@ -66,6 +79,8 @@ O padrão de mercado que apareceu nas pesquisas anteriores (`docs/analise-concor
 
 O modelo multi-adquirente do Ordin (já confirmado como diferencial raro em `docs/analise-dashboard-concorrentes-mercado.md` e reconfirmado nesta rodada) é estruturalmente **imune ao mecanismo de lock-in de adquirente** descrito acima — o cliente do Ordin não pode ser silenciosamente empurrado pra uma adquirente com margem escondida, porque a escolha é do cliente. Isso é a resposta direta à preocupação que você levantou: **o Ordin já não tem esse buraco específico**, estruturalmente, pela arquitetura de multi-provedor já existente.
 
+O caso Genesis PRO (2026-09-14, aprofundado) **não é lock-in** — diferente do Totem Mini Clover da Goomer, o FAQ confirma que o TEF aceita qualquer adquirente, então o cliente não fica preso à Stone. Mas traz uma variante do mesmo problema de fundo, mais direta: "Taxas Competitivas"/"Taxas Exclusivas" são vendidas como **item de feature do plano pago**, sem nunca publicar percentual — o cliente não tem dado pra comparar antes de assinar, mesmo tendo liberdade de escolha de adquirente depois. É a opacidade estrutural do MDR (negociado por volume, sem tabela única possível) virando **material de marketing ativo**, não só ausência de informação — reforça que o padrão "custo transacional nunca publicado" é do setor inteiro, com o Genesis PRO sendo o caso mais explícito de transformar isso em argumento de venda.
+
 O que a pesquisa não responde, e fica como pergunta em aberto pro próprio negócio do Ordin: **antecipação automática de recebíveis** é um mecanismo independente do lock-in de adquirente — existe mesmo em contas bem negociadas — e não foi verificado neste levantamento se/como isso é tratado no fluxo do `payment-service` do Ordin hoje. Se for relevante, é uma pergunta separada de arquitetura/produto, não de concorrência.
 
 ## Fontes
@@ -73,3 +88,4 @@ O que a pesquisa não responde, e fica como pergunta em aberto pro próprio neg�
 - `bananasoft.ai/blog/pdv-gratuito-sai-mais-caro-que-pago` — exemplo numérico do mecanismo de MDR forçada
 - `goomer.com.br/blog/mini-totem-2-0-goomer`, `sindrio.com.br`, `mobiletime.com.br`, `bin.com.br` — confirmação do lock-in do Totem Mini Clover (BIN/Fiserv) vs. liberdade do Totem Mini
 - `sisfood.com.br/saiba-mais/gestao-financeira/maquininha-cartao-restaurante-comparativo` — faixas reais de MDR por adquirente, mecanismo de antecipação automática, explicação de por que a taxa é negociada por volume
+- `genesis.pro.br` (home institucional) — parceria oficial com a Stone + menção de TEF genérico multi-adquirente, achado de 2026-09-14 que motivou a seção "Segundo caso do mesmo padrão dual"
