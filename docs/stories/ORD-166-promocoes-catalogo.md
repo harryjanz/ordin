@@ -1,6 +1,6 @@
 ---
 id: ORD-166
-status: In Progress
+status: Code Review
 estimativa: 7,5 pontos (3 backend + 3 admin + 1,5 totem)
 fase: 6
 sprint: null
@@ -605,4 +605,9 @@ com o `node_modules` já resolvido do host, e não é causado por nenhum arquivo
 (nenhum arquivo alterado aqui importa esse caminho). CI não builda a imagem Docker do totem
 hoje, então isso nunca foi pego antes. Vale abrir um item separado pra investigar.
 
-**Pendente**: push da branch e abertura da PR.
+**PR aberta**: [#134](https://github.com/harryjanz/ordin/pull/134) — aguardando code review.
+
+Ajuste pós-implementação (`dccbda8`): campos "Buscar categoria, produto ou combo pra adicionar"
+dividindo 50/50 o espaço — a classe CSS compartilhada com `ComboFormScreen` (`1fr 200px`) tinha
+sido pensada pra outra ordem de campos; corrigido com override local, sem tocar na classe
+compartilhada.
