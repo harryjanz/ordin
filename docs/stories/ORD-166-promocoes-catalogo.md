@@ -1,6 +1,6 @@
 ---
 id: ORD-166
-status: QA Explorer
+status: Tech Explorer
 fase: 6
 sprint: null
 responsavel: Backend SR + Frontend (admin + totem)
@@ -340,3 +340,206 @@ Feature: Promoções no catálogo
 Cenários Gherkin (happy path, borda, erro, isolamento multi-tenant, item indisponível e ciclo de
 edição) estão completos e aprovados. Critério de saída do QA Explorer atendido — pronta pra
 avançar ao **Tech Explorer**.
+
+## Tech Explorer
+
+### Serviços impactados
+- **catalog-service**: novo domínio `Promotion`/`PromotionItem` — modelos, migration, CRUD,
+  algoritmo de conflito, e anotação de preço promocional nos endpoints de leitura já existentes
+  (`GET /catalog/products`, `GET /catalog/combos`).
+- **frontend/admin**: nova aba "Promoções" em `CatalogScreen.tsx`.
+- **frontend/totem**: `CatalogScreen.tsx` consome o campo novo `promotion` (aditivo) na resposta
+  de produto/combo e renderiza preço riscado + selo (reaproveitando o padrão visual que o card
+  de combo já usa pra "economize R$X", ver `services/catalog` e o wireframe publicado no
+  Explorer).
+- **order-service, payment-service**: nenhuma mudança de código — ver nota de risco #4 abaixo.
+
+### Modelo de dados (`fk_catalog`, MySQL/aiomysql)
+
+**`Promotion`**
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id` | PK | |
+| `company_id` | Integer, indexado | multi-tenancy, mesmo padrão de `Category.company_id` |
+| `name` | String(120), NOT NULL | |
+| `starts_at` | DateTime, NOT NULL | |
+| `ends_at` | DateTime, NOT NULL | CHECK `ends_at > starts_at` |
+| `general_discount_percent` | Numeric(5,2), NOT NULL | CHECK `0 <= x <= 100` |
+| `is_enabled` | Boolean, NOT NULL, default `false` | `true` = ativada pelo admin (passou pela checagem de conflito); status exibido é sempre **computado**, nunca um enum persistido (ver "Status computado" abaixo) |
+| `deleted` | Boolean, NOT NULL, default `false` | soft delete, mesmo padrão de `Category` |
+| `created_at`/`updated_at` | DateTime, server default `now()` | |
+
+Índice: `(company_id, is_enabled, deleted)` — usado tanto na listagem quanto na resolução de
+preço promocional a cada consulta de catálogo.
+
+**`PromotionItem`** (composição)
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id` | PK | |
+| `promotion_id` | FK → `Promotion.id`, ON DELETE CASCADE, NOT NULL | |
+| `item_type` | Enum(`category`,`product`,`combo`), NOT NULL | |
+| `category_id` / `product_id` / `combo_id` | FK, nullable | exatamente um preenchido, condizente com `item_type` — CHECK constraint |
+| `discount_percent_override` | Numeric(5,2), nullable | `NULL` = usa o geral da promoção; senão CHECK `0 <= x <= 100` |
+
+**Unicidade de item duplicado na composição validada na aplicação, não no banco** — MySQL não
+tem índice único parcial/funcional como o Postgres pra ignorar `NULL` de forma prática nas
+colunas alternativas; mais simples checar antes do insert do que montar uma constraint
+funcional.
+
+**Exclusão/hard delete de item referenciado**: soft delete (o caso normal — `Category.active`/
+`deleted`, equivalente em `Product`/`Combo`) não quebra o `PromotionItem`, a FK continua válida;
+é isso que sustenta o comportamento de "fica indisponível" já decidido. Hard delete
+(`permanent=True`, caso raro e explícito hoje só em `Category`) usa `ON DELETE CASCADE` — se a
+linha referenciada deixa de existir de verdade, o `PromotionItem` correspondente é removido
+junto, não faz sentido "marcar indisponível" algo que não existe mais no banco.
+
+### Status computado (não persistido)
+```python
+def compute_status(promo, now, has_conflict) -> str:
+    if not promo.is_enabled:
+        return "conflito" if has_conflict else "rascunho"
+    if now > promo.ends_at:
+        return "expirada"
+    return "ativa"
+```
+Calculado em toda leitura (`GET /catalog/promotions` e `GET /catalog/promotions/{id}`) — não há
+coluna de status nem job pra mantê-la sincronizada, consistente com a decisão já registrada no
+Explorer de não introduzir scheduler novo no projeto.
+
+### Algoritmo de conflito
+Conflito é comparado por **produto/combo efetivamente afetado**, não por item bruto da
+composição — uma promoção com a categoria "Lanches" conflita com outra que tenha o produto
+"X-Bacon" avulso, porque "X-Bacon" pertence a "Lanches".
+
+```python
+async def resolve_affected_ids(db, promotion_id) -> tuple[set[int], set[int]]:
+    """(product_ids, combo_ids) afetados, expandindo item_type=category pros
+    produtos ativos/não-excluídos daquela categoria."""
+    ...
+
+async def find_conflicts(db, company_id, promotion) -> list[ConflictDetail]:
+    """Compara contra toda promoção com is_enabled=True e deleted=False da mesma
+    empresa cujo período [starts_at, ends_at] sobrepõe o da promoção candidata.
+    Produto e combo são namespaces independentes — nunca conflitam entre si,
+    consistente com a regra de que desconto de combo nunca vaza pro produto avulso."""
+    ...
+```
+Chamado em dois pontos: (1) `POST /catalog/promotions/{id}/activate`, bloqueando com 409 se
+achar conflito; (2) toda leitura de listagem/detalhe, pra mostrar o chip "Conflito"
+**proativamente**, mesmo numa promoção ainda em rascunho que nunca tentou ativar — é o que o
+wireframe do QA Explorer mostra.
+
+### Resolução de preço promocional (nos endpoints de leitura do catálogo)
+Em `GET /catalog/products` e `GET /catalog/combos` (consumidos pelo totem), cada item passa a
+carregar um campo adicional `promotion` (aditivo, `null` quando não há promoção em vigor):
+1. Busca a promoção `is_enabled=true`, `deleted=false` da empresa cujo período cobre `NOW()`
+   (comparação feita com o `NOW()` do **banco**, não do relógio da aplicação — ver risco #3) e
+   cuja composição expandida inclui aquele produto/combo.
+2. O gate de conflito garante **no máximo uma** promoção habilitada cobrindo um item num dado
+   período — resolução é determinística, sem critério de desempate entre promoções diferentes.
+3. Dentro da promoção encontrada, aplica a precedência **produto/combo > categoria > geral**: se
+   existe um `PromotionItem` apontando direto pro item (com ou sem override próprio), usa esse;
+   senão usa o `PromotionItem` de categoria que o contém (com ou sem override); senão o geral.
+   Esse é também o caso de um item estar coberto tanto direto quanto via categoria **na mesma
+   promoção** — a entrada direta vence.
+4. Item cuja categoria/produto/combo está soft-deletado é simplesmente filtrado da resposta,
+   mesmo comportamento que o catálogo já tem hoje pra item inativo — nunca aparece no totem, com
+   ou sem promoção.
+
+### Endpoints
+
+#### `POST /catalog/promotions`
+**Auth:** JWT · role `admin` · `company_id` do JWT
+Cria sempre como rascunho (`is_enabled=false`).
+
+Request:
+```json
+{
+  "name": "Happy Hour Bebidas",
+  "starts_at": "2026-09-20T18:00:00",
+  "ends_at": "2026-09-20T20:00:00",
+  "general_discount_percent": 20.0,
+  "items": [
+    {"item_type": "category", "category_id": 4},
+    {"item_type": "product", "product_id": 91, "discount_percent_override": 25.0},
+    {"item_type": "combo", "combo_id": 12}
+  ]
+}
+```
+Response 201: promoção completa, com `status` computado (`"rascunho"` ou `"conflito"`).
+Erros: 400 (nome vazio, `ends_at <= starts_at`, percentual fora de 0–100, `items` vazio, item
+duplicado na composição), 404 (categoria/produto/combo referenciado não existe ou não pertence à
+empresa do JWT).
+
+#### `PUT /catalog/promotions/{id}`
+Mesmo payload do POST. 409 se `is_enabled=true` ("promoção ativa precisa ser inativada antes de
+editar").
+
+#### `POST /catalog/promotions/{id}/activate`
+Revalida conflito dentro da mesma transação (lock nas promoções candidatas, ver risco #2). 409
+com a lista de itens e promoções conflitantes se houver; senão seta `is_enabled=true`.
+
+#### `POST /catalog/promotions/{id}/deactivate`
+Sempre permitido — seta `is_enabled=false`, sem validação.
+
+#### `DELETE /catalog/promotions/{id}`
+Soft delete. 409 se `is_enabled=true` (mesma regra de "inativar antes").
+
+#### `GET /catalog/promotions` / `GET /catalog/promotions/{id}`
+Lista/detalhe com `status` computado, contagem de itens, e (no detalhe) cada item da composição
+com `available: bool` (falso quando a entidade referenciada está soft-deletada) e o percentual
+efetivo (override ou herdado).
+
+#### `GET /catalog/products`, `GET /catalog/combos` (alterados, aditivo)
+Passam a incluir `"promotion": {"promotion_id", "promotion_name", "discount_percent",
+"final_price"} | null` por item, conforme a resolução descrita acima.
+
+### Migrations
+Nova revisão em `services/catalog/migrations/versions/` (convenção `YYYYMMDD_HHMM_promocoes.py`):
+cria `promotions` e `promotion_items` com as colunas/constraints acima, FKs pra `categories`,
+`products`, `combos` já existentes, e os índices citados.
+
+### Eventos de fila
+Nenhum. Promoção é resolvida on-the-fly pelo catalog-service; não há necessidade de notificar
+outro serviço.
+
+### Impacto em outros serviços
+- **order-service**: nenhuma mudança — já recebe `unit_price` computado pelo totem sem
+  revalidação server-side (mesmo padrão hoje usado pra combo e `price_delta` de opção). Ver
+  risco #4.
+- **payment-service**: nenhum impacto.
+
+### Estimativa
+- Backend (catalog-service): **~3 pontos** — modelos + migration + CRUD + algoritmo de conflito
+  (com suíte de teste unitário dedicada) + anotação de preço nos endpoints de leitura.
+- Frontend admin: **~3 pontos** — nova aba, listagem com chips de status, composer com override
+  e banner de conflito, fluxo inativar → editar → ativar.
+- Frontend totem: **~1,5 ponto** — consumo do campo `promotion` novo, badge + preço riscado
+  (padrão visual já existe no card de combo, reaproveitável).
+- **Total: ~7,5 pontos.**
+
+### Riscos
+1. **Algoritmo de conflito é a peça de maior risco de correção** — expandir categoria pra
+   produtos, comparar períodos sobrepostos, tratar produto/combo como namespaces
+   independentes. Mitigação: suíte de teste unitário isolada só pro resolver de conflito, antes
+   de integrar aos endpoints, cobrindo os casos do Gherkin do QA Explorer.
+2. **Condição de corrida na ativação** — duas ativações conflitantes simultâneas. Mitigação:
+   revalidar o conflito dentro da mesma transação que seta `is_enabled=true`, com lock nas
+   promoções candidatas (mesmo padrão de `SELECT ... FOR UPDATE` já usado em `collect_ticket`
+   do order-service pra evitar dupla coleta).
+3. **Consistência de relógio pra "ativa por data"** — usar o `NOW()` do MySQL na query, não
+   `datetime.now()` da aplicação, pra não depender do relógio de cada container/réplica do
+   catalog-service.
+4. **order-service confia no preço enviado pelo totem sem revalidação** — já é o padrão
+   pré-existente pra combo e `price_delta` de opção (`item.unit_price` do payload de
+   `POST /orders`, sem chamada de volta ao catalog-service). Promoção segue o mesmo modelo —
+   **não introduz superfície de risco nova**, mas se o Ordin endurecer isso no futuro
+   (revalidação server-side de preço), promoção precisa entrar nesse mecanismo também. Fora de
+   escopo desta história.
+5. **MySQL não tem índice único parcial/funcional** — unicidade de item duplicado na composição
+   é responsabilidade da camada de aplicação, não do schema.
+
+### O que ainda impede o avanço pro Ready
+Nada bloqueante. Todos os itens do critério de saída do Tech Explorer estão cobertos: serviços
+impactados, endpoints (payload completo), migrations, impacto em outros serviços, estimativa e
+riscos com mitigação proposta. Segue pra aprovação final (step Ready).
