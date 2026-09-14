@@ -24,6 +24,14 @@ A pesquisa anterior (`docs/analise-concorrente-goomer.md`) já tinha registrado 
 
 Isso mostra o padrão na prática, dentro de um único fornecedor: **o modelo de hardware que o cliente escolhe determina se ele fica preso a uma adquirente ou não** — e a página de venda do totem "livre" (Mini) usa linguagem de libertação ("fuja das altas taxas", "flexibilidade total") sem nunca citar % de taxa concreta nem comparar contra o modelo Clover da própria casa. A escolha de qual SKU comprar é, na prática, a escolha de ficar preso ou não — e isso não é destacado na página de vendas.
 
+## Segundo caso do mesmo padrão dual: Genesis PRO e a parceria com a Stone (2026-09-14)
+
+O levantamento do Genesis PRO (`docs/analise-concorrente-genesispro.md`, motivado por um link de demo enviado pelo usuário) encontrou uma estrutura parecida com o par Mini/Mini Clover da Goomer, só que descrita de forma mais explícita na própria página institucional: o site anuncia **"parceria oficial com a Stone"** pra pagamento integrado (a maquininha imprime e processa direto no PDV/totem) — e, numa frase separada, menciona **TEF genérico "com todas as principais adquirentes"** como caminho alternativo.
+
+Isso é o mesmo formato dual já visto em outros concorrentes (TEF Sitef vs. "Smart TEF" no CPlug/SisFood): um caminho **integrado/nativo com uma adquirente específica** e um caminho **TEF multi-adquirente mais genérico**. A diferença é que aqui a adquirente nomeada nominalmente é a Stone, publicada como parceria oficial de marketing — o que sugere (sem confirmar) que o caminho "integrado" tende a empurrar o cliente pra Stone especificamente, enquanto o caminho "TEF genérico" preserva a liberdade de escolha.
+
+**Não foi possível confirmar nesta rodada** se escolher a via "integrada com a Stone" no Genesis PRO tranca o cliente na Stone (igual ao Mini Clover da Goomer com BIN/Fiserv) ou se é só uma opção padrão recomendada, sem exclusividade real — a página não detalha se o TEF genérico multi-adquirente está disponível dentro do mesmo plano/hardware ou exige outro SKU. Fica registrado como um segundo indício (não uma terceira confirmação) de que a dualidade "parceria de pagamento anunciada + TEF genérico à parte" é padrão recorrente no setor, não coincidência isolada da Goomer.
+
 ## Por que o número nunca aparece publicado — não é sonegação, é estrutura de negociação
 
 O comparativo honesto de maquininhas do SisFood (`sisfood.com.br/.../maquininha-cartao-restaurante-comparativo`) deixa isso explícito:
@@ -66,6 +74,8 @@ O padrão de mercado que apareceu nas pesquisas anteriores (`docs/analise-concor
 
 O modelo multi-adquirente do Ordin (já confirmado como diferencial raro em `docs/analise-dashboard-concorrentes-mercado.md` e reconfirmado nesta rodada) é estruturalmente **imune ao mecanismo de lock-in de adquirente** descrito acima — o cliente do Ordin não pode ser silenciosamente empurrado pra uma adquirente com margem escondida, porque a escolha é do cliente. Isso é a resposta direta à preocupação que você levantou: **o Ordin já não tem esse buraco específico**, estruturalmente, pela arquitetura de multi-provedor já existente.
 
+O caso Genesis PRO (2026-09-14) reforça que essa estrutura dual "parceria de pagamento nomeada + TEF genérico" não é peculiaridade de um fornecedor só — apareceu de forma independente em dois concorrentes (Goomer/BIN-Fiserv, Genesis PRO/Stone), com nível de confirmação diferente (Goomer: lock-in confirmado por fontes externas; Genesis PRO: parceria declarada, exclusividade não confirmada). Não muda a conclusão sobre o Ordin, só fortalece a evidência de que o padrão é estrutural do setor, não coincidência.
+
 O que a pesquisa não responde, e fica como pergunta em aberto pro próprio negócio do Ordin: **antecipação automática de recebíveis** é um mecanismo independente do lock-in de adquirente — existe mesmo em contas bem negociadas — e não foi verificado neste levantamento se/como isso é tratado no fluxo do `payment-service` do Ordin hoje. Se for relevante, é uma pergunta separada de arquitetura/produto, não de concorrência.
 
 ## Fontes
@@ -73,3 +83,4 @@ O que a pesquisa não responde, e fica como pergunta em aberto pro próprio neg�
 - `bananasoft.ai/blog/pdv-gratuito-sai-mais-caro-que-pago` — exemplo numérico do mecanismo de MDR forçada
 - `goomer.com.br/blog/mini-totem-2-0-goomer`, `sindrio.com.br`, `mobiletime.com.br`, `bin.com.br` — confirmação do lock-in do Totem Mini Clover (BIN/Fiserv) vs. liberdade do Totem Mini
 - `sisfood.com.br/saiba-mais/gestao-financeira/maquininha-cartao-restaurante-comparativo` — faixas reais de MDR por adquirente, mecanismo de antecipação automática, explicação de por que a taxa é negociada por volume
+- `genesis.pro.br` (home institucional) — parceria oficial com a Stone + menção de TEF genérico multi-adquirente, achado de 2026-09-14 que motivou a seção "Segundo caso do mesmo padrão dual"
