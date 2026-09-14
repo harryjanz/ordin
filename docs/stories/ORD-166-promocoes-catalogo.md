@@ -1,10 +1,11 @@
 ---
 id: ORD-166
-status: Ready
+status: In Progress
 estimativa: 7,5 pontos (3 backend + 3 admin + 1,5 totem)
 fase: 6
 sprint: null
 responsavel: Backend SR + Frontend (admin + totem)
+branch: feature/ORD-166-promocoes-catalogo
 ---
 
 # ORD-166 — Promoções no catálogo: desconto percentual por período, categoria e produto
@@ -573,3 +574,35 @@ calendário.
 
 **Status: Ready.** Pode começar a implementação (backend primeiro — modelo/migration/algoritmo
 de conflito — depois admin, depois totem, na ordem sugerida pela estimativa).
+
+## Implementação (In Progress)
+
+As 3 fatias foram implementadas na branch `feature/ORD-166-promocoes-catalogo`, ainda sem PR
+aberta:
+
+1. **Backend** (`eb2df68`) — `Promotion`/`PromotionItem` em `fk_catalog`, migration aplicada e
+   verificada (upgrade/downgrade no MySQL de dev), CRUD completo, algoritmo de conflito (com
+   correção encontrada durante a implementação: promoção `is_enabled=true` mas já expirada não
+   deve contar como concorrente — sem isso o cenário "conflito some quando a promoção
+   concorrente expira" quebrava), anotação de preço promocional em `GET /catalog/products` e
+   `/catalog/combos`, lock via `SELECT FOR UPDATE` na ativação. 17 testes novos, suíte completa
+   do serviço sem regressão (218 passando). `ruff` limpo.
+2. **Admin** (`1af85a8`) — aba Promoções, tela dedicada de criação/edição espelhando
+   `ComboFormScreen`/`PriceTableFormScreen`. Testado ao vivo no navegador contra o backend real
+   (criação, composição, ativação, modo somente-leitura, exclusão) — achado e corrigido um bug
+   de pluralização ("itemns" → "itens") que só apareceu nesse teste visual, não no `tsc`/build.
+3. **Totem** (`3a46d10`) — preço promocional evidenciado (riscado + novo preço + selo âmbar) no
+   card de produto e combo, e `effectivePrice()` centralizando a leitura do desconto em todo
+   ponto onde o preço entra no carrinho (produto avulso, com opção, combo, upsell). Verificado
+   via `tsc`/build limpos e chamada direta à API real confirmando `final_price` correto; **não
+   foi possível testar visualmente no navegador** — login por PIN falhou num servidor de dev à
+   parte (sessão sem pareamento prévio, problema de ambiente de teste, não do código) e a
+   tentativa foi interrompida antes de arriscar bloqueio de IP por PIN errado repetido.
+
+**Achado fora de escopo, não corrigido**: `docker compose build totem` falha numa instalação
+limpa (`npm ci` dentro do container, resolução do pacote `react-aria` quebrada) — não acontece
+com o `node_modules` já resolvido do host, e não é causado por nenhum arquivo desta história
+(nenhum arquivo alterado aqui importa esse caminho). CI não builda a imagem Docker do totem
+hoje, então isso nunca foi pego antes. Vale abrir um item separado pra investigar.
+
+**Pendente**: push da branch e abertura da PR.
