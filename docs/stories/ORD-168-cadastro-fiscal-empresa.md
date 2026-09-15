@@ -412,3 +412,28 @@ não resolvidos · [ ] sprint específico — não atribuída ainda.
 
 **Status: Ready.** Pode começar a implementação — backend primeiro (modelo + migration +
 endpoints), depois frontend (aba nova).
+
+## Implementação
+
+Implementada na branch `epic/nfce-focusnfe`, ainda sem PR aberta:
+
+1. **Backend** (`services/company/main.py`) — modelo `CompanyFiscalConfig` (satélite 1:1,
+   certificado+CSC criptografados), schemas `FiscalConfigIn`/`FiscalConfigOut`, endpoints
+   `GET`/`PUT /companies/{id}/fiscal-config` (`_require_platform_admin`), migration
+   `20260915_1700_company_fiscal_configs`. 10 testes novos
+   (`test_ord168_cadastro_fiscal_empresa.py`), suíte completa do company-service sem regressão
+   (429 passando). `ruff` limpo.
+2. **Admin** (`CompanyScreen.tsx`, `CompanyContractScreen.tsx`, `types.ts`,
+   `api/companies.ts`) — aba "Fiscal" nova (visível só pra `superadmin`/`admin`, via array de
+   children em vez de `&&` — `Tabs` do design-system tipa estritamente
+   `ReactElement<TabProps>`), resumo somente-leitura dos campos já existentes em `Company`,
+   upload de certificado (`FileReader` → base64) + campos de CSC. Opção "MEI" adicionada ao
+   `TAX_REGIME_OPTIONS` já existente. `tsc --noEmit` e `npm run build` limpos, 48 testes de
+   frontend sem regressão.
+3. **Testado ao vivo**: migration aplicada no banco de dev real (`docker compose cp` +
+   `restart`, mesmo padrão da gotcha já conhecida sobre uvicorn não recarregar sozinho), imagem
+   do admin rebuildada e recriada. Aba Fiscal confirmada visível só pra `superadmin`, cadastro de
+   CSC de produção salvo e confirmado **criptografado** direto no banco (`enc:...`), persistência
+   confirmada após reload de página. Console do navegador sem erros.
+
+Nada commitado além do próprio código ainda — aguardando decisão do usuário sobre abrir PR.

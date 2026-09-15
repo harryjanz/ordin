@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
 import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
-import { getCompanyPlan, listCompanies } from "../api/companies";
+import { getCompanyPlan, getFiscalConfig, listCompanies, updateFiscalConfig } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { useStore } from "../store";
-import type { CompanyPlan, Terminal, User, Role, PaymentConfig, Company, MpTerminal } from "../types";
+import type { CompanyPlan, FiscalConfig, Terminal, User, Role, PaymentConfig, Company, MpTerminal } from "../types";
 import styles from "./CompanyScreen.module.scss";
 
 // ── Provider catalog ─────────────────────────────────────────────────────────
@@ -212,6 +212,173 @@ function PlanTab({ companyId }: PlanTabProps) {
         <span className={styles.planLabel}>Última renovação</span>
         <span>{plan.renewed_at ? fmtDate(plan.renewed_at) : "Nunca renovado"}</span>
       </div>
+    </div>
+  );
+}
+
+interface FiscalTabProps {
+  companyId: number;
+}
+
+// ORD-168 — certificado A1 + CSC (produção/homologação). Razão social/IE/
+// regime/endereço já existem em Company e são editados em
+// CompanyContractScreen — mostrados aqui só como resumo somente-leitura,
+// nunca duas fontes de verdade pro mesmo dado.
+function FiscalTab({ companyId }: FiscalTabProps) {
+  const [cfg, setCfg] = useState<FiscalConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [formKey, setFormKey] = useState(0);
+
+  const [certFile, setCertFile] = useState<File | null>(null);
+  const certSenhaRef = useRef<HTMLInputElement | null>(null);
+  const cscProducaoRef = useRef<HTMLInputElement | null>(null);
+  const idTokenProducaoRef = useRef<HTMLInputElement | null>(null);
+  const cscHomologacaoRef = useRef<HTMLInputElement | null>(null);
+  const idTokenHomologacaoRef = useRef<HTMLInputElement | null>(null);
+
+  function load() {
+    setLoading(true);
+    getFiscalConfig(companyId)
+      .then(setCfg)
+      .catch((e) => setErr(parseApiError(e).message))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => { load(); }, [companyId]);
+
+  function flash(ok: boolean, text: string) {
+    setMsg({ ok, text });
+    setTimeout(() => setMsg(null), 3000);
+  }
+
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // reader.result é uma data URL ("data:...;base64,XXXX") — só o
+        // conteúdo depois da vírgula é o base64 puro que a Focus NFe espera
+        // (docs/stories/ORD-168-*.md).
+        resolve(result.slice(result.indexOf(",") + 1));
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleSave() {
+    const payload: Record<string, string> = {};
+    if (certFile) {
+      payload.certificado_base64 = await fileToBase64(certFile);
+      payload.certificado_nome_arquivo = certFile.name;
+    }
+    const senha = certSenhaRef.current?.value.trim();
+    if (senha) payload.certificado_senha = senha;
+    const cscProducao = cscProducaoRef.current?.value.trim();
+    if (cscProducao) payload.csc_producao = cscProducao;
+    const idTokenProducao = idTokenProducaoRef.current?.value.trim();
+    if (idTokenProducao) payload.id_token_producao = idTokenProducao;
+    const cscHomologacao = cscHomologacaoRef.current?.value.trim();
+    if (cscHomologacao) payload.csc_homologacao = cscHomologacao;
+    const idTokenHomologacao = idTokenHomologacaoRef.current?.value.trim();
+    if (idTokenHomologacao) payload.id_token_homologacao = idTokenHomologacao;
+
+    if (Object.keys(payload).length === 0) {
+      flash(false, "Preencha ao menos um campo para salvar.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await updateFiscalConfig(companyId, payload);
+      setCfg(updated);
+      setCertFile(null);
+      setFormKey((k) => k + 1); // limpa os campos sensíveis (senha/CSC) depois de salvar
+      flash(true, "Dados fiscais salvos!");
+    } catch (e: unknown) {
+      flash(false, parseApiError(e).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) return <div className={styles.muted}>Carregando…</div>;
+  if (err) return <Alert variant="error" text={err} fullWidth />;
+  if (!cfg) return null;
+
+  return (
+    <div>
+      <div className={styles.planPanel} style={{ marginBottom: 20 }}>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Status</span>
+          <Tag variant={cfg.completo ? "success" : "warning"}>
+            {cfg.completo ? "Dados fiscais: completos" : "Dados fiscais: incompletos"}
+          </Tag>
+        </div>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Razão social</span>
+          <span>{cfg.legal_name ?? "—"}</span>
+        </div>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Inscrição Estadual</span>
+          <span>{cfg.state_registration ?? "—"}</span>
+        </div>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Regime tributário</span>
+          <span>{cfg.tax_regime ?? "—"}</span>
+        </div>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Endereço</span>
+          <span>{cfg.address_summary ?? "—"}</span>
+        </div>
+        <div className={styles.formHint}>
+          Razão social, IE, regime e endereço são editados na aba "Contrato" da empresa.
+        </div>
+      </div>
+
+      <div className={styles.form} key={formKey}>
+        <div className={styles.formTitle}>Certificado digital (A1)</div>
+        <div className={styles.formHint}>
+          {cfg.certificado_cadastrado
+            ? `Certificado cadastrado: ${cfg.certificado_nome_arquivo ?? "arquivo"} — envie um novo arquivo para substituir.`
+            : "Nenhum certificado cadastrado ainda."}
+        </div>
+        <input type="file" accept=".pfx,.p12" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)} />
+        <InputBase
+          label="Senha do certificado"
+          type="password"
+          placeholder={cfg.certificado_cadastrado ? "••••••••" : "Senha do arquivo .pfx"}
+          ref={certSenhaRef}
+          autoComplete="new-password"
+        />
+
+        <div className={styles.formTitle} style={{ marginTop: 16 }}>CSC — Código de Segurança do Contribuinte</div>
+        <div className={styles.formHint}>Gerado no portal da SEFAZ do estado da empresa.</div>
+        <InputBase
+          label="CSC de produção"
+          type="password"
+          placeholder={cfg.csc_producao_cadastrado ? "••••••••" : "CSC de produção"}
+          ref={cscProducaoRef}
+          autoComplete="new-password"
+        />
+        <InputBase label="ID do CSC de produção" type="text" placeholder="Ex.: 1" ref={idTokenProducaoRef} />
+        <InputBase
+          label="CSC de homologação"
+          type="password"
+          placeholder={cfg.csc_homologacao_cadastrado ? "••••••••" : "CSC de homologação"}
+          ref={cscHomologacaoRef}
+          autoComplete="new-password"
+        />
+        <InputBase label="ID do CSC de homologação" type="text" placeholder="Ex.: 1" ref={idTokenHomologacaoRef} />
+
+        <div className={styles.formActions} style={{ marginTop: 12 }}>
+          <Button type="button" onClick={handleSave} loading={saving} disabled={saving}>Salvar</Button>
+        </div>
+      </div>
+
+      {msg && <Alert variant={msg.ok ? "success" : "error"} text={msg.text} fullWidth />}
     </div>
   );
 }
@@ -561,7 +728,7 @@ export default function CompanyScreen() {
   // sessão ativa, seleciona aqui; com sessão ativa (vinda de Config ou
   // desta própria tela), usa pra carregar os dados da empresa.
   const companyId = isPlatformAdmin ? selectedCompanyId : ownCompanyId;
-  const [tab, setTab] = useState<"terminals" | "users" | "payment" | "plan">("users");
+  const [tab, setTab] = useState<"terminals" | "users" | "payment" | "plan" | "fiscal">("users");
 
   const [companies, setCompanies] = useState<Company[]>([]);
   useEffect(() => {
@@ -1015,11 +1182,20 @@ export default function CompanyScreen() {
       {companySelector}
 
       <div className={styles.tabs}>
-        <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as "terminals" | "users" | "payment" | "plan")}>
-          <Tab value="users" label="Usuários" />
-          <Tab value="terminals" label="Terminais" />
-          <Tab value="payment" label="Pagamento" />
-          <Tab value="plan" label="Plano" />
+        <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as "terminals" | "users" | "payment" | "plan" | "fiscal")}>
+          {[
+            <Tab key="users" value="users" label="Usuários" />,
+            <Tab key="terminals" value="terminals" label="Terminais" />,
+            <Tab key="payment" value="payment" label="Pagamento" />,
+            <Tab key="plan" value="plan" label="Plano" />,
+            // ORD-168 — cadastro fiscal é assistido pelo time Ordin, não
+            // self-service do owner (docs/stories/ORD-168-*.md): aba some
+            // inteira pra owner/manager, não só o endpoint bloqueia. Um
+            // único array como children (em vez de "&&" entre <Tab> soltos)
+            // — Tabs tipa children como ReactElement<TabProps> | [], não
+            // aceita boolean|Element misturado entre elementos individuais.
+            ...(isPlatformAdmin ? [<Tab key="fiscal" value="fiscal" label="Fiscal" />] : []),
+          ]}
         </Tabs>
       </div>
 
@@ -1307,6 +1483,7 @@ export default function CompanyScreen() {
       {/* ── Pagamento ── */}
       {tab === "payment" && <PaymentTab companyId={companyId} />}
       {tab === "plan" && <PlanTab companyId={companyId} />}
+      {tab === "fiscal" && isPlatformAdmin && <FiscalTab companyId={companyId} />}
 
       <ConfirmDialog
         open={!!confirmState}

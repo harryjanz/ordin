@@ -428,6 +428,33 @@ export interface CompanyPlanHistory {
   entries: CompanyPlanHistoryEntry[];
 }
 
+// ORD-168 — cadastro fiscal da empresa (certificado A1 + CSC). legal_name/
+// state_registration/tax_regime/address_summary espelham Company (edição
+// continua em CompanyContractScreen) — nunca traz certificado/CSC em texto
+// puro, só flags de presença.
+export interface FiscalConfig {
+  legal_name: string | null;
+  state_registration: string | null;
+  tax_regime: string | null;
+  address_summary: string | null;
+  certificado_cadastrado: boolean;
+  certificado_nome_arquivo: string | null;
+  certificado_enviado_em: string | null;
+  csc_producao_cadastrado: boolean;
+  csc_homologacao_cadastrado: boolean;
+  completo: boolean;
+}
+
+export interface FiscalConfigUpdate {
+  certificado_base64?: string;
+  certificado_senha?: string;
+  certificado_nome_arquivo?: string;
+  csc_producao?: string;
+  id_token_producao?: string;
+  csc_homologacao?: string;
+  id_token_homologacao?: string;
+}
+
 export interface Order {
   order_ref: string;
   status: string;

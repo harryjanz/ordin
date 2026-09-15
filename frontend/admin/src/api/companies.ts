@@ -1,5 +1,5 @@
 import api from "../api";
-import type { CepLookupResult, CnpjLookupResult, Company, CompanyPlan, CompanyPlanHistory, CompanyStatusSummary, Contact, ContactType, LegalRepresentative, Terminal, User } from "../types";
+import type { CepLookupResult, CnpjLookupResult, Company, CompanyPlan, CompanyPlanHistory, CompanyStatusSummary, Contact, ContactType, FiscalConfig, FiscalConfigUpdate, LegalRepresentative, Terminal, User } from "../types";
 import { normalizeCnpj } from "../lib/validators";
 
 export async function lookupCnpj(cnpj: string): Promise<CnpjLookupResult> {
@@ -35,6 +35,19 @@ export async function applyCompanyPlanTable(companyId: number, priceTableId: num
 // recente primeiro.
 export async function getCompanyPlanHistory(companyId: number): Promise<CompanyPlanHistory> {
   const r = await api.get<CompanyPlanHistory>(`/companies/${companyId}/plan/history`);
+  return r.data;
+}
+
+// ORD-168 — cadastro fiscal (certificado A1 + CSC), restrito a
+// superadmin/admin (a UI já esconde a aba pra owner/manager, backend também
+// bloqueia).
+export async function getFiscalConfig(companyId: number): Promise<FiscalConfig> {
+  const r = await api.get<FiscalConfig>(`/companies/${companyId}/fiscal-config`);
+  return r.data;
+}
+
+export async function updateFiscalConfig(companyId: number, payload: FiscalConfigUpdate): Promise<FiscalConfig> {
+  const r = await api.put<FiscalConfig>(`/companies/${companyId}/fiscal-config`, payload);
   return r.data;
 }
 
