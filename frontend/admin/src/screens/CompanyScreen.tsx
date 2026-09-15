@@ -364,7 +364,8 @@ function FiscalTab({ companyId }: FiscalTabProps) {
     <div>
       <div className={styles.fiscalForm}>
         <Alert
-          variant="warning"
+          variant="neutral"
+          icon="alert-circle"
           fullWidth
           text="Esses dados — certificado digital A1, CSC e as informações fiscais já cadastradas da empresa — são usados pelo Ordin para emitir a NFC-e nas vendas do totem. Cadastrar aqui não ativa a emissão automaticamente: ligar ou desligar a emissão de verdade acontece numa etapa separada, depois da conclusão do cadastro fiscal da empresa."
         />
