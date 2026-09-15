@@ -170,9 +170,28 @@ interface PlanTabProps {
   companyId: number;
 }
 
+const fmtBRL = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+// ORD-177 — mesmo padrão visual de ReadOnlyField já usado em
+// PriceTableFormScreen.tsx (label + valor em negrito, sem parecer campo
+// desabilitado) — reproduzido aqui porque CSS modules não compartilham
+// classe entre arquivos.
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div className={styles.planFormRowField}>
+      <span className={styles.formLabel}>{label}</span>
+      <div style={{ fontWeight: 700 }}>{value}</div>
+    </div>
+  );
+}
+
 // ORD-163 — plano comercial, somente leitura pro owner/manager (não
 // confundir com o contrato jurídico, que é uma tela separada só de
 // superadmin/admin — ver CompanyContractScreen).
+// ORD-177 — antes só mostrava o nome da tabela de preço, sem os valores de
+// fato cobrados (preço do totem, faixas de transação) — o cliente não tinha
+// como conferir o que está pagando sem pedir pro time Ordin. Reaproveita o
+// mesmo padrão de detalhamento somente-leitura já validado na ORD-167.
 function PlanTab({ companyId }: PlanTabProps) {
   const [plan, setPlan] = useState<CompanyPlan | null>(null);
   const [loading, setLoading] = useState(true);
@@ -195,24 +214,57 @@ function PlanTab({ companyId }: PlanTabProps) {
     return new Date(iso).toLocaleString("pt-BR");
   }
 
+  const pt = plan.price_table;
+
   return (
-    <div className={styles.planPanel}>
-      <div className={styles.planRow}>
-        <span className={styles.planLabel}>Status</span>
-        <Tag variant={plan.status === "Ativo" ? "success" : "warning"}>{plan.status}</Tag>
+    <div>
+      <div className={styles.planPanel} style={{ marginBottom: 20 }}>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Status</span>
+          <Tag variant={plan.status === "Ativo" ? "success" : "warning"}>{plan.status}</Tag>
+        </div>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Tabela de preço</span>
+          <span>{pt.name}</span>
+        </div>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Vencimento</span>
+          <span>{fmtDate(plan.expires_at)}</span>
+        </div>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Última renovação</span>
+          <span>{plan.renewed_at ? fmtDate(plan.renewed_at) : "Nunca renovado"}</span>
+        </div>
       </div>
-      <div className={styles.planRow}>
-        <span className={styles.planLabel}>Tabela de preço</span>
-        <span>{plan.price_table.name}</span>
-      </div>
-      <div className={styles.planRow}>
-        <span className={styles.planLabel}>Vencimento</span>
-        <span>{fmtDate(plan.expires_at)}</span>
-      </div>
-      <div className={styles.planRow}>
-        <span className={styles.planLabel}>Última renovação</span>
-        <span>{plan.renewed_at ? fmtDate(plan.renewed_at) : "Nunca renovado"}</span>
-      </div>
+
+      {pt.totem_price_1 !== undefined && (
+        <div className={styles.planPanel}>
+          <div className={styles.formTitle}>Valores da tabela vigente</div>
+          <div className={styles.planFormRow}>
+            <ReadOnlyField label="Preço do 1º totem" value={fmtBRL(pt.totem_price_1)} />
+            <ReadOnlyField label="Multiplicador do 2º totem" value={`${Math.round((pt.totem_multiplier_2 ?? 0) * 100)}%`} />
+            <ReadOnlyField label="Multiplicador do 3º ao 5º totem" value={`${Math.round((pt.totem_multiplier_3_5 ?? 0) * 100)}%`} />
+          </div>
+
+          {pt.transaction_tiers && pt.transaction_tiers.length > 0 && (
+            <>
+              <div className={styles.formLabel} style={{ marginTop: 8 }}>
+                Faixas de taxa transacional (por volume de transações/mês)
+              </div>
+              {pt.transaction_tiers.map((t, i) => (
+                <div key={i} className={styles.planFormRow}>
+                  <ReadOnlyField label="De (transações/mês)" value={String(t.min_transactions)} />
+                  <ReadOnlyField
+                    label="Até (transações/mês)"
+                    value={t.max_transactions === null ? "Sem teto" : String(t.max_transactions)}
+                  />
+                  <ReadOnlyField label="Preço por transação" value={fmtBRL(t.price_per_transaction)} />
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
