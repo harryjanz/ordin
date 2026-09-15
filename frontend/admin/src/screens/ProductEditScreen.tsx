@@ -4,7 +4,6 @@ import {
   Alert,
   Button,
   Checkbox,
-  CheckboxMultiselect,
   CurrencyInput,
   Divider,
   Dropdown,
@@ -536,22 +535,35 @@ export default function ProductEditScreen() {
           placeholder={`Sugestões: ${SUGGESTED_TAGS}`}
         />
 
-        <CheckboxMultiselect
-          key={editProd.id}
-          id={`edit-prod-${editProd.id}-allergens`}
-          label="Alérgenos (RDC 727/2022)"
-          options={allergens.map((a) => ({ value: String(a.id), label: a.name, disabled: false }))}
-          initialSelection={editProd.allergen_ids}
-          onSelectOption={(option, checked) => {
-            setEditProd((prev) => {
-              if (!prev) return prev;
-              const ids = checked
-                ? [...prev.allergen_ids, option.value]
-                : prev.allergen_ids.filter((id) => id !== option.value);
-              return { ...prev, allergen_ids: ids };
-            });
-          }}
-        />
+        {/* Grade de checkboxes sempre visível — substitui o
+            CheckboxMultiselect (dropdown que escondia a seleção atrás de um
+            clique, sem busca, sem mostrar o que já estava marcado no estado
+            fechado). Lista de alérgenos é pequena e fixa (~19 itens, RDC
+            727/2022) — cabe tudo numa grade sem precisar de dropdown nem
+            busca, pedido explícito do usuário por algo "mais simples e
+            usual". */}
+        <Divider />
+
+        <h2 className={styles.h2}>Alérgenos (RDC 727/2022)</h2>
+        <div className={styles.allergenGrid}>
+          {allergens.map((a) => (
+            <Checkbox
+              key={a.id}
+              id={`edit-prod-${editProd.id}-allergen-${a.id}`}
+              label={a.name}
+              checked={editProd.allergen_ids.includes(String(a.id))}
+              onChange={(checked) => {
+                setEditProd((prev) => {
+                  if (!prev) return prev;
+                  const ids = checked
+                    ? [...prev.allergen_ids, String(a.id)]
+                    : prev.allergen_ids.filter((id) => id !== String(a.id));
+                  return { ...prev, allergen_ids: ids };
+                });
+              }}
+            />
+          ))}
+        </div>
       </div>
 
       <div className={styles.panel}>
