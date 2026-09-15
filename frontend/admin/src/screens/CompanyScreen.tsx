@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, FormEvent } from "react";
 import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, Upload, UploadListFiles, makeToast, type DropdownOptions, type UploadFile } from "design-system";
 import api from "../api";
 import { getCompanyPlan, getFiscalConfig, listCompanies, updateFiscalConfig } from "../api/companies";
+import { TAX_REGIME_OPTIONS } from "./CompanyContractScreen";
 import { parseApiError } from "../lib/apiErrors";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
@@ -274,7 +275,6 @@ function FiscalTab({ companyId }: FiscalTabProps) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [formKey, setFormKey] = useState(0);
 
   const [certFile, setCertFile] = useState<File | null>(null);
@@ -294,11 +294,6 @@ function FiscalTab({ companyId }: FiscalTabProps) {
   }
 
   useEffect(() => { load(); }, [companyId]);
-
-  function flash(ok: boolean, text: string) {
-    setMsg({ ok, text });
-    setTimeout(() => setMsg(null), 3000);
-  }
 
   function handleCertUpload(files: UploadFile[]) {
     const picked = files[0];
@@ -343,7 +338,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
     if (idTokenHomologacao) payload.id_token_homologacao = idTokenHomologacao;
 
     if (Object.keys(payload).length === 0) {
-      flash(false, "Preencha ao menos um campo para salvar.");
+      makeToast("error", "Preencha ao menos um campo para salvar.");
       return;
     }
     setSaving(true);
@@ -353,9 +348,9 @@ function FiscalTab({ companyId }: FiscalTabProps) {
       setCertFile(null);
       setUploadFiles([]);
       setFormKey((k) => k + 1); // limpa os campos sensíveis (senha/CSC) depois de salvar
-      flash(true, "Dados fiscais salvos!");
+      makeToast("success", "Dados fiscais salvos!");
     } catch (e: unknown) {
-      flash(false, parseApiError(e).message);
+      makeToast("error", parseApiError(e).message);
     } finally {
       setSaving(false);
     }
@@ -367,7 +362,14 @@ function FiscalTab({ companyId }: FiscalTabProps) {
 
   return (
     <div>
-      <div className={styles.planPanel} style={{ marginBottom: 20 }}>
+      <div className={styles.fiscalForm}>
+        <Alert
+          variant="warning"
+          fullWidth
+          text="Esses dados — certificado digital A1, CSC e as informações fiscais já cadastradas da empresa — são usados pelo Ordin para emitir a NFC-e nas vendas do totem. Cadastrar aqui não ativa a emissão automaticamente: ligar ou desligar a emissão de verdade acontece numa etapa separada, depois da conclusão do cadastro fiscal da empresa."
+        />
+      </div>
+      <div className={`${styles.planPanel} ${styles.fiscalForm}`} style={{ marginTop: 16, marginBottom: 20 }}>
         <div className={styles.planRow}>
           <span className={styles.planLabel}>Status</span>
           <Tag variant={cfg.completo ? "success" : "warning"}>
@@ -384,7 +386,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
         </div>
         <div className={styles.planRow}>
           <span className={styles.planLabel}>Regime tributário</span>
-          <span>{cfg.tax_regime ?? "—"}</span>
+          <span>{TAX_REGIME_OPTIONS.find((o) => o.value === cfg.tax_regime)?.label ?? cfg.tax_regime ?? "—"}</span>
         </div>
         <div className={styles.planRow}>
           <span className={styles.planLabel}>Endereço</span>
@@ -395,7 +397,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
         </div>
       </div>
 
-      <div className={styles.form} key={formKey}>
+      <div className={`${styles.form} ${styles.fiscalForm}`} key={formKey}>
         <div className={styles.formTitle}>Certificado digital (A1)</div>
         <div className={styles.formHint}>
           {cfg.certificado_cadastrado
@@ -403,8 +405,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
             : "Nenhum certificado cadastrado ainda."}
         </div>
         <Upload
-          fullWidth={false}
-          width={320}
+          fullWidth
           maxFileSize={CERTIFICADO_MAX_SIZE_MB}
           multipleFiles={false}
           types={CERTIFICADO_TYPES}
@@ -413,13 +414,11 @@ function FiscalTab({ companyId }: FiscalTabProps) {
           onCallbackUpload={handleCertUpload}
         />
         <UploadListFiles items={uploadFiles} removable={false} />
-        <div className={styles.fiscalRow}>
-          <PasswordField
-            label="Senha do certificado"
-            placeholder={cfg.certificado_cadastrado ? "••••••••" : "Senha do arquivo .pfx"}
-            inputRef={certSenhaRef}
-          />
-        </div>
+        <PasswordField
+          label="Senha do certificado"
+          placeholder={cfg.certificado_cadastrado ? "••••••••" : "Senha do arquivo .pfx"}
+          inputRef={certSenhaRef}
+        />
 
         <div className={styles.formTitle} style={{ marginTop: 16 }}>CSC — Código de Segurança do Contribuinte</div>
         <div className={styles.formHint}>Gerado no portal da SEFAZ do estado da empresa.</div>
@@ -446,8 +445,6 @@ function FiscalTab({ companyId }: FiscalTabProps) {
           <Button type="button" onClick={handleSave} loading={saving} disabled={saving}>Salvar</Button>
         </div>
       </div>
-
-      {msg && <Alert variant={msg.ok ? "success" : "error"} text={msg.text} fullWidth />}
     </div>
   );
 }

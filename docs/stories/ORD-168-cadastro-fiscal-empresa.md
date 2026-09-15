@@ -465,3 +465,39 @@ Testado ao vivo de novo após os ajustes (rebuild da imagem do admin): Upload na
 corretamente, campo de senha compacto, toggle de olho confirmado funcionando (texto
 alterna mascarado/visível), CSC em duas colunas por ambiente. `tsc`/build/testes de frontend sem
 regressão.
+
+### Segunda rodada de ajustes de UI (2026-09-15, direto com o usuário no navegador)
+Refinamento visual iterativo, um ajuste por vez confirmado ao vivo:
+1. **Limite de tamanho em CSC (36) e ID do CSC (6)** — confirmado pelo usuário via pesquisa
+   própria (Focus NFe/Olist/Nota Gateway: CSC alfanumérico até 36 caracteres, ID numérico
+   geralmente 6 dígitos). Aplicado nos dois lados: `Field(max_length=...)` no
+   `FiscalConfigIn` (backend) e `maxLength` nos `InputBase` correspondentes (frontend).
+2. **Bloco "Certificado digital" ocupando meia tela**: `max-width: 480px` inicial ficou como
+   ~25% numa tela mais larga — trocado pra `max-width: 50%` (`.fiscalForm`, classe nova, não
+   mexe em `.form` — compartilhada com `PlatformUsersScreen.tsx`).
+3. **Upload ocupando a linha toda**: `fullWidth` em vez de `width={320}` fixo.
+4. **Proporção CSC/ID ajustada**: `.fiscalRow` de `3fr 1fr` pra `2fr 1fr` — CSC (36 car.) um
+   pouco menor, ID (6 car.) um pouco maior, mais equilibrado visualmente.
+5. **Painel de resumo (status/dados fiscais) alinhado aos mesmos 50%** do formulário abaixo —
+   reaproveitando a mesma classe `.fiscalForm` (cascata CSS: declarada depois de `.planPanel`
+   no arquivo, então `max-width: 50%` vence sobre o `480px` original de `.planPanel`).
+6. **Mensagens de sucesso/erro trocadas de `Alert` inline (ficava escondido abaixo do botão)
+   pra `makeToast`** — padrão dominante no resto do arquivo (convite, reset de senha, 2FA,
+   remoção de dispositivo confiável), mais visível que o Alert que exigia rolar a tela.
+7. **Regime tributário traduzido**: resumo mostrava o valor bruto do enum
+   (`simples_nacional`) — `TAX_REGIME_OPTIONS` exportado de `CompanyContractScreen.tsx`
+   (evita duplicar o mapeamento) e reaproveitado pra traduzir pro label (`Simples Nacional`).
+8. **Mensagem explicativa no topo da aba**, `Alert variant="warning"` (laranja, mesma
+   paleta do `Tag` "incompletos"), mesma largura de 50% do resto — explica pra que servem os
+   dados e deixa claro que cadastrar aqui não liga a emissão sozinho. **Sem citar o provedor
+   terceirizado** (Focus NFe) no texto visível — só "Ordin", decisão explícita do usuário (o
+   nome do fornecedor por trás não deveria vazar pra quem usa a tela, mesmo sendo só o time
+   Ordin). Menções a "Focus NFe" continuam só em comentários de código, não em texto de UI.
+
+Dados fictícios de teste gerados pra "Burger House" (razão social, IE, regime, endereço) direto
+no banco de dev, pra validar visualmente o painel de resumo populado — corrigido um problema de
+charset na primeira tentativa (`mysql` CLI sem `--default-character-set=utf8mb4` corrompia
+acentuação).
+
+`tsc`/vitest (48 testes)/build sem regressão depois de toda a rodada. Usuário confirmou o
+resultado final ("agora ficou bom") antes deste commit.

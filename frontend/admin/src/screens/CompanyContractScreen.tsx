@@ -22,7 +22,9 @@ const COMPANY_SIZE_OPTIONS: DropdownOptions[] = [
   { value: "DEMAIS", label: "Demais" },
 ];
 
-const TAX_REGIME_OPTIONS: DropdownOptions[] = [
+// ORD-168 — exportado pra CompanyScreen.tsx reaproveitar na tradução do
+// resumo somente-leitura da aba Fiscal, em vez de duplicar o mapeamento.
+export const TAX_REGIME_OPTIONS: DropdownOptions[] = [
   { value: "simples_nacional", label: "Simples Nacional" },
   { value: "lucro_presumido", label: "Lucro Presumido" },
   { value: "lucro_real", label: "Lucro Real" },

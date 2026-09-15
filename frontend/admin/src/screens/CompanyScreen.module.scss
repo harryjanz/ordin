@@ -128,14 +128,21 @@
   align-items: end;
 }
 
-// ORD-168 — aba Fiscal: senha do certificado (1 campo) e as duas linhas de
-// CSC (CSC + ID do token, produção/homologação) — evita campo de senha
-// esticado full-width e mantém CSC+ID lado a lado por ambiente.
+// ORD-168 — bloco de Certificado/CSC ocupa só meia tela, mesmo padrão de
+// largura de .planPanel acima (não mexe em .form direto — classe
+// compartilhada com PlatformUsersScreen.tsx, ver comentário já existente
+// sobre isso logo acima).
+.fiscalForm {
+  max-width: 50%;
+}
+
+// ORD-168 — senha do certificado (1 campo) e as duas linhas de CSC (CSC +
+// ID do token, produção/homologação). Colunas proporcionais ao tamanho real
+// dos campos (CSC até 36 caracteres, ID até 6) em vez de 50/50.
 .fiscalRow {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 2fr 1fr;
   gap: 12px;
-  max-width: 480px;
 }
 
 // Mesmo padrão visual das barras de filtro de Pedidos/Pagamentos (fundo
