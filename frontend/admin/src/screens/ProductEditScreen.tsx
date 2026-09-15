@@ -43,8 +43,11 @@ const CFOP_OPTIONS: DropdownOptions[] = [
   { value: "5102", label: "5102 — Venda de mercadoria adquirida de terceiros" },
 ];
 
+// A descrição sincronizada da Receita Federal vem com traços de hierarquia
+// (ex. "-- Outros" é subitem de nível 2) — sem remover, o rótulo duplicava o
+// travessão: "código — - descrição".
 function ncmLabel(codigo: string, descricao: string): string {
-  return `${codigo} — ${descricao}`;
+  return `${codigo} — ${descricao.replace(/^-+\s*/, "")}`;
 }
 
 // Um produto pode estar vinculado ao mesmo cardápio direto E via categoria
