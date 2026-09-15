@@ -213,10 +213,21 @@ export interface Product {
   calories: number | null;
   sku: string | null;
   sort_order: number | null;
+  // ORD-169 — classificação fiscal, sempre opcional.
+  ncm: string | null;
+  ncm_descricao: string | null;
+  cfop: string | null;
+  cest: string | null;
   allergens: Allergen[];
   option_groups: ProductOptionGroup[];
   related_products: RelatedProduct[];
   promotion: PromotionAnnotation | null;
+}
+
+// ORD-169 — resultado de GET /catalog/ncm/search (master data, sem company_id).
+export interface NcmSearchResult {
+  codigo: string;
+  descricao: string;
 }
 
 // ORD-125 — cardápio por horário: dias da semana (0=segunda..6=domingo,

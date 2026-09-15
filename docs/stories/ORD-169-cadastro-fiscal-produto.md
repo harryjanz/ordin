@@ -336,3 +336,44 @@ anteriores) · [ ] sprint específico — não atribuída ainda.
 
 **Status: Ready.** Pode começar a implementação — backend primeiro (tabela NCM + job + campos em
 Product + endpoint de busca), depois frontend (seção nova em `ProductEditScreen.tsx`).
+
+## Implementação
+
+Backend (`services/catalog/main.py`): model `NcmCode` (global, sem `company_id`), 3 colunas em
+`Product` (`ncm` com FK pra `ncm_codes.codigo`, `cfop`, `cest`), `ProductIn`/`ProductUpdate` com
+`@field_validator("cfop")` restringindo a `{"5101", "5102"}` (mesmo padrão do `price_positive` já
+existente), `_validate_ncm_exists()` chamado em `create_product`/`update_product` antes de
+persistir. Duas migrations (`20260915_0900_ncm_codes.py`, `20260915_0901_product_fiscal_fields.py`).
+10 testes novos em `test_ord169_cadastro_fiscal_produto.py`, suíte completa do catalog-service
+229 passou, `ruff` limpo.
+
+**Correções em relação ao Tech Explorer:**
+- **Endpoint real é `GET /catalog/ncm/search`**, não `GET /ncm/search` como escrito acima — todo
+  o resto das rotas do catalog-service usa o prefixo `/catalog/`, confirmado lendo o arquivo real
+  antes de implementar (mesmo cuidado que gerou o gotcha de duplicação na ORD-168).
+- **`SearchInput` do design-system já existe e cobre exatamente o caso** (busca-conforme-digita
+  com lista de opções, `onValueSelected`/`onChange` próprios) — o Tech Explorer presumia que não
+  havia componente pronto e recomendava construir ad-hoc. Usado diretamente em vez de replicar o
+  padrão manual de busca (`relatedSearch`) já usado mais abaixo na mesma tela.
+- **Campo extra não previsto**: `ProductOut.ncm_descricao` (join com `ncm_codes` em
+  `_serialize_product`) — como o NCM nunca é digitado livre, reabrir a edição de um produto já
+  classificado precisa mostrar a descrição selecionada, não só o código cru. Sem esse campo o
+  `SearchInput` reabriria vazio.
+
+**Job de sincronização** (`scripts/sync_ncm.py`): testado ao vivo contra a API real do Portal
+Único Siscomex dentro do container — precisou de `follow_redirects=True` no `httpx.AsyncClient`
+(a API responde 307 antes do JSON). Populou **10.515 códigos NCM reais** na primeira rodada.
+
+**Frontend** (`ProductEditScreen.tsx`): seção "Classificação fiscal" com `SearchInput` (NCM,
+`changeValueOnSelect={false}` porque a seleção é controlada manualmente — texto editado invalida
+a seleção anterior, forçando nova busca), `Dropdown` (CFOP, 2 opções com texto explicativo) e
+`InputBase` (CEST, livre). `tsc`/`build`/`vitest` limpos (48 testes). Testado ao vivo no navegador
+contra dado real sincronizado: busca por "bovina" e pelo código exato `19059090` retornaram
+resultados corretos, seleção + CFOP `5101` + CEST `1706200` salvos e confirmados após reload da
+página (NCM/CFOP/CEST e `ncm_descricao` persistidos corretamente).
+
+Nota lateral do teste ao vivo: o NCM 02102000 ("Carnes da espécie bovina") escolhido inicialmente
+pra testar a busca não é o correto pra um hambúrguer pronto pra consumo (produto industrializado,
+não carne in natura) — usuário corrigiu durante o teste; o exemplo final usado foi `19059090`.
+Não muda nada no código, é só uma observação sobre qual NCM cada empresa real deve escolher (fora
+do escopo do Ordin validar isso — mesma decisão já registrada no Explorer sobre CEST).
