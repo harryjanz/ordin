@@ -30,6 +30,7 @@
 | App balcão mobile | frontend/balcao | Protótipo — **não deployável** |
 | Infra e deploy AWS | infra | **Não iniciado** |
 | Testes e qualidade | todos | **Zero cobertura** |
+| Emissão fiscal (NFC-e) | company, catalog, payment (ou `fiscal-service` novo), frontend/totem | Levantamento — não iniciado (ver `docs/estudo-nfce.md`, seção 9 pra quebra em histórias) |
 
 ## Definition of Done (feature)
 
