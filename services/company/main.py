@@ -990,10 +990,25 @@ class PriceTableKindIn(BaseModel):
     kind: str | None = Field(default=None, pattern="^(alternativa|promocional)$")
 
 
+class PlanTierOut(BaseModel):
+    min_transactions: int
+    max_transactions: int | None
+    price_per_transaction: float
+
+
 class CompanyPlanPriceTableOut(BaseModel):
     id: int
     name: str
     kind: str | None = None
+    # ORD-177 — transparência pro cliente: antes só o nome da tabela vinha
+    # aqui, sem os valores de fato cobrados. Owner/manager já acessam este
+    # endpoint (_require_company_admin), só faltava o dado. Opcionais porque
+    # este mesmo schema é reaproveitado por CompanyPlanHistoryEntryOut
+    # (histórico de troca não precisa do preço completo, só qual tabela era).
+    totem_price_1: float | None = None
+    totem_multiplier_2: float | None = None
+    totem_multiplier_3_5: float | None = None
+    transaction_tiers: list[PlanTierOut] = []
 
 
 class CompanyPlanOut(BaseModel):
@@ -3943,9 +3958,25 @@ async def set_price_table_kind(
 async def _serialize_company_plan(db: AsyncSession, plan: CompanyPlan) -> dict:
     price_table = await db.get(PriceTable, plan.price_table_id)
     now = datetime.utcnow()
+    tiers = await _get_price_table_tiers(db, price_table.id)  # ORD-177, reaproveita helper da ORD-162
     return {
         "company_id": plan.company_id,
-        "price_table": {"id": price_table.id, "name": price_table.name, "kind": price_table.kind},
+        "price_table": {
+            "id": price_table.id,
+            "name": price_table.name,
+            "kind": price_table.kind,
+            "totem_price_1": price_table.totem_price_1,
+            "totem_multiplier_2": price_table.totem_multiplier_2,
+            "totem_multiplier_3_5": price_table.totem_multiplier_3_5,
+            "transaction_tiers": [
+                {
+                    "min_transactions": t.min_transactions,
+                    "max_transactions": t.max_transactions,
+                    "price_per_transaction": t.price_per_transaction,
+                }
+                for t in tiers
+            ],
+        },
         "started_at": plan.started_at,
         "expires_at": plan.expires_at,
         "renewed_at": plan.renewed_at,
