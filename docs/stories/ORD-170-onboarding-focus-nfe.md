@@ -197,6 +197,13 @@ CPF/CNPJ, mesmo `id`, mesmos tokens.
     token_producao_enc = Column(String(512), nullable=True)
     token_homologacao_enc = Column(String(512), nullable=True)
     focus_nfe_cadastrado_em = Column(DateTime, nullable=True)
+    # Achado de 2026-09-15 (teste ao vivo contra a API real): a resposta do
+    # POST /empresas já traz certificado_valido_ate/certificado_valido_de —
+    # a Focus NFe extrai isso do X.509 no momento do cadastro. Capturado
+    # aqui pra virar pré-requisito de dado da ORD-176 (monitoramento de
+    # validade), sem precisar parsear o certificado localmente.
+    certificado_valido_de = Column(DateTime, nullable=True)
+    certificado_valido_ate = Column(DateTime, nullable=True)
 ```
 
 ### Endpoint novo
@@ -213,7 +220,9 @@ Sem payload no corpo — monta tudo a partir dos dados já persistidos. Internam
    `https://api.focusnfe.com.br/v2/empresas` (produção — confirmado que é o único host que serve
    este endpoint, mesmo pra gerar token de homologação).
 3. Sucesso (201): persiste `id`→`focus_nfe_empresa_id`, `client_app_id`, `token_producao`
-   (criptografado), `token_homologacao` (criptografado), `focus_nfe_cadastrado_em = now()`.
+   (criptografado), `token_homologacao` (criptografado), `focus_nfe_cadastrado_em = now()`, e
+   **`certificado_valido_de`/`certificado_valido_ate`** (vêm prontos na resposta, sem
+   processamento local — pré-requisito de dado da ORD-176).
 4. Erro (4xx): repassa `codigo`/`mensagem`/`erros[]` da Focus NFe pro frontend, sem persistir
    nada, sem logar o payload enviado (contém dado sensível decriptado em memória).
 
