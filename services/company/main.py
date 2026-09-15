@@ -843,13 +843,16 @@ class PaymentConfigListOut(BaseModel):
 class FiscalConfigIn(BaseModel):
     # ORD-168 — todos opcionais, atualização parcial (upsert): só os campos
     # enviados são alterados, campos ausentes preservam o valor já salvo.
+    # Limites de CSC/ID confirmados pelo usuário via pesquisa (Focus NFe/
+    # Olist/Nota Gateway): CSC alfanumérico até 36 caracteres, ID do CSC
+    # numérico, geralmente 6 dígitos (ex.: "000001").
     certificado_base64: str | None = None
     certificado_senha: str | None = None
     certificado_nome_arquivo: str | None = None
-    csc_producao: str | None = None
-    id_token_producao: str | None = None
-    csc_homologacao: str | None = None
-    id_token_homologacao: str | None = None
+    csc_producao: str | None = Field(default=None, max_length=36)
+    id_token_producao: str | None = Field(default=None, max_length=6)
+    csc_homologacao: str | None = Field(default=None, max_length=36)
+    id_token_homologacao: str | None = Field(default=None, max_length=6)
 
 
 class FiscalConfigOut(BaseModel):

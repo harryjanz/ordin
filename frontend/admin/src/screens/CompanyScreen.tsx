@@ -229,6 +229,12 @@ interface FiscalTabProps {
 // em docs/estudo-nfce.md §7.1).
 const CERTIFICADO_TYPES = ["application/x-pkcs12"];
 const CERTIFICADO_MAX_SIZE_MB = 5;
+// ORD-168 — tamanhos confirmados via pesquisa do usuário (Focus NFe/Olist/
+// Nota Gateway): CSC alfanumérico até 36 caracteres; ID do CSC numérico,
+// geralmente 6 dígitos (ex. "000001") — mesmo limite aplicado no backend
+// (FiscalConfigIn, services/company/main.py).
+const CSC_MAX_LENGTH = 36;
+const ID_TOKEN_MAX_LENGTH = 6;
 
 // ORD-168 — não existe um componente de senha com olho pronto no
 // design-system nem em uso em outra tela deste app (LoginScreen/
@@ -237,11 +243,12 @@ const CERTIFICADO_MAX_SIZE_MB = 5;
 // icon+onActionIconClick já usado no campo de URL do webhook (PaymentTab
 // acima). Ícones 'eye'/'eye-off' já existem no icon set do design-system.
 function PasswordField({
-  label, placeholder, inputRef,
+  label, placeholder, inputRef, maxLength,
 }: {
   label: string;
   placeholder: string;
   inputRef: React.MutableRefObject<HTMLInputElement | null>;
+  maxLength?: number;
 }) {
   const [visible, setVisible] = useState(false);
   return (
@@ -253,6 +260,7 @@ function PasswordField({
       autoComplete="new-password"
       icon={visible ? "eye-off" : "eye"}
       onActionIconClick={() => setVisible((v) => !v)}
+      maxLength={maxLength}
     />
   );
 }
@@ -420,16 +428,18 @@ function FiscalTab({ companyId }: FiscalTabProps) {
             label="CSC de produção"
             placeholder={cfg.csc_producao_cadastrado ? "••••••••" : "CSC de produção"}
             inputRef={cscProducaoRef}
+            maxLength={CSC_MAX_LENGTH}
           />
-          <InputBase label="ID do CSC de produção" type="text" placeholder="Ex.: 1" ref={idTokenProducaoRef} />
+          <InputBase label="ID do CSC de produção" type="text" placeholder="Ex.: 000001" ref={idTokenProducaoRef} maxLength={ID_TOKEN_MAX_LENGTH} />
         </div>
         <div className={styles.fiscalRow}>
           <PasswordField
             label="CSC de homologação"
             placeholder={cfg.csc_homologacao_cadastrado ? "••••••••" : "CSC de homologação"}
             inputRef={cscHomologacaoRef}
+            maxLength={CSC_MAX_LENGTH}
           />
-          <InputBase label="ID do CSC de homologação" type="text" placeholder="Ex.: 1" ref={idTokenHomologacaoRef} />
+          <InputBase label="ID do CSC de homologação" type="text" placeholder="Ex.: 000001" ref={idTokenHomologacaoRef} maxLength={ID_TOKEN_MAX_LENGTH} />
         </div>
 
         <div className={styles.formActions} style={{ marginTop: 12 }}>
