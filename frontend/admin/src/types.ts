@@ -403,9 +403,27 @@ export interface PriceTableSummary {
 // completamente diferente — evitar confundir os dois no código.
 export type CompanyPlanStatus = "Ativo" | "Vencido";
 
+// ORD-177 — transparência pro cliente: preços e faixas agora vêm junto do
+// plano vigente, não só o nome da tabela. Opcionais porque o mesmo shape é
+// reaproveitado por CompanyPlanHistoryEntry (histórico de troca não traz
+// esses valores).
+export interface PlanTier {
+  min_transactions: number;
+  max_transactions: number | null;
+  price_per_transaction: number;
+}
+
 export interface CompanyPlan {
   company_id: number;
-  price_table: { id: number; name: string; kind: PriceTableKind };
+  price_table: {
+    id: number;
+    name: string;
+    kind: PriceTableKind;
+    totem_price_1?: number;
+    totem_multiplier_2?: number;
+    totem_multiplier_3_5?: number;
+    transaction_tiers?: PlanTier[];
+  };
   started_at: string;
   expires_at: string;
   renewed_at: string | null;
