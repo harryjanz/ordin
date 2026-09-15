@@ -105,6 +105,17 @@ class Category(Base):
     sort_order = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+class NcmCode(Base):
+    """Referência global (NÃO por empresa) da tabela NCM oficial — mesma
+    tabela pra todo mundo, sincronizada mensalmente contra a API pública da
+    Receita Federal (Sistema Classif, ver scripts/sync_ncm.py). ORD-169."""
+    __tablename__ = "ncm_codes"
+    codigo         = Column(String(8), primary_key=True)  # sem formatação, só dígitos
+    descricao      = Column(Text, nullable=False)
+    ato_legal      = Column(String(255), nullable=True)
+    sincronizado_em = Column(DateTime, server_default=func.now())
+
+
 class Product(Base):
     __tablename__ = "products"
     __table_args__ = (UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),)
@@ -124,6 +135,13 @@ class Product(Base):
     sku         = Column(String(50))  # único por empresa, ver UniqueConstraint acima
     sort_order  = Column(Integer)  # gerenciado só via create_product (inicial) e /catalog/products/reorder
     created_at  = Column(DateTime, default=datetime.utcnow)
+    # ORD-169 — classificação fiscal, todos opcionais (produto vende sem,
+    # só não pode emitir NFC-e sem — checagem é da história 4). ncm com FK
+    # pra tabela local evita dado fiscal inconsistente desde o cadastro;
+    # cfop/cest são texto simples, sem tabela de referência.
+    ncm         = Column(String(8), ForeignKey("ncm_codes.codigo"), nullable=True)
+    cfop        = Column(String(4), nullable=True)  # "5101" ou "5102", validado na aplicação
+    cest        = Column(String(7), nullable=True)  # opcional sempre, Ordin não valida nem sugere
 
 class Allergen(Base):
     """Master data, não por empresa — lista oficial (RDC 727/2022, Lei
@@ -785,11 +803,25 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "calories": p.calories,
         "sku": p.sku,
         "sort_order": p.sort_order,
+        "ncm": p.ncm,
+        "ncm_descricao": (
+            (await db.execute(select(NcmCode.descricao).filter_by(codigo=p.ncm))).scalar_one_or_none()
+            if p.ncm else None
+        ),
+        "cfop": p.cfop,
+        "cest": p.cest,
         "allergens": await _get_product_allergens(db, p.id),
         "option_groups": await _get_product_option_groups(db, p.id),
         "related_products": await _get_product_related(db, p.id),
         "promotion": await _resolve_product_promotion(db, p),
     }
+
+async def _validate_ncm_exists(db: AsyncSession, ncm: str) -> None:
+    """NCM só pode vir da tabela local sincronizada (scripts/sync_ncm.py) —
+    ver ORD-169, produto com NCM inválido é rejeitado na escrita."""
+    exists = (await db.execute(select(NcmCode.codigo).filter_by(codigo=ncm))).scalars().first()
+    if not exists:
+        raise HTTPException(400, detail="ncm não encontrado na tabela de referência")
 
 # ── Promoções (ORD-166) ──────────────────────────────────────────────────────
 
@@ -1028,6 +1060,13 @@ class AllergenOut(BaseModel):
 class AllergenListOut(BaseModel):
     allergens: list[AllergenOut]
 
+class NcmOut(BaseModel):
+    codigo: str
+    descricao: str
+
+class NcmListOut(BaseModel):
+    results: list[NcmOut]
+
 class OptionIn(BaseModel):
     label: str
     price_delta: float = 0  # acréscimo sobre o preço-base do produto, não preço absoluto — ver ORD-142
@@ -1174,6 +1213,14 @@ class ProductOut(BaseModel):
     calories: int | None = None
     sku: str | None = None
     sort_order: int | None = None
+    # ORD-169 — classificação fiscal, sempre opcional. ncm_descricao só existe
+    # aqui na saída (join com ncm_codes) — o cliente nunca digita o NCM, só
+    # escolhe via busca, então a tela de edição precisa do texto pra mostrar
+    # o que já está selecionado sem uma segunda chamada.
+    ncm: str | None = None
+    ncm_descricao: str | None = None
+    cfop: str | None = None
+    cest: str | None = None
     allergens: list[AllergenOut] = []
     option_groups: list[ProductOptionGroupOut] = []
     # ORD-152: só populado por update_product() ao ativar o produto — os
@@ -1188,6 +1235,17 @@ class ProductOut(BaseModel):
 class ProductListOut(BaseModel):
     products: list[ProductOut]
 
+# ORD-169 — só os 2 valores fechados no Explorer (produção própria / revenda),
+# venda presencial do totem sempre dentro do estado.
+VALID_CFOP = {"5101", "5102"}
+
+
+def _validate_cfop(v: str | None) -> str | None:
+    if v is not None and v not in VALID_CFOP:
+        raise ValueError(f"cfop deve ser um de {sorted(VALID_CFOP)}")
+    return v
+
+
 class ProductIn(BaseModel):
     name: str
     description: str | None = None
@@ -1198,6 +1256,10 @@ class ProductIn(BaseModel):
     calories: int | None = None
     sku: str | None = None
     allergen_ids: list[int] | None = None
+    # ORD-169 — classificação fiscal, sempre opcional no cadastro.
+    ncm: str | None = None
+    cfop: str | None = None
+    cest: str | None = None
 
     @field_validator("price")
     @classmethod
@@ -1205,6 +1267,11 @@ class ProductIn(BaseModel):
         if v <= 0:
             raise ValueError("Preço deve ser positivo")
         return v
+
+    @field_validator("cfop")
+    @classmethod
+    def cfop_valid(cls, v: str | None) -> str | None:
+        return _validate_cfop(v)
 
 class ProductUpdate(BaseModel):
     name: str | None = None
@@ -1223,6 +1290,10 @@ class ProductUpdate(BaseModel):
     # ORD-151: precisa vir True pra confirmar a desativação em cascata dos
     # combos ativos vinculados — ver update_product().
     confirm_deactivate_combos: bool | None = None
+    # ORD-169 — classificação fiscal, sempre opcional na edição.
+    ncm: str | None = None
+    cfop: str | None = None
+    cest: str | None = None
 
     @field_validator("price")
     @classmethod
@@ -1230,6 +1301,11 @@ class ProductUpdate(BaseModel):
         if v is not None and v <= 0:
             raise ValueError("Preço deve ser positivo")
         return v
+
+    @field_validator("cfop")
+    @classmethod
+    def cfop_valid(cls, v: str | None) -> str | None:
+        return _validate_cfop(v)
 
 class ReorderIn(BaseModel):
     category_id: int
@@ -1611,6 +1687,31 @@ async def list_allergens(
     allergens = result.scalars().all()
     return {"allergens": [{"id": a.id, "code": a.code, "name": a.name, "category": a.category} for a in allergens]}
 
+@app.get(
+    "/catalog/ncm/search",
+    response_model=NcmListOut,
+    tags=["Catálogo"],
+    summary="Buscar NCM por código ou descrição",
+)
+async def search_ncm(
+    q: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """Master data global (sem company_id), sincronizada por scripts/sync_ncm.py
+    — ver ORD-169. Busca por código (prefixo) ou descrição (substring), sem
+    digitação livre de NCM na UI: o owner sempre escolhe de um resultado
+    desta busca, nunca digita o código final direto."""
+    like = f"%{q}%"
+    result = await db.execute(
+        select(NcmCode)
+        .filter(or_(NcmCode.codigo.like(f"{q}%"), NcmCode.descricao.ilike(like)))
+        .order_by(NcmCode.codigo)
+        .limit(20)
+    )
+    codes = result.scalars().all()
+    return {"results": [{"codigo": c.codigo, "descricao": c.descricao} for c in codes]}
+
 @app.post(
     "/catalog/categories",
     status_code=201,
@@ -1730,6 +1831,8 @@ async def create_product(
         )).scalars().first()
         if not cat:
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
+    if body.ncm is not None:
+        await _validate_ncm_exists(db, body.ncm)
     next_sort_order = 0
     if body.category_id is not None:
         count_result = await db.execute(
@@ -1749,6 +1852,9 @@ async def create_product(
         calories=body.calories,
         sku=body.sku,
         sort_order=next_sort_order,
+        ncm=body.ncm,
+        cfop=body.cfop,
+        cest=body.cest,
     )
     db.add(p)
     try:
@@ -1813,6 +1919,8 @@ async def update_product(
         )).scalars().first()
         if not cat:
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
+    if body.ncm is not None:
+        await _validate_ncm_exists(db, body.ncm)
 
     affected_combos: list[tuple[int, str]] = []
     if body.active is False:

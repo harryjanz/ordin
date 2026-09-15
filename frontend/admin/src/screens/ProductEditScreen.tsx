@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -11,6 +11,7 @@ import {
   Modal,
   NumberInput,
   NumberSpinInput,
+  SearchInput,
   Tag,
   TagInput,
   TextArea,
@@ -18,6 +19,7 @@ import {
   UploadListFiles,
   makeToast,
   type DropdownOptions,
+  type SearchOptions,
   type UploadFile,
 } from "design-system";
 import api from "../api";
@@ -26,12 +28,26 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
-import type { Allergen, Category, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct } from "../types";
+import type { Allergen, Category, NcmSearchResult, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct } from "../types";
 import styles from "./ProductEditScreen.module.scss";
 
 const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
 const IMAGE_MAX_SIZE_MB = 2;
 const IMAGE_TYPES = ["image/jpeg", "image/png"];
+
+// ORD-169 — só os 2 valores fechados no Explorer (produção própria / revenda
+// de terceiros), venda presencial do totem sempre dentro do estado.
+const CFOP_OPTIONS: DropdownOptions[] = [
+  { value: "5101", label: "5101 — Venda de produção do próprio estabelecimento" },
+  { value: "5102", label: "5102 — Venda de mercadoria adquirida de terceiros" },
+];
+
+// A descrição sincronizada da Receita Federal vem com traços de hierarquia
+// (ex. "-- Outros" é subitem de nível 2) — sem remover, o rótulo duplicava o
+// travessão: "código — - descrição".
+function ncmLabel(codigo: string, descricao: string): string {
+  return `${codigo} — ${descricao.replace(/^-+\s*/, "")}`;
+}
 
 // Um produto pode estar vinculado ao mesmo cardápio direto E via categoria
 // ao mesmo tempo — mescla numa linha só em vez de mostrar o mesmo cardápio
@@ -67,6 +83,10 @@ interface EditProdState {
   allergen_ids: string[];
   option_groups: ProductOptionGroup[];
   related_products: RelatedProduct[];
+  // ORD-169 — classificação fiscal, sempre opcional.
+  ncm: string | null;
+  cfop: string | null;
+  cest: string;
 }
 
 // ORD-136 — edição de produto sai do modal (espaço comprometido, mais
@@ -93,6 +113,13 @@ export default function ProductEditScreen() {
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
   const [productFormError, setProductFormError] = useState("");
   const [productSaving, setProductSaving] = useState(false);
+
+  // ── Classificação fiscal (ORD-169) ───────────────────────────────────────
+  // NCM nunca é digitado livre — só escolhido a partir da busca (SearchInput
+  // reflete o texto selecionado; ncmQuery é o que dirige a busca em si).
+  const [ncmQuery, setNcmQuery] = useState("");
+  const [ncmResults, setNcmResults] = useState<NcmSearchResult[]>([]);
+  const ncmSearchTimer = useRef<ReturnType<typeof setTimeout>>();
 
   // ── Opções do produto (ORD-140) ──────────────────────────────────────────
   // Só vincula grupo já cadastrado — criação fica em Catálogo > Opções
@@ -143,7 +170,11 @@ export default function ProductEditScreen() {
           allergen_ids: (p.allergens ?? []).map((a) => String(a.id)),
           option_groups: p.option_groups ?? [],
           related_products: p.related_products ?? [],
+          ncm: p.ncm,
+          cfop: p.cfop,
+          cest: p.cest ?? "",
         });
+        setNcmQuery(p.ncm && p.ncm_descricao ? ncmLabel(p.ncm, p.ncm_descricao) : "");
         setCategories(categoriesRes.data.categories ?? categoriesRes.data);
         setAllergens(allergensRes.data.allergens ?? allergensRes.data);
         setEditProdMenus(menusRes.data.menus ?? []);
@@ -194,6 +225,40 @@ export default function ProductEditScreen() {
     if (!editProd) return;
     const r = await api.delete(`/catalog/products/${productId}/image`, catalogParams());
     setEditProd((prev) => (prev ? { ...prev, image_url: r.data.image_url, thumbnail_url: r.data.thumbnail_url } : prev));
+  }
+
+  function handleNcmQueryChange(value: string) {
+    setNcmQuery(value);
+    // Editar o texto invalida a seleção anterior — NCM só fica setado de
+    // novo ao clicar numa opção da busca (nunca por digitação livre).
+    setEditProd((prev) => (prev ? { ...prev, ncm: null } : prev));
+    clearTimeout(ncmSearchTimer.current);
+    if (value.trim().length < 3) {
+      setNcmResults([]);
+      return;
+    }
+    ncmSearchTimer.current = setTimeout(async () => {
+      try {
+        const r = await api.get("/catalog/ncm/search", { params: { q: value.trim() } });
+        setNcmResults(r.data.results ?? []);
+      } catch {
+        setNcmResults([]);
+      }
+    }, 400);
+  }
+
+  function selectNcm(option: SearchOptions) {
+    const result = ncmResults.find((n) => n.codigo === option.value);
+    if (!result) return;
+    setEditProd((prev) => (prev ? { ...prev, ncm: result.codigo } : prev));
+    setNcmQuery(ncmLabel(result.codigo, result.descricao));
+    setNcmResults([]);
+  }
+
+  function clearNcm() {
+    setEditProd((prev) => (prev ? { ...prev, ncm: null } : prev));
+    setNcmQuery("");
+    setNcmResults([]);
   }
 
   function resetOptionModal() {
@@ -379,10 +444,13 @@ export default function ProductEditScreen() {
         tags: editProd.tags,
         allergen_ids: editProd.allergen_ids.map(Number),
         related_product_ids: editProd.related_products.map((rp) => rp.id),
+        ncm: editProd.ncm,
+        cfop: editProd.cfop,
+        cest: editProd.cest.trim() || null,
       }, catalogParams());
       navigate("/catalog?tab=products");
-    } catch {
-      setProductFormError("Erro ao salvar produto.");
+    } catch (err) {
+      setProductFormError(parseApiError(err).message || "Erro ao salvar produto.");
     } finally {
       setProductSaving(false);
     }
@@ -563,6 +631,52 @@ export default function ProductEditScreen() {
               }}
             />
           ))}
+        </div>
+      </div>
+
+      <div className={styles.panel}>
+        <h2 className={styles.h2}>Classificação fiscal</h2>
+        <p className={styles.menusInfo}>
+          Usada na emissão de NFC-e — produto sem essa classificação pode vender normalmente,
+          só não pode emitir nota fiscal.
+        </p>
+        <div className={styles.formRow}>
+          <div className={styles.formRowField}>
+            <SearchInput
+              label="NCM"
+              placeholder="Buscar por código ou descrição…"
+              value={ncmQuery}
+              onChange={handleNcmQueryChange}
+              onValueSelected={selectNcm}
+              options={ncmResults.map((n) => ({ value: n.codigo, label: ncmLabel(n.codigo, n.descricao) }))}
+              changeValueOnSelect={false}
+              emptyMessage={ncmQuery.trim().length < 3 ? "Digite ao menos 3 caracteres" : "Nenhum NCM encontrado"}
+            />
+          </div>
+          {editProd.ncm && (
+            <Button type="button" size="small" variant="secondary" onClick={clearNcm}>
+              Remover NCM
+            </Button>
+          )}
+        </div>
+
+        <div className={styles.formRow}>
+          <div className={styles.formRowField}>
+            <Dropdown
+              label="CFOP"
+              value={CFOP_OPTIONS.find((o) => o.value === editProd.cfop) ?? null}
+              onValueSelected={(opt) => setEditProd({ ...editProd, cfop: opt.value })}
+              options={CFOP_OPTIONS}
+            />
+          </div>
+          <div className={styles.formRowField}>
+            <InputBase
+              label="CEST"
+              placeholder="Opcional"
+              value={editProd.cest}
+              onChange={(e) => setEditProd({ ...editProd, cest: e.target.value })}
+            />
+          </div>
         </div>
       </div>
 

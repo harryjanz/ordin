@@ -320,6 +320,25 @@ class CompanyPaymentConfig(Base):
     )
 
 
+class CompanyFiscalConfig(Base):
+    # ORD-168 — só certificado A1 e CSC; razão social/IE/regime/endereço já
+    # existem em Company (state_registration/tax_regime/legal_name/endereço),
+    # reaproveitados como leitura na aba Fiscal em vez de duplicados aqui.
+    __tablename__ = "company_fiscal_configs"
+    id                        = Column(Integer, primary_key=True)
+    company_id                = Column(Integer, nullable=False, unique=True, index=True)
+    certificado_arquivo_enc   = Column(String(8000), nullable=True)  # base64 do .pfx, criptografado
+    certificado_senha_enc     = Column(String(500), nullable=True)
+    certificado_nome_arquivo  = Column(String(255), nullable=True)
+    certificado_enviado_em    = Column(DateTime, nullable=True)
+    csc_producao_enc          = Column(String(500), nullable=True)
+    id_token_producao         = Column(String(32), nullable=True)
+    csc_homologacao_enc       = Column(String(500), nullable=True)
+    id_token_homologacao      = Column(String(32), nullable=True)
+    created_at                = Column(DateTime, default=datetime.utcnow)
+    updated_at                = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class CompanyContact(Base):
     __tablename__ = "company_contacts"
     id           = Column(Integer, primary_key=True)
@@ -819,6 +838,38 @@ class PaymentConfigOut(BaseModel):
 
 class PaymentConfigListOut(BaseModel):
     configs: list[PaymentConfigOut]
+
+
+class FiscalConfigIn(BaseModel):
+    # ORD-168 — todos opcionais, atualização parcial (upsert): só os campos
+    # enviados são alterados, campos ausentes preservam o valor já salvo.
+    # Limites de CSC/ID confirmados pelo usuário via pesquisa (Focus NFe/
+    # Olist/Nota Gateway): CSC alfanumérico até 36 caracteres, ID do CSC
+    # numérico, geralmente 6 dígitos (ex.: "000001").
+    certificado_base64: str | None = None
+    certificado_senha: str | None = None
+    certificado_nome_arquivo: str | None = None
+    csc_producao: str | None = Field(default=None, max_length=36)
+    id_token_producao: str | None = Field(default=None, max_length=6)
+    csc_homologacao: str | None = Field(default=None, max_length=36)
+    id_token_homologacao: str | None = Field(default=None, max_length=6)
+
+
+class FiscalConfigOut(BaseModel):
+    # Espelha razão social/IE/regime/endereço de Company (somente leitura
+    # aqui — edição continua em CompanyContractScreen) + presença dos
+    # campos novos desta história. Nunca decripta certificado/CSC pra
+    # retornar em texto puro, só indica presença.
+    legal_name: str | None = None
+    state_registration: str | None = None
+    tax_regime: str | None = None
+    address_summary: str | None = None
+    certificado_cadastrado: bool
+    certificado_nome_arquivo: str | None = None
+    certificado_enviado_em: datetime | None = None
+    csc_producao_cadastrado: bool
+    csc_homologacao_cadastrado: bool
+    completo: bool
 
 
 VALID_CONTACT_TYPES = {"comercial", "financeiro", "tecnico"}
@@ -3245,6 +3296,112 @@ async def activate_payment_config(
     cfg.active = True
     await db.commit()
     return {"ok": True}
+
+
+# ── Configuração fiscal — certificado A1 e CSC (ORD-168) ──────────────────────
+# Razão social/IE/regime/endereço já existem em Company — não duplicados aqui,
+# só espelhados como leitura na resposta do GET. Restrito a superadmin/admin
+# (_require_platform_admin): decisão do Explorer foi cadastro assistido pelo
+# time Ordin, não self-service do owner (docs/stories/ORD-168-*.md).
+
+def _address_summary(co: Company) -> str | None:
+    if not co.street:
+        return None
+    parts = [co.street]
+    if co.address_number:
+        parts[-1] += f", {co.address_number}"
+    if co.neighborhood:
+        parts.append(co.neighborhood)
+    city_uf = "/".join(p for p in (co.city, co.state) if p)
+    if city_uf:
+        parts.append(city_uf)
+    return ", ".join(parts)
+
+
+def _serialize_fiscal_config(co: Company, cfg: CompanyFiscalConfig | None) -> dict:
+    certificado_cadastrado = bool(cfg and cfg.certificado_arquivo_enc)
+    csc_producao_cadastrado = bool(cfg and cfg.csc_producao_enc)
+    csc_homologacao_cadastrado = bool(cfg and cfg.csc_homologacao_enc)
+    return {
+        "legal_name": co.legal_name,
+        "state_registration": co.state_registration,
+        "tax_regime": co.tax_regime,
+        "address_summary": _address_summary(co),
+        "certificado_cadastrado": certificado_cadastrado,
+        "certificado_nome_arquivo": cfg.certificado_nome_arquivo if cfg else None,
+        "certificado_enviado_em": cfg.certificado_enviado_em if cfg else None,
+        "csc_producao_cadastrado": csc_producao_cadastrado,
+        "csc_homologacao_cadastrado": csc_homologacao_cadastrado,
+        "completo": bool(
+            co.legal_name and co.state_registration and co.tax_regime and co.street
+            and certificado_cadastrado and csc_producao_cadastrado and csc_homologacao_cadastrado
+        ),
+    }
+
+
+@app.get(
+    "/companies/{company_id}/fiscal-config",
+    response_model=FiscalConfigOut,
+    tags=["Fiscal"],
+    summary="Consultar configuração fiscal da empresa (certificado, CSC)",
+)
+async def get_fiscal_config(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    co = (await db.execute(select(Company).filter_by(id=company_id))).scalars().first()
+    if not co:
+        raise HTTPException(404, "Empresa não encontrada")
+    cfg = (await db.execute(
+        select(CompanyFiscalConfig).filter_by(company_id=company_id)
+    )).scalars().first()
+    return _serialize_fiscal_config(co, cfg)
+
+
+@app.put(
+    "/companies/{company_id}/fiscal-config",
+    response_model=FiscalConfigOut,
+    tags=["Fiscal"],
+    summary="Cadastrar/atualizar certificado e CSC da empresa (upsert parcial)",
+)
+async def update_fiscal_config(
+    company_id: int,
+    body: FiscalConfigIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    co = (await db.execute(select(Company).filter_by(id=company_id))).scalars().first()
+    if not co:
+        raise HTTPException(404, "Empresa não encontrada")
+    cfg = (await db.execute(
+        select(CompanyFiscalConfig).filter_by(company_id=company_id)
+    )).scalars().first()
+    if cfg is None:
+        cfg = CompanyFiscalConfig(company_id=company_id)
+        db.add(cfg)
+
+    if body.certificado_base64 is not None:
+        cfg.certificado_arquivo_enc = encrypt_field(body.certificado_base64)
+        cfg.certificado_enviado_em = datetime.utcnow()
+    if body.certificado_senha is not None:
+        cfg.certificado_senha_enc = encrypt_field(body.certificado_senha)
+    if body.certificado_nome_arquivo is not None:
+        cfg.certificado_nome_arquivo = body.certificado_nome_arquivo
+    if body.csc_producao is not None:
+        cfg.csc_producao_enc = encrypt_field(body.csc_producao)
+    if body.id_token_producao is not None:
+        cfg.id_token_producao = body.id_token_producao
+    if body.csc_homologacao is not None:
+        cfg.csc_homologacao_enc = encrypt_field(body.csc_homologacao)
+    if body.id_token_homologacao is not None:
+        cfg.id_token_homologacao = body.id_token_homologacao
+
+    await db.commit()
+    await db.refresh(cfg)
+    return _serialize_fiscal_config(co, cfg)
 
 
 # ── Contatos e responsável legal (ORD-058) ────────────────────────────────────

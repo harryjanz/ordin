@@ -22,10 +22,16 @@ const COMPANY_SIZE_OPTIONS: DropdownOptions[] = [
   { value: "DEMAIS", label: "Demais" },
 ];
 
-const TAX_REGIME_OPTIONS: DropdownOptions[] = [
+// ORD-168 — exportado pra CompanyScreen.tsx reaproveitar na tradução do
+// resumo somente-leitura da aba Fiscal, em vez de duplicar o mapeamento.
+export const TAX_REGIME_OPTIONS: DropdownOptions[] = [
   { value: "simples_nacional", label: "Simples Nacional" },
   { value: "lucro_presumido", label: "Lucro Presumido" },
   { value: "lucro_real", label: "Lucro Real" },
+  // ORD-168 — faltava MEI, recorte real da base-alvo do Ordin (pequeno food
+  // service); a Focus NFe trata como regime próprio (código 4, distinto de
+  // Simples Nacional) no cadastro fiscal.
+  { value: "mei", label: "MEI" },
 ];
 
 const UF_OPTIONS: DropdownOptions[] = UF_VALUES.map((uf) => ({ value: uf, label: uf }));
