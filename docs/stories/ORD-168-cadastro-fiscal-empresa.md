@@ -437,3 +437,31 @@ Implementada na branch `epic/nfce-focusnfe`, ainda sem PR aberta:
    confirmada após reload de página. Console do navegador sem erros.
 
 Nada commitado além do próprio código ainda — aguardando decisão do usuário sobre abrir PR.
+
+### Ajustes de UI pós-revisão do usuário (2026-09-15)
+Revisão do usuário na tela implementada pediu 3 ajustes + 1 dúvida de escopo:
+1. **Upload de arquivo**: trocado o `<input type="file">` cru pelo componente `Upload` +
+   `UploadListFiles` já existente no design-system (mesmo padrão de
+   `ProductEditScreen.tsx`/imagem de produto) — valida extensão (`application/x-pkcs12`) e
+   tamanho máximo (5 MB) nativamente. **Ressalva registrada**: o componente valida por MIME
+   reportado pelo navegador, não por extensão de arquivo — `.pfx`/`.p12` têm reconhecimento de
+   MIME inconsistente entre SO/navegador; só um teste com certificado real (mesmo bloqueio já
+   conhecido) confirma se `application/x-pkcs12` é suficiente na prática.
+2. **Senha do certificado e CSC como campo de senha com olho**: não existia componente nem
+   padrão pronto pra isso em nenhuma tela do admin (checado antes de assumir) — construído com
+   `InputBase` + `icon="eye"/"eye-off"` + `onActionIconClick`, reaproveitando o mesmo mecanismo já
+   usado no campo de URL do webhook (`PaymentTab`). Vira o primeiro uso desse padrão no admin.
+3. **CSC dois por linha**: reorganizado em grid de 2 colunas (`.fiscalRow`, nova classe em
+   `CompanyScreen.module.scss`) — uma linha por ambiente (CSC + ID do token), produção e
+   homologação.
+4. **Campo de senha do certificado muito largo**: também movido pro grid de 2 colunas (sozinho
+   na linha), consistente com o tamanho dos campos de CSC abaixo.
+5. **Dúvida sobre onde ativa/desativa a emissão**: esclarecido — não é escopo desta história.
+   `ativo`/`ambiente` já estão desenhados na ORD-171 (história 4), condicionados a existir token
+   da Focus NFe primeiro (ORD-170). Usuário confirmou manter como já desenhado, não adiantar pra
+   esta história.
+
+Testado ao vivo de novo após os ajustes (rebuild da imagem do admin): Upload nativo renderiza
+corretamente, campo de senha compacto, toggle de olho confirmado funcionando (texto
+alterna mascarado/visível), CSC em duas colunas por ambiente. `tsc`/build/testes de frontend sem
+regressão.

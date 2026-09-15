@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
-import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, makeToast, type DropdownOptions } from "design-system";
+import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, Upload, UploadListFiles, makeToast, type DropdownOptions, type UploadFile } from "design-system";
 import api from "../api";
 import { getCompanyPlan, getFiscalConfig, listCompanies, updateFiscalConfig } from "../api/companies";
 import { parseApiError } from "../lib/apiErrors";
@@ -220,6 +220,43 @@ interface FiscalTabProps {
   companyId: number;
 }
 
+// ORD-168 — mesma constante/padrão de ProductEditScreen.tsx (IMAGE_MAX_SIZE_MB/
+// IMAGE_TYPES) pro componente Upload do design-system. application/x-pkcs12 é
+// o MIME registrado pra .pfx/.p12 — em teste real com certificado de verdade,
+// vale confirmar que o navegador reporta esse MIME (alguns SOs/navegadores
+// caem em application/octet-stream pra esse tipo de arquivo; não coberto
+// ainda por não termos um .pfx real pra testar, ver bloqueio já registrado
+// em docs/estudo-nfce.md §7.1).
+const CERTIFICADO_TYPES = ["application/x-pkcs12"];
+const CERTIFICADO_MAX_SIZE_MB = 5;
+
+// ORD-168 — não existe um componente de senha com olho pronto no
+// design-system nem em uso em outra tela deste app (LoginScreen/
+// SetPasswordScreen/SettingsScreen usam type="password" puro, sem toggle) —
+// construído aqui em cima do InputBase, reaproveitando o mesmo mecanismo de
+// icon+onActionIconClick já usado no campo de URL do webhook (PaymentTab
+// acima). Ícones 'eye'/'eye-off' já existem no icon set do design-system.
+function PasswordField({
+  label, placeholder, inputRef,
+}: {
+  label: string;
+  placeholder: string;
+  inputRef: React.MutableRefObject<HTMLInputElement | null>;
+}) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <InputBase
+      label={label}
+      type={visible ? "text" : "password"}
+      placeholder={placeholder}
+      ref={(el) => { inputRef.current = el; }}
+      autoComplete="new-password"
+      icon={visible ? "eye-off" : "eye"}
+      onActionIconClick={() => setVisible((v) => !v)}
+    />
+  );
+}
+
 // ORD-168 — certificado A1 + CSC (produção/homologação). Razão social/IE/
 // regime/endereço já existem em Company e são editados em
 // CompanyContractScreen — mostrados aqui só como resumo somente-leitura,
@@ -233,6 +270,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
   const [formKey, setFormKey] = useState(0);
 
   const [certFile, setCertFile] = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
   const certSenhaRef = useRef<HTMLInputElement | null>(null);
   const cscProducaoRef = useRef<HTMLInputElement | null>(null);
   const idTokenProducaoRef = useRef<HTMLInputElement | null>(null);
@@ -252,6 +290,16 @@ function FiscalTab({ companyId }: FiscalTabProps) {
   function flash(ok: boolean, text: string) {
     setMsg({ ok, text });
     setTimeout(() => setMsg(null), 3000);
+  }
+
+  function handleCertUpload(files: UploadFile[]) {
+    const picked = files[0];
+    setUploadFiles(files);
+    if (picked && picked.status === "success") {
+      setCertFile(picked.file);
+    } else {
+      setCertFile(null);
+    }
   }
 
   function fileToBase64(file: File): Promise<string> {
@@ -295,6 +343,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
       const updated = await updateFiscalConfig(companyId, payload);
       setCfg(updated);
       setCertFile(null);
+      setUploadFiles([]);
       setFormKey((k) => k + 1); // limpa os campos sensíveis (senha/CSC) depois de salvar
       flash(true, "Dados fiscais salvos!");
     } catch (e: unknown) {
@@ -345,33 +394,43 @@ function FiscalTab({ companyId }: FiscalTabProps) {
             ? `Certificado cadastrado: ${cfg.certificado_nome_arquivo ?? "arquivo"} — envie um novo arquivo para substituir.`
             : "Nenhum certificado cadastrado ainda."}
         </div>
-        <input type="file" accept=".pfx,.p12" onChange={(e) => setCertFile(e.target.files?.[0] ?? null)} />
-        <InputBase
-          label="Senha do certificado"
-          type="password"
-          placeholder={cfg.certificado_cadastrado ? "••••••••" : "Senha do arquivo .pfx"}
-          ref={certSenhaRef}
-          autoComplete="new-password"
+        <Upload
+          fullWidth={false}
+          width={320}
+          maxFileSize={CERTIFICADO_MAX_SIZE_MB}
+          multipleFiles={false}
+          types={CERTIFICADO_TYPES}
+          helperMessage=".pfx ou .p12, até 5 MB"
+          errorMessage="Envie um arquivo .pfx ou .p12 de até 5 MB"
+          onCallbackUpload={handleCertUpload}
         />
+        <UploadListFiles items={uploadFiles} removable={false} />
+        <div className={styles.fiscalRow}>
+          <PasswordField
+            label="Senha do certificado"
+            placeholder={cfg.certificado_cadastrado ? "••••••••" : "Senha do arquivo .pfx"}
+            inputRef={certSenhaRef}
+          />
+        </div>
 
         <div className={styles.formTitle} style={{ marginTop: 16 }}>CSC — Código de Segurança do Contribuinte</div>
         <div className={styles.formHint}>Gerado no portal da SEFAZ do estado da empresa.</div>
-        <InputBase
-          label="CSC de produção"
-          type="password"
-          placeholder={cfg.csc_producao_cadastrado ? "••••••••" : "CSC de produção"}
-          ref={cscProducaoRef}
-          autoComplete="new-password"
-        />
-        <InputBase label="ID do CSC de produção" type="text" placeholder="Ex.: 1" ref={idTokenProducaoRef} />
-        <InputBase
-          label="CSC de homologação"
-          type="password"
-          placeholder={cfg.csc_homologacao_cadastrado ? "••••••••" : "CSC de homologação"}
-          ref={cscHomologacaoRef}
-          autoComplete="new-password"
-        />
-        <InputBase label="ID do CSC de homologação" type="text" placeholder="Ex.: 1" ref={idTokenHomologacaoRef} />
+        <div className={styles.fiscalRow}>
+          <PasswordField
+            label="CSC de produção"
+            placeholder={cfg.csc_producao_cadastrado ? "••••••••" : "CSC de produção"}
+            inputRef={cscProducaoRef}
+          />
+          <InputBase label="ID do CSC de produção" type="text" placeholder="Ex.: 1" ref={idTokenProducaoRef} />
+        </div>
+        <div className={styles.fiscalRow}>
+          <PasswordField
+            label="CSC de homologação"
+            placeholder={cfg.csc_homologacao_cadastrado ? "••••••••" : "CSC de homologação"}
+            inputRef={cscHomologacaoRef}
+          />
+          <InputBase label="ID do CSC de homologação" type="text" placeholder="Ex.: 1" ref={idTokenHomologacaoRef} />
+        </div>
 
         <div className={styles.formActions} style={{ marginTop: 12 }}>
           <Button type="button" onClick={handleSave} loading={saving} disabled={saving}>Salvar</Button>
