@@ -479,6 +479,8 @@ export interface FiscalConfig {
   // focus_nfe_cadastrado=true (validado no backend).
   ativo: boolean;
   ambiente: "homologacao" | "producao";
+  // ORD-178 — distingue "cadastrado via API" de "cadastrado manualmente".
+  focus_nfe_cadastro_manual: boolean;
 }
 
 // ORD-170 — corpo de erro repassado 1:1 da Focus NFe (erros[] pode vir vazio).
@@ -499,6 +501,9 @@ export interface FiscalConfigUpdate {
   // ORD-171
   ativo?: boolean;
   ambiente?: "homologacao" | "producao";
+  // ORD-178
+  token_producao_manual?: string;
+  token_homologacao_manual?: string;
 }
 
 export interface Order {

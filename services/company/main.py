@@ -357,6 +357,12 @@ class CompanyFiscalConfig(Base):
     # nunca emite nota fiscal real por engano num cliente novo.
     ativo                    = Column(Boolean, nullable=False, default=False)
     ambiente                 = Column(String(12), nullable=False, default="homologacao")
+    # ORD-178 — distingue origem do cadastro na Focus NFe: true quando os
+    # tokens vieram colados manualmente (empresa já existia lá, ex. criada
+    # direto no painel da Focus NFe), false quando vieram de um POST
+    # /empresas de verdade (ORD-170). Zerado sempre que o onboarding
+    # automatizado roda com sucesso — a origem mais recente prevalece.
+    focus_nfe_cadastro_manual = Column(Boolean, nullable=False, default=False)
     created_at                = Column(DateTime, default=datetime.utcnow)
     updated_at                = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -887,6 +893,14 @@ class FiscalConfigIn(BaseModel):
             raise ValueError('ambiente deve ser "homologacao" ou "producao"')
         return v
 
+    # ORD-178 — via alternativa ao onboarding automatizado (POST /empresas,
+    # ORD-170): empresa que já tinha conta própria na Focus NFe, ou token de
+    # teste gerado manualmente no painel deles. Pelo menos um dos dois é
+    # exigido na escrita (validado no endpoint, não aqui — depende dos dois
+    # campos juntos).
+    token_producao_manual: str | None = None
+    token_homologacao_manual: str | None = None
+
 
 class FiscalConfigOut(BaseModel):
     # Espelha razão social/IE/regime/endereço de Company (somente leitura
@@ -909,6 +923,9 @@ class FiscalConfigOut(BaseModel):
     # ORD-171 — interruptor de emissão + ambiente.
     ativo: bool
     ambiente: str
+    # ORD-178 — distingue "cadastrado via API" de "cadastrado manualmente"
+    # (só tem sentido quando focus_nfe_cadastrado=true).
+    focus_nfe_cadastro_manual: bool
 
 
 VALID_CONTACT_TYPES = {"comercial", "financeiro", "tecnico"}
@@ -3432,6 +3449,7 @@ def _serialize_fiscal_config(co: Company, cfg: CompanyFiscalConfig | None) -> di
         "focus_nfe_cadastrado_em": cfg.focus_nfe_cadastrado_em if cfg else None,
         "ativo": bool(cfg and cfg.ativo),
         "ambiente": cfg.ambiente if cfg else "homologacao",
+        "focus_nfe_cadastro_manual": bool(cfg and cfg.focus_nfe_cadastro_manual),
     }
 
 
@@ -3502,6 +3520,21 @@ async def update_fiscal_config(
                 400, detail="Não é possível ativar a emissão antes de cadastrar a empresa na Focus NFe."
             )
         cfg.ativo = body.ativo
+
+    # ORD-178 — cadastro manual de tokens já existentes na Focus NFe (via
+    # alternativa ao onboarding automatizado da ORD-170). Pelo menos um dos
+    # dois é exigido; upsert parcial igual ao resto do endpoint.
+    token_producao_manual = (body.token_producao_manual or "").strip()
+    token_homologacao_manual = (body.token_homologacao_manual or "").strip()
+    if body.token_producao_manual is not None or body.token_homologacao_manual is not None:
+        if not token_producao_manual and not token_homologacao_manual:
+            raise HTTPException(400, detail="Informe ao menos um token (homologação ou produção).")
+        if token_producao_manual:
+            cfg.token_producao_enc = encrypt_field(token_producao_manual)
+        if token_homologacao_manual:
+            cfg.token_homologacao_enc = encrypt_field(token_homologacao_manual)
+        cfg.focus_nfe_cadastrado_em = datetime.utcnow()
+        cfg.focus_nfe_cadastro_manual = True
 
     await db.commit()
     await db.refresh(cfg)
@@ -3614,6 +3647,7 @@ async def focus_nfe_onboarding(
     cfg.token_producao_enc = encrypt_field(data["token_producao"])
     cfg.token_homologacao_enc = encrypt_field(data["token_homologacao"])
     cfg.focus_nfe_cadastrado_em = datetime.utcnow()
+    cfg.focus_nfe_cadastro_manual = False  # ORD-178 — API é a origem mais recente agora
     cert_de = data.get("certificado_valido_de")
     cert_ate = data.get("certificado_valido_ate")
     cfg.certificado_valido_de = datetime.fromisoformat(cert_de) if cert_de else None
