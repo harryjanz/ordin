@@ -34,8 +34,30 @@ logger = logging.getLogger(__name__)
 DB_URL              = require_env("DB_URL")
 ORDER_SVC           = require_env("ORDER_SERVICE_URL")
 COMPANY_SVC         = require_env("COMPANY_SERVICE_URL")
+# ORD-171 — payment-service busca NCM/CFOP/CEST por produto na emissão.
+CATALOG_SVC         = require_env("CATALOG_SERVICE_URL")
 INTERNAL_SECRET     = require_env("INTERNAL_SECRET")
 INTERNAL_HEADERS    = {"X-Internal-Secret": INTERNAL_SECRET}
+
+# ORD-171 — emissão de NFC-e (módulo dentro do payment-service, não um
+# fiscal-service separado — decisão do Explorer da história: evita mais um
+# hop de rede no caminho mais sensível a latência do totem).
+FOCUS_NFE_HOMOLOGACAO_URL = "https://homologacao.focusnfe.com.br/v2"
+FOCUS_NFE_PRODUCAO_URL    = "https://api.focusnfe.com.br/v2"
+FOCUS_NFE_EMIT_TIMEOUT    = 8.0  # segundos — curto de propósito, não pode segurar o checkout do totem
+
+# Tabela nacional de formas de pagamento do manual de NFC-e (não é específica
+# da Focus NFe). "voucher" não tem código único na tabela SEFAZ (vale
+# alimentação=10, vale refeição=11) — "10" é o uso majoritário no food
+# service; sem campo no Ordin hoje pra diferenciar os dois. Confirmar com o
+# cliente-piloto no primeiro pedido real (mesma pendência já registrada no
+# Tech Explorer).
+FOCUS_NFE_PAYMENT_CODE_MAP = {
+    "credit": "03",
+    "debit": "04",
+    "pix": "17",
+    "voucher": "10",
+}
 
 engine = create_async_engine(DB_URL.replace("mysql+pymysql://", "mysql+aiomysql://"), pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
@@ -79,6 +101,23 @@ class Transaction(Base):
     refund_reason           = Column(String(255), nullable=True)
     created_at              = Column(DateTime, default=datetime.utcnow)
     updated_at              = Column(DateTime, onupdate=datetime.utcnow)
+
+
+class FiscalDocument(Base):
+    """ORD-171 — resultado da tentativa de emissão de NFC-e pós-pagamento
+    aprovado. order_ref é referência, não FK — cross-service, mesmo padrão já
+    usado pra ligar Transaction a um pedido do order-service."""
+    __tablename__ = "fiscal_documents"
+    id            = Column(Integer, primary_key=True)
+    order_ref     = Column(String(64), nullable=False, index=True)
+    company_id    = Column(Integer, nullable=False, index=True)
+    status        = Column(String(20), nullable=False)  # "autorizada" | "pendente"
+    chave_nfe     = Column(String(44), nullable=True)
+    caminho_danfe = Column(String(255), nullable=True)
+    qrcode_url    = Column(String(255), nullable=True)
+    erro_mensagem = Column(Text, nullable=True)
+    ambiente      = Column(String(12), nullable=False)  # ambiente vigente NO MOMENTO da emissão
+    criado_em     = Column(DateTime, server_default=func.now())
 
 
 _WRITE_ROLES = {"admin", "owner", "manager", "superadmin"}
@@ -136,6 +175,148 @@ async def _get_terminal_config(terminal_id: int) -> dict:
     if resp.status_code != 200:
         raise HTTPException(503, "company-service indisponível")
     return resp.json()
+
+
+# ── Emissão de NFC-e (ORD-171) ───────────────────────────────────────────────
+# Módulo dentro do payment-service (não fiscal-service separado — decisão do
+# Explorer: payment-service já é o dono do ponto exato onde isso precisa
+# acontecer, e um serviço novo pra um único provedor ainda em piloto seria
+# infraestrutura especulativa). Toda a cadeia é best-effort: falha ou timeout
+# aqui NUNCA bloqueia nem atrasa o pagamento além do timeout curto configurado.
+
+def compute_icms_situacao_tributaria(tax_regime: str, has_cest: bool) -> str:
+    """CST/CSOSN nunca é campo armazenado — sempre derivado do regime
+    tributário da empresa (Company.tax_regime) + presença de CEST no item
+    (Product.cest, ORD-169). Simples Nacional/MEI usam CSOSN, os demais
+    regimes usam CST (docs/estudo-nfce.md §3.2)."""
+    if tax_regime in ("simples_nacional", "mei"):
+        return "500" if has_cest else "102"
+    return "060" if has_cest else "000"
+
+
+async def _get_fiscal_credentials(company_id: int) -> dict | None:
+    async with httpx.AsyncClient(timeout=5) as c:
+        resp = await c.get(
+            f"{COMPANY_SVC}/internal/companies/{company_id}/fiscal-credentials",
+            headers=INTERNAL_HEADERS,
+        )
+    if resp.status_code != 200:
+        return None
+    return resp.json()
+
+
+async def _get_order_with_items(order_ref: str) -> dict | None:
+    async with httpx.AsyncClient(timeout=5) as c:
+        resp = await c.get(f"{ORDER_SVC}/internal/orders/{order_ref}", headers=INTERNAL_HEADERS)
+    if resp.status_code != 200:
+        return None
+    return resp.json()
+
+
+async def _get_products_fiscal(product_ids: list[int]) -> dict[int, dict]:
+    """Uma chamada por produto único do pedido — carrinho do totem tem poucos
+    itens distintos, sem necessidade de endpoint batch pra este volume."""
+    result: dict[int, dict] = {}
+    async with httpx.AsyncClient(timeout=5) as c:
+        for pid in set(product_ids):
+            resp = await c.get(f"{CATALOG_SVC}/internal/products/{pid}/fiscal", headers=INTERNAL_HEADERS)
+            result[pid] = resp.json() if resp.status_code == 200 else {"ncm": None, "cfop": None, "cest": None}
+    return result
+
+
+def _build_nfce_payload(items: list[dict], products_fiscal: dict[int, dict], creds: dict, method: str, amount: float) -> dict:
+    nfce_items = []
+    for i, item in enumerate(items, start=1):
+        pf = products_fiscal.get(item["product_id"], {"ncm": None, "cfop": None, "cest": None})
+        has_cest = bool(pf.get("cest"))
+        nfce_items.append({
+            "numero_item": str(i),
+            "codigo_ncm": pf.get("ncm"),
+            "codigo_produto": str(item["product_id"]),
+            "descricao": item["product_name"],
+            "quantidade_comercial": item["quantity"],
+            "quantidade_tributavel": item["quantity"],
+            "cfop": pf.get("cfop"),
+            "valor_unitario_comercial": item["unit_price"],
+            "valor_unitario_tributavel": item["unit_price"],
+            "valor_bruto": item["quantity"] * item["unit_price"],
+            "unidade_comercial": "un",  # fixo — pendência de unidade de medida da ORD-169, resolvida aqui como default único
+            "unidade_tributavel": "un",
+            "icms_origem": "0",  # fixo — mercadoria nacional, sem exceção esperada no food service (ORD-171 Tech Explorer)
+            "icms_situacao_tributaria": compute_icms_situacao_tributaria(creds["tax_regime"], has_cest),
+            "cest": pf.get("cest"),
+        })
+    return {
+        "cnpj_emitente": creds["cnpj"],
+        "data_emissao": datetime.utcnow().isoformat(),
+        "presenca_comprador": "1",   # presencial, sempre — caso de uso do totem
+        "modalidade_frete": "9",     # sem frete — venda presencial no balcão
+        "local_destino": "1",        # operação interna (mesmo estado)
+        "natureza_operacao": "VENDA AO CONSUMIDOR",
+        "items": nfce_items,
+        "formas_pagamento": [{
+            "forma_pagamento": FOCUS_NFE_PAYMENT_CODE_MAP.get(method, "99"),
+            "valor_pagamento": amount,
+        }],
+    }
+
+
+async def _save_fiscal_document(order_ref: str, company_id: int, ambiente: str, *, status: str,
+                                 chave_nfe: str | None = None, caminho_danfe: str | None = None,
+                                 qrcode_url: str | None = None, erro_mensagem: str | None = None) -> None:
+    async with AsyncSessionLocal() as db:
+        db.add(FiscalDocument(
+            order_ref=order_ref, company_id=company_id, ambiente=ambiente, status=status,
+            chave_nfe=chave_nfe, caminho_danfe=caminho_danfe, qrcode_url=qrcode_url,
+            erro_mensagem=erro_mensagem,
+        ))
+        await db.commit()
+
+
+async def emit_nfce_if_active(company_id: int, order_ref: str, method: str, amount: float) -> None:
+    """Chamado depois de toda aprovação de pagamento (ORD-171). Nunca propaga
+    exceção — qualquer falha em qualquer etapa (credenciais indisponíveis,
+    order-service fora do ar, timeout na Focus NFe) apenas encerra a função,
+    o pagamento já foi confirmado e o pedido segue seu fluxo normal."""
+    try:
+        creds = await _get_fiscal_credentials(company_id)
+        if not creds or not creds.get("ativo"):
+            return  # módulo desligado — comportamento idêntico ao que existia antes desta história
+
+        order = await _get_order_with_items(order_ref)
+        if not order:
+            return
+
+        products_fiscal = await _get_products_fiscal([it["product_id"] for it in order["items"]])
+        payload = _build_nfce_payload(order["items"], products_fiscal, creds, method, amount)
+        base_url = FOCUS_NFE_PRODUCAO_URL if creds["ambiente"] == "producao" else FOCUS_NFE_HOMOLOGACAO_URL
+
+        try:
+            async with httpx.AsyncClient(timeout=FOCUS_NFE_EMIT_TIMEOUT) as client:
+                resp = await client.post(
+                    f"{base_url}/nfce", params={"ref": order_ref},
+                    auth=(creds["token"], ""), json=payload,
+                )
+        except httpx.TimeoutException:
+            await _save_fiscal_document(order_ref, company_id, creds["ambiente"], status="pendente", erro_mensagem="timeout na Focus NFe")
+            return
+        except httpx.HTTPError as exc:
+            await _save_fiscal_document(order_ref, company_id, creds["ambiente"], status="pendente", erro_mensagem=str(exc))
+            return
+
+        if resp.status_code == 200 and resp.json().get("status") == "autorizado":
+            body = resp.json()
+            await _save_fiscal_document(
+                order_ref, company_id, creds["ambiente"], status="autorizada",
+                chave_nfe=body.get("chave_nfe"), caminho_danfe=body.get("caminho_danfe"), qrcode_url=body.get("qrcode_url"),
+            )
+        else:
+            await _save_fiscal_document(order_ref, company_id, creds["ambiente"], status="pendente", erro_mensagem=resp.text[:2000])
+    # ORD-171 — mesmo motivo do _publish/_notify_order acima: emissão fiscal
+    # nunca pode derrubar nem atrasar o fluxo de pagamento além do timeout já
+    # aplicado à chamada da Focus NFe.
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("emit_nfce_if_active falhou (%s): %s", order_ref, exc)
 
 
 async def _get_mp_webhook_secret(company_id: int) -> tuple[bool, str | None]:
@@ -473,6 +654,7 @@ async def create_payment(
     # 6. Notificar order-service e publicar evento
     if result.status == TransactionStatus.approved:
         await _notify_order(body.order_ref, "paid")
+        await emit_nfce_if_active(current_user.company_id, body.order_ref, body.method, body.amount)
         await _publish(
             "payment.approved",
             PaymentApprovedEvent(
@@ -1135,6 +1317,7 @@ async def get_payment_status(
                         tx.status = "approved"
                         await db.commit()
                         await _notify_order(tx.order_ref, "paid")
+                        await emit_nfce_if_active(tx.company_id, tx.order_ref, tx.method, float(tx.amount))
                         await _publish(
                             "payment.approved",
                             PaymentApprovedEvent(
@@ -1246,6 +1429,7 @@ async def _mp_fetch_and_update(tx: Transaction, payment_id: str, db: AsyncSessio
                 tx.status = "approved"
                 await db.commit()
                 await _notify_order(tx.order_ref, "paid")
+                await emit_nfce_if_active(tx.company_id, tx.order_ref, tx.method, float(tx.amount))
                 await _publish(
                     "payment.approved",
                     PaymentApprovedEvent(
@@ -1299,6 +1483,7 @@ async def _mp_order_fetch_and_update(tx: Transaction, order_id: str, db: AsyncSe
                 tx.status = "approved"
                 await db.commit()
                 await _notify_order(tx.order_ref, "paid")
+                await emit_nfce_if_active(tx.company_id, tx.order_ref, tx.method, float(tx.amount))
                 await _publish(
                     "payment.approved",
                     PaymentApprovedEvent(

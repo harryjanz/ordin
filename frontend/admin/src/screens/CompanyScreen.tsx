@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
-import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, Upload, UploadListFiles, makeToast, type DropdownOptions, type UploadFile } from "design-system";
+import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, Toggle, Upload, UploadListFiles, makeToast, type DropdownOptions, type UploadFile } from "design-system";
 import api from "../api";
 import { getCompanyPlan, getFiscalConfig, listCompanies, onboardFocusNfe, updateFiscalConfig } from "../api/companies";
 import { TAX_REGIME_OPTIONS } from "./CompanyContractScreen";
@@ -289,6 +289,13 @@ const CERTIFICADO_MAX_SIZE_MB = 5;
 const CSC_MAX_LENGTH = 36;
 const ID_TOKEN_MAX_LENGTH = 6;
 
+// ORD-171 — ambiente sempre começa em "homologacao" (backend), troca pra
+// "producao" é explícita — nunca emite nota fiscal real por engano.
+const AMBIENTE_OPTIONS: DropdownOptions[] = [
+  { value: "homologacao", label: "Homologação (sem validade fiscal)" },
+  { value: "producao", label: "Produção (nota fiscal real)" },
+];
+
 // ORD-168 — não existe um componente de senha com olho pronto no
 // design-system nem em uso em outra tela deste app (LoginScreen/
 // SetPasswordScreen/SettingsScreen usam type="password" puro, sem toggle) —
@@ -350,6 +357,11 @@ function FiscalTab({ companyId }: FiscalTabProps) {
   // ── Onboarding na Focus NFe (ORD-170) ────────────────────────────────────
   const [onboarding, setOnboarding] = useState(false);
   const [onboardError, setOnboardError] = useState<string | null>(null);
+
+  // ── Interruptor de emissão + ambiente (ORD-171) ──────────────────────────
+  const [ativoSaving, setAtivoSaving] = useState(false);
+  const [ambienteSaving, setAmbienteSaving] = useState(false);
+  const [confirmAtivar, setConfirmAtivar] = useState(false);
   const certSenhaRef = useRef<HTMLInputElement | null>(null);
   const cscProducaoRef = useRef<HTMLInputElement | null>(null);
   const idTokenProducaoRef = useRef<HTMLInputElement | null>(null);
@@ -441,6 +453,39 @@ function FiscalTab({ companyId }: FiscalTabProps) {
     }
   }
 
+  async function applyAtivo(value: boolean) {
+    setAtivoSaving(true);
+    try {
+      const updated = await updateFiscalConfig(companyId, { ativo: value });
+      setCfg(updated);
+      makeToast("success", value ? "Emissão de NFC-e ativada." : "Emissão de NFC-e desativada.");
+    } catch (e: unknown) {
+      makeToast("error", parseApiError(e).message);
+    } finally {
+      setAtivoSaving(false);
+    }
+  }
+
+  // Ligar pede confirmação (é o interruptor de emissão fiscal real) —
+  // desligar é o sentido seguro, aplica direto.
+  function handleToggleAtivo() {
+    if (!cfg) return;
+    if (cfg.ativo) applyAtivo(false);
+    else setConfirmAtivar(true);
+  }
+
+  async function handleChangeAmbiente(opt: DropdownOptions) {
+    setAmbienteSaving(true);
+    try {
+      const updated = await updateFiscalConfig(companyId, { ambiente: opt.value as "homologacao" | "producao" });
+      setCfg(updated);
+    } catch (e: unknown) {
+      makeToast("error", parseApiError(e).message);
+    } finally {
+      setAmbienteSaving(false);
+    }
+  }
+
   if (loading) return <div className={styles.muted}>Carregando…</div>;
   if (err) return <Alert variant="error" text={err} fullWidth />;
   if (!cfg) return null;
@@ -506,6 +551,39 @@ function FiscalTab({ companyId }: FiscalTabProps) {
         </div>
       </div>
 
+      <div className={`${styles.planPanel} ${styles.fiscalForm}`} style={{ marginBottom: 20 }}>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Emissão de NFC-e</span>
+          <Toggle
+            name="fiscal-ativo"
+            checked={cfg.ativo}
+            disabled={ativoSaving || (!cfg.ativo && !cfg.focus_nfe_cadastrado)}
+            onChange={handleToggleAtivo}
+          />
+        </div>
+        {!cfg.focus_nfe_cadastrado && (
+          <div className={styles.formHint}>Cadastre a empresa na Focus NFe acima para poder ativar a emissão.</div>
+        )}
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Ambiente</span>
+        </div>
+        <Dropdown
+          label=""
+          value={AMBIENTE_OPTIONS.find((o) => o.value === cfg.ambiente) ?? null}
+          onValueSelected={handleChangeAmbiente}
+          options={AMBIENTE_OPTIONS}
+          disabled={ambienteSaving}
+        />
+        {cfg.ambiente === "homologacao" && (
+          <Alert
+            variant="warning"
+            icon="alert-triangle"
+            fullWidth
+            text="Ambiente de homologação — qualquer NFC-e emitida aqui não tem validade fiscal real. Troque para produção somente após validar a emissão."
+          />
+        )}
+      </div>
+
       <div className={`${styles.form} ${styles.fiscalForm}`} key={formKey}>
         <div className={styles.formTitle}>Certificado digital (A1)</div>
         <div className={styles.formHint}>
@@ -554,6 +632,17 @@ function FiscalTab({ companyId }: FiscalTabProps) {
           <Button type="button" onClick={handleSave} loading={saving} disabled={saving}>Salvar</Button>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmAtivar}
+        title="Ativar emissão de NFC-e"
+        message={`A partir de agora, todo pagamento aprovado no totem vai tentar emitir uma nota fiscal de verdade no ambiente de ${cfg.ambiente === "producao" ? "produção (nota fiscal real)" : "homologação (sem validade fiscal)"}. Falha na emissão nunca bloqueia a venda. Confirma a ativação?`}
+        confirmLabel="Ativar"
+        alertVariant="warning"
+        alertIcon="alert-triangle"
+        onConfirm={() => { setConfirmAtivar(false); applyAtivo(true); }}
+        onCancel={() => setConfirmAtivar(false)}
+      />
     </div>
   );
 }

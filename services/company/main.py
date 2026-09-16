@@ -350,6 +350,13 @@ class CompanyFiscalConfig(Base):
     focus_nfe_cadastrado_em  = Column(DateTime, nullable=True)
     certificado_valido_de    = Column(DateTime, nullable=True)
     certificado_valido_ate   = Column(DateTime, nullable=True)
+    # ORD-171 — interruptor de emissão de verdade (nenhuma história anterior
+    # criou isso: 168/170 cuidaram só de dado). Só pode ligar depois de
+    # focus_nfe_cadastrado=true (ORD-170), validado na escrita. ambiente
+    # sempre começa em "homologacao" — troca pra "producao" é explícita,
+    # nunca emite nota fiscal real por engano num cliente novo.
+    ativo                    = Column(Boolean, nullable=False, default=False)
+    ambiente                 = Column(String(12), nullable=False, default="homologacao")
     created_at                = Column(DateTime, default=datetime.utcnow)
     updated_at                = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -868,6 +875,17 @@ class FiscalConfigIn(BaseModel):
     id_token_producao: str | None = Field(default=None, max_length=6)
     csc_homologacao: str | None = Field(default=None, max_length=36)
     id_token_homologacao: str | None = Field(default=None, max_length=6)
+    # ORD-171 — interruptor de emissão de verdade + ambiente. ativo=True só é
+    # aceito com focus_nfe_cadastrado=true (validado no endpoint).
+    ativo: bool | None = None
+    ambiente: str | None = None
+
+    @field_validator("ambiente")
+    @classmethod
+    def ambiente_valido(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("homologacao", "producao"):
+            raise ValueError('ambiente deve ser "homologacao" ou "producao"')
+        return v
 
 
 class FiscalConfigOut(BaseModel):
@@ -888,6 +906,9 @@ class FiscalConfigOut(BaseModel):
     # ORD-170 — nunca expõe os tokens em texto puro, só o indicador de status.
     focus_nfe_cadastrado: bool
     focus_nfe_cadastrado_em: datetime | None = None
+    # ORD-171 — interruptor de emissão + ambiente.
+    ativo: bool
+    ambiente: str
 
 
 VALID_CONTACT_TYPES = {"comercial", "financeiro", "tecnico"}
@@ -1342,6 +1363,52 @@ async def internal_get_payment_config(
 
     return {
         "webhook_secret": decrypt_field(cfg.webhook_secret) if cfg.webhook_secret else None,
+    }
+
+
+@app.get("/internal/companies/{company_id}/fiscal-credentials", include_in_schema=False)
+async def internal_fiscal_credentials(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    """ORD-171 — payment-service busca aqui tudo que precisa pra montar e
+    assinar a emissão da NFC-e. token/csc já decifrados no momento da
+    chamada, nunca cacheados em texto puro fora da memória da requisição —
+    mesmo cuidado de internal_get_payment_config acima. Se ativo=false, é o
+    único campo retornado — o chamador nem tenta montar o resto do payload."""
+    co = (await db.execute(select(Company).filter_by(id=company_id))).scalars().first()
+    if not co:
+        raise HTTPException(404, "Empresa não encontrada")
+    cfg = (await db.execute(
+        select(CompanyFiscalConfig).filter_by(company_id=company_id)
+    )).scalars().first()
+    if not cfg or not cfg.ativo:
+        return {"ativo": False}
+
+    producao = cfg.ambiente == "producao"
+    token_enc = cfg.token_producao_enc if producao else cfg.token_homologacao_enc
+    csc_enc = cfg.csc_producao_enc if producao else cfg.csc_homologacao_enc
+    id_token = cfg.id_token_producao if producao else cfg.id_token_homologacao
+
+    return {
+        "ativo": True,
+        "ambiente": cfg.ambiente,
+        "cnpj": co.document,
+        "legal_name": co.legal_name,
+        "endereco": {
+            "logradouro": co.street,
+            "numero": co.address_number,
+            "complemento": co.complement,
+            "bairro": co.neighborhood,
+            "municipio": co.city,
+            "uf": co.state,
+            "cep": co.zip_code,
+        },
+        "tax_regime": co.tax_regime,
+        "token": decrypt_field(token_enc) if token_enc else None,
+        "csc": decrypt_field(csc_enc) if csc_enc else None,
+        "id_token_csc": id_token,
     }
 
 
@@ -3363,6 +3430,8 @@ def _serialize_fiscal_config(co: Company, cfg: CompanyFiscalConfig | None) -> di
         "completo": _fiscal_config_completo(co, cfg),
         "focus_nfe_cadastrado": bool(cfg and cfg.focus_nfe_cadastrado_em),
         "focus_nfe_cadastrado_em": cfg.focus_nfe_cadastrado_em if cfg else None,
+        "ativo": bool(cfg and cfg.ativo),
+        "ambiente": cfg.ambiente if cfg else "homologacao",
     }
 
 
@@ -3425,6 +3494,14 @@ async def update_fiscal_config(
         cfg.csc_homologacao_enc = encrypt_field(body.csc_homologacao)
     if body.id_token_homologacao is not None:
         cfg.id_token_homologacao = body.id_token_homologacao
+    if body.ambiente is not None:
+        cfg.ambiente = body.ambiente
+    if body.ativo is not None:
+        if body.ativo and not cfg.focus_nfe_cadastrado_em:
+            raise HTTPException(
+                400, detail="Não é possível ativar a emissão antes de cadastrar a empresa na Focus NFe."
+            )
+        cfg.ativo = body.ativo
 
     await db.commit()
     await db.refresh(cfg)

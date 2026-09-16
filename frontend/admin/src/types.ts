@@ -475,6 +475,10 @@ export interface FiscalConfig {
   // ORD-170 — nunca traz os tokens, só o indicador de status.
   focus_nfe_cadastrado: boolean;
   focus_nfe_cadastrado_em: string | null;
+  // ORD-171 — interruptor de emissão + ambiente. ativo=true só é aceito com
+  // focus_nfe_cadastrado=true (validado no backend).
+  ativo: boolean;
+  ambiente: "homologacao" | "producao";
 }
 
 // ORD-170 — corpo de erro repassado 1:1 da Focus NFe (erros[] pode vir vazio).
@@ -492,6 +496,9 @@ export interface FiscalConfigUpdate {
   id_token_producao?: string;
   csc_homologacao?: string;
   id_token_homologacao?: string;
+  // ORD-171
+  ativo?: boolean;
+  ambiente?: "homologacao" | "producao";
 }
 
 export interface Order {
