@@ -119,6 +119,27 @@ async def test_nenhum_token_informado_e_rejeitado(client, token_superadmin):
     assert r.status_code == 400
 
 
+async def test_cadastro_manual_exige_dados_fiscais_completos(client, token_superadmin):
+    """Mesma exigência do onboarding automatizado (POST /empresas) — sem isso
+    dava pra ativar emissão (ORD-171) numa empresa sem CNPJ/certificado/CSC."""
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        co = svc.Company(id=2, name="Pasta & Co", pin_hash="x", state="SP")
+        db.add(co)
+        await db.commit()
+
+    r = await client.put("/companies/2/fiscal-config", headers=auth(token_superadmin), json={
+        "token_homologacao_manual": "QUALQUER_TOKEN",
+    })
+    assert r.status_code == 400
+
+    import main as svc
+    from sqlalchemy import select
+    async with svc.AsyncSessionLocal() as db:
+        cfg = (await db.execute(select(svc.CompanyFiscalConfig).filter_by(company_id=2))).scalars().first()
+        assert cfg is None or cfg.token_homologacao_enc is None
+
+
 async def test_reenvio_sobrescreve_token_existente(client, token_superadmin):
     await _seed_company_completa(1)
     await client.put("/companies/1/fiscal-config", headers=auth(token_superadmin), json={

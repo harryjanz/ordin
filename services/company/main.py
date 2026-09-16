@@ -3527,6 +3527,10 @@ async def update_fiscal_config(
     token_producao_manual = (body.token_producao_manual or "").strip()
     token_homologacao_manual = (body.token_homologacao_manual or "").strip()
     if body.token_producao_manual is not None or body.token_homologacao_manual is not None:
+        if not _fiscal_config_completo(co, cfg):
+            raise HTTPException(
+                400, detail="Complete o cadastro fiscal da empresa (certificado, CSC, dados da empresa) antes de informar tokens da Focus NFe."
+            )
         if not token_producao_manual and not token_homologacao_manual:
             raise HTTPException(400, detail="Informe ao menos um token (homologação ou produção).")
         if token_producao_manual:

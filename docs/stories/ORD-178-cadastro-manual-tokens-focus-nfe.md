@@ -283,3 +283,13 @@ manualmente em 16/09/2026, 02:51:04", botão virou "Reenviar cadastro", e o togg
 NFC-e" (ORD-171) ficou habilitado imediatamente — confirma a integração completa com os
 interruptores já existentes. Validação "nenhum token informado" testada e rejeitada corretamente
 antes de chamar a API. Dado de teste revertido do banco depois da validação.
+
+**Correção pós-review (usuário)**: o botão "Já tenho os tokens" não tinha nenhum gate — dava pra
+colar um token em qualquer empresa, mesmo sem CNPJ/certificado/CSC preenchidos, e a partir daí
+ativar emissão de verdade (ORD-171) numa empresa fiscal-incompleta. Corrigido pra exigir
+`_fiscal_config_completo` (mesma checagem já usada pelo onboarding automatizado da ORD-170) — nos
+dois lados: backend (`update_fiscal_config` rejeita com 400 antes de aceitar qualquer token
+manual) e frontend (botão desabilitado com o mesmo `!cfg.completo` do "Cadastrar na Focus NFe").
+Teste novo (`test_cadastro_manual_exige_dados_fiscais_completos`) e validação ao vivo via `curl`
+direto no `company-service` real: empresa incompleta → 400; empresa completa → 200. Suíte
+company-service: 458 passou.

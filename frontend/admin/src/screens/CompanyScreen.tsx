@@ -579,7 +579,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
         {!cfg.completo && (
           <div className={styles.formHint}>
             Complete o certificado e o CSC (produção e homologação) acima, e a razão social/IE/
-            regime/endereço na aba "Contrato", para habilitar o cadastro.
+            regime/endereço na aba "Contrato", para habilitar o cadastro (automático ou manual).
           </div>
         )}
         {onboardError && <Alert variant="error" text={onboardError} fullWidth />}
@@ -587,7 +587,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
           <Button type="button" onClick={handleOnboard} loading={onboarding} disabled={onboarding || !cfg.completo}>
             {cfg.focus_nfe_cadastrado ? "Reenviar cadastro" : "Cadastrar na Focus NFe"}
           </Button>
-          <Button type="button" variant="secondary" size="small" onClick={openManualTokenModal}>
+          <Button type="button" variant="secondary" size="small" onClick={openManualTokenModal} disabled={!cfg.completo}>
             Já tenho os tokens
           </Button>
         </div>
