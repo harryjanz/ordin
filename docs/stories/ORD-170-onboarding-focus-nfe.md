@@ -351,3 +351,13 @@ forma legível na tela, sem persistir nada (status continuou "Ainda não cadastr
 o fluxo de erro de ponta a ponta. Validação com sucesso real (cadastro de verdade na Focus NFe)
 continua dependendo do cliente-piloto com certificado A1 válido, como já esperado desde o
 Explorer.
+
+**Atualização — token master real configurado (2026-09-16)**: usuário forneceu o token
+principal/master real da conta Ordin na Focus NFe, colocado em `FOCUS_NFE_MASTER_TOKEN` no
+`.env` local (nunca commitado — arquivo no `.gitignore`). Reteste ao vivo: a autenticação passou
+(sem mais 401) e a Focus NFe avançou pra validação seguinte, retornando `"Erro de validação:
+Houve um erro ao instalar o certificado. Verifique se a senha está correta e se o arquivo está
+no formato PFX ou P12, codificado em Base64."` — esperado, já que o certificado usado no teste é
+um valor fake (não um `.pfx` real). Confirma que a integração está correta ponta a ponta até o
+limite da pendência já registrada: só falta um certificado A1 real de CNPJ ativo (cliente-piloto)
+pra validar o cadastro de sucesso completo.
