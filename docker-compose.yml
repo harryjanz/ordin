@@ -157,6 +157,7 @@ services:
     environment:
       DB_URL: ${CATALOG_DB_URL}
       JWT_SECRET: ${JWT_SECRET}
+      INTERNAL_SECRET: ${INTERNAL_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS}
       # Bucket próprio (não o S3_BUCKET de contratos do company-service) —
       # nome de env var separado de propósito pra não vazar override um do
@@ -205,6 +206,7 @@ services:
       INTERNAL_SECRET: ${INTERNAL_SECRET}
       ORDER_SERVICE_URL: ${ORDER_SERVICE_URL}
       COMPANY_SERVICE_URL: ${COMPANY_SERVICE_URL}
+      CATALOG_SERVICE_URL: ${CATALOG_SERVICE_URL}
       CORS_ORIGINS: ${CORS_ORIGINS}
       MESSAGE_BROKER: ${MESSAGE_BROKER}
       RABBITMQ_URL: ${RABBITMQ_URL}

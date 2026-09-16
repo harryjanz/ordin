@@ -426,3 +426,65 @@ impede) · [ ] sprint específico — não atribuída ainda.
 **Status: Ready.** É a implementação mais arriscada do épico até aqui — recomendo começar pelo
 backend com testes usando mock da Focus NFe antes de qualquer teste real, e só depois validar
 contra a API de verdade quando o cliente-piloto estiver pronto.
+
+## Implementação
+
+**Backend — 3 serviços tocados:**
+- **catalog-service**: primeiro endpoint `/internal/*` do serviço — precisou adicionar
+  `INTERNAL_SECRET`/`require_internal` do zero (não existia). `GET /internal/products/{id}/fiscal`
+  retorna `{ncm, cfop, cest}`.
+- **order-service**: `GET /internal/orders/{order_ref}` novo, retorna itens denormalizados
+  (`product_id`/`product_name`/`unit_price`/`quantity` de `OrderItem` — dado vendido de fato, não
+  busca no catalog-service, que pode ter mudado desde a venda).
+- **company-service**: `CompanyFiscalConfig` ganha `ativo`/`ambiente`; `PUT /fiscal-config` valida
+  que `ativo=true` só é aceito com `focus_nfe_cadastrado=true` (`_fiscal_config_completo` reaproveitado
+  como gate único, mesmo já existente da ORD-170). `GET /internal/companies/{id}/fiscal-credentials`
+  decripta token/CSC do ambiente vigente (produção ou homologação) e retorna junto com CNPJ/endereço/
+  regime — `{"ativo": false}` sozinho quando desligado, pra quem chama nem tentar montar o resto.
+- **payment-service**: módulo de emissão inteiro dentro do `main.py` (`compute_icms_situacao_tributaria`,
+  `_build_nfce_payload`, `emit_nfce_if_active`), tabela `fiscal_documents`, chamado logo após
+  `_notify_order(..., "paid")` nos 4 pontos onde um pagamento vira aprovado (criação síncrona +
+  3 caminhos de webhook/polling do Mercado Pago). Toda a função é best-effort — qualquer falha em
+  qualquer etapa (credenciais, order-service, catalog-service, timeout/erro na Focus NFe) é
+  capturada e logada, nunca propaga, mesmo padrão já usado em `_notify_order`/`_publish`.
+
+**Correção em relação ao Tech Explorer**: o mapa de formas de pagamento (`FOCUS_NFE_PAYMENT_CODE_MAP`)
+usava chaves em português (`"dinheiro"`, `"credito"`, `"debito"`, `"pix"`) que não existem no
+código real — `PaymentMethod` (`services/payment/domain/schemas.py`) usa `"credit"`/`"debit"`/
+`"pix"`/`"voucher"`. Corrigido pra usar as chaves reais; `"voucher"` mapeado pra `"10"` (Vale
+Alimentação, sem tabela própria no Ordin hoje pra distinguir de Vale Refeição/"11") — pendência
+igual à já registrada no Tech Explorer, mesma recomendação de confirmar no primeiro pedido real.
+
+**Env var nova**: `CATALOG_SERVICE_URL` (payment-service) e `INTERNAL_SECRET` (catalog-service,
+novo) — adicionados em `.env`, `.env.example`, `docker-compose.yml` e nos `conftest.py`
+correspondentes.
+
+**Testes**: 5 novos no catalog-service, 3 no order-service, 11 no company-service, 12 no
+payment-service (incluindo os 4 casos de `compute_icms_situacao_tributaria`, módulo inativo,
+sucesso, erro/timeout viram "pendente", ambiente produção usa host/token corretos, e um teste de
+integração completo via `POST /payments`) — todos com `respx` mockando Focus NFe/chamadas
+internas, nunca batendo na rede. Suítes completas: catalog 234, order 72, company 449, payment 138
+— todas passando. Ruff limpo nos 3 serviços.
+
+**Frontend**: `FiscalTab` ganha um painel novo com `Toggle` "Emissão de NFC-e" (desabilitado até
+`focus_nfe_cadastrado=true`, com hint explicando o que falta) e `Dropdown` "Ambiente" — cada um
+salva imediatamente ao mudar (não fica preso ao botão "Salvar" do formulário de certificado/CSC,
+que é uma ação não relacionada). Ligar o interruptor pede confirmação via `ConfirmDialog`
+(mencionando o ambiente vigente na mensagem); desligar aplica direto, é o sentido seguro. Alert de
+aviso permanente quando `ambiente="homologacao"` (documento sem validade fiscal real). `tsc`,
+`build` e `vitest` limpos (48 testes).
+
+**Testado ao vivo, ponta a ponta, com dado real do dev DB** (não só mocks): rebuild completo dos 5
+containers afetados (admin, catalog/order/company/payment-service). Os 3 endpoints `/internal/*`
+novos testados via `curl` direto na rede docker real (não `ASGITransport` de teste) —
+`GET /internal/orders/P459131` (pedido real da Burger House, 6 itens de 2 combos) retornou os
+itens corretamente, e `GET /internal/products/1000/fiscal` retornou `{"ncm":"19059090",
+"cfop":"5101","cest":"1706200"}` — exatamente a classificação fiscal cadastrada manualmente no
+Classic Cheddar Burger durante o teste ao vivo da ORD-169. Confirma a cadeia
+order-service→catalog-service com dado de produção real. No admin, testado ao vivo: toggle
+desabilitado até simular `focus_nfe_cadastrado_em` (via UPDATE direto, já que não há certificado
+A1 real pra completar o onboarding de verdade — mesmo bloqueio já registrado), troca de ambiente
+salva e o alert de homologação aparece/some corretamente, confirmação ao ativar menciona o
+ambiente vigente, desativar aplica direto sem confirmação. Emissão de sucesso real contra a Focus
+NFe (com token válido) continua dependendo do cliente-piloto, mesma pendência de sempre — o
+código de payload/erro está integralmente coberto pelos testes com mock.

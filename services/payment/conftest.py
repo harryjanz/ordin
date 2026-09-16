@@ -11,6 +11,7 @@ os.environ.setdefault("INTERNAL_SECRET", "test-internal-ci")
 os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000")
 os.environ.setdefault("COMPANY_SERVICE_URL", "http://localhost:8002")
 os.environ.setdefault("ORDER_SERVICE_URL", "http://localhost:8004")
+os.environ.setdefault("CATALOG_SERVICE_URL", "http://localhost:8003")
 os.environ.setdefault("PAYGO_BASE_URL", "https://sandbox.controlpay.com.br/webapi/")
 os.environ.setdefault("MONGO_URL", "")
 

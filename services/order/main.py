@@ -895,6 +895,35 @@ async def list_order_tickets(
                         "combo_instance_key":combo_by_item.get(t.order_item_id, (None, None))[0],
                         "combo_name":combo_by_item.get(t.order_item_id, (None, None))[1]} for t in tickets]}
 
+@app.get("/internal/orders/{order_ref}", include_in_schema=False)
+async def internal_get_order(
+    order_ref: str,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    """ORD-171 — payment-service busca os itens do pedido pra montar o
+    payload de emissão da NFC-e (product_id/nome/preço/quantidade já
+    denormalizados em OrderItem, mesmo dado vendido de fato — não busca no
+    catalog-service, que pode ter mudado desde a venda)."""
+    o = (await db.execute(select(Order).filter_by(order_ref=order_ref))).scalars().first()
+    if not o: raise HTTPException(404)
+    items_result = await db.execute(select(OrderItem).filter_by(order_id=o.id))
+    items = items_result.scalars().all()
+    return {
+        "order_ref": o.order_ref,
+        "company_id": o.company_id,
+        "total": float(o.total),
+        "items": [
+            {
+                "product_id": i.product_id,
+                "product_name": i.product_name,
+                "unit_price": float(i.unit_price),
+                "quantity": i.quantity,
+            }
+            for i in items
+        ],
+    }
+
 @app.patch("/internal/orders/{order_ref}/status", include_in_schema=False)
 async def internal_update_status(
     order_ref: str,

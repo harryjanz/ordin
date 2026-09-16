@@ -1,10 +1,11 @@
 import io
+import secrets
 from datetime import datetime
 from typing import Optional
 
 from auth import TokenPayload, get_current_user
 from config import get_cors_origins, require_env
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from infrastructure.image_storage import (
     delete_object,
@@ -83,8 +84,17 @@ async def resolve_company_id_write(
     return _resolve_company_id(company_id, current_user)
 
 DB_URL = require_env("DB_URL")
+# ORD-171 — primeiro endpoint /internal/* do catalog-service (payment-service
+# busca NCM/CFOP/CEST na emissão de NFC-e). Mesmo padrão de require_internal
+# já usado em order-service/company-service.
+INTERNAL_SECRET = require_env("INTERNAL_SECRET")
 engine = create_async_engine(DB_URL.replace("mysql+pymysql://", "mysql+aiomysql://"), pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+
+def require_internal(x_internal_secret: str = Header(default="")) -> None:
+    if not secrets.compare_digest(x_internal_secret, INTERNAL_SECRET):
+        raise HTTPException(403, detail="Acesso interno não autorizado")
 
 class Base(DeclarativeBase): pass
 
@@ -2930,6 +2940,22 @@ async def get_product_menus(
         refs += [{"id": m.id, "name": m.name, "via_category": category_name} for m in via_result.all()]
 
     return {"menus": refs}
+
+@app.get("/internal/products/{product_id}/fiscal", include_in_schema=False)
+async def internal_product_fiscal(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    """ORD-171 — payment-service busca NCM/CFOP/CEST na hora de montar o
+    payload de emissão da NFC-e. Sem isolamento por company_id de propósito:
+    quem chama já validou o pedido pela empresa certa, e o product_id sozinho
+    já é suficiente pra essa consulta pontual (mesmo padrão de simplicidade
+    de outros endpoints /internal/*)."""
+    p = (await db.execute(select(Product).filter_by(id=product_id, deleted=False))).scalars().first()
+    if not p:
+        raise HTTPException(404)
+    return {"ncm": p.ncm, "cfop": p.cfop, "cest": p.cest}
 
 @app.get("/health", response_model=HealthOut, tags=["Catálogo"], summary="Healthcheck")
 def health(): return {"service": "catalog", "status": "ok"}
