@@ -127,6 +127,7 @@ JWT_REFRESH_EXP_DAYS=7
 # Segurança
 QR_SECRET=<hex 32 chars>            # assina QR codes dos tickets
 INTERNAL_SECRET=<hex 32 chars>      # header X-Internal-Secret entre serviços
+FOCUS_NFE_MASTER_TOKEN=<token>       # company-service — token master da conta Ordin na Focus NFe (ORD-170), cadastra empresas
 
 # Infraestrutura
 REDIS_URL=redis://redis:6379/0

@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, FormEvent } from "react";
 import { Alert, Button, Dropdown, InputBase, Modal, Tab, Tabs, Tag, Upload, UploadListFiles, makeToast, type DropdownOptions, type UploadFile } from "design-system";
 import api from "../api";
-import { getCompanyPlan, getFiscalConfig, listCompanies, updateFiscalConfig } from "../api/companies";
+import { getCompanyPlan, getFiscalConfig, listCompanies, onboardFocusNfe, updateFiscalConfig } from "../api/companies";
 import { TAX_REGIME_OPTIONS } from "./CompanyContractScreen";
 import { parseApiError } from "../lib/apiErrors";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { useStore } from "../store";
-import type { CompanyPlan, FiscalConfig, Terminal, User, Role, PaymentConfig, Company, MpTerminal } from "../types";
+import type { CompanyPlan, FiscalConfig, FocusNfeErrorDetail, Terminal, User, Role, PaymentConfig, Company, MpTerminal } from "../types";
 import styles from "./CompanyScreen.module.scss";
 
 // ── Provider catalog ─────────────────────────────────────────────────────────
@@ -318,6 +318,21 @@ function PasswordField({
   );
 }
 
+// ORD-170 — erro repassado 1:1 da Focus NFe (não é o formato genérico do
+// FastAPI/Pydantic que parseApiError trata) — objeto com codigo/mensagem e,
+// às vezes, uma lista erros[] com mais de um item na mesma resposta
+// (confirmado ao vivo, ver Explorer da história). Cai no parseApiError
+// genérico se o formato vier diferente do esperado (ex. 502 de conectividade).
+function parseFocusNfeError(err: unknown): string {
+  const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (detail && typeof detail === "object" && !Array.isArray(detail) && "mensagem" in detail) {
+    const d = detail as FocusNfeErrorDetail;
+    const extras = (d.erros ?? []).map((e) => e.mensagem).filter(Boolean);
+    return extras.length ? `${d.mensagem}: ${extras.join("; ")}` : d.mensagem;
+  }
+  return parseApiError(err).message;
+}
+
 // ORD-168 — certificado A1 + CSC (produção/homologação). Razão social/IE/
 // regime/endereço já existem em Company e são editados em
 // CompanyContractScreen — mostrados aqui só como resumo somente-leitura,
@@ -331,6 +346,10 @@ function FiscalTab({ companyId }: FiscalTabProps) {
 
   const [certFile, setCertFile] = useState<File | null>(null);
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
+
+  // ── Onboarding na Focus NFe (ORD-170) ────────────────────────────────────
+  const [onboarding, setOnboarding] = useState(false);
+  const [onboardError, setOnboardError] = useState<string | null>(null);
   const certSenhaRef = useRef<HTMLInputElement | null>(null);
   const cscProducaoRef = useRef<HTMLInputElement | null>(null);
   const idTokenProducaoRef = useRef<HTMLInputElement | null>(null);
@@ -408,6 +427,20 @@ function FiscalTab({ companyId }: FiscalTabProps) {
     }
   }
 
+  async function handleOnboard() {
+    setOnboarding(true);
+    setOnboardError(null);
+    try {
+      await onboardFocusNfe(companyId);
+      load();
+      makeToast("success", "Empresa cadastrada na Focus NFe!");
+    } catch (e: unknown) {
+      setOnboardError(parseFocusNfeError(e));
+    } finally {
+      setOnboarding(false);
+    }
+  }
+
   if (loading) return <div className={styles.muted}>Carregando…</div>;
   if (err) return <Alert variant="error" text={err} fullWidth />;
   if (!cfg) return null;
@@ -447,6 +480,29 @@ function FiscalTab({ companyId }: FiscalTabProps) {
         </div>
         <div className={styles.formHint}>
           Razão social, IE, regime e endereço são editados na aba "Contrato" da empresa.
+        </div>
+      </div>
+
+      <div className={`${styles.planPanel} ${styles.fiscalForm}`} style={{ marginBottom: 20 }}>
+        <div className={styles.planRow}>
+          <span className={styles.planLabel}>Focus NFe</span>
+          <Tag variant={cfg.focus_nfe_cadastrado ? "success" : "neutral"}>
+            {cfg.focus_nfe_cadastrado
+              ? `Cadastrado em ${new Date(cfg.focus_nfe_cadastrado_em!).toLocaleString("pt-BR")}`
+              : "Ainda não cadastrado"}
+          </Tag>
+        </div>
+        {!cfg.completo && (
+          <div className={styles.formHint}>
+            Complete o certificado e o CSC (produção e homologação) acima, e a razão social/IE/
+            regime/endereço na aba "Contrato", para habilitar o cadastro.
+          </div>
+        )}
+        {onboardError && <Alert variant="error" text={onboardError} fullWidth />}
+        <div className={styles.formActions}>
+          <Button type="button" onClick={handleOnboard} loading={onboarding} disabled={onboarding || !cfg.completo}>
+            {cfg.focus_nfe_cadastrado ? "Reenviar cadastro" : "Cadastrar na Focus NFe"}
+          </Button>
         </div>
       </div>
 

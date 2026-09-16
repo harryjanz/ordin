@@ -51,6 +51,13 @@ export async function updateFiscalConfig(companyId: number, payload: FiscalConfi
   return r.data;
 }
 
+// ORD-170 — sem payload, monta tudo a partir do que já está persistido.
+// "Reenviar cadastro" usa a mesma função (upsert confirmado ao vivo na Focus NFe).
+export async function onboardFocusNfe(companyId: number): Promise<{ cadastrado: boolean; focus_nfe_cadastrado_em: string | null }> {
+  const r = await api.post(`/companies/${companyId}/fiscal-config/focus-nfe-onboarding`);
+  return r.data;
+}
+
 export async function lookupCep(cep: string): Promise<CepLookupResult> {
   const r = await api.get<CepLookupResult>(`/companies/cep-lookup/${encodeURIComponent(cep)}`);
   return r.data;

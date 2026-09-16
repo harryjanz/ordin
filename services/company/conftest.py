@@ -10,6 +10,7 @@ os.environ.setdefault("JWT_ACCESS_EXP_MINUTES", "60")
 os.environ.setdefault("INTERNAL_SECRET", "test-internal-ci")
 os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000")
 os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY", "0" * 64)
+os.environ.setdefault("FOCUS_NFE_MASTER_TOKEN", "test-focus-nfe-master-token")
 os.environ.setdefault("S3_BUCKET", "ordin-contracts-test")
 os.environ.setdefault("AWS_REGION", "us-east-1")
 # S3_ENDPOINT_URL deliberadamente NÃO setada nos testes — moto só intercepta

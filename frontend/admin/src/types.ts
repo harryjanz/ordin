@@ -472,6 +472,16 @@ export interface FiscalConfig {
   csc_producao_cadastrado: boolean;
   csc_homologacao_cadastrado: boolean;
   completo: boolean;
+  // ORD-170 — nunca traz os tokens, só o indicador de status.
+  focus_nfe_cadastrado: boolean;
+  focus_nfe_cadastrado_em: string | null;
+}
+
+// ORD-170 — corpo de erro repassado 1:1 da Focus NFe (erros[] pode vir vazio).
+export interface FocusNfeErrorDetail {
+  codigo: string;
+  mensagem: string;
+  erros?: { mensagem: string }[];
 }
 
 export interface FiscalConfigUpdate {
