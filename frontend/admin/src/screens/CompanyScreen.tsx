@@ -362,6 +362,15 @@ function FiscalTab({ companyId }: FiscalTabProps) {
   const [ativoSaving, setAtivoSaving] = useState(false);
   const [ambienteSaving, setAmbienteSaving] = useState(false);
   const [confirmAtivar, setConfirmAtivar] = useState(false);
+
+  // ── Cadastro manual de tokens já existentes (ORD-178) ────────────────────
+  const [manualTokenModalOpen, setManualTokenModalOpen] = useState(false);
+  const [manualTokenSaving, setManualTokenSaving] = useState(false);
+  const [manualTokenError, setManualTokenError] = useState("");
+  const [manualTokenModalKey, setManualTokenModalKey] = useState(0);
+  const tokenProducaoManualRef = useRef<HTMLInputElement | null>(null);
+  const tokenHomologacaoManualRef = useRef<HTMLInputElement | null>(null);
+
   const certSenhaRef = useRef<HTMLInputElement | null>(null);
   const cscProducaoRef = useRef<HTMLInputElement | null>(null);
   const idTokenProducaoRef = useRef<HTMLInputElement | null>(null);
@@ -486,6 +495,36 @@ function FiscalTab({ companyId }: FiscalTabProps) {
     }
   }
 
+  function openManualTokenModal() {
+    setManualTokenError("");
+    setManualTokenModalKey((k) => k + 1);
+    setManualTokenModalOpen(true);
+  }
+
+  async function handleSaveManualTokens() {
+    const tokenProducao = tokenProducaoManualRef.current?.value.trim();
+    const tokenHomologacao = tokenHomologacaoManualRef.current?.value.trim();
+    if (!tokenProducao && !tokenHomologacao) {
+      setManualTokenError("Informe ao menos um token (homologação ou produção).");
+      return;
+    }
+    setManualTokenSaving(true);
+    setManualTokenError("");
+    try {
+      const updated = await updateFiscalConfig(companyId, {
+        ...(tokenProducao ? { token_producao_manual: tokenProducao } : {}),
+        ...(tokenHomologacao ? { token_homologacao_manual: tokenHomologacao } : {}),
+      });
+      setCfg(updated);
+      setManualTokenModalOpen(false);
+      makeToast("success", "Tokens cadastrados!");
+    } catch (e: unknown) {
+      setManualTokenError(parseApiError(e).message);
+    } finally {
+      setManualTokenSaving(false);
+    }
+  }
+
   if (loading) return <div className={styles.muted}>Carregando…</div>;
   if (err) return <Alert variant="error" text={err} fullWidth />;
   if (!cfg) return null;
@@ -533,20 +572,23 @@ function FiscalTab({ companyId }: FiscalTabProps) {
           <span className={styles.planLabel}>Focus NFe</span>
           <Tag variant={cfg.focus_nfe_cadastrado ? "success" : "neutral"}>
             {cfg.focus_nfe_cadastrado
-              ? `Cadastrado em ${new Date(cfg.focus_nfe_cadastrado_em!).toLocaleString("pt-BR")}`
+              ? `Cadastrado${cfg.focus_nfe_cadastro_manual ? " manualmente" : ""} em ${new Date(cfg.focus_nfe_cadastrado_em!).toLocaleString("pt-BR")}`
               : "Ainda não cadastrado"}
           </Tag>
         </div>
         {!cfg.completo && (
           <div className={styles.formHint}>
             Complete o certificado e o CSC (produção e homologação) acima, e a razão social/IE/
-            regime/endereço na aba "Contrato", para habilitar o cadastro.
+            regime/endereço na aba "Contrato", para habilitar o cadastro (automático ou manual).
           </div>
         )}
         {onboardError && <Alert variant="error" text={onboardError} fullWidth />}
         <div className={styles.formActions}>
           <Button type="button" onClick={handleOnboard} loading={onboarding} disabled={onboarding || !cfg.completo}>
             {cfg.focus_nfe_cadastrado ? "Reenviar cadastro" : "Cadastrar na Focus NFe"}
+          </Button>
+          <Button type="button" variant="secondary" size="small" onClick={openManualTokenModal} disabled={!cfg.completo}>
+            Já tenho os tokens
           </Button>
         </div>
       </div>
@@ -643,6 +685,33 @@ function FiscalTab({ companyId }: FiscalTabProps) {
         onConfirm={() => { setConfirmAtivar(false); applyAtivo(true); }}
         onCancel={() => setConfirmAtivar(false)}
       />
+
+      <Modal
+        open={manualTokenModalOpen}
+        width={480}
+        onClose={() => setManualTokenModalOpen(false)}
+        onBackdropClick={() => setManualTokenModalOpen(false)}
+        onCloseButtonClick={() => setManualTokenModalOpen(false)}
+      >
+        <div key={manualTokenModalKey} className={styles.modalForm}>
+          <div className={styles.formTitle}>Já tenho os tokens</div>
+          <div className={styles.formHint}>
+            Use quando a empresa já tem uma conta própria na Focus NFe (ex.: criada direto no
+            painel deles) — cole aqui os tokens que já existem, em vez de gerar novos.
+          </div>
+          {manualTokenError && <Alert variant="error" text={manualTokenError} fullWidth />}
+          <PasswordField label="Token de homologação" placeholder="Opcional" inputRef={tokenHomologacaoManualRef} />
+          <PasswordField label="Token de produção" placeholder="Opcional" inputRef={tokenProducaoManualRef} />
+          <div className={styles.formActions}>
+            <Button type="button" onClick={handleSaveManualTokens} loading={manualTokenSaving} disabled={manualTokenSaving}>
+              Salvar
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setManualTokenModalOpen(false)}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
