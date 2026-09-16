@@ -306,3 +306,58 @@ específico — não atribuída ainda.
 **Status: Ready.** Implementação pode começar, mas **validação de ponta a ponta (QA de verdade)
 continua dependendo do cliente-piloto real com certificado A1 válido** — mesma pendência já
 registrada em `docs/estudo-nfce.md`, não nova desta história.
+
+## Implementação
+
+Backend (`services/company/main.py`): 7 colunas novas em `CompanyFiscalConfig` (`focus_nfe_empresa_id`,
+`focus_nfe_client_app_id`, `token_producao_enc`, `token_homologacao_enc`, `focus_nfe_cadastrado_em`,
+`certificado_valido_de`, `certificado_valido_ate`), `FOCUS_NFE_REGIME_MAP` (mapeia
+`tax_regime` do Ordin pro inteiro que a Focus NFe espera — `lucro_presumido`/`lucro_real` caem
+os dois em "3 — Normal"), `_fiscal_config_completo()` extraído como helper único (usado tanto na
+resposta de leitura quanto como gate do onboarding, pra nunca divergir "botão habilitado" de
+"backend aceita a chamada"), endpoint `POST /companies/{id}/fiscal-config/focus-nfe-onboarding`
+(monta o payload a partir de `Company`+`CompanyFiscalConfig`, decripta em memória, chama a Focus
+NFe real com `httpx` + Basic Auth do token master, repassa erro 4xx como 422 com o corpo original
+da Focus NFe). `FOCUS_NFE_MASTER_TOKEN` como env var obrigatória (`require_env`), documentada em
+`.env.example`, `docker-compose.yml` e `CLAUDE.md`; placeholder adicionado em `.env` local (sem o
+token real, `POST /empresas` retorna 401 — comportamento esperado, confirmado no teste ao vivo
+abaixo). Migration `20260916_0900_focus_nfe_onboarding.py`. 9 testes novos
+(`test_ord170_onboarding_focus_nfe.py`), mockando a chamada à Focus NFe via `respx` (nunca bate
+na rede em teste) — cobrem sucesso, reenvio (mesmo POST, `call_count == 2`), dados incompletos,
+múltiplos erros em `erros[]`, certificado×CNPJ, timeout/erro de conectividade (502), controle de
+acesso (owner 403) e tokens nunca em texto puro. Suíte completa do company-service: 438 passou.
+Ruff limpo.
+
+Frontend (`CompanyScreen.tsx`): novo painel "Focus NFe" na `FiscalTab`, com `Tag` de status (data
+formatada quando já cadastrado) e botão condicional "Cadastrar na Focus NFe"/"Reenviar cadastro"
+(desabilitado com hint textual quando `completo=false`). `parseFocusNfeError()` local (não
+reaproveita `parseApiError` genérico — o formato de erro repassado da Focus NFe,
+`{codigo, mensagem, erros[]}`, é diferente do formato padrão do FastAPI/Pydantic que aquele
+parser trata) junta `mensagem` + todos os itens de `erros[]` numa única string legível. `tsc`,
+`build` e `vitest` limpos (48 testes).
+
+**Testado ao vivo, ponta a ponta**: rebuild completo dos containers `admin` e `company-service`
+(o `company-service` estava sendo só hot-patchado via `docker compose cp` + `restart` nas
+histórias anteriores da sessão — isso deixou a imagem baked desatualizada, sem as migrations do
+próprio épico; precisou de `docker compose build company-service` de verdade pra pegar a cadeia
+de migrations completa). Certificado/CSC da Burger House seedados via chamada direta à API (o
+Upload do design-system valida por MIME real do arquivo — um `.pfx` fake gerado com bytes
+aleatórios não tem magic bytes de PKCS#12 e foi rejeitado no browser, mesmo risco já registrado
+na ORD-168; contornado testando o backend diretamente, não é regressão). Com os dados completos,
+cliquei em "Cadastrar na Focus NFe": a chamada bateu de verdade em `api.focusnfe.com.br` (não
+mockada) e voltou `401 "Access token inválido (host: api.focusnfe.com.br)"` — esperado, já que o
+`.env` local só tem um placeholder, não o token master real. O erro foi repassado e exibido de
+forma legível na tela, sem persistir nada (status continuou "Ainda não cadastrado"), confirmando
+o fluxo de erro de ponta a ponta. Validação com sucesso real (cadastro de verdade na Focus NFe)
+continua dependendo do cliente-piloto com certificado A1 válido, como já esperado desde o
+Explorer.
+
+**Atualização — token master real configurado (2026-09-16)**: usuário forneceu o token
+principal/master real da conta Ordin na Focus NFe, colocado em `FOCUS_NFE_MASTER_TOKEN` no
+`.env` local (nunca commitado — arquivo no `.gitignore`). Reteste ao vivo: a autenticação passou
+(sem mais 401) e a Focus NFe avançou pra validação seguinte, retornando `"Erro de validação:
+Houve um erro ao instalar o certificado. Verifique se a senha está correta e se o arquivo está
+no formato PFX ou P12, codificado em Base64."` — esperado, já que o certificado usado no teste é
+um valor fake (não um `.pfx` real). Confirma que a integração está correta ponta a ponta até o
+limite da pendência já registrada: só falta um certificado A1 real de CNPJ ativo (cliente-piloto)
+pra validar o cadastro de sucesso completo.

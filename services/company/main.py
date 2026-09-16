@@ -91,6 +91,10 @@ PASSWORD_RESET_TTL_HOURS = 1
 AUTH_SERVICE_URL         = require_env("AUTH_SERVICE_URL")
 FORGOT_PASSWORD_RATE_MAX = 3
 FORGOT_PASSWORD_RATE_TTL = 15 * 60
+# ORD-170 — token principal/master da conta Ordin na Focus NFe. Segredo de
+# PLATAFORMA (cadastra empresas na conta real), não de empresa cliente —
+# mesmo padrão de QR_SECRET/INTERNAL_SECRET, nunca logado nem retornado.
+FOCUS_NFE_MASTER_TOKEN   = require_env("FOCUS_NFE_MASTER_TOKEN")
 
 
 def require_internal(x_internal_secret: str = Header(default="")) -> None:
@@ -335,6 +339,17 @@ class CompanyFiscalConfig(Base):
     id_token_producao         = Column(String(32), nullable=True)
     csc_homologacao_enc       = Column(String(500), nullable=True)
     id_token_homologacao      = Column(String(32), nullable=True)
+    # ORD-170 — onboarding na Focus NFe (POST /empresas). certificado_valido_*
+    # vem pronto na resposta (a Focus NFe extrai do X.509 no cadastro) —
+    # pré-requisito de dado da ORD-176, sem precisar parsear o certificado
+    # localmente.
+    focus_nfe_empresa_id     = Column(Integer, nullable=True)
+    focus_nfe_client_app_id  = Column(Integer, nullable=True)
+    token_producao_enc       = Column(String(512), nullable=True)
+    token_homologacao_enc    = Column(String(512), nullable=True)
+    focus_nfe_cadastrado_em  = Column(DateTime, nullable=True)
+    certificado_valido_de    = Column(DateTime, nullable=True)
+    certificado_valido_ate   = Column(DateTime, nullable=True)
     created_at                = Column(DateTime, default=datetime.utcnow)
     updated_at                = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -870,6 +885,9 @@ class FiscalConfigOut(BaseModel):
     csc_producao_cadastrado: bool
     csc_homologacao_cadastrado: bool
     completo: bool
+    # ORD-170 — nunca expõe os tokens em texto puro, só o indicador de status.
+    focus_nfe_cadastrado: bool
+    focus_nfe_cadastrado_em: datetime | None = None
 
 
 VALID_CONTACT_TYPES = {"comercial", "financeiro", "tecnico"}
@@ -3318,6 +3336,16 @@ def _address_summary(co: Company) -> str | None:
     return ", ".join(parts)
 
 
+def _fiscal_config_completo(co: Company, cfg: CompanyFiscalConfig | None) -> bool:
+    """Critério único de completude — usado tanto na resposta de leitura
+    quanto como gate do onboarding na Focus NFe (ORD-170), pra nunca divergir
+    entre "o botão está habilitado" e "o backend aceita a chamada"."""
+    return bool(
+        cfg and co.legal_name and co.state_registration and co.tax_regime and co.street
+        and cfg.certificado_arquivo_enc and cfg.csc_producao_enc and cfg.csc_homologacao_enc
+    )
+
+
 def _serialize_fiscal_config(co: Company, cfg: CompanyFiscalConfig | None) -> dict:
     certificado_cadastrado = bool(cfg and cfg.certificado_arquivo_enc)
     csc_producao_cadastrado = bool(cfg and cfg.csc_producao_enc)
@@ -3332,10 +3360,9 @@ def _serialize_fiscal_config(co: Company, cfg: CompanyFiscalConfig | None) -> di
         "certificado_enviado_em": cfg.certificado_enviado_em if cfg else None,
         "csc_producao_cadastrado": csc_producao_cadastrado,
         "csc_homologacao_cadastrado": csc_homologacao_cadastrado,
-        "completo": bool(
-            co.legal_name and co.state_registration and co.tax_regime and co.street
-            and certificado_cadastrado and csc_producao_cadastrado and csc_homologacao_cadastrado
-        ),
+        "completo": _fiscal_config_completo(co, cfg),
+        "focus_nfe_cadastrado": bool(cfg and cfg.focus_nfe_cadastrado_em),
+        "focus_nfe_cadastrado_em": cfg.focus_nfe_cadastrado_em if cfg else None,
     }
 
 
@@ -3402,6 +3429,121 @@ async def update_fiscal_config(
     await db.commit()
     await db.refresh(cfg)
     return _serialize_fiscal_config(co, cfg)
+
+
+# ── Onboarding na Focus NFe (ORD-170) ─────────────────────────────────────────
+# 1=Simples Nacional, 2=Simples c/ excesso de sublimite (Ordin não distingue
+# esse caso hoje), 3=Regime Normal (Lucro Presumido e Lucro Real caem no
+# mesmo código pra Focus NFe), 4=MEI — ver docs/estudo-nfce.md §7.
+FOCUS_NFE_REGIME_MAP = {
+    "simples_nacional": 1,
+    "lucro_presumido": 3,
+    "lucro_real": 3,
+    "mei": 4,
+}
+FOCUS_NFE_EMPRESAS_URL = "https://api.focusnfe.com.br/v2/empresas"
+
+
+class FocusNfeOnboardingOut(BaseModel):
+    cadastrado: bool
+    focus_nfe_cadastrado_em: datetime | None = None
+
+
+async def _company_comercial_email(db: AsyncSession, company_id: int) -> str | None:
+    contact = (await db.execute(
+        select(CompanyContact).filter_by(company_id=company_id, contact_type="comercial")
+    )).scalars().first()
+    return decrypt_field(contact.email_enc) if contact else None
+
+
+@app.post(
+    "/companies/{company_id}/fiscal-config/focus-nfe-onboarding",
+    response_model=FocusNfeOnboardingOut,
+    tags=["Fiscal"],
+    summary="Cadastrar a empresa como emitente na Focus NFe (POST /empresas)",
+    responses={
+        400: {"description": "Dados fiscais incompletos ou regime tributário não mapeado"},
+        422: {"description": "Erro de validação repassado pela Focus NFe"},
+        502: {"description": "Falha de conectividade com a Focus NFe"},
+    },
+)
+async def focus_nfe_onboarding(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    """Sem payload no corpo — monta tudo a partir do que já está persistido
+    (Company + CompanyFiscalConfig). Reenviar (empresa já cadastrada) é o
+    mesmo POST de novo: testado ao vivo contra a API real, é upsert por
+    CNPJ — mesmo id, mesmos tokens, sem duplicar (ver Explorer da história)."""
+    _require_platform_admin(current_user)
+    co = (await db.execute(select(Company).filter_by(id=company_id))).scalars().first()
+    if not co:
+        raise HTTPException(404, "Empresa não encontrada")
+    cfg = (await db.execute(
+        select(CompanyFiscalConfig).filter_by(company_id=company_id)
+    )).scalars().first()
+    if not _fiscal_config_completo(co, cfg):
+        raise HTTPException(
+            400, detail="Dados fiscais incompletos — complete razão social, IE, regime, endereço, certificado e CSC antes de cadastrar na Focus NFe."
+        )
+
+    regime = FOCUS_NFE_REGIME_MAP.get(co.tax_regime)
+    if regime is None:
+        raise HTTPException(400, detail="Regime tributário da empresa inválido ou não mapeado para a Focus NFe.")
+
+    payload = {
+        "nome": co.legal_name,
+        "cnpj": co.document,
+        "inscricao_estadual": co.state_registration,
+        "regime_tributario": regime,
+        "logradouro": co.street,
+        "numero": co.address_number,
+        "complemento": co.complement,
+        "bairro": co.neighborhood,
+        "municipio": co.city,
+        "uf": co.state,
+        "cep": co.zip_code,
+        "email": await _company_comercial_email(db, company_id),
+        "habilita_nfce": True,
+        "arquivo_certificado_base64": decrypt_field(cfg.certificado_arquivo_enc),
+        "senha_certificado": decrypt_field(cfg.certificado_senha_enc) if cfg.certificado_senha_enc else None,
+        "csc_nfce_producao": decrypt_field(cfg.csc_producao_enc),
+        "id_token_nfce_producao": cfg.id_token_producao,
+        "csc_nfce_homologacao": decrypt_field(cfg.csc_homologacao_enc),
+        "id_token_nfce_homologacao": cfg.id_token_homologacao,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                FOCUS_NFE_EMPRESAS_URL,
+                auth=(FOCUS_NFE_MASTER_TOKEN, ""),
+                json=payload,
+            )
+    except httpx.HTTPError:
+        raise HTTPException(502, detail="Não foi possível conectar à Focus NFe. Tente novamente em instantes.")
+
+    if resp.status_code not in (200, 201):
+        try:
+            error_body = resp.json()
+        except ValueError:
+            error_body = {"codigo": "erro_desconhecido", "mensagem": "Erro desconhecido da Focus NFe."}
+        raise HTTPException(422, detail=error_body)
+
+    data = resp.json()
+    cfg.focus_nfe_empresa_id = data.get("id")
+    cfg.focus_nfe_client_app_id = data.get("client_app_id")
+    cfg.token_producao_enc = encrypt_field(data["token_producao"])
+    cfg.token_homologacao_enc = encrypt_field(data["token_homologacao"])
+    cfg.focus_nfe_cadastrado_em = datetime.utcnow()
+    cert_de = data.get("certificado_valido_de")
+    cert_ate = data.get("certificado_valido_ate")
+    cfg.certificado_valido_de = datetime.fromisoformat(cert_de) if cert_de else None
+    cfg.certificado_valido_ate = datetime.fromisoformat(cert_ate) if cert_ate else None
+    await db.commit()
+
+    return {"cadastrado": True, "focus_nfe_cadastrado_em": cfg.focus_nfe_cadastrado_em}
 
 
 # ── Contatos e responsável legal (ORD-058) ────────────────────────────────────
