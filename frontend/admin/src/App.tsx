@@ -25,8 +25,9 @@ import CompanyContractScreen from "./screens/CompanyContractScreen";
 import CompanyListScreen from "./screens/CompanyListScreen";
 import PlatformUsersScreen from "./screens/PlatformUsersScreen";
 import FulfillmentScreen from "./screens/FulfillmentScreen";
-import PriceTableListScreen from "./screens/PriceTableListScreen";
+import CommercialScreen from "./screens/CommercialScreen";
 import PriceTableFormScreen from "./screens/PriceTableFormScreen";
+import FiscalAddonPlanFormScreen from "./screens/FiscalAddonPlanFormScreen";
 
 const ROLE_ROUTES: Record<string, string[]> = {
   // "/company" liberado pra superadmin/admin — precisam acessar Usuários/
@@ -34,8 +35,8 @@ const ROLE_ROUTES: Record<string, string[]> = {
   // de seleção de empresa já usado em /settings (ORD-082). "/platform-users"
   // (ORD-093) é o CRUD separado pra usuários da própria Ordin — não confundir
   // com "/company", que é sobre a equipe de uma empresa cliente.
-  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/catalog/combos/new", "/catalog/combos/:id/edit", "/catalog/promotions/new", "/catalog/promotions/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment", "/commercial/price-tables", "/commercial/price-tables/new", "/commercial/price-tables/:id/edit"],
-  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/catalog/combos/new", "/catalog/combos/:id/edit", "/catalog/promotions/new", "/catalog/promotions/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment", "/commercial/price-tables", "/commercial/price-tables/new", "/commercial/price-tables/:id/edit"],
+  superadmin: ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/catalog/combos/new", "/catalog/combos/:id/edit", "/catalog/promotions/new", "/catalog/promotions/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment", "/commercial/price-tables", "/commercial/price-tables/new", "/commercial/price-tables/:id/edit", "/commercial/fiscal-addon-plans", "/commercial/fiscal-addon-plans/new", "/commercial/fiscal-addon-plans/:id/edit"],
+  admin:      ["/dashboard", "/companies", "/companies/new", "/companies/:id/contract", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/catalog/combos/new", "/catalog/combos/:id/edit", "/catalog/promotions/new", "/catalog/promotions/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/platform-users", "/fulfillment", "/commercial/price-tables", "/commercial/price-tables/new", "/commercial/price-tables/:id/edit", "/commercial/fiscal-addon-plans", "/commercial/fiscal-addon-plans/new", "/commercial/fiscal-addon-plans/:id/edit"],
   owner:      ["/dashboard", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/catalog/combos/new", "/catalog/combos/:id/edit", "/catalog/promotions/new", "/catalog/promotions/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/fulfillment"],
   manager:    ["/dashboard", "/catalog", "/catalog/products/:id/edit", "/catalog/menus/new", "/catalog/menus/:id/edit", "/catalog/option-groups/new", "/catalog/option-groups/:id/edit", "/catalog/combos/new", "/catalog/combos/:id/edit", "/catalog/promotions/new", "/catalog/promotions/:id/edit", "/orders", "/payments", "/company", "/pair", "/settings", "/fulfillment"],
   // ORD-088: cashier ganha acesso a /settings só pra seção "Minha segurança"
@@ -137,9 +138,12 @@ export default function App() {
             <Route path="/companies/new" element={<ProtectedRoute path="/companies/new" element={<NewCompanyScreen />} />} />
             <Route path="/companies/:id/contract" element={<ProtectedRoute path="/companies/:id/contract" element={<CompanyContractScreen />} />} />
             <Route path="/platform-users" element={<ProtectedRoute path="/platform-users" element={<PlatformUsersScreen />} />} />
-            <Route path="/commercial/price-tables" element={<ProtectedRoute path="/commercial/price-tables" element={<PriceTableListScreen />} />} />
+            <Route path="/commercial/price-tables" element={<ProtectedRoute path="/commercial/price-tables" element={<CommercialScreen />} />} />
             <Route path="/commercial/price-tables/new" element={<ProtectedRoute path="/commercial/price-tables/new" element={<PriceTableFormScreen />} />} />
             <Route path="/commercial/price-tables/:id/edit" element={<ProtectedRoute path="/commercial/price-tables/:id/edit" element={<PriceTableFormScreen />} />} />
+            <Route path="/commercial/fiscal-addon-plans" element={<ProtectedRoute path="/commercial/fiscal-addon-plans" element={<CommercialScreen />} />} />
+            <Route path="/commercial/fiscal-addon-plans/new" element={<ProtectedRoute path="/commercial/fiscal-addon-plans/new" element={<FiscalAddonPlanFormScreen />} />} />
+            <Route path="/commercial/fiscal-addon-plans/:id/edit" element={<ProtectedRoute path="/commercial/fiscal-addon-plans/:id/edit" element={<FiscalAddonPlanFormScreen />} />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </main>

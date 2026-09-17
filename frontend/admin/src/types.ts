@@ -439,6 +439,12 @@ export interface CompanyPlan {
   expires_at: string;
   renewed_at: string | null;
   status: CompanyPlanStatus;
+  // ORD-174 — bloco "Módulo fiscal", dimensão SEPARADA de price_table acima.
+  // null quando o módulo nunca foi ativado (nenhum plano escolhido ainda).
+  // Não-null com fiscal_module_ativo=false = módulo já teve plano vinculado
+  // mas está desativado agora (histórico preservado, ORD-171).
+  fiscal_addon_plan: FiscalAddonPlanSummary | null;
+  fiscal_module_ativo: boolean;
 }
 
 // ORD-165 — registro de toda troca de price_table_id do plano comercial,
@@ -481,6 +487,34 @@ export interface FiscalConfig {
   ambiente: "homologacao" | "producao" | "mockup";
   // ORD-178 — distingue "cadastrado via API" de "cadastrado manualmente".
   focus_nfe_cadastro_manual: boolean;
+  // ORD-174 — null quando o módulo nunca foi ativado (nenhum plano de
+  // add-on escolhido ainda) — aba "Plano" mostra "Não contratado" nesse
+  // caso. Desativar o módulo NÃO desvincula o plano (histórico).
+  fiscal_addon_plan: FiscalAddonPlanSummary | null;
+}
+
+// ORD-174 — custo do módulo fiscal, add-on SEPARADO da PriceTable (mede
+// notas emitidas, não transações do totem). Catálogo da própria plataforma,
+// mesmo padrão de controle de PriceTable (role, não tenant).
+export interface FiscalAddonPlan {
+  id: number;
+  name: string;
+  monthly_price: number;
+  price_per_document: number;
+  created_at: string;
+  linked_companies_count: number;
+  // Sem componente de histórico (diferente de PriceTable.editable) — só
+  // "vinculado agora" bloqueia edição/exclusão.
+  editable: boolean;
+}
+
+// Versão enxuta embutida em FiscalConfig — só o que a aba "Plano" precisa
+// mostrar (nome + preços), sem contador/editable.
+export interface FiscalAddonPlanSummary {
+  id: number;
+  name: string;
+  monthly_price: number;
+  price_per_document: number;
 }
 
 // ORD-170 — corpo de erro repassado 1:1 da Focus NFe (erros[] pode vir vazio).
@@ -504,6 +538,8 @@ export interface FiscalConfigUpdate {
   // ORD-178
   token_producao_manual?: string;
   token_homologacao_manual?: string;
+  // ORD-174 — obrigatório junto de ativo=true (validado no backend).
+  fiscal_addon_plan_id?: number;
 }
 
 export interface Order {

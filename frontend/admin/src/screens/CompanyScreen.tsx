@@ -7,7 +7,7 @@ import { parseApiError } from "../lib/apiErrors";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { useStore } from "../store";
-import type { CompanyPlan, FiscalConfig, FocusNfeErrorDetail, Terminal, User, Role, PaymentConfig, Company, MpTerminal } from "../types";
+import type { CompanyPlan, FiscalAddonPlan, FiscalConfig, FocusNfeErrorDetail, Terminal, User, Role, PaymentConfig, Company, MpTerminal } from "../types";
 import styles from "./CompanyScreen.module.scss";
 
 // ── Provider catalog ─────────────────────────────────────────────────────────
@@ -265,6 +265,39 @@ function PlanTab({ companyId }: PlanTabProps) {
           )}
         </div>
       )}
+
+      {/* ORD-174 — custo do módulo fiscal, dimensão SEPARADA da PriceTable
+          acima (Focus NFe cobra plano fixo + valor por nota, não
+          transações do totem). Mesmo bloco visível a owner/manager que já
+          vê o resto desta aba — dado vem embutido em CompanyPlan
+          (_require_company_admin), não em FiscalConfig (restrito a
+          superadmin/admin). */}
+      <div className={styles.planPanel} style={{ marginTop: 20 }}>
+        <div className={styles.formTitle}>Módulo fiscal</div>
+        {plan.fiscal_addon_plan ? (
+          <>
+            <div className={styles.planRow}>
+              <span className={styles.planLabel}>Status</span>
+              <Tag variant={plan.fiscal_module_ativo ? "success" : "neutral"}>
+                {plan.fiscal_module_ativo ? "Ativo" : "Desativado"}
+              </Tag>
+            </div>
+            <div className={styles.planRow}>
+              <span className={styles.planLabel}>Plano</span>
+              <span>{plan.fiscal_addon_plan.name}</span>
+            </div>
+            <div className={styles.planFormRow}>
+              <ReadOnlyField label="Preço fixo/mês" value={fmtBRL(plan.fiscal_addon_plan.monthly_price)} />
+              <ReadOnlyField label="Preço por nota emitida" value={fmtBRL(plan.fiscal_addon_plan.price_per_document)} />
+            </div>
+          </>
+        ) : (
+          <div className={styles.planRow}>
+            <span className={styles.planLabel}>Status</span>
+            <Tag variant="neutral">Não contratado</Tag>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -368,6 +401,10 @@ function FiscalTab({ companyId }: FiscalTabProps) {
   const [ambienteSaving, setAmbienteSaving] = useState(false);
   const [confirmAtivar, setConfirmAtivar] = useState(false);
 
+  // ── Plano de add-on fiscal (ORD-174) — ativar exige plano vinculado ──────
+  const [addonPlans, setAddonPlans] = useState<FiscalAddonPlan[]>([]);
+  const [addonPlanSaving, setAddonPlanSaving] = useState(false);
+
   // ── Cadastro manual de tokens já existentes (ORD-178) ────────────────────
   const [manualTokenModalOpen, setManualTokenModalOpen] = useState(false);
   const [manualTokenSaving, setManualTokenSaving] = useState(false);
@@ -391,6 +428,14 @@ function FiscalTab({ companyId }: FiscalTabProps) {
   }
 
   useEffect(() => { load(); }, [companyId]);
+
+  // ORD-174 — catálogo de planos pro Dropdown, carregado uma vez (não
+  // depende da empresa selecionada, é catálogo da plataforma).
+  useEffect(() => {
+    api.get("/commercial/fiscal-addon-plans")
+      .then((r) => setAddonPlans(r.data.plans ?? []))
+      .catch(() => {});
+  }, []);
 
   function handleCertUpload(files: UploadFile[]) {
     const picked = files[0];
@@ -500,6 +545,21 @@ function FiscalTab({ companyId }: FiscalTabProps) {
     }
   }
 
+  // ORD-174 — plano de add-on fiscal, salvo à parte (não junto do toggle de
+  // ativar) — igual ao Ambiente acima, upsert independente. Ativar exige
+  // que isso já esteja preenchido (ver disabled do Toggle abaixo).
+  async function handleChangeAddonPlan(opt: DropdownOptions) {
+    setAddonPlanSaving(true);
+    try {
+      const updated = await updateFiscalConfig(companyId, { fiscal_addon_plan_id: Number(opt.value) });
+      setCfg(updated);
+    } catch (e: unknown) {
+      makeToast("error", parseApiError(e).message);
+    } finally {
+      setAddonPlanSaving(false);
+    }
+  }
+
   function openManualTokenModal() {
     setManualTokenError("");
     setManualTokenModalKey((k) => k + 1);
@@ -600,11 +660,25 @@ function FiscalTab({ companyId }: FiscalTabProps) {
 
       <div className={`${styles.planPanel} ${styles.fiscalForm}`} style={{ marginBottom: 20 }}>
         <div className={styles.planRow}>
+          <span className={styles.planLabel}>Plano de add-on fiscal</span>
+        </div>
+        <Dropdown
+          label=""
+          value={cfg.fiscal_addon_plan ? { value: String(cfg.fiscal_addon_plan.id), label: cfg.fiscal_addon_plan.name } : null}
+          onValueSelected={handleChangeAddonPlan}
+          options={addonPlans.map((p) => ({ value: String(p.id), label: p.name }))}
+          disabled={addonPlanSaving}
+          placeholder="Escolha um plano"
+        />
+        {!cfg.fiscal_addon_plan && (
+          <div className={styles.formHint}>Escolha um plano de add-on fiscal para poder ativar a emissão.</div>
+        )}
+        <div className={styles.planRow}>
           <span className={styles.planLabel}>Emissão de NFC-e</span>
           <Toggle
             name="fiscal-ativo"
             checked={cfg.ativo}
-            disabled={ativoSaving || (!cfg.ativo && !cfg.focus_nfe_cadastrado)}
+            disabled={ativoSaving || (!cfg.ativo && (!cfg.focus_nfe_cadastrado || !cfg.fiscal_addon_plan))}
             onChange={handleToggleAtivo}
           />
         </div>

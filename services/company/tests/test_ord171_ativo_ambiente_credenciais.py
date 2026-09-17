@@ -65,6 +65,17 @@ async def _seed_company_cadastrada_focus_nfe(company_id: int) -> None:
         await db.commit()
 
 
+async def _seed_fiscal_addon_plan() -> int:
+    """ORD-174 — ativar (`ativo=True`) exige plano de add-on vinculado."""
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        plan = svc.FiscalAddonPlan(name="Fiscal Básico", monthly_price=59.90, price_per_document=0.05)
+        db.add(plan)
+        await db.commit()
+        await db.refresh(plan)
+        return plan.id
+
+
 # ── Ativar exige cadastro prévio na Focus NFe ────────────────────────────────
 
 async def test_ativar_sem_cadastro_focus_nfe_e_rejeitado(client, token_superadmin):
@@ -84,9 +95,21 @@ async def test_ativar_sem_cadastro_focus_nfe_e_rejeitado(client, token_superadmi
 
 async def test_ativar_apos_cadastro_focus_nfe_funciona(client, token_superadmin):
     await _seed_company_cadastrada_focus_nfe(1)
-    r = await client.put("/companies/1/fiscal-config", headers=auth(token_superadmin), json={"ativo": True})
+    plan_id = await _seed_fiscal_addon_plan()
+    r = await client.put(
+        "/companies/1/fiscal-config", headers=auth(token_superadmin),
+        json={"ativo": True, "fiscal_addon_plan_id": plan_id},
+    )
     assert r.status_code == 200
     assert r.json()["ativo"] is True
+
+
+async def test_ativar_sem_plano_de_addon_e_rejeitado(client, token_superadmin):
+    """ORD-174 — ativar exige plano de add-on fiscal vinculado, mesmo com
+    cadastro na Focus NFe completo."""
+    await _seed_company_cadastrada_focus_nfe(1)
+    r = await client.put("/companies/1/fiscal-config", headers=auth(token_superadmin), json={"ativo": True})
+    assert r.status_code == 400
 
 
 async def test_ambiente_default_e_homologacao(client, token_superadmin):
@@ -119,7 +142,11 @@ async def test_internal_credentials_inativo_so_retorna_ativo_false(client, token
 
 async def test_internal_credentials_ativo_retorna_token_homologacao_por_padrao(client, token_superadmin):
     await _seed_company_cadastrada_focus_nfe(1)
-    await client.put("/companies/1/fiscal-config", headers=auth(token_superadmin), json={"ativo": True})
+    plan_id = await _seed_fiscal_addon_plan()
+    await client.put(
+        "/companies/1/fiscal-config", headers=auth(token_superadmin),
+        json={"ativo": True, "fiscal_addon_plan_id": plan_id},
+    )
 
     r = await client.get("/internal/companies/1/fiscal-credentials", headers=internal_headers())
     assert r.status_code == 200
@@ -135,7 +162,11 @@ async def test_internal_credentials_ativo_retorna_token_homologacao_por_padrao(c
 
 async def test_internal_credentials_ambiente_producao_retorna_token_producao(client, token_superadmin):
     await _seed_company_cadastrada_focus_nfe(1)
-    await client.put("/companies/1/fiscal-config", headers=auth(token_superadmin), json={"ativo": True, "ambiente": "producao"})
+    plan_id = await _seed_fiscal_addon_plan()
+    await client.put(
+        "/companies/1/fiscal-config", headers=auth(token_superadmin),
+        json={"ativo": True, "ambiente": "producao", "fiscal_addon_plan_id": plan_id},
+    )
 
     r = await client.get("/internal/companies/1/fiscal-credentials", headers=internal_headers())
     data = r.json()

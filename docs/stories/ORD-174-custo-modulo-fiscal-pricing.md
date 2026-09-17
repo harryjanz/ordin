@@ -238,3 +238,46 @@ existente) · [x] migrations (uma) · [x] eventos de fila — nenhum · [x] esti
 não resolvidos · [ ] sprint específico — não atribuída ainda.
 
 **Status: Ready.**
+
+## Implementação
+
+Implementado como desenhado no Tech Explorer, com um ajuste de local do dado exposto ao
+frontend: o bloco "Módulo fiscal" da aba Plano foi embutido em `CompanyPlanOut`
+(`GET /companies/{id}/plan`), não em `FiscalConfigOut` como o esboço original sugeria — esse
+endpoint já é acessível a owner/manager da própria empresa (`_require_company_admin`), enquanto
+`FiscalConfigOut` é restrito a superadmin/admin. Colocar o bloco lá deixaria a aba Plano quebrada
+(403 silencioso) pra qualquer usuário que não fosse admin de plataforma.
+
+Backend: `FiscalAddonPlan` (modelo) + `fiscal_addon_plan_id` em `CompanyFiscalConfig` + CRUD
+`/commercial/fiscal-addon-plans` (create/list/get/update/delete, bloqueio de edição/exclusão
+quando vinculado a alguma empresa) + extensão de `PUT /companies/{id}/fiscal-config` (aceita
+`fiscal_addon_plan_id`, exige plano preenchido pra `ativo=true`) + extensão de
+`GET /companies/{id}/plan` (bloco `fiscal_addon_plan`/`fiscal_module_ativo`). Migration
+`20260917_1400_fiscal_addon_plans.py`, testada rodando de verdade no container local (upgrade
+limpo). 19 testes novos (`test_ord174_addon_fiscal_pricing.py`, 10 testes, + 1 teste de borda
+adicionado em `test_ord171_ativo_ambiente_credenciais.py` para "ativar sem plano é rejeitado" + 3
+testes existentes ajustados pra passar `fiscal_addon_plan_id` na ativação). Suíte completa do
+company-service (469 testes) e `ruff` sem regressão.
+
+Frontend: `FiscalAddonPlanListScreen`/`FiscalAddonPlanFormScreen` (cópia estrutural simplificada
+de `PriceTableListScreen`/`PriceTableFormScreen`, sem faixas nem status), nova entrada de sidebar
+"Add-on fiscal", `FiscalTab` ganha Dropdown de plano (auto-save, mesmo padrão do Ambiente) e o
+Toggle de ativação passa a exigir plano escolhido, `PlanTab` ganha o bloco "Módulo fiscal".
+Testado manualmente de ponta a ponta no navegador: criação de plano, vínculo numa empresa já
+ativa de sessão anterior (caso "grandfathered" — `ativo=true` sem plano, populado corretamente
+pelo Dropdown sem precisar desativar/reativar), bloqueio de edição/exclusão do plano em uso, e o
+bloco da aba Plano refletindo o vínculo.
+
+**Gotcha desta sessão (recorrente)**: o container do company-service ficou rodando código
+desatualizado duas vezes durante a implementação — hot-patch (`docker compose cp`) feito antes de
+terminar todas as edições do `main.py`, mascarado porque o serviço continuava respondendo (só sem
+os campos novos). Sintoma: `GET /companies/{id}/plan` retornando sem `fiscal_addon_plan`/
+`fiscal_module_ativo` mesmo depois de reload completo do navegador — só reproduzido comparando a
+resposta real da API via curl contra o código fonte.
+
+**Revisão pós-teste do usuário (mesma sessão)**: desenho original punha "Tabelas de preço" e
+"Add-on fiscal" como dois itens separados na sidebar — usuário achou que virou poluição de menu
+pra dois catálogos da mesma área comercial. Unificados numa aba só (`CommercialScreen.tsx`,
+Tab/Tabs — mesmo padrão já usado em `CompanyScreen`), sidebar cai pra um item ("Comercial"). URLs
+de formulário (criar/editar) não mudaram; as duas rotas de listagem (`/commercial/price-tables`,
+`/commercial/fiscal-addon-plans`) agora renderizam o mesmo wrapper, que decide a aba pela rota.

@@ -23,10 +23,17 @@ const MENU = [
   // ORD-093: só pra equipe da própria Ordin — não confundir com "Clientes"
   // (empresas) nem com "Empresa" (equipe de UMA empresa cliente específica).
   { to: "/platform-users", label: "Equipe Ordin", icon: "user-check",  roles: ["superadmin", "admin"] },
-  // ORD-162: tabela de preço comercial da PLATAFORMA (mensalidade por
-  // totem + taxa transacional) — não confundir com "/companies/:id/contract"
-  // (CompanyContractScreen, contrato jurídico de UMA empresa cliente).
-  { to: "/commercial/price-tables", label: "Tabelas de preço", icon: "tag", roles: ["superadmin", "admin"] },
+  // ORD-162/174: tabela de preço comercial da PLATAFORMA (mensalidade por
+  // totem + taxa transacional) e custo do módulo fiscal (add-on separado,
+  // mede notas emitidas via Focus NFe) — não confundir com
+  // "/companies/:id/contract" (CompanyContractScreen, contrato jurídico de
+  // UMA empresa cliente). Um item só na sidebar (revisão pós-feedback do
+  // ORD-174: dois itens pra catálogos da mesma área comercial virou
+  // poluição de menu) — as duas telas viram abas dentro de CommercialScreen.
+  // activePrefix: item deve acender também nas rotas de "/commercial/fiscal-
+  // addon-plans" (aba irmã dentro de CommercialScreen, ver ORD-174) — o
+  // NavLink por padrão só acende em sub-rotas do próprio `to`.
+  { to: "/commercial/price-tables", label: "Comercial", icon: "tag", roles: ["superadmin", "admin"], activePrefix: "/commercial" },
 ] as const;
 
 const W_OPEN = 220;
@@ -111,19 +118,24 @@ export default function Sidebar() {
         </div>
 
         <nav className={styles.nav}>
-          {visibleItems.map((m) => (
-            <NavLink
-              key={m.to}
-              to={m.to}
-              onClick={(e) => handleNavClick(e, m.to)}
-              className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
-            >
-              <i className={`icon-${m.icon} ${styles.navIcon}`} />
-              <span className={styles.navLabel} style={{ opacity: expanded ? 1 : 0 }}>
-                {m.label}
-              </span>
-            </NavLink>
-          ))}
+          {visibleItems.map((m) => {
+            const active = "activePrefix" in m
+              ? location.pathname.startsWith(m.activePrefix)
+              : undefined; // undefined deixa o NavLink calcular isActive normalmente
+            return (
+              <NavLink
+                key={m.to}
+                to={m.to}
+                onClick={(e) => handleNavClick(e, m.to)}
+                className={({ isActive }) => `${styles.navItem} ${(active ?? isActive) ? styles.navItemActive : ""}`}
+              >
+                <i className={`icon-${m.icon} ${styles.navIcon}`} />
+                <span className={styles.navLabel} style={{ opacity: expanded ? 1 : 0 }}>
+                  {m.label}
+                </span>
+              </NavLink>
+            );
+          })}
         </nav>
 
         {/* Item de navegação, não LinkButton — variant="inverse" do LinkButton
