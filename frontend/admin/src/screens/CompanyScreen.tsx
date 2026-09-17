@@ -294,6 +294,11 @@ const ID_TOKEN_MAX_LENGTH = 6;
 const AMBIENTE_OPTIONS: DropdownOptions[] = [
   { value: "homologacao", label: "Homologação (sem validade fiscal)" },
   { value: "producao", label: "Produção (nota fiscal real)" },
+  // ORD-179 — só fabrica NFC-e fictícia se o payment-service tiver
+  // FISCAL_MOCKUP_ENABLED ligado (env var de plataforma); sem isso, se
+  // comporta como homologação. Uso interno do time Ordin, pra validar o
+  // layout impresso sem certificado A1 real.
+  { value: "mockup", label: "Mockup (teste — gera NFC-e fictícia)" },
 ];
 
 // ORD-168 — não existe um componente de senha com olho pronto no
@@ -486,7 +491,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
   async function handleChangeAmbiente(opt: DropdownOptions) {
     setAmbienteSaving(true);
     try {
-      const updated = await updateFiscalConfig(companyId, { ambiente: opt.value as "homologacao" | "producao" });
+      const updated = await updateFiscalConfig(companyId, { ambiente: opt.value as "homologacao" | "producao" | "mockup" });
       setCfg(updated);
     } catch (e: unknown) {
       makeToast("error", parseApiError(e).message);
@@ -587,9 +592,9 @@ function FiscalTab({ companyId }: FiscalTabProps) {
           <Button type="button" onClick={handleOnboard} loading={onboarding} disabled={onboarding || !cfg.completo}>
             {cfg.focus_nfe_cadastrado ? "Reenviar cadastro" : "Cadastrar na Focus NFe"}
           </Button>
-          <Button type="button" variant="secondary" size="small" onClick={openManualTokenModal} disabled={!cfg.completo}>
-            Já tenho os tokens
-          </Button>
+          {/* ORD-178 — escondido por enquanto: o cadastro automatizado já traz os
+              tokens prontos na resposta; a via manual fica reservada pro caso raro
+              de empresa que já existe na Focus NFe, sem botão visível por ora. */}
         </div>
       </div>
 
@@ -622,6 +627,14 @@ function FiscalTab({ companyId }: FiscalTabProps) {
             icon="alert-triangle"
             fullWidth
             text="Ambiente de homologação — qualquer NFC-e emitida aqui não tem validade fiscal real. Troque para produção somente após validar a emissão."
+          />
+        )}
+        {cfg.ambiente === "mockup" && (
+          <Alert
+            variant="warning"
+            icon="alert-triangle"
+            fullWidth
+            text="Ambiente de mockup — a NFC-e é inteiramente fictícia (chave e QR fake), gerada sem contato com a Focus NFe. Uso interno do time Ordin pra testar o impresso, nunca use numa empresa cliente real."
           />
         )}
       </div>
@@ -678,7 +691,11 @@ function FiscalTab({ companyId }: FiscalTabProps) {
       <ConfirmDialog
         open={confirmAtivar}
         title="Ativar emissão de NFC-e"
-        message={`A partir de agora, todo pagamento aprovado no totem vai tentar emitir uma nota fiscal de verdade no ambiente de ${cfg.ambiente === "producao" ? "produção (nota fiscal real)" : "homologação (sem validade fiscal)"}. Falha na emissão nunca bloqueia a venda. Confirma a ativação?`}
+        message={`A partir de agora, todo pagamento aprovado no totem vai tentar emitir uma nota fiscal no ambiente de ${
+          cfg.ambiente === "producao" ? "produção (nota fiscal real)"
+          : cfg.ambiente === "mockup" ? "mockup (NFC-e fictícia, só pra teste)"
+          : "homologação (sem validade fiscal)"
+        }. Falha na emissão nunca bloqueia a venda. Confirma a ativação?`}
         confirmLabel="Ativar"
         alertVariant="warning"
         alertIcon="alert-triangle"

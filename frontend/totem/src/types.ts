@@ -18,6 +18,10 @@ export interface CompanyInfo {
   // "Ainda está aí?" antes do reset.
   inactivity_timeout_min: number;
   inactivity_warn_sec: number;
+  // ORD-172 — deriva de CompanyFiscalConfig.ativo (ORD-171). Controla se a
+  // tela de CPF entra na navegação antes do pagamento — CPF só faz sentido
+  // vinculado a uma nota fiscal de verdade.
+  fiscal_module_ativo: boolean;
 }
 
 export interface TerminalInfo {
@@ -208,6 +212,16 @@ export interface Ticket {
   combo_name?: string | null;
 }
 
+// ORD-172 — resumo suficiente pra imprimir a NFC-e junto do ticket (chave +
+// QR). Não é a DANFE completa da Focus NFe (window.open de página externa
+// foi descartado — ver printService.ts), é um bloco ESC/POS próprio, mesma
+// operação/mesmo corte dos tickets.
+export interface FiscalDocumentSummary {
+  status: string; // "autorizada" | "pendente"
+  chave_nfe: string | null;
+  qrcode_url: string | null;
+}
+
 export interface CompletedOrder {
   order_ref: string;
   total: number;
@@ -219,6 +233,10 @@ export interface CompletedOrder {
   // impresso vira um ticket compacto com este QR só, em vez de um bloco
   // por unidade em `tickets`).
   order_qr_data: string | null;
+  // ORD-172 — null quando o módulo fiscal está desligado ou a emissão
+  // falhou (Focus NFe indisponível, item sem NCM etc.) — nesses casos o
+  // impresso segue exatamente como hoje, sem bloco de NFC-e.
+  fiscal_document: FiscalDocumentSummary | null;
 }
 
 export type Screen =

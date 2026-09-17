@@ -5,7 +5,7 @@ import type { Theme } from "../themes";
 import type { CompletedOrder } from "../types";
 import { useStore } from "../store";
 import api from "../api";
-import { silentPrint, splitNameOption, stripComboSuffix } from "../lib/printService";
+import { formatChaveAcesso, silentPrint, splitNameOption, stripComboSuffix } from "../lib/printService";
 import type { PrintMethod } from "../lib/printService";
 import { FONT } from "../scale";
 import { Button } from "@/components/ui/button";
@@ -30,10 +30,29 @@ function extractOrderNumber(ref: string): string {
   return Number.isNaN(num) ? ref : String(num);
 }
 
+// ORD-172 — mesmo bloco conceitual do ESC/POS (printService.ts), versão HTML
+// pro fallback de navegador (mock/pop-up bloqueado). Vazio quando o módulo
+// fiscal está desligado ou a emissão não foi autorizada — impresso segue
+// idêntico ao de antes desta história.
+function buildDanfeHtml(order: CompletedOrder, danfeQrSvg: string): string {
+  const doc = order.fiscal_document;
+  if (!doc || doc.status !== "autorizada" || !doc.qrcode_url) return "";
+  const svgEl = danfeQrSvg.replace(/width="[^"]*"/, 'width="130"').replace(/height="[^"]*"/, 'height="130"');
+  return `
+    <div class="danfe">
+      <div class="danfe-title">DANFE NFC-e</div>
+      <div class="danfe-sub">Documento Auxiliar da Nota Fiscal de Consumidor Eletronica</div>
+      ${doc.chave_nfe ? `<div class="danfe-chave">${formatChaveAcesso(doc.chave_nfe)}</div>` : ""}
+      <div class="danfe-qr">${svgEl}</div>
+      <div class="danfe-footer">Consulte pela Chave de Acesso no site da SEFAZ do seu estado</div>
+    </div>
+    <div class="cut">- &nbsp; - &nbsp; - &nbsp;✂&nbsp; - &nbsp; - &nbsp; -</div>`;
+}
+
 // Template do ticket impresso (80mm térmica) — escala própria de impressora,
 // intencionalmente fora da escala de tela do ORD-113 (mídia física
 // diferente, não é UI de totem vista na tela).
-function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string[]): string {
+function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string[], danfeQrSvg: string): string {
   const now = new Date().toLocaleString("pt-BR");
 
   // ORD-159 — cada ticket continua sendo seu próprio bloco cortável (é
@@ -127,6 +146,12 @@ function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string
   .ref{font-size:9px;color:#888;margin-top:6px;}
   .footer{text-align:center;margin-top:10px;padding-top:8px;
     border-top:1px dashed #000;font-size:10px;color:#555;line-height:1.6;}
+  .danfe{text-align:center;padding-bottom:8px;}
+  .danfe-title{font-size:13px;font-weight:bold;letter-spacing:.5px;}
+  .danfe-sub{font-size:9px;color:#555;margin:2px 0 6px;}
+  .danfe-chave{font-size:10px;letter-spacing:.5px;margin-bottom:6px;word-break:break-all;}
+  .danfe-qr svg{width:130px;height:130px;display:block;margin:0 auto;}
+  .danfe-footer{font-size:9px;color:#555;margin-top:6px;}
   @media print{
     @page{size:80mm auto;margin:3mm 2mm;}
     body{width:100%;padding:0;}
@@ -134,6 +159,7 @@ function buildPrintHtml(order: CompletedOrder, companyName: string, svgs: string
 </style>
 </head>
 <body>
+${buildDanfeHtml(order, danfeQrSvg)}
 <div class="header">
   <div class="company">${companyName.toUpperCase()}</div>
   <div class="brand">ordin · autoatendimento</div>
@@ -159,7 +185,7 @@ ${ticketsHtml}
 
 // ORD-118 — modelo "retirada_unica": ticket compacto, lista de itens sem
 // bloco por unidade, um único QR do pedido inteiro no fim.
-function buildCompactPrintHtml(order: CompletedOrder, companyName: string, orderQrSvg: string): string {
+function buildCompactPrintHtml(order: CompletedOrder, companyName: string, orderQrSvg: string, danfeQrSvg: string): string {
   const now = new Date().toLocaleString("pt-BR");
   // order.tickets tem 1 linha por unidade (qty=2 -> 2 tickets) — só a
   // unidade 1 de cada item representa a linha, senão duplica no impresso.
@@ -202,10 +228,17 @@ function buildCompactPrintHtml(order: CompletedOrder, companyName: string, order
   .qr{text-align:center;margin:10px 0;}
   .qr svg{width:150px;height:150px;}
   .footer{text-align:center;margin-top:10px;padding-top:8px;border-top:1px dashed #000;font-size:10px;color:#555;line-height:1.6;}
+  .danfe{text-align:center;padding-bottom:8px;}
+  .danfe-title{font-size:13px;font-weight:bold;letter-spacing:.5px;}
+  .danfe-sub{font-size:9px;color:#555;margin:2px 0 6px;}
+  .danfe-chave{font-size:10px;letter-spacing:.5px;margin-bottom:6px;word-break:break-all;}
+  .danfe-qr svg{width:130px;height:130px;display:block;margin:0 auto;}
+  .danfe-footer{font-size:9px;color:#555;margin-top:6px;}
   @media print{ @page{size:80mm auto;margin:3mm 2mm;} body{width:100%;padding:0;} }
 </style>
 </head>
 <body>
+${buildDanfeHtml(order, danfeQrSvg)}
 <div class="header">
   <div class="company">${companyName.toUpperCase()}</div>
   <div class="brand">ordin · autoatendimento</div>
@@ -248,13 +281,14 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
   const [prepEstimateMin, setPrepEstimateMin] = useState<number | null>(null);
   const qrContainerRef = useRef<HTMLDivElement>(null);
   const orderQrRef = useRef<HTMLDivElement>(null);
+  const danfeQrRef = useRef<HTMLDivElement>(null);
 
   const orderNumber = extractOrderNumber(order.order_ref);
 
-  function buildHtmlForMode(svgs: string[], orderQrSvg: string): string {
+  function buildHtmlForMode(svgs: string[], orderQrSvg: string, danfeQrSvg: string): string {
     return compactPrint
-      ? buildCompactPrintHtml(order, companyName, orderQrSvg)
-      : buildPrintHtml(order, companyName, svgs);
+      ? buildCompactPrintHtml(order, companyName, orderQrSvg, danfeQrSvg)
+      : buildPrintHtml(order, companyName, svgs, danfeQrSvg);
   }
 
   useEffect(() => {
@@ -267,10 +301,11 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
         return el.outerHTML;
       });
       const orderQrSvg = orderQrRef.current?.querySelector("svg")?.outerHTML ?? "";
+      const danfeQrSvg = danfeQrRef.current?.querySelector("svg")?.outerHTML ?? "";
 
       if (order.provider === "mock") {
         // Em modo mock: abre preview HTML direto, sem tentar QZ Tray
-        const html = buildHtmlForMode(svgs, orderQrSvg);
+        const html = buildHtmlForMode(svgs, orderQrSvg, danfeQrSvg);
         const w = window.open("", "_blank");
         if (w) { w.document.write(html); w.document.close(); setPrintMethod("browser"); }
         else setPrintMethod("blocked");
@@ -278,7 +313,7 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       }
 
       const result = await silentPrint(order, companyName, {
-        buildHtml: (s) => buildHtmlForMode(s, orderQrSvg),
+        buildHtml: (s) => buildHtmlForMode(s, orderQrSvg, danfeQrSvg),
         svgs,
       }, fulfillmentMode);
       setPrintMethod(result);
@@ -314,6 +349,11 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
       {order.order_qr_data && (
         <div ref={orderQrRef} className="fixed opacity-0 pointer-events-none" style={{ left: -9999, top: 0 }} aria-hidden="true">
           <QRCodeSVG value={order.order_qr_data} size={150} bgColor="#ffffff" fgColor="#000000" level="M" />
+        </div>
+      )}
+      {order.fiscal_document?.qrcode_url && (
+        <div ref={danfeQrRef} className="fixed opacity-0 pointer-events-none" style={{ left: -9999, top: 0 }} aria-hidden="true">
+          <QRCodeSVG value={order.fiscal_document.qrcode_url} size={130} bgColor="#ffffff" fgColor="#000000" level="M" />
         </div>
       )}
 
@@ -418,7 +458,8 @@ export default function SuccessScreen({ T, order, companyName, onNew }: Props) {
                   onClick={async () => {
                     const svgs = Array.from(qrContainerRef.current?.querySelectorAll("svg") ?? []).map((el) => el.outerHTML);
                     const orderQrSvg = orderQrRef.current?.querySelector("svg")?.outerHTML ?? "";
-                    const html = buildHtmlForMode(svgs, orderQrSvg);
+                    const danfeQrSvg = danfeQrRef.current?.querySelector("svg")?.outerHTML ?? "";
+                    const html = buildHtmlForMode(svgs, orderQrSvg, danfeQrSvg);
                     const w = window.open("", "_blank");
                     if (w) { w.document.write(html); w.document.close(); setPrintMethod("browser"); }
                   }}

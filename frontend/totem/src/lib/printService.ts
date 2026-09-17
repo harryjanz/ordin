@@ -37,9 +37,63 @@ const METHOD_LABEL: Record<string, string> = {
 const fmtMethod = (m: string) => METHOD_LABEL[m] ?? m;
 const fmtMoney = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
+// ORD-172 — chave de acesso (44 dígitos) em grupos de 4, mesma apresentação
+// visual usada em qualquer DANFE oficial — facilita conferência manual.
+export function formatChaveAcesso(chave: string): string {
+  return chave.replace(/(\d{4})(?=\d)/g, "$1 ");
+}
+
 // ---------------------------------------------------------------------------
 // ESC/POS builder
 // ---------------------------------------------------------------------------
+// ORD-172 — bloco impresso ANTES dos tickets, na MESMA operação/corte ESC/POS
+// já usada pra separar tickets entre si (mesmo comando GS V 1, ver builders
+// abaixo). Só imprime quando a emissão foi autorizada — módulo desligado ou
+// falha na emissão (Focus NFe fora do ar, item sem NCM etc.) não mudam nada
+// no impresso, exatamente como antes desta história existir.
+//
+// Decisão técnica: NÃO é a DANFE completa que a Focus NFe hospeda
+// (`caminho_danfe`, uma página HTML externa) — não dá pra converter uma
+// página HTML de terceiro em bytes ESC/POS, e abrir essa URL via
+// `window.open`/`window.print()` seria uma segunda operação de impressão
+// separada (risco de impressão não-silenciosa e bloqueio de pop-up, já
+// levantado no Explorer original desta história). Em vez disso, monta um
+// resumo próprio (chave de acesso + QR Code de consulta) reaproveitando o
+// mesmo builder ESC/POS/QR já usado pelos tickets — mesma robustez, mesma
+// operação, mesmo corte.
+function escposDanfeBlock(
+  raw: (...bs: number[]) => void,
+  text: (s: string) => void,
+  nl: (n?: number) => void,
+  qrCode: (data: string) => void,
+  fiscalDoc: CompletedOrder["fiscal_document"],
+): void {
+  if (!fiscalDoc || fiscalDoc.status !== "autorizada" || !fiscalDoc.qrcode_url) return;
+
+  raw(0x1B, 0x61, 0x01); // Center
+  raw(0x1B, 0x45, 0x01); // Bold
+  text("DANFE NFC-e"); nl();
+  raw(0x1B, 0x45, 0x00);
+  text("Documento Auxiliar da Nota Fiscal"); nl();
+  text("de Consumidor Eletronica"); nl(2);
+
+  if (fiscalDoc.chave_nfe) {
+    raw(0x1B, 0x61, 0x00); // Left
+    text("Chave de acesso:"); nl();
+    raw(0x1B, 0x61, 0x01); // Center
+    text(formatChaveAcesso(fiscalDoc.chave_nfe)); nl(2);
+  }
+
+  qrCode(fiscalDoc.qrcode_url);
+  nl(2);
+  text("Consulte pela Chave de Acesso"); nl();
+  text("no site da SEFAZ do seu estado"); nl(2);
+
+  raw(0x1B, 0x61, 0x00); // Left
+  raw(0x1B, 0x64, 0x04); // Feed — mesmo padrão de antes de cada corte
+  raw(0x1D, 0x56, 0x01); // Partial cut — mesma operação dos tickets abaixo
+}
+
 // ORD-118 — modelo "retirada_unica": produção centralizada, pedido inteiro
 // entregue de uma vez. Ticket vira uma lista compacta de itens (sem bloco
 // por unidade, sem corte parcial entre itens) com um único QR do pedido.
@@ -68,6 +122,8 @@ function buildEscPosBase64Compact(order: CompletedOrder, companyName: string): s
   }
 
   raw(0x1B, 0x40); // Init
+
+  escposDanfeBlock(raw, text, nl, qrCode, order.fiscal_document);
 
   raw(0x1B, 0x61, 0x01); // Center
   raw(0x1B, 0x45, 0x01); // Bold
@@ -163,6 +219,8 @@ function buildEscPosBase64(order: CompletedOrder, companyName: string): string {
 
   // Initialize
   raw(0x1B, 0x40);
+
+  escposDanfeBlock(raw, text, nl, qrCode, order.fiscal_document);
 
   // Header — company name centered, bold, duplo
   raw(0x1B, 0x61, 0x01);         // Center

@@ -270,3 +270,83 @@ não resolvidos pro Ready (risco de impressão é pra downstream testar, não bl
 **Status: Ready.** Recomendo, no downstream, testar a impressão do DANFE em hardware real do
 totem **antes** de considerar a história pronta — é o único risco desta história que só se
 resolve com teste físico, não com código ou revisão.
+
+## Implementação
+
+### Mudança de design: ESC/POS próprio, não `window.open`/`print()`
+Pedido explícito do usuário, feito no início do downstream: a NFC-e **precisa** sair na mesma
+operação/mesmo mecanismo de impressão que já existe hoje (ESC/POS via QZ Tray), impressa **antes**
+dos tickets, com **corte automático** — não como uma segunda janela/impressão HTML separada. Isso
+substitui a abordagem `window.open(caminho_danfe) + win.print()` desenhada no Tech Explorer acima.
+
+Motivo técnico pra não dar simplesmente pra "reaproveitar" o `caminho_danfe`: é uma URL de HTML
+hospedada pela própria Focus NFe — não existe forma de converter essa página em bytes ESC/POS
+(o `qz.print()` do totem manda um array de bytes construído localmente, uma única chamada por
+pedido). Solução adotada: o totem monta um **bloco ESC/POS próprio** ("resumo da NFC-e": chave de
+acesso formatada em grupos de 4 dígitos + QR Code do `qrcode_url`) e injeta esse bloco no início do
+mesmo array de bytes que já produz os tickets — não é a DANFE completa renderizada pela Focus NFe,
+é um resumo funcionalmente equivalente (chave + QR, os dois dados que qualquer app de leitor de
+nota fiscal precisa) impresso no mesmo papel, mesma impressora, mesma operação.
+
+Implementado em `printService.ts` (`buildEscPosBase64` e `buildEscPosBase64Compact`, os dois
+builders que hoje existem — um por unidade e o modelo "retirada única"): nova função
+`escposDanfeBlock()` chamada logo após `ESC @` (init da impressora) e antes dos tickets. Ela só
+imprime algo quando `fiscal_document.status === "autorizada"` e `qrcode_url` está presente — senão
+é um no-op, ou seja, pedido sem módulo fiscal ativo ou com emissão pendente/erro sai idêntico ao
+comportamento anterior a esta história. Corte automático (`GS V 1` precedido de `ESC d 4`, mesmo
+padrão já usado entre seções dentro de um job) fecha o bloco da NFC-e antes dos tickets começarem.
+
+Mesma lógica replicada em `SuccessScreen.tsx` (`buildDanfeHtml()`) pro fallback HTML/`window.print()`
+que já existe quando QZ Tray não está disponível — mantém paridade entre os dois caminhos de
+impressão que o totem já suporta.
+
+### CPF: reativação condicional (`App.tsx`, `CpfScreen.tsx`)
+`CpfScreen.tsx` já existia pronto e sem uso (ver comentário original "tela pulada por ora" em
+`App.tsx`). Reativada condicionalmente: só entra na navegação quando
+`company?.fiscal_module_ativo === true`. Pontos de entrada cobertos (a tela de CPF podia ser
+alcançada a partir de três telas diferentes, dependendo da config da empresa):
+- `CatalogScreen.onCheckout` (fluxo sem consumo local nem retirada única)
+- `ConsumptionTypeScreen.onSelect` (fluxo com "comer aqui"/"para levar")
+- `PickupNameScreen.onNext` (fluxo "retirada única")
+
+Todos os três, quando `fiscal_module_ativo` é falso, seguem exatamente o caminho anterior a esta
+história (comportamento e telas idênticos — nenhuma regressão pra empresas sem módulo fiscal).
+`onBack` da tela de CPF volta pra tela de origem correta (catálogo, consumo ou retirada), já que
+agora há três pontos de entrada possíveis em vez de nenhum.
+
+O CPF informado (opcional, sempre skippable) é enviado como `order.cpf`; propagado por
+`order-service` (`GET /internal/orders/{order_ref}`) até `payment-service`, que inclui
+`cpf_destinatario` no payload da Focus NFe só quando presente (`_build_nfce_payload`).
+
+### `fiscal_module_ativo`: os 4 pontos tocados (confirma o mapeamento do Tech Explorer)
+Campo derivado de `CompanyFiscalConfig.ativo` (não é coluna de `Company`), adicionado em:
+`validate-pin`, `verify-pin`, `approve_device` e `approve_panel` (company-service), no schema
+`CompanyInfo` (auth-service) e no `GET /companies/{id}` (refresh periódico do totem a cada 2min,
+ORD-158) — mesmo padrão do gotcha já registrado pra `consumption_mode_enabled`.
+
+### Bugs encontrados e corrigidos durante a verificação final
+1. Um `Edit` anterior anexou o decorator `@app.post("/internal/validate-pin")` na função errada
+   (`_get_fiscal_module_ativo` em vez de `validate_pin`) — quebrava o import do company-service
+   inteiro (`FastAPIError: Invalid args for response field!`). Corrigido movendo o decorator pra
+   cima da função certa.
+2. `get_company()` passou a retornar um `dict` puro (necessário porque `fiscal_module_ativo` é
+   campo derivado, não existe em `Company.__table__.columns`) em vez do objeto ORM — funcionava
+   via FastAPI (que serializa pelo `response_model=CompanyOut`), mas quebrava testes que chamam a
+   função diretamente. Corrigido retornando `CompanyOut(**data)` explicitamente.
+
+Suites completas re-executadas após as correções: company (458), auth (31), order (72), payment
+(141) — todas verdes. `ruff check` limpo nos 4 serviços.
+
+### Build do totem (achado, não introduzido por esta história)
+`docker compose up --build totem` falha hoje em `main`, antes de qualquer mudança desta história
+(`npm ci && npm run build` quebra em `react-aria`/`intlStrings.mjs`, erro de resolução do rollup —
+confirmado via `git stash` reproduzindo o mesmo erro em código limpo). Workaround usado pra testar
+esta história: build local (`npm run build`) + `docker compose cp` do `dist/` pro container já
+rodando. Story própria pra corrigir o build fica fora do escopo desta história.
+
+### Teste manual
+Config fiscal da Burger House foi pré-configurada via chamadas diretas à API (curl + JWT gerado
+manualmente) pra permitir teste imediato do usuário no navegador. Automação de teste E2E via
+browser (Chrome) foi tentada e abandonada por instabilidade no teclado numérico do PIN do totem
+(cliques errando por causa de reflow entre capturas de tela) — teste funcional ponta a ponta ficou
+por conta de verificação manual do usuário, não coberto por evidência Playwright nesta história.

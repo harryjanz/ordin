@@ -46,6 +46,12 @@ FOCUS_NFE_HOMOLOGACAO_URL = "https://homologacao.focusnfe.com.br/v2"
 FOCUS_NFE_PRODUCAO_URL    = "https://api.focusnfe.com.br/v2"
 FOCUS_NFE_EMIT_TIMEOUT    = 8.0  # segundos — curto de propósito, não pode segurar o checkout do totem
 
+# ORD-179 — env var de PLATAFORMA (não por empresa, ver company-service),
+# default desligada. Com ambiente="mockup" e isso em false, se comporta
+# como homologação (nunca fabrica dado) — só quem sobe o container decide
+# ligar, nunca uma empresa cliente sozinha.
+FISCAL_MOCKUP_ENABLED = os.getenv("FISCAL_MOCKUP_ENABLED", "").strip().lower() == "true"
+
 # Tabela nacional de formas de pagamento do manual de NFC-e (não é específica
 # da Focus NFe). "voucher" não tem código único na tabela SEFAZ (vale
 # alimentação=10, vale refeição=11) — "10" é o uso majoritário no food
@@ -224,7 +230,7 @@ async def _get_products_fiscal(product_ids: list[int]) -> dict[int, dict]:
     return result
 
 
-def _build_nfce_payload(items: list[dict], products_fiscal: dict[int, dict], creds: dict, method: str, amount: float) -> dict:
+def _build_nfce_payload(items: list[dict], products_fiscal: dict[int, dict], creds: dict, method: str, amount: float, cpf: str | None = None) -> dict:
     nfce_items = []
     for i, item in enumerate(items, start=1):
         pf = products_fiscal.get(item["product_id"], {"ncm": None, "cfop": None, "cest": None})
@@ -246,7 +252,7 @@ def _build_nfce_payload(items: list[dict], products_fiscal: dict[int, dict], cre
             "icms_situacao_tributaria": compute_icms_situacao_tributaria(creds["tax_regime"], has_cest),
             "cest": pf.get("cest"),
         })
-    return {
+    payload = {
         "cnpj_emitente": creds["cnpj"],
         "data_emissao": datetime.utcnow().isoformat(),
         "presenca_comprador": "1",   # presencial, sempre — caso de uso do totem
@@ -259,6 +265,24 @@ def _build_nfce_payload(items: list[dict], products_fiscal: dict[int, dict], cre
             "valor_pagamento": amount,
         }],
     }
+    # ORD-172 — CPF é sempre opcional (cliente decide informar ou não, tela
+    # de CPF sempre pulável). Campo "cpf_destinatario" é o nome documentado
+    # publicamente pela Focus NFe pra CPF do consumidor final em NFC-e — não
+    # confirmado ainda contra teste real (mesma pendência de baixo risco já
+    # registrada pro mapa de forma de pagamento, ver FOCUS_NFE_PAYMENT_CODE_MAP).
+    if cpf:
+        payload["cpf_destinatario"] = cpf
+    return payload
+
+
+def _build_mockup_chave(order_ref: str) -> str:
+    """ORD-179 — 44 dígitos numéricos, formato de chave de acesso, sem
+    nenhum significado fiscal real. Derivado do order_ref (não aleatório) só
+    pra facilitar reconhecer numa investigação futura que é dado fabricado,
+    não uma chave perdida/real."""
+    digest = hashlib.sha256(order_ref.encode()).hexdigest()
+    digits = "".join(c for c in digest if c.isdigit()) or "0"
+    return (digits * 8)[:44]
 
 
 async def _save_fiscal_document(order_ref: str, company_id: int, ambiente: str, *, status: str,
@@ -283,12 +307,25 @@ async def emit_nfce_if_active(company_id: int, order_ref: str, method: str, amou
         if not creds or not creds.get("ativo"):
             return  # módulo desligado — comportamento idêntico ao que existia antes desta história
 
+        # ORD-179 — visualizar o layout impresso da NFC-e (ORD-172) sem
+        # depender de certificado A1 real. Só fabrica com a env var de
+        # plataforma ligada — sem ela, "mockup" cai no caminho normal
+        # (mesma URL de homologação, tenta de verdade, vira "pendente").
+        if creds["ambiente"] == "mockup" and FISCAL_MOCKUP_ENABLED:
+            chave_fake = _build_mockup_chave(order_ref)
+            await _save_fiscal_document(
+                order_ref, company_id, "mockup", status="autorizada",
+                chave_nfe=chave_fake,
+                qrcode_url=f"https://mockup.ordin.local/qrcode/{chave_fake}",
+            )
+            return
+
         order = await _get_order_with_items(order_ref)
         if not order:
             return
 
         products_fiscal = await _get_products_fiscal([it["product_id"] for it in order["items"]])
-        payload = _build_nfce_payload(order["items"], products_fiscal, creds, method, amount)
+        payload = _build_nfce_payload(order["items"], products_fiscal, creds, method, amount, order.get("cpf"))
         base_url = FOCUS_NFE_PRODUCAO_URL if creds["ambiente"] == "producao" else FOCUS_NFE_HOMOLOGACAO_URL
 
         try:
@@ -317,6 +354,22 @@ async def emit_nfce_if_active(company_id: int, order_ref: str, method: str, amou
     # aplicado à chamada da Focus NFe.
     except Exception as exc:  # noqa: BLE001
         logger.warning("emit_nfce_if_active falhou (%s): %s", order_ref, exc)
+
+
+async def _get_fiscal_document_summary(order_ref: str) -> dict | None:
+    """ORD-172 — o totem consulta isso na resposta de aprovação (síncrona ou
+    via polling do PIX) pra saber se tem chave/QR pra imprimir junto do
+    ticket. None quando o módulo fiscal está desligado ou emit_nfce_if_active
+    ainda não terminou (não deveria acontecer — é sempre aguardado antes da
+    empresa notificar aprovação, ver os 4 pontos de chamada)."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(FiscalDocument).filter_by(order_ref=order_ref).order_by(FiscalDocument.criado_em.desc())
+        )
+        doc = result.scalars().first()
+    if not doc:
+        return None
+    return {"status": doc.status, "chave_nfe": doc.chave_nfe, "qrcode_url": doc.qrcode_url}
 
 
 async def _get_mp_webhook_secret(company_id: int) -> tuple[bool, str | None]:
@@ -372,6 +425,16 @@ class RefundIn(BaseModel):
     reason: str | None = "Reembolso solicitado"
 
 
+class FiscalDocumentSummary(BaseModel):
+    # ORD-172 — o suficiente pro totem imprimir o resumo da NFC-e (chave +
+    # QR) na mesma operação ESC/POS dos tickets. caminho_danfe (a página
+    # HTML hospedada pela Focus NFe) não entra aqui de propósito — o totem
+    # não abre URL externa pra imprimir, monta o próprio bloco ESC/POS.
+    status:     str
+    chave_nfe:  str | None = None
+    qrcode_url: str | None = None
+
+
 class PaymentApprovedOut(BaseModel):
     ok:             bool
     transaction_id: int
@@ -383,6 +446,7 @@ class PaymentApprovedOut(BaseModel):
     error:          str | None = None
     qr_code:        str | None = None
     qr_code_base64: str | None = None
+    fiscal_document: FiscalDocumentSummary | None = None
 
 
 class PaymentStatusOut(BaseModel):
@@ -390,6 +454,7 @@ class PaymentStatusOut(BaseModel):
     status:         str
     qr_code:        str | None = None
     qr_code_base64: str | None = None
+    fiscal_document: FiscalDocumentSummary | None = None
 
 
 class TransactionOut(BaseModel):
@@ -675,6 +740,7 @@ async def create_payment(
             "authorization": result.authorization,
             "order_ref": body.order_ref,
             "amount": body.amount,
+            "fiscal_document": await _get_fiscal_document_summary(body.order_ref),
         }
 
     # PIX criado com sucesso — aguardando pagamento
@@ -1344,6 +1410,7 @@ async def get_payment_status(
         "status": tx.status,
         "qr_code": tx.qr_code,
         "qr_code_base64": tx.qr_code_base64,
+        "fiscal_document": await _get_fiscal_document_summary(tx.order_ref) if tx.status == "approved" else None,
     }
 
 

@@ -117,6 +117,9 @@ class CompanyInfo(BaseModel):
     # configurável por empresa (era constante fixa, ver ORD-155).
     inactivity_timeout_min: int = 5
     inactivity_warn_sec: int = 30
+    # ORD-172 — mesma armadilha de novo: deriva de CompanyFiscalConfig.ativo
+    # (ORD-171), controla se a tela de CPF entra na navegação do totem.
+    fiscal_module_ativo: bool = False
 
 class TerminalInfo(BaseModel):
     id: int

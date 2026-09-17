@@ -3,6 +3,7 @@ import { ArrowLeft, Delete } from "lucide-react";
 import type { Theme } from "../themes";
 import { FONT } from "../scale";
 import { Button } from "@/components/ui/button";
+import { isValidCpf } from "../lib/cpf";
 
 const FONT_D = "'Lexend', sans-serif";
 const FONT_B = "'Inter', sans-serif";
@@ -28,7 +29,9 @@ interface Props {
 
 export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
   const [digits, setDigits] = useState("");
-  const done = digits.length === 11;
+  const complete = digits.length === 11;
+  const valid = complete && isValidCpf(digits);
+  const done = valid;
 
   function press(v: number) {
     setDigits((d) => d.length < 11 ? d + String(v) : d);
@@ -86,6 +89,15 @@ export default function CpfScreen({ T, onNext, onSkip, onBack }: Props) {
             {digits.length > 0 ? fmtCpf(digits) : "___.___.___-__"}
           </span>
         </div>
+
+        {complete && !valid && (
+          <p
+            className="text-center -mt-4"
+            style={{ color: T.errorText, fontFamily: FONT_B, fontSize: FONT.body, fontWeight: 700 }}
+          >
+            CPF inválido — confira os números ou toque em "Prefiro não informar"
+          </p>
+        )}
 
         {/* Numpad — altura fixa por tecla, nunca cresce */}
         <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${T.border}` }}>
