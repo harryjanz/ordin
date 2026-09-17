@@ -6,15 +6,13 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import type { FiscalAddonPlan } from "../types";
-// ORD-174 — mesmo stylesheet de PriceTableListScreen (.page, .pageHead,
-// .eyebrow, .title), mesmo padrão de tela de lista simples reaproveitando
-// CompanyListScreen.module.scss.
-import styles from "./CompanyListScreen.module.scss";
 
 // ORD-174 — CRUD de planos de add-on fiscal (superadmin/admin). Custo do
 // módulo fiscal é uma dimensão SEPARADA da PriceTable do totem (Focus NFe
 // cobra plano fixo + valor por nota emitida) — não confundir com
-// "/commercial/price-tables".
+// "/commercial/price-tables". Revisão pós-feedback: página/título
+// compartilhados com CommercialScreen (aba "Tabela de preço" ao lado) —
+// este componente renderiza só o conteúdo da aba.
 
 const fmtBRL = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
@@ -86,12 +84,8 @@ export default function FiscalAddonPlanListScreen() {
   ];
 
   return (
-    <div className={styles.page}>
-      <div className={styles.pageHead}>
-        <div>
-          <div className={styles.eyebrow}>Comercial</div>
-          <h1 className={styles.title}>Planos de add-on fiscal</h1>
-        </div>
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
         <Button onClick={() => navigate("/commercial/fiscal-addon-plans/new")}>+ Novo plano</Button>
       </div>
 
@@ -113,6 +107,6 @@ export default function FiscalAddonPlanListScreen() {
         onConfirm={confirmRemove}
         onCancel={() => setRemoveTarget(null)}
       />
-    </div>
+    </>
   );
 }

@@ -6,14 +6,12 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import type { PriceTableKind, PriceTableStatus, PriceTableSummary } from "../types";
-// Reaproveita o mesmo stylesheet de CompanyListScreen (.page, .pageHead,
-// .eyebrow, .title) — mesmo padrão de PlatformUsersScreen reaproveitando
-// CompanyScreen.module.scss pra uma tela de lista simples nova.
-import styles from "./CompanyListScreen.module.scss";
 
 // ORD-162 — CRUD de tabela de preço comercial da plataforma (superadmin/
 // admin). Não confundir com CompanyContractScreen ("/companies/:id/contract"),
-// que é o contrato jurídico por empresa — entidade diferente.
+// que é o contrato jurídico por empresa — entidade diferente. ORD-174
+// (revisão): página/título compartilhados com CommercialScreen (aba "Add-on
+// fiscal" ao lado) — este componente renderiza só o conteúdo da aba.
 
 const STATUS_LABEL: Record<PriceTableStatus, string> = {
   draft: "Rascunho",
@@ -197,12 +195,10 @@ export default function PriceTableListScreen() {
   ];
 
   return (
-    <div className={styles.page}>
-      <div className={styles.pageHead}>
-        <div>
-          <div className={styles.eyebrow}>Comercial</div>
-          <h1 className={styles.title}>Tabelas de preço</h1>
-        </div>
+    <>
+      {/* ORD-174 (revisão) — página/título ficaram por conta de CommercialScreen
+          (aba compartilhada com Add-on fiscal); aqui só o botão de criar. */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
         <Button onClick={() => navigate("/commercial/price-tables/new")}>+ Nova tabela</Button>
       </div>
 
@@ -241,6 +237,6 @@ export default function PriceTableListScreen() {
           onValueSelected={(opt) => setPendingKind((opt.value || null) as PriceTableKind)}
         />
       </ConfirmDialog>
-    </div>
+    </>
   );
 }

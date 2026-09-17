@@ -25,9 +25,8 @@ import CompanyContractScreen from "./screens/CompanyContractScreen";
 import CompanyListScreen from "./screens/CompanyListScreen";
 import PlatformUsersScreen from "./screens/PlatformUsersScreen";
 import FulfillmentScreen from "./screens/FulfillmentScreen";
-import PriceTableListScreen from "./screens/PriceTableListScreen";
+import CommercialScreen from "./screens/CommercialScreen";
 import PriceTableFormScreen from "./screens/PriceTableFormScreen";
-import FiscalAddonPlanListScreen from "./screens/FiscalAddonPlanListScreen";
 import FiscalAddonPlanFormScreen from "./screens/FiscalAddonPlanFormScreen";
 
 const ROLE_ROUTES: Record<string, string[]> = {
@@ -139,10 +138,10 @@ export default function App() {
             <Route path="/companies/new" element={<ProtectedRoute path="/companies/new" element={<NewCompanyScreen />} />} />
             <Route path="/companies/:id/contract" element={<ProtectedRoute path="/companies/:id/contract" element={<CompanyContractScreen />} />} />
             <Route path="/platform-users" element={<ProtectedRoute path="/platform-users" element={<PlatformUsersScreen />} />} />
-            <Route path="/commercial/price-tables" element={<ProtectedRoute path="/commercial/price-tables" element={<PriceTableListScreen />} />} />
+            <Route path="/commercial/price-tables" element={<ProtectedRoute path="/commercial/price-tables" element={<CommercialScreen />} />} />
             <Route path="/commercial/price-tables/new" element={<ProtectedRoute path="/commercial/price-tables/new" element={<PriceTableFormScreen />} />} />
             <Route path="/commercial/price-tables/:id/edit" element={<ProtectedRoute path="/commercial/price-tables/:id/edit" element={<PriceTableFormScreen />} />} />
-            <Route path="/commercial/fiscal-addon-plans" element={<ProtectedRoute path="/commercial/fiscal-addon-plans" element={<FiscalAddonPlanListScreen />} />} />
+            <Route path="/commercial/fiscal-addon-plans" element={<ProtectedRoute path="/commercial/fiscal-addon-plans" element={<CommercialScreen />} />} />
             <Route path="/commercial/fiscal-addon-plans/new" element={<ProtectedRoute path="/commercial/fiscal-addon-plans/new" element={<FiscalAddonPlanFormScreen />} />} />
             <Route path="/commercial/fiscal-addon-plans/:id/edit" element={<ProtectedRoute path="/commercial/fiscal-addon-plans/:id/edit" element={<FiscalAddonPlanFormScreen />} />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
