@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Zap, Hourglass } from "lucide-react";
 import api from "../api";
 import type { Theme } from "../themes";
+import type { FiscalDocumentSummary } from "../types";
 import { FONT } from "../scale";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -26,7 +27,7 @@ interface Props {
   qrCodeBase64: string;
   amount: number;
   orderRef: string;
-  onSuccess: () => void;
+  onSuccess: (fiscalDocument: FiscalDocumentSummary | null) => void;
   onCancel: () => void;
 }
 
@@ -72,13 +73,13 @@ export default function PIXPaymentScreen({
       if (doneRef.current) { clearInterval(t); return; }
       try {
         const r = await api.get(`/payments/${transactionId}/status`);
-        const { status } = r.data;
+        const { status, fiscal_document } = r.data;
         if (status === "approved") {
           if (doneRef.current) return;
           doneRef.current = true;
           clearInterval(t);
           // Busca tickets do pedido aprovado
-          onSuccess();
+          onSuccess(fiscal_document ?? null);
         } else if (status === "expired" || status === "cancelled") {
           clearInterval(t);
           if (!doneRef.current) { doneRef.current = true; onCancel(); }

@@ -913,6 +913,10 @@ async def internal_get_order(
         "order_ref": o.order_ref,
         "company_id": o.company_id,
         "total": float(o.total),
+        # ORD-172 — CPF informado opcionalmente pelo cliente (só aparece na
+        # navegação do totem quando o módulo fiscal está ativo), usado no
+        # payload da NFC-e quando o cliente quer a nota vinculada ao CPF.
+        "cpf": o.cpf,
         "items": [
             {
                 "product_id": i.product_id,

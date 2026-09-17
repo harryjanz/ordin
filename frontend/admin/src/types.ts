@@ -478,7 +478,7 @@ export interface FiscalConfig {
   // ORD-171 — interruptor de emissão + ambiente. ativo=true só é aceito com
   // focus_nfe_cadastrado=true (validado no backend).
   ativo: boolean;
-  ambiente: "homologacao" | "producao";
+  ambiente: "homologacao" | "producao" | "mockup";
   // ORD-178 — distingue "cadastrado via API" de "cadastrado manualmente".
   focus_nfe_cadastro_manual: boolean;
 }
@@ -500,7 +500,7 @@ export interface FiscalConfigUpdate {
   id_token_homologacao?: string;
   // ORD-171
   ativo?: boolean;
-  ambiente?: "homologacao" | "producao";
+  ambiente?: "homologacao" | "producao" | "mockup";
   // ORD-178
   token_producao_manual?: string;
   token_homologacao_manual?: string;

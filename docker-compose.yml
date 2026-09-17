@@ -207,6 +207,9 @@ services:
       ORDER_SERVICE_URL: ${ORDER_SERVICE_URL}
       COMPANY_SERVICE_URL: ${COMPANY_SERVICE_URL}
       CATALOG_SERVICE_URL: ${CATALOG_SERVICE_URL}
+      # ORD-179 — só em dev/staging. Nunca true numa AWS de produção real
+      # (quando existir) — fabricaria NFC-e fake pra cliente de verdade.
+      FISCAL_MOCKUP_ENABLED: ${FISCAL_MOCKUP_ENABLED:-false}
       CORS_ORIGINS: ${CORS_ORIGINS}
       MESSAGE_BROKER: ${MESSAGE_BROKER}
       RABBITMQ_URL: ${RABBITMQ_URL}

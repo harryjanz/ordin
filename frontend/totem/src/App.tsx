@@ -16,7 +16,7 @@ import PaymentScreen from "./screens/PaymentScreen";
 import PIXPaymentScreen from "./screens/PIXPaymentScreen";
 import SuccessScreen from "./screens/SuccessScreen";
 import { useState } from "react";
-import type { CompanyInfo, TerminalInfo, CartItem, CompletedOrder, ConsumptionType } from "./types";
+import type { CompanyInfo, TerminalInfo, CartItem, CompletedOrder, ConsumptionType, FiscalDocumentSummary } from "./types";
 
 class PixErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   constructor(props: { children: ReactNode }) {
@@ -72,6 +72,11 @@ export default function App() {
   // escolhido antes de passar pela tela de nome de retirada, pra não perder
   // o valor entre a navegação e a chamada de handleCpfDone.
   const [pendingConsumptionType, setPendingConsumptionType] = useState<ConsumptionType | null>(null);
+  // ORD-172 — mesmo motivo do pendingConsumptionType acima: guarda o nome de
+  // retirada escolhido antes de passar pela tela de CPF (quando o módulo
+  // fiscal está ativo), pra não perder o valor entre a navegação e a
+  // chamada de handleCpfDone.
+  const [pendingPickupName, setPendingPickupName] = useState<string | null>(null);
   const [pixData, setPixData] = useState<{
     transactionId: number; qrCodeBase64: string;
   } | null>(null);
@@ -155,6 +160,7 @@ export default function App() {
           fulfillment_mode: r.data.fulfillment_mode,
           inactivity_timeout_min: r.data.inactivity_timeout_min,
           inactivity_warn_sec: r.data.inactivity_warn_sec,
+          fiscal_module_ativo: r.data.fiscal_module_ativo ?? false,
         });
       }).catch(() => null);
     }, COMPANY_REFRESH_MS);
@@ -256,7 +262,7 @@ export default function App() {
     setScreen("pix");
   }
 
-  async function handlePixSuccess() {
+  async function handlePixSuccess(fiscalDocument: FiscalDocumentSummary | null) {
     if (!orderRef) return;
     const ticketsRes = await api.get(`/orders/${orderRef}/tickets`).catch(() => ({ data: { tickets: [], order_qr_data: null } }));
     const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
@@ -268,6 +274,7 @@ export default function App() {
       provider: "mock",
       tickets: ticketsRes.data.tickets ?? [],
       order_qr_data: ticketsRes.data.order_qr_data ?? null,
+      fiscal_document: fiscalDocument,
     });
   }
 
@@ -366,6 +373,7 @@ export default function App() {
           onCheckout={() => {
             if (company?.consumption_mode_enabled) setScreen("consumption");
             else if (company?.fulfillment_mode === "retirada_unica") setScreen("pickup");
+            else if (company?.fiscal_module_ativo) setScreen("cpf");
             else handleCpfDone(null);
           }}
           onHome={goIdle}
@@ -380,6 +388,9 @@ export default function App() {
             if (company?.fulfillment_mode === "retirada_unica") {
               setPendingConsumptionType(type);
               setScreen("pickup");
+            } else if (company?.fiscal_module_ativo) {
+              setPendingConsumptionType(type);
+              setScreen("cpf");
             } else {
               handleCpfDone(null, type);
             }
@@ -393,21 +404,35 @@ export default function App() {
       {screen === "pickup" && (
         <PickupNameScreen
           T={T}
-          onNext={(name) => handleCpfDone(null, pendingConsumptionType ?? undefined, name)}
+          onNext={(name) => {
+            if (company?.fiscal_module_ativo) {
+              setPendingPickupName(name);
+              setScreen("cpf");
+            } else {
+              handleCpfDone(null, pendingConsumptionType ?? undefined, name);
+            }
+          }}
           onBack={() => setScreen(company?.consumption_mode_enabled ? "consumption" : "catalog")}
         />
       )}
 
-      {/* Tela pulada por ora (nenhuma navegação leva a "cpf" hoje) — CPF na
-          nota só faz sentido junto da emissão de NFC-e, ainda não
-          implementada (ver estudo em docs/estudo-nfce.md). Componente
-          mantido de propósito pra reativar quando o módulo fiscal existir. */}
+      {/* ORD-172 — reativada: só entra na navegação quando o módulo fiscal
+          está ativo (company.fiscal_module_ativo, ORD-171) — CPF na nota só
+          faz sentido junto de uma emissão de NFC-e de verdade. Carrega
+          pendingConsumptionType/pendingPickupName porque a tela de CPF pode
+          vir depois de ConsumptionTypeScreen ou PickupNameScreen, e o store
+          ainda não re-renderizou com esses valores (mesmo motivo do
+          consumptionTypeOverride já documentado em handleCpfDone). */}
       {screen === "cpf" && (
         <CpfScreen
           T={T}
-          onNext={(c) => handleCpfDone(c)}
-          onSkip={() => handleCpfDone(null)}
-          onBack={() => setScreen(company?.consumption_mode_enabled ? "consumption" : "catalog")}
+          onNext={(c) => handleCpfDone(c, pendingConsumptionType ?? undefined, pendingPickupName ?? undefined)}
+          onSkip={() => handleCpfDone(null, pendingConsumptionType ?? undefined, pendingPickupName ?? undefined)}
+          onBack={() => setScreen(
+            company?.fulfillment_mode === "retirada_unica" ? "pickup"
+            : company?.consumption_mode_enabled ? "consumption"
+            : "catalog"
+          )}
         />
       )}
 

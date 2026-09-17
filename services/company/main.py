@@ -530,6 +530,10 @@ class CompanyOut(BaseModel):
     prep_urgency_minutes: int = 10
     inactivity_timeout_min: int = 5
     inactivity_warn_sec: int = 30
+    # ORD-172 — derivado de CompanyFiscalConfig.ativo (ORD-171), não é coluna
+    # de Company — por isso get_company() monta um dict manual em vez de
+    # devolver o objeto ORM direto (from_attributes não alcançaria este campo).
+    fiscal_module_ativo: bool = False
     model_config = {"from_attributes": True}
 
 
@@ -889,8 +893,13 @@ class FiscalConfigIn(BaseModel):
     @field_validator("ambiente")
     @classmethod
     def ambiente_valido(cls, v: str | None) -> str | None:
-        if v is not None and v not in ("homologacao", "producao"):
-            raise ValueError('ambiente deve ser "homologacao" ou "producao"')
+        # ORD-179 — "mockup" só fabrica dado de verdade se o payment-service
+        # tiver FISCAL_MOCKUP_ENABLED=true (env var de plataforma, nunca por
+        # empresa) — sem isso, se comporta como homologação. Aceito aqui sem
+        # checar essa flag: o gate de segurança fica no payment-service, que
+        # é quem de fato decide fabricar ou não.
+        if v is not None and v not in ("homologacao", "producao", "mockup"):
+            raise ValueError('ambiente deve ser "homologacao", "producao" ou "mockup"')
         return v
 
     # ORD-178 — via alternativa ao onboarding automatizado (POST /empresas,
@@ -1202,6 +1211,17 @@ async def _create_contracts_bucket_if_local() -> None:
 _HEARTBEAT_TTL = timedelta(minutes=5)
 
 
+async def _get_fiscal_module_ativo(db: AsyncSession, company_id: int) -> bool:
+    """ORD-172 — deriva de CompanyFiscalConfig.ativo (ORD-171), nunca
+    duplicado como coluna própria. Mesmo padrão de dado que precisa tocar
+    validate-pin/verify-pin/approve_device/approve_panel já visto com
+    consumption_mode_enabled — gotcha conhecido de CompanyInfo."""
+    ativo = (await db.execute(
+        select(CompanyFiscalConfig.ativo).filter_by(company_id=company_id)
+    )).scalar_one_or_none()
+    return bool(ativo)
+
+
 @app.post("/internal/validate-pin", include_in_schema=False)
 async def validate_pin(
     body: dict,
@@ -1232,6 +1252,7 @@ async def validate_pin(
             "prep_urgency_minutes": co.prep_urgency_minutes,
             "inactivity_timeout_min": co.inactivity_timeout_min,
             "inactivity_warn_sec": co.inactivity_warn_sec,
+            "fiscal_module_ativo": await _get_fiscal_module_ativo(db, co.id),
         },
         "terminals": [
             {"id": t.id, "label": t.label, "terminal_code": t.terminal_code, "tef_number": t.tef_number}
@@ -1273,6 +1294,7 @@ async def verify_pin(
             "prep_urgency_minutes": co.prep_urgency_minutes,
             "inactivity_timeout_min": co.inactivity_timeout_min,
             "inactivity_warn_sec": co.inactivity_warn_sec,
+            "fiscal_module_ativo": await _get_fiscal_module_ativo(db, co.id),
         },
         "terminal": {
             "id": t.id, "label": t.label, "tef_number": t.tef_number,
@@ -1634,7 +1656,9 @@ async def get_company(
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
-    return co
+    data = {c.name: getattr(co, c.name) for c in Company.__table__.columns}
+    data["fiscal_module_ativo"] = await _get_fiscal_module_ativo(db, company_id)
+    return CompanyOut(**data)
 
 
 @app.put(
@@ -3922,7 +3946,8 @@ async def approve_device(
                      "fulfillment_mode": co.fulfillment_mode,
                      "prep_urgency_minutes": co.prep_urgency_minutes,
                      "inactivity_timeout_min": co.inactivity_timeout_min,
-                     "inactivity_warn_sec": co.inactivity_warn_sec},
+                     "inactivity_warn_sec": co.inactivity_warn_sec,
+                     "fiscal_module_ativo": await _get_fiscal_module_ativo(db, co.id)},
         "terminal": {
             "id": t.id, "label": t.label, "tef_number": t.tef_number,
             "payment_provider": cfg.provider if cfg else "mock",
@@ -3980,7 +4005,8 @@ async def approve_panel(
                      "fulfillment_mode": co.fulfillment_mode,
                      "prep_urgency_minutes": co.prep_urgency_minutes,
                      "inactivity_timeout_min": co.inactivity_timeout_min,
-                     "inactivity_warn_sec": co.inactivity_warn_sec},
+                     "inactivity_warn_sec": co.inactivity_warn_sec,
+                     "fiscal_module_ativo": await _get_fiscal_module_ativo(db, co.id)},
     }), ex=60)
 
     return {"ok": True}
