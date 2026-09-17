@@ -53,6 +53,10 @@ export interface Company {
   // ORD-158 — timeout de inatividade do totem (era constante fixa, ver ORD-155).
   inactivity_timeout_min?: number;
   inactivity_warn_sec?: number;
+  // ORD-176 — indicador de vencimento do certificado A1 na listagem, sem
+  // precisar abrir empresa por empresa. null = módulo fiscal inativo ou
+  // validade ainda não conhecida (nada a monitorar); negativo = já venceu.
+  certificado_dias_restantes?: number | null;
 }
 
 // ORD-115 — vídeo de modo espera (attract mode) do totem.
@@ -491,6 +495,11 @@ export interface FiscalConfig {
   // add-on escolhido ainda) — aba "Plano" mostra "Não contratado" nesse
   // caso. Desativar o módulo NÃO desvincula o plano (histórico).
   fiscal_addon_plan: FiscalAddonPlanSummary | null;
+  // ORD-176 — validade do certificado A1 (vem pronta da Focus NFe, ORD-170).
+  // certificado_dias_restantes negativo = já venceu; null = validade ainda
+  // não conhecida (certificado nunca cadastrado na Focus NFe).
+  certificado_valido_ate: string | null;
+  certificado_dias_restantes: number | null;
 }
 
 // ORD-174 — custo do módulo fiscal, add-on SEPARADO da PriceTable (mede

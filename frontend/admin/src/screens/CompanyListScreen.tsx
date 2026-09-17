@@ -172,6 +172,20 @@ export default function CompanyListScreen() {
         </Tag>
       ),
     },
+    {
+      // ORD-176 — sinaliza certificado vencendo/vencido sem precisar abrir
+      // cada empresa. Vazio pra maioria das linhas de propósito (módulo
+      // inativo, validade normal, ou > 30 dias) — só chama atenção pra quem
+      // realmente precisa de ação, mesmo critério do QA Explorer.
+      key: "certificado", header: "Certificado A1", render: (c) => {
+        if (c.certificado_dias_restantes == null || c.certificado_dias_restantes > 30) return null;
+        return (
+          <Tag variant={c.certificado_dias_restantes <= 0 ? "error" : "warning"}>
+            {c.certificado_dias_restantes <= 0 ? "Vencido" : `Vence em ${c.certificado_dias_restantes}d`}
+          </Tag>
+        );
+      },
+    },
     { key: "created_at", header: "Cadastrado em", mono: true, render: (c) => fmtDate(c.created_at) },
     {
       key: "action", header: "Ação", render: (c) =>
