@@ -274,3 +274,10 @@ terminar todas as edições do `main.py`, mascarado porque o serviço continuava
 os campos novos). Sintoma: `GET /companies/{id}/plan` retornando sem `fiscal_addon_plan`/
 `fiscal_module_ativo` mesmo depois de reload completo do navegador — só reproduzido comparando a
 resposta real da API via curl contra o código fonte.
+
+**Revisão pós-teste do usuário (mesma sessão)**: desenho original punha "Tabelas de preço" e
+"Add-on fiscal" como dois itens separados na sidebar — usuário achou que virou poluição de menu
+pra dois catálogos da mesma área comercial. Unificados numa aba só (`CommercialScreen.tsx`,
+Tab/Tabs — mesmo padrão já usado em `CompanyScreen`), sidebar cai pra um item ("Comercial"). URLs
+de formulário (criar/editar) não mudaram; as duas rotas de listagem (`/commercial/price-tables`,
+`/commercial/fiscal-addon-plans`) agora renderizam o mesmo wrapper, que decide a aba pela rota.
