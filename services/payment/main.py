@@ -423,6 +423,114 @@ async def _try_cancel_fiscal_document(order_ref: str, reason: str | None) -> Non
             logger.warning("Focus NFe cancel error (%s): %s", order_ref, exc)
 
 
+FISCAL_RECONCILE_WINDOW_HOURS = 24  # janela de retry automático antes de "falha_definitiva" (ORD-175)
+
+
+async def _consult_nfce_status(base_url: str, order_ref: str, token: str) -> dict | None:
+    """ORD-175 — GET /nfce/{ref} da Focus NFe: consulta o status atual sem
+    nenhum efeito colateral. Chamado SEMPRE antes de qualquer reenvio em
+    reconcile_pending_fiscal_documents — nunca um POST /nfce direto num
+    retry. Motivo: diferente do POST /empresas (confirmado upsert, ORD-170),
+    não temos confirmação de que POST /nfce seja idempotente pro mesmo
+    `ref` — reenviar sem checar arriscaria emitir uma segunda nota fiscal
+    pro mesmo pedido (risco de compliance, não só técnico). None em
+    qualquer falha (nota nunca chegou a existir do lado deles, erro de
+    rede) — nesse caso o chamador segue pro POST normal, mesmo
+    comportamento de quando não havia nada pra consultar."""
+    try:
+        async with httpx.AsyncClient(timeout=FOCUS_NFE_EMIT_TIMEOUT) as client:
+            resp = await client.get(f"{base_url}/nfce/{order_ref}", auth=(token, ""))
+    except httpx.HTTPError:
+        return None
+    if resp.status_code != 200:
+        return None
+    return resp.json()
+
+
+async def reconcile_pending_fiscal_documents() -> None:
+    """ORD-175 — reenvia notas fiscais pendentes (falha/timeout na emissão
+    original, ORD-171) dentro de uma janela de 24h; passado isso, marca
+    "falha_definitiva" e para de tentar automaticamente. Script standalone
+    (services/payment/scripts/reconcile_fiscal_documents.py), mesmo padrão
+    do sync_ncm da ORD-169 — agendamento periódico é decisão de infra/
+    deploy, fora do escopo deste código.
+
+    Checagem de cancelamento/reembolso usa Transaction.status LOCAL (não
+    consulta o order-service): refund_payment nunca notifica o
+    order-service sobre reembolso (só cancel_payment notifica "cancelled"
+    via _notify_order) — Order.status no order-service não reflete
+    "refunded", então checar por lá deixaria passar despercebido um pedido
+    reembolsado. Transaction já tem os dois estados corretos, sem chamada
+    de rede extra."""
+    cutoff = datetime.utcnow() - timedelta(hours=FISCAL_RECONCILE_WINDOW_HOURS)
+    async with AsyncSessionLocal() as db:
+        pending = (await db.execute(
+            select(FiscalDocument).filter_by(status="pendente")
+        )).scalars().all()
+
+        for doc in pending:
+            if doc.criado_em <= cutoff:
+                doc.status = "falha_definitiva"
+                continue
+
+            tx = (await db.execute(
+                select(Transaction).filter_by(order_ref=doc.order_ref).order_by(Transaction.id.desc())
+            )).scalars().first()
+            if not tx:
+                logger.warning("reconcile: FiscalDocument sem Transaction correspondente (%s)", doc.order_ref)
+                continue
+            if tx.status in ("cancelled", "refunded"):
+                continue  # pedido desfeito no meio tempo — nada a emitir
+
+            try:
+                creds = await _get_fiscal_credentials(doc.company_id)
+                if not creds or not creds.get("ativo"):
+                    continue  # módulo fiscal desativado no meio tempo
+
+                base_url = FOCUS_NFE_PRODUCAO_URL if doc.ambiente == "producao" else FOCUS_NFE_HOMOLOGACAO_URL
+
+                consulted = await _consult_nfce_status(base_url, doc.order_ref, creds["token"])
+                if consulted and consulted.get("status") == "autorizado":
+                    # Já tinha sido autorizada do lado deles (resposta da
+                    # tentativa original se perdeu, mas a nota existe) — só
+                    # reconcilia o registro local, nunca reemite.
+                    doc.status = "autorizada"
+                    doc.chave_nfe = consulted.get("chave_nfe")
+                    doc.caminho_danfe = consulted.get("caminho_danfe")
+                    doc.qrcode_url = consulted.get("qrcode_url")
+                    continue
+
+                order = await _get_order_with_items(doc.order_ref)
+                if not order:
+                    continue
+                products_fiscal = await _get_products_fiscal([it["product_id"] for it in order["items"]])
+                payload = _build_nfce_payload(
+                    order["items"], products_fiscal, creds, tx.method, float(tx.amount), order.get("cpf"),
+                )
+
+                async with httpx.AsyncClient(timeout=FOCUS_NFE_EMIT_TIMEOUT) as client:
+                    resp = await client.post(
+                        f"{base_url}/nfce", params={"ref": doc.order_ref},
+                        auth=(creds["token"], ""), json=payload,
+                    )
+                if resp.status_code == 200 and resp.json().get("status") == "autorizado":
+                    body = resp.json()
+                    doc.status = "autorizada"
+                    doc.chave_nfe = body.get("chave_nfe")
+                    doc.caminho_danfe = body.get("caminho_danfe")
+                    doc.qrcode_url = body.get("qrcode_url")
+                else:
+                    doc.erro_mensagem = resp.text[:2000]
+                    # permanece "pendente" — tenta de novo na próxima execução do job
+            # ORD-175 — mesmo motivo do resto do módulo fiscal: falha aqui
+            # (rede, Focus NFe fora do ar) nunca pode travar o reconcile dos
+            # outros documentos pendentes na mesma execução.
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("reconcile_pending_fiscal_documents falhou (%s): %s", doc.order_ref, exc)
+
+        await db.commit()
+
+
 async def _get_mp_webhook_secret(company_id: int) -> tuple[bool, str | None]:
     """Busca o webhook_secret do Mercado Pago da empresa (ORD-131) — cada
     empresa tem sua própria aplicação/conta MP, logo seu próprio secret.

@@ -228,3 +228,39 @@ específico — não atribuída ainda.
 
 **Status: Ready.** Última história do épico — recomendo confirmar a idempotência do `POST
 /nfce` com o suporte antes de implementar o retry de verdade, mesmo com Ready alcançado.
+
+## Implementação
+
+**Decisão tomada com o usuário antes de implementar** (a pendência de idempotência registrada
+acima): em vez de esperar confirmação do suporte da Focus NFe, o retry sempre consulta
+`GET /nfce/{ref}` **antes** de qualquer reenvio — se a consulta já confirma "autorizado", o job só
+reconcilia o registro local (chave/DANFE/QR), nunca chama `POST /nfce` de novo. Isso elimina o
+risco de duplicidade sem depender de resposta externa: no pior caso, é uma consulta a mais; nunca
+um reenvio desnecessário.
+
+`reconcile_pending_fiscal_documents()` implementada em `services/payment/main.py`, chamada por um
+script standalone (`services/payment/scripts/reconcile_fiscal_documents.py`, `python -m
+scripts.reconcile_fiscal_documents`) — mesmo padrão do `sync_ncm.py` da ORD-169: agendamento
+periódico (cron do host, tarefa do ECS) é decisão de infra/deploy, fora do código desta história.
+
+**Achado técnico durante a implementação, não previsto no Tech Explorer**: a checagem de
+"pedido cancelado/reembolsado no meio tempo" foi feita contra `Transaction.status` **local**
+(payment-service), não contra o `order.status` do order-service como o pseudocódigo original
+sugeria. Motivo: `refund_payment` nunca notifica o order-service sobre reembolso (só
+`cancel_payment` chama `_notify_order` com "cancelled") — checar por `order.status` deixaria
+passar despercebido qualquer pedido reembolsado. `Transaction.status` já tem os dois estados
+corretos, sem chamada de rede extra.
+
+Sem UI nova, conforme o wireframe da história ("no máximo uma contagem simples, não uma tela
+dedicada") — os critérios de aceite testáveis do QA Explorer são inteiramente de backend.
+
+7 testes novos (`test_ord175_reconciliacao_fiscal.py`), cobrindo os 5 cenários Gherkin do QA
+Explorer + o caminho de segurança da consulta prévia. Suíte completa do payment-service (153
+testes) e `ruff` sem regressão. Script testado de verdade dentro do container local (`python -m
+scripts.reconcile_fiscal_documents`, exit 0, sem pendências no banco de dev no momento do teste).
+
+**Gotcha novo desta sessão**: hot-patch via `docker compose cp` seguido de `restart` causou um
+`ImportError: cannot import name 'Base' from 'main'` enganoso — parecia arquivo corrompido, mas
+era `__pycache__/main.cpython-312.pyc` desatualizado confundindo a invalidação por mtime do
+Python. Resolvido limpando `__pycache__` no container antes do restart; registrado como gotcha
+de memória pra não repetir a investigação.
