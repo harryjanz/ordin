@@ -132,3 +132,11 @@ Funcionalidade: Painel de pedidos pendentes/prontos para retirada
 
 ## Próximos passos
 Upstream completo, sem bloqueadores abertos — mecanismo de pareamento do painel confirmado pelo usuário (2026-08-24), reaproveitando ORD-042. **Status: Ready.**
+
+## Correção pós-produção (2026-09-17)
+
+Mesmo bug do `POST /orders/{order_ref}/collect` (ver addendum na ORD-118), no endpoint irmão
+`POST /orders/{order_ref}/ready`: filtro fixo por `current_user.company_id` sem bypass pra
+`superadmin`/`admin`, e `broadcast_order_ready()` chamado com `current_user.company_id` em vez de
+`order.company_id`. Ambos corrigidos junto, mesmo commit — ver detalhes técnicos e testes no
+addendum da ORD-118.
