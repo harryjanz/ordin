@@ -197,7 +197,7 @@ export default function PriceTableListScreen() {
   return (
     <>
       {/* ORD-174 (revisão) — página/título ficaram por conta de CommercialScreen
-          (aba compartilhada com Add-on fiscal); aqui só o botão de criar. */}
+          (aba compartilhada com Módulo fiscal); aqui só o botão de criar. */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
         <Button onClick={() => navigate("/commercial/price-tables/new")}>+ Nova tabela</Button>
       </div>

@@ -97,7 +97,7 @@ export default function FiscalAddonPlanListScreen() {
           columns={columns}
           rows={plans}
           rowKey={(p) => p.id}
-          emptyMessage={loading ? "Carregando…" : "Nenhum plano de add-on fiscal cadastrado ainda."}
+          emptyMessage={loading ? "Carregando…" : "Nenhum plano do módulo fiscal cadastrado ainda."}
         />
       )}
 

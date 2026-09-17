@@ -677,7 +677,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
 
       <div className={`${styles.planPanel} ${styles.fiscalForm}`} style={{ marginBottom: 20 }}>
         <div className={styles.planRow}>
-          <span className={styles.planLabel}>Plano de add-on fiscal</span>
+          <span className={styles.planLabel}>Plano do módulo fiscal</span>
         </div>
         <Dropdown
           label=""
@@ -688,7 +688,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
           placeholder="Escolha um plano"
         />
         {!cfg.fiscal_addon_plan && (
-          <div className={styles.formHint}>Escolha um plano de add-on fiscal para poder ativar a emissão.</div>
+          <div className={styles.formHint}>Escolha um plano do módulo fiscal para poder ativar a emissão.</div>
         )}
         <div className={styles.planRow}>
           <span className={styles.planLabel}>Emissão de NFC-e</span>
