@@ -369,6 +369,11 @@ class CompanyFiscalConfig(Base):
     # este campo preenchido (validado em update_fiscal_config) — desativar
     # NÃO desvincula, mantém histórico de qual plano a empresa usou.
     fiscal_addon_plan_id     = Column(Integer, nullable=True)
+    # ORD-176 — controle de alerta de vencimento do certificado já enviado
+    # (30, 15, 7, 1, ou 0 = vencido), evita duplicar e-mail no mesmo marco.
+    # Resetado pra None sempre que certificado_valido_ate muda (onboarding/
+    # reenvio de cadastro na Focus NFe) — certificado novo, contagem do zero.
+    certificado_ultimo_alerta_dias = Column(Integer, nullable=True)
     created_at                = Column(DateTime, default=datetime.utcnow)
     updated_at                = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -554,6 +559,10 @@ class CompanyOut(BaseModel):
     # de Company — por isso get_company() monta um dict manual em vez de
     # devolver o objeto ORM direto (from_attributes não alcançaria este campo).
     fiscal_module_ativo: bool = False
+    # ORD-176 — mesmo motivo de fiscal_module_ativo acima: derivado de
+    # CompanyFiscalConfig, não coluna de Company. None quando módulo
+    # inativo ou validade ainda não conhecida (nada a monitorar).
+    certificado_dias_restantes: int | None = None
     model_config = {"from_attributes": True}
 
 
@@ -972,6 +981,12 @@ class FiscalConfigOut(BaseModel):
     # ORD-174 — None quando o módulo nunca foi ativado (nenhum plano
     # escolhido ainda) — aba "Plano" mostra "Não contratado" nesse caso.
     fiscal_addon_plan: FiscalAddonPlanSummaryOut | None = None
+    # ORD-176 — validade do certificado A1, vem pronta da Focus NFe (ORD-170).
+    # certificado_dias_restantes é derivado (nunca armazenado) — negativo
+    # quando já venceu; None quando a validade ainda não é conhecida
+    # (certificado nunca cadastrado na Focus NFe).
+    certificado_valido_ate: datetime | None = None
+    certificado_dias_restantes: int | None = None
 
 
 VALID_CONTACT_TYPES = {"comercial", "financeiro", "tecnico"}
@@ -1583,7 +1598,28 @@ async def list_companies(
         if row_status in summary:
             summary[row_status] = row_count
 
-    return {"companies": result.scalars().all(), "total": total, "summary": summary}
+    # ORD-176 — indicador de certificado vencendo/vencido na listagem, sem
+    # abrir empresa por empresa. Uma query batch pra página atual (não
+    # N+1) — mesmo padrão já usado em list_price_tables/
+    # list_fiscal_addon_plans pra contagem de vínculos.
+    companies = result.scalars().all()
+    company_ids = [c.id for c in companies]
+    fiscal_by_company: dict[int, CompanyFiscalConfig] = {}
+    if company_ids:
+        fiscal_rows = await db.execute(
+            select(CompanyFiscalConfig).where(CompanyFiscalConfig.company_id.in_(company_ids))
+        )
+        fiscal_by_company = {cfg.company_id: cfg for cfg in fiscal_rows.scalars().all()}
+
+    companies_out = []
+    for c in companies:
+        data = {col.name: getattr(c, col.name) for col in Company.__table__.columns}
+        cfg = fiscal_by_company.get(c.id)
+        data["fiscal_module_ativo"] = bool(cfg and cfg.ativo)
+        data["certificado_dias_restantes"] = _certificado_dias_restantes(cfg) if (cfg and cfg.ativo) else None
+        companies_out.append(data)
+
+    return {"companies": companies_out, "total": total, "summary": summary}
 
 
 @app.post(
@@ -3524,6 +3560,16 @@ def _fiscal_config_completo(co: Company, cfg: CompanyFiscalConfig | None) -> boo
     )
 
 
+def _certificado_dias_restantes(cfg: CompanyFiscalConfig | None) -> int | None:
+    """ORD-176 — dias até o vencimento do certificado (negativo se já
+    venceu). None quando a validade ainda não é conhecida. Único lugar que
+    calcula isso — reaproveitado pela leitura (aba Fiscal, listagem de
+    empresas) e pelo job diário de alerta, pra nunca divergir."""
+    if not cfg or not cfg.certificado_valido_ate:
+        return None
+    return (cfg.certificado_valido_ate.date() - datetime.utcnow().date()).days
+
+
 async def _serialize_fiscal_config(db: AsyncSession, co: Company, cfg: CompanyFiscalConfig | None) -> dict:
     certificado_cadastrado = bool(cfg and cfg.certificado_arquivo_enc)
     csc_producao_cadastrado = bool(cfg and cfg.csc_producao_enc)
@@ -3555,6 +3601,8 @@ async def _serialize_fiscal_config(db: AsyncSession, co: Company, cfg: CompanyFi
         "ambiente": cfg.ambiente if cfg else "homologacao",
         "focus_nfe_cadastro_manual": bool(cfg and cfg.focus_nfe_cadastro_manual),
         "fiscal_addon_plan": addon_plan,
+        "certificado_valido_ate": cfg.certificado_valido_ate if cfg else None,
+        "certificado_dias_restantes": _certificado_dias_restantes(cfg),
     }
 
 
@@ -3774,9 +3822,105 @@ async def focus_nfe_onboarding(
     cert_ate = data.get("certificado_valido_ate")
     cfg.certificado_valido_de = datetime.fromisoformat(cert_de) if cert_de else None
     cfg.certificado_valido_ate = datetime.fromisoformat(cert_ate) if cert_ate else None
+    # ORD-176 — certificado novo (ou reenvio), contagem de alerta do zero.
+    # Único lugar do sistema que escreve certificado_valido_ate — resolvido
+    # aqui, não é dependência cruzada com história nenhuma.
+    cfg.certificado_ultimo_alerta_dias = None
     await db.commit()
 
     return {"cadastrado": True, "focus_nfe_cadastrado_em": cfg.focus_nfe_cadastrado_em}
+
+
+# ── Monitoramento de validade do certificado digital (ORD-176) ──────────────
+# Job diário, script standalone (services/company/scripts/
+# check_certificate_expirations.py) — mesmo padrão de agendamento do
+# sync_ncm.py (catalog-service, ORD-169) e do reconcile_fiscal_documents.py
+# (payment-service, ORD-175): agendamento periódico é decisão de infra/
+# deploy, não código deste serviço.
+
+ALERT_THRESHOLDS = [30, 15, 7, 1]  # dias antes do vencimento
+
+
+async def _get_technical_contact_or_owner_email(db: AsyncSession, company_id: int) -> str | None:
+    """ORD-176 — contato técnico (CompanyContact) é o destinatário
+    preferido; sem ele, cai no e-mail do owner da empresa (fallback já
+    documentado no ORD-087 pra outros fluxos transacionais)."""
+    contact = (await db.execute(
+        select(CompanyContact).filter_by(company_id=company_id, contact_type="tecnico")
+    )).scalars().first()
+    if contact:
+        return decrypt_field(contact.email_enc)
+    owner = (await db.execute(
+        select(User).where(User.company_id == company_id, User.role == "owner", User.active == True)
+        .order_by(User.id)
+    )).scalars().first()
+    return owner.email if owner else None
+
+
+async def check_certificate_expirations() -> None:
+    """ORD-176 — varre empresas com módulo fiscal ativo e certificado com
+    validade conhecida, dispara e-mail ao cruzar cada marco (30/15/7/1 dias,
+    e um marco final "0" pra vencido), e nunca duplica o mesmo marco pra
+    mesma empresa (certificado_ultimo_alerta_dias). Best-effort por
+    empresa: falha numa não pode travar as outras na mesma execução."""
+    async with AsyncSessionLocal() as db:
+        configs = (await db.execute(
+            select(CompanyFiscalConfig).where(
+                CompanyFiscalConfig.ativo == True,
+                CompanyFiscalConfig.certificado_valido_ate.is_not(None),
+            )
+        )).scalars().all()
+
+        for cfg in configs:
+            try:
+                dias_restantes = _certificado_dias_restantes(cfg)
+                # Marco ATINGIDO é o mais APERTADO (menor) que já foi
+                # cruzado — por isso itera em ordem crescente, não na ordem
+                # de leitura de ALERT_THRESHOLDS (30→15→7→1): com
+                # dias_restantes=15, iterar na ordem declarada acharia 30
+                # primeiro (15<=30 já é verdade) e nunca chegaria no 15.
+                marco_atingido = next((t for t in sorted(ALERT_THRESHOLDS) if dias_restantes <= t), None)
+                if dias_restantes <= 0:
+                    marco_atingido = 0  # vencido (hoje ou antes) — marco final, mais apertado que qualquer threshold
+                if marco_atingido is None:
+                    continue  # ainda longe do vencimento, nada a fazer
+
+                # cfg.certificado_ultimo_alerta_dias guarda o ÚLTIMO marco já
+                # avisado (30 → 15 → 7 → 1 → 0, sempre decrescente) — só
+                # dispara de novo se o marco atual for mais apertado que o
+                # último avisado (ou se nunca avisou nada ainda).
+                if cfg.certificado_ultimo_alerta_dias is not None and cfg.certificado_ultimo_alerta_dias <= marco_atingido:
+                    continue
+
+                destinatario = await _get_technical_contact_or_owner_email(db, cfg.company_id)
+                if not destinatario:
+                    logger.warning(
+                        "check_certificate_expirations: empresa %s sem contato técnico nem owner com e-mail",
+                        cfg.company_id,
+                    )
+                    continue
+
+                co = await db.get(Company, cfg.company_id)
+                async with httpx.AsyncClient(timeout=5) as client:
+                    resp = await client.post(
+                        f"{NOTIFICATION_SERVICE_URL}/internal/send-certificate-expiry-alert",
+                        json={
+                            "to": destinatario,
+                            "company_name": co.name if co else "sua empresa",
+                            "dias_restantes": dias_restantes,
+                        },
+                        headers=INTERNAL_HEADERS,
+                    )
+                    resp.raise_for_status()
+
+                cfg.certificado_ultimo_alerta_dias = marco_atingido
+                await db.commit()
+            # Best-effort por empresa — mesmo motivo já estabelecido nos
+            # outros jobs periódicos do sistema (sync_ncm, reconcile
+            # fiscal): falha isolada não pode travar as demais na mesma
+            # execução, tenta de novo na próxima.
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("check_certificate_expirations falhou (company_id=%s): %s", cfg.company_id, exc)
 
 
 # ── Contatos e responsável legal (ORD-058) ────────────────────────────────────

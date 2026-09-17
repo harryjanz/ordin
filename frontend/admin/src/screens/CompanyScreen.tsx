@@ -641,6 +641,23 @@ function FiscalTab({ companyId }: FiscalTabProps) {
               : "Ainda não cadastrado"}
           </Tag>
         </div>
+        {/* ORD-176 — só aparece depois de cadastrado na Focus NFe (é de lá que
+            vem certificado_valido_ate, ORD-170) — normal (>30 dias), atenção
+            (≤30 dias), vencido, mesma paleta já usada no status completo/incompleto. */}
+        {cfg.certificado_dias_restantes !== null && (
+          <div className={styles.planRow}>
+            <span className={styles.planLabel}>Validade do certificado</span>
+            <Tag variant={
+              cfg.certificado_dias_restantes <= 0 ? "error"
+              : cfg.certificado_dias_restantes <= 30 ? "warning"
+              : "success"
+            }>
+              {cfg.certificado_dias_restantes <= 0
+                ? `Vencido em ${new Date(cfg.certificado_valido_ate!).toLocaleDateString("pt-BR")}`
+                : `Vence em ${new Date(cfg.certificado_valido_ate!).toLocaleDateString("pt-BR")} (${cfg.certificado_dias_restantes} dia${cfg.certificado_dias_restantes === 1 ? "" : "s"})`}
+            </Tag>
+          </div>
+        )}
         {!cfg.completo && (
           <div className={styles.formHint}>
             Complete o certificado e o CSC (produção e homologação) acima, e a razão social/IE/

@@ -177,6 +177,55 @@ async def send_password_reset(body: SendPasswordResetIn, _: None = Depends(requi
     return {"sent": True}
 
 
+# ORD-176 — alerta de vencimento do certificado digital A1. dias_restantes
+# negativo ou zero significa "já venceu" — mensagem e assunto mudam nesse
+# caso (aviso de urgência, não "está chegando a data").
+def _build_certificate_expiry_html(company_name: str, dias_restantes: int) -> str:
+    if dias_restantes <= 0:
+        headline = "O certificado digital da sua empresa venceu"
+        body_text = (
+            f"O certificado digital A1 de <strong>{company_name}</strong> venceu"
+            + (f" há {abs(dias_restantes)} dia(s)" if dias_restantes < 0 else " hoje")
+            + ". A emissão de NFC-e não vai funcionar até que um certificado novo seja cadastrado."
+        )
+    else:
+        headline = "O certificado digital da sua empresa está perto de vencer"
+        body_text = (
+            f"O certificado digital A1 de <strong>{company_name}</strong> vence em "
+            f"<strong>{dias_restantes} dia(s)</strong>. Providencie a renovação com seu contador ou "
+            "certificadora antes do vencimento, pra emissão de NFC-e não parar de funcionar."
+        )
+    return f"""
+    <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+      {_EMAIL_HEADER}
+      <h2>{headline}</h2>
+      <p>{body_text}</p>
+      <p style="color: #888; font-size: 12px;">
+        Este é um aviso automático — nenhuma ação é necessária se a renovação já estiver em andamento.
+      </p>
+      {_EMAIL_FOOTER}
+    </div>
+    """
+
+
+class SendCertificateExpiryAlertIn(BaseModel):
+    to: str
+    company_name: str
+    dias_restantes: int
+
+
+@app.post("/internal/send-certificate-expiry-alert", include_in_schema=False)
+async def send_certificate_expiry_alert(body: SendCertificateExpiryAlertIn, _: None = Depends(require_internal)):
+    html = _build_certificate_expiry_html(body.company_name, body.dias_restantes)
+    subject = (
+        "Ordin — certificado digital vencido"
+        if body.dias_restantes <= 0
+        else "Ordin — certificado digital vence em breve"
+    )
+    await provider.send(to=body.to, subject=subject, html=html)
+    return {"sent": True}
+
+
 @app.get("/health")
 def health():
     return {"service": "notification", "status": "ok"}

@@ -82,6 +82,60 @@ async def test_send_invite_papel_desconhecido_usa_texto_generico(client):
     assert "convidado a fazer parte da equipe" in kwargs["html"]
 
 
+# ── ORD-176: alerta de vencimento do certificado digital ────────────────────
+
+async def test_send_certificate_expiry_alert_sem_secret_retorna_403(client):
+    r = await client.post("/internal/send-certificate-expiry-alert", json={
+        "to": "tecnico@empresa.com", "company_name": "Burger House", "dias_restantes": 15,
+    })
+    assert r.status_code == 403
+
+
+async def test_send_certificate_expiry_alert_perto_de_vencer(client):
+    import main as svc
+    r = await client.post(
+        "/internal/send-certificate-expiry-alert",
+        json={"to": "tecnico@empresa.com", "company_name": "Burger House", "dias_restantes": 15},
+        headers=internal_headers(),
+    )
+    assert r.status_code == 200
+    assert r.json() == {"sent": True}
+    svc.provider.send.assert_awaited_once()
+    kwargs = svc.provider.send.call_args.kwargs
+    assert kwargs["to"] == "tecnico@empresa.com"
+    assert "vence em" in kwargs["html"]
+    assert "15 dia(s)" in kwargs["html"]
+    assert "Burger House" in kwargs["html"]
+    assert kwargs["subject"] == "Ordin — certificado digital vence em breve"
+
+
+async def test_send_certificate_expiry_alert_ja_vencido(client):
+    import main as svc
+    r = await client.post(
+        "/internal/send-certificate-expiry-alert",
+        json={"to": "tecnico@empresa.com", "company_name": "Burger House", "dias_restantes": -2},
+        headers=internal_headers(),
+    )
+    assert r.status_code == 200
+    kwargs = svc.provider.send.call_args.kwargs
+    assert "venceu" in kwargs["html"]
+    assert "há 2 dia(s)" in kwargs["html"]
+    assert kwargs["subject"] == "Ordin — certificado digital vencido"
+
+
+async def test_send_certificate_expiry_alert_vence_hoje(client):
+    import main as svc
+    r = await client.post(
+        "/internal/send-certificate-expiry-alert",
+        json={"to": "tecnico@empresa.com", "company_name": "Burger House", "dias_restantes": 0},
+        headers=internal_headers(),
+    )
+    assert r.status_code == 200
+    kwargs = svc.provider.send.call_args.kwargs
+    assert "venceu" in kwargs["html"]
+    assert "hoje" in kwargs["html"]
+
+
 def test_provider_factory_smtp():
     from infrastructure.provider_factory import get_email_provider
     from infrastructure.providers.smtp_provider import SMTPEmailProvider

@@ -244,11 +244,12 @@ notification-service ganha endpoint novo. Nenhum outro serviço afetado.
 2. **Job diário é mais um componente de agendamento** (terceiro do épico, junto de ORD-169 e
    ORD-175) — reforça que vale definir o mecanismo de agendamento uma vez só, não reinventar em
    cada história — decisão de infra ainda em aberto, não bloqueia esta história especificamente.
-3. **Certificado renovado não zera `certificado_ultimo_alerta_dias` automaticamente** — se o
-   cliente providenciar um certificado novo, a ORD-170 (reenvio de cadastro) precisa resetar esse
-   campo junto com o novo `certificado_valido_ate` — **dependência cruzada com a ORD-170,
-   registrar no Tech Explorer dela quando for implementada** (upsert de certificado deveria
-   limpar `certificado_ultimo_alerta_dias` sempre que `certificado_valido_ate` mudar).
+3. ~~**Certificado renovado não zera `certificado_ultimo_alerta_dias` automaticamente**~~ —
+   **resolvido antes de implementar** (revisão pós-Ready): não é dependência cruzada com a
+   ORD-170, é só um detalhe da própria ORD-176. `certificado_valido_ate` só é escrito num único
+   lugar do código (`services/company/main.py`, endpoint de onboarding/reenvio de cadastro na
+   Focus NFe, linhas ~3773-3776) — resetar `certificado_ultimo_alerta_dias = None` logo ali,
+   junto da mesma escrita, fecha o ciclo sem precisar tocar em nenhum outro ponto do sistema.
 
 ### O que ainda impede o avanço pro Ready
 Nada bloqueante. Risco 3 (reset do alerta em renovação) é um ponto de atenção pra implementação,
@@ -274,5 +275,39 @@ alerta na renovação).
 
 **Aprovação final:** [x] solução técnica revisada · [x] estimativa 6 pontos · [x] sem bloqueios
 não resolvidos · [ ] sprint específico — não atribuída ainda.
+
+## Implementação
+
+Implementado como desenhado no Tech Explorer, com o Risco 3 já resolvido antes de começar (ver
+revisão acima) — reset de `certificado_ultimo_alerta_dias` fica no mesmo commit, dentro do
+próprio endpoint de onboarding/reenvio de cadastro (único lugar que escreve
+`certificado_valido_ate`).
+
+**Achado técnico durante a implementação, não previsto no Tech Explorer**: o pseudocódigo original
+percorria `ALERT_THRESHOLDS = [30, 15, 7, 1]` na ordem declarada (decrescente) pra achar o "marco
+atingido" — bug real, pego pelos próprios testes: com `dias_restantes=15`, iterar na ordem
+declarada acha `30` primeiro (`15 <= 30` já é verdade) e nunca chega no `15`, disparando sempre o
+marco mais frouxo em vez do mais apertado. Corrigido iterando `sorted(ALERT_THRESHOLDS)` (ordem
+crescente). Corrigido também o limite do marco "vencido": `dias_restantes == 0` (vence hoje) precisa
+contar como marco `0`, não como marco `1` — a checagem original só cobria `dias_restantes < 0`.
+
+Backend: `certificado_ultimo_alerta_dias` em `CompanyFiscalConfig` + `check_certificate_expirations()`
+(job) + `_get_technical_contact_or_owner_email()` (fallback contato técnico → owner) + extensão de
+`FiscalConfigOut`/`CompanyOut` com `certificado_valido_ate`/`certificado_dias_restantes` (batch
+query em `list_companies`, não N+1, mesmo padrão de `list_price_tables`). Script standalone
+`services/company/scripts/check_certificate_expirations.py`, mesmo padrão do `sync_ncm.py`/
+`reconcile_fiscal_documents.py`. Endpoint novo `POST /internal/send-certificate-expiry-alert` no
+notification-service, mesmo padrão de `/internal/send-invite`.
+
+Frontend: indicador "Validade do certificado" na aba Fiscal (`Tag` success/warning/error) e coluna
+"Certificado A1" na listagem de empresas (vazia pra maioria das linhas de propósito — só aparece
+pra quem realmente precisa de ação, conforme QA Explorer).
+
+Migration `20260917_2000_certificado_ultimo_alerta.py`, testada de verdade no container local
+(upgrade limpo). 12 testes novos no company-service (`test_ord176_validade_certificado.py`) + 4
+no notification-service. Suíte completa do company-service (481 testes) e do notification-service
+(12 testes), `ruff` sem regressão. Testado manualmente de ponta a ponta no navegador: validade
+simulada em 10 dias na Burger House, indicador correto na aba Fiscal e só nessa empresa na
+listagem (Pasta & Co/Sweet Corner, módulo inativo, mostram "–").
 
 **Status: Ready.**
