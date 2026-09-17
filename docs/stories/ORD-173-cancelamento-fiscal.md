@@ -219,3 +219,17 @@ de fila — nenhum · [x] estimativa (3 pontos) · [x] riscos com mitigação.
 não resolvidos · [ ] sprint específico — não atribuída ainda.
 
 **Status: Ready.**
+
+## Implementação
+
+Implementado exatamente como desenhado no Tech Explorer — `_try_cancel_fiscal_document()` em
+`services/payment/main.py`, chamada de forma **síncrona** (`await`, sem fire-and-forget) no fim de
+`cancel_payment` e `refund_payment`, decisão confirmada explicitamente antes de escrever código:
+com janela de só 30 minutos, uma rotina desacoplada (fila/worker) arriscaria perder a janela só
+pelo próprio atraso de infraestrutura — o caminho feliz da Focus NFe responde em milissegundos, o
+timeout de 8s (`FOCUS_NFE_EMIT_TIMEOUT`, reaproveitado da ORD-171) só afeta o pior caso.
+
+5 testes novos (`test_ord173_cancelamento_fiscal.py`) cobrindo os 5 cenários Gherkin do QA
+Explorer: dentro da janela cancela, fora da janela não tenta, sem nota associada não tenta,
+justificativa curta é complementada, falha na Focus NFe não impede o cancelamento/reembolso do
+pagamento. Suíte completa do payment-service (146 testes) e `ruff` verificados sem regressão.
