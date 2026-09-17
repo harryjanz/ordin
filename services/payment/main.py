@@ -372,6 +372,57 @@ async def _get_fiscal_document_summary(order_ref: str) -> dict | None:
     return {"status": doc.status, "chave_nfe": doc.chave_nfe, "qrcode_url": doc.qrcode_url}
 
 
+FOCUS_NFE_CANCEL_WINDOW_MINUTES = 30  # janela da Focus NFe pra DELETE /nfce (docs/estudo-nfce.md §7)
+
+
+async def _try_cancel_fiscal_document(order_ref: str, reason: str | None) -> None:
+    """ORD-173 — chamado no fim de cancel_payment/refund_payment (payment-
+    service), não um endpoint/rotina separada: a janela de cancelamento da
+    Focus NFe (30min) é muito mais curta que as janelas de reembolso já
+    existentes (PayGo mesmo dia, Mercado Pago até 180 dias no PIX) — uma
+    rotina assíncrona desacoplada arriscaria perder a janela só por causa do
+    próprio atraso da fila/worker. Mesmo padrão best-effort do cancelamento
+    PayGo em cancel_payment: falha aqui nunca impede nem desfaz o
+    cancelamento/reembolso do pagamento, que já aconteceu antes desta chamada."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(FiscalDocument)
+            .filter_by(order_ref=order_ref, status="autorizada")
+            .order_by(FiscalDocument.criado_em.desc())
+        )
+        doc = result.scalars().first()
+        if not doc:
+            return  # sem nota autorizada pra esse pedido — nada a fazer
+        if datetime.utcnow() - doc.criado_em > timedelta(minutes=FOCUS_NFE_CANCEL_WINDOW_MINUTES):
+            return  # fora da janela — nota permanece autorizada, limite legal esperado, não erro
+
+        justificativa = (reason or "").strip()
+        if len(justificativa) < 15:
+            justificativa = f"Cancelamento de pagamento - {justificativa}"[:255]
+
+        try:
+            creds = await _get_fiscal_credentials(doc.company_id)
+            if not creds:
+                return
+            base_url = FOCUS_NFE_PRODUCAO_URL if doc.ambiente == "producao" else FOCUS_NFE_HOMOLOGACAO_URL
+            async with httpx.AsyncClient(timeout=FOCUS_NFE_EMIT_TIMEOUT) as client:
+                resp = await client.request(
+                    "DELETE", f"{base_url}/nfce/{order_ref}",
+                    json={"justificativa": justificativa},
+                    auth=(creds["token"], ""),
+                )
+            if resp.status_code == 200:
+                doc.status = "cancelada"
+                await db.commit()
+        # ORD-173 — mesmo motivo do cancelamento PayGo/emit_nfce_if_active:
+        # falha na Focus NFe (rede, 4xx/5xx) é best-effort — o cancelamento
+        # do pagamento já aconteceu e não pode ser revertido por causa disso.
+        # FiscalDocument permanece "autorizada" (não sabemos se cancelou do
+        # lado deles), vira pendência de reconciliação manual (história 8).
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Focus NFe cancel error (%s): %s", order_ref, exc)
+
+
 async def _get_mp_webhook_secret(company_id: int) -> tuple[bool, str | None]:
     """Busca o webhook_secret do Mercado Pago da empresa (ORD-131) — cada
     empresa tem sua própria aplicação/conta MP, logo seu próprio secret.
@@ -1150,6 +1201,8 @@ async def cancel_payment(
         except Exception as exc:  # noqa: BLE001
             logger.warning("PayGo cancel error: %s", exc)
 
+    await _try_cancel_fiscal_document(tx.order_ref, body.reason)
+
     await _notify_order(tx.order_ref, "cancelled")
     await _publish(
         "payment.cancelled",
@@ -1267,6 +1320,8 @@ async def refund_payment(
     tx.refunded_at = datetime.utcnow()
     tx.refund_reason = body.reason
     await db.commit()
+
+    await _try_cancel_fiscal_document(tx.order_ref, body.reason)
 
     await _publish(
         "payment.refunded",
