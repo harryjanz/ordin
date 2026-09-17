@@ -30,7 +30,7 @@ export default function CommercialScreen() {
       <div className={styles.tabs}>
         <Tabs activeTab={tab} onSelectTab={(v) => setTab(v as typeof tab)}>
           <Tab value="price-tables" label="Tabela de preço" />
-          <Tab value="fiscal" label="Add-on fiscal" />
+          <Tab value="fiscal" label="Módulo fiscal" />
         </Tabs>
       </div>
 

@@ -504,7 +504,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
     try {
       await onboardFocusNfe(companyId);
       load();
-      makeToast("success", "Empresa cadastrada na Focus NFe!");
+      makeToast("success", "Empresa cadastrada na Integradora NFe!");
     } catch (e: unknown) {
       setOnboardError(parseFocusNfeError(e));
     } finally {
@@ -634,7 +634,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
 
       <div className={`${styles.planPanel} ${styles.fiscalForm}`} style={{ marginBottom: 20 }}>
         <div className={styles.planRow}>
-          <span className={styles.planLabel}>Focus NFe</span>
+          <span className={styles.planLabel}>Integradora NFe</span>
           <Tag variant={cfg.focus_nfe_cadastrado ? "success" : "neutral"}>
             {cfg.focus_nfe_cadastrado
               ? `Cadastrado${cfg.focus_nfe_cadastro_manual ? " manualmente" : ""} em ${new Date(cfg.focus_nfe_cadastrado_em!).toLocaleString("pt-BR")}`
@@ -667,7 +667,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
         {onboardError && <Alert variant="error" text={onboardError} fullWidth />}
         <div className={styles.formActions}>
           <Button type="button" onClick={handleOnboard} loading={onboarding} disabled={onboarding || !cfg.completo}>
-            {cfg.focus_nfe_cadastrado ? "Reenviar cadastro" : "Cadastrar na Focus NFe"}
+            {cfg.focus_nfe_cadastrado ? "Reenviar cadastro" : "Cadastrar na Integradora NFe"}
           </Button>
           {/* ORD-178 — escondido por enquanto: o cadastro automatizado já traz os
               tokens prontos na resposta; a via manual fica reservada pro caso raro
@@ -677,7 +677,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
 
       <div className={`${styles.planPanel} ${styles.fiscalForm}`} style={{ marginBottom: 20 }}>
         <div className={styles.planRow}>
-          <span className={styles.planLabel}>Plano de add-on fiscal</span>
+          <span className={styles.planLabel}>Plano do módulo fiscal</span>
         </div>
         <Dropdown
           label=""
@@ -688,7 +688,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
           placeholder="Escolha um plano"
         />
         {!cfg.fiscal_addon_plan && (
-          <div className={styles.formHint}>Escolha um plano de add-on fiscal para poder ativar a emissão.</div>
+          <div className={styles.formHint}>Escolha um plano do módulo fiscal para poder ativar a emissão.</div>
         )}
         <div className={styles.planRow}>
           <span className={styles.planLabel}>Emissão de NFC-e</span>
@@ -700,7 +700,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
           />
         </div>
         {!cfg.focus_nfe_cadastrado && (
-          <div className={styles.formHint}>Cadastre a empresa na Focus NFe acima para poder ativar a emissão.</div>
+          <div className={styles.formHint}>Cadastre a empresa na Integradora NFe acima para poder ativar a emissão.</div>
         )}
         <div className={styles.planRow}>
           <span className={styles.planLabel}>Ambiente</span>
@@ -725,7 +725,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
             variant="warning"
             icon="alert-triangle"
             fullWidth
-            text="Ambiente de mockup — a NFC-e é inteiramente fictícia (chave e QR fake), gerada sem contato com a Focus NFe. Uso interno do time Ordin pra testar o impresso, nunca use numa empresa cliente real."
+            text="Ambiente de mockup — a NFC-e é inteiramente fictícia (chave e QR fake), gerada sem contato com a Integradora NFe. Uso interno do time Ordin pra testar o impresso, nunca use numa empresa cliente real."
           />
         )}
       </div>
@@ -804,7 +804,7 @@ function FiscalTab({ companyId }: FiscalTabProps) {
         <div key={manualTokenModalKey} className={styles.modalForm}>
           <div className={styles.formTitle}>Já tenho os tokens</div>
           <div className={styles.formHint}>
-            Use quando a empresa já tem uma conta própria na Focus NFe (ex.: criada direto no
+            Use quando a empresa já tem uma conta própria na Integradora NFe (ex.: criada direto no
             painel deles) — cole aqui os tokens que já existem, em vez de gerar novos.
           </div>
           {manualTokenError && <Alert variant="error" text={manualTokenError} fullWidth />}

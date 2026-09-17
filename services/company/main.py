@@ -3679,7 +3679,7 @@ async def update_fiscal_config(
     if body.ativo is not None:
         if body.ativo and not cfg.focus_nfe_cadastrado_em:
             raise HTTPException(
-                400, detail="Não é possível ativar a emissão antes de cadastrar a empresa na Focus NFe."
+                400, detail="Não é possível ativar a emissão antes de cadastrar a empresa na Integradora NFe."
             )
         # ORD-174 — não desvincula ao desativar (mesmo padrão "editable
         # grudento" da PriceTable): só bloqueia a ATIVAÇÃO sem plano.
@@ -3695,7 +3695,7 @@ async def update_fiscal_config(
     if body.token_producao_manual is not None or body.token_homologacao_manual is not None:
         if not _fiscal_config_completo(co, cfg):
             raise HTTPException(
-                400, detail="Complete o cadastro fiscal da empresa (certificado, CSC, dados da empresa) antes de informar tokens da Focus NFe."
+                400, detail="Complete o cadastro fiscal da empresa (certificado, CSC, dados da empresa) antes de informar tokens da Integradora NFe."
             )
         if not token_producao_manual and not token_homologacao_manual:
             raise HTTPException(400, detail="Informe ao menos um token (homologação ou produção).")
@@ -3765,12 +3765,12 @@ async def focus_nfe_onboarding(
     )).scalars().first()
     if not _fiscal_config_completo(co, cfg):
         raise HTTPException(
-            400, detail="Dados fiscais incompletos — complete razão social, IE, regime, endereço, certificado e CSC antes de cadastrar na Focus NFe."
+            400, detail="Dados fiscais incompletos — complete razão social, IE, regime, endereço, certificado e CSC antes de cadastrar na Integradora NFe."
         )
 
     regime = FOCUS_NFE_REGIME_MAP.get(co.tax_regime)
     if regime is None:
-        raise HTTPException(400, detail="Regime tributário da empresa inválido ou não mapeado para a Focus NFe.")
+        raise HTTPException(400, detail="Regime tributário da empresa inválido ou não mapeado para a Integradora NFe.")
 
     payload = {
         "nome": co.legal_name,
@@ -3802,13 +3802,13 @@ async def focus_nfe_onboarding(
                 json=payload,
             )
     except httpx.HTTPError:
-        raise HTTPException(502, detail="Não foi possível conectar à Focus NFe. Tente novamente em instantes.")
+        raise HTTPException(502, detail="Não foi possível conectar à Integradora NFe. Tente novamente em instantes.")
 
     if resp.status_code not in (200, 201):
         try:
             error_body = resp.json()
         except ValueError:
-            error_body = {"codigo": "erro_desconhecido", "mensagem": "Erro desconhecido da Focus NFe."}
+            error_body = {"codigo": "erro_desconhecido", "mensagem": "Erro desconhecido da Integradora NFe."}
         raise HTTPException(422, detail=error_body)
 
     data = resp.json()

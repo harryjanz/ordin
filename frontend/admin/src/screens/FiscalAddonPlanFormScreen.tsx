@@ -59,7 +59,7 @@ export default function FiscalAddonPlanFormScreen() {
         setReadOnly(!p.editable);
         setLinkedCompaniesCount(p.linked_companies_count);
       } catch {
-        if (!cancelled) setLoadError("Erro ao carregar plano de add-on fiscal.");
+        if (!cancelled) setLoadError("Erro ao carregar plano do módulo fiscal.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -88,7 +88,7 @@ export default function FiscalAddonPlanFormScreen() {
       }
       navigate("/commercial/fiscal-addon-plans");
     } catch (err) {
-      setFormError(parseApiError(err).message || "Erro ao salvar plano de add-on fiscal.");
+      setFormError(parseApiError(err).message || "Erro ao salvar plano do módulo fiscal.");
     } finally {
       setSaving(false);
     }
@@ -108,13 +108,13 @@ export default function FiscalAddonPlanFormScreen() {
       <Breadcrumb
         items={[
           { label: "Comercial", href: "/commercial/fiscal-addon-plans" },
-          { label: "Planos de add-on fiscal", href: "/commercial/fiscal-addon-plans" },
+          { label: "Planos do módulo fiscal", href: "/commercial/fiscal-addon-plans" },
           { label: editingId === null ? "Novo plano" : readOnly ? "Ver plano" : "Editar plano" },
         ]}
       />
       <div className={styles.header}>
         <h1 className={styles.h1}>
-          {editingId === null ? "Novo plano de add-on fiscal" : readOnly ? "Ver plano de add-on fiscal" : "Editar plano de add-on fiscal"}
+          {editingId === null ? "Novo plano do módulo fiscal" : readOnly ? "Ver plano do módulo fiscal" : "Editar plano do módulo fiscal"}
         </h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/commercial/fiscal-addon-plans")}>Voltar</Button>
