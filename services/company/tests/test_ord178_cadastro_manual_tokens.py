@@ -99,11 +99,22 @@ async def test_cadastrar_so_token_homologacao(client, token_superadmin):
 
 
 async def test_habilita_toggle_ativo_apos_cadastro_manual(client, token_superadmin):
+    import main as svc
     await _seed_company_completa(1)
     await client.put("/companies/1/fiscal-config", headers=auth(token_superadmin), json={
         "token_homologacao_manual": "TOKEN_HOMOLOG",
     })
-    r = await client.put("/companies/1/fiscal-config", headers=auth(token_superadmin), json={"ativo": True})
+    # ORD-174 — ativar exige plano de add-on fiscal vinculado.
+    async with svc.AsyncSessionLocal() as db:
+        plan = svc.FiscalAddonPlan(name="Fiscal Básico", monthly_price=59.90, price_per_document=0.05)
+        db.add(plan)
+        await db.commit()
+        await db.refresh(plan)
+        plan_id = plan.id
+    r = await client.put(
+        "/companies/1/fiscal-config", headers=auth(token_superadmin),
+        json={"ativo": True, "fiscal_addon_plan_id": plan_id},
+    )
     assert r.status_code == 200
     assert r.json()["ativo"] is True
 

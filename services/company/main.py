@@ -363,6 +363,12 @@ class CompanyFiscalConfig(Base):
     # /empresas de verdade (ORD-170). Zerado sempre que o onboarding
     # automatizado roda com sucesso — a origem mais recente prevalece.
     focus_nfe_cadastro_manual = Column(Boolean, nullable=False, default=False)
+    # ORD-174 — plano de add-on que cobre o custo do módulo fiscal (separado
+    # da PriceTable do totem, ver FiscalAddonPlan). Sem ForeignKey real,
+    # mesmo padrão do resto do serviço. Ativar o módulo (`ativo=True`) exige
+    # este campo preenchido (validado em update_fiscal_config) — desativar
+    # NÃO desvincula, mantém histórico de qual plano a empresa usou.
+    fiscal_addon_plan_id     = Column(Integer, nullable=True)
     created_at                = Column(DateTime, default=datetime.utcnow)
     updated_at                = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -428,6 +434,20 @@ class PriceTableTransactionTier(Base):
     __table_args__ = (
         UniqueConstraint("price_table_id", "sort_order", name="uq_price_table_tier_sort"),
     )
+
+
+class FiscalAddonPlan(Base):
+    # ORD-174: custo do módulo fiscal — add-on SEPARADO da PriceTable (mede
+    # notas emitidas, dimensão diferente de transações do totem). Sem
+    # tabela de histórico dedicada (diferente de CompanyPlanHistory) — volume
+    # baixo esperado (módulo opt-in, poucos clientes no piloto), reavaliar se
+    # necessário depois de escala maior.
+    __tablename__ = "fiscal_addon_plans"
+    id                  = Column(Integer, primary_key=True)
+    name                = Column(String(120), nullable=False)
+    monthly_price       = Column(Numeric(10, 2), nullable=False)
+    price_per_document  = Column(Numeric(10, 4), nullable=False)  # 4 casas — valor por nota costuma ser centavos
+    created_at          = Column(DateTime, default=datetime.utcnow)
 
 
 class CompanyPlan(Base):
@@ -889,6 +909,10 @@ class FiscalConfigIn(BaseModel):
     # aceito com focus_nfe_cadastrado=true (validado no endpoint).
     ativo: bool | None = None
     ambiente: str | None = None
+    # ORD-174 — plano de add-on que cobre o custo do módulo. Ativar (ativo=
+    # True) exige que esse campo esteja preenchido nesta mesma chamada ou já
+    # persistido de uma chamada anterior (validado no endpoint).
+    fiscal_addon_plan_id: int | None = None
 
     @field_validator("ambiente")
     @classmethod
@@ -909,6 +933,16 @@ class FiscalConfigIn(BaseModel):
     # campos juntos).
     token_producao_manual: str | None = None
     token_homologacao_manual: str | None = None
+
+
+class FiscalAddonPlanSummaryOut(BaseModel):
+    # ORD-174 — versão enxuta embutida em FiscalConfigOut (a aba "Plano" só
+    # precisa mostrar nome + preços do plano vinculado, não o contador nem
+    # editable, que só fazem sentido na tela de gestão dos planos em si).
+    id: int
+    name: str
+    monthly_price: float
+    price_per_document: float
 
 
 class FiscalConfigOut(BaseModel):
@@ -935,6 +969,9 @@ class FiscalConfigOut(BaseModel):
     # ORD-178 — distingue "cadastrado via API" de "cadastrado manualmente"
     # (só tem sentido quando focus_nfe_cadastrado=true).
     focus_nfe_cadastro_manual: bool
+    # ORD-174 — None quando o módulo nunca foi ativado (nenhum plano
+    # escolhido ainda) — aba "Plano" mostra "Não contratado" nesse caso.
+    fiscal_addon_plan: FiscalAddonPlanSummaryOut | None = None
 
 
 VALID_CONTACT_TYPES = {"comercial", "financeiro", "tecnico"}
@@ -1096,6 +1133,29 @@ class PriceTableListOut(BaseModel):
     price_tables: list[PriceTableSummaryOut]
 
 
+class FiscalAddonPlanIn(BaseModel):
+    name: str
+    monthly_price: float = Field(gt=0)
+    price_per_document: float = Field(gt=0)
+
+
+class FiscalAddonPlanOut(BaseModel):
+    id: int
+    name: str
+    monthly_price: float
+    price_per_document: float
+    created_at: datetime
+    # ORD-174 — mesmo critério de PriceTable.editable, mas sem o componente
+    # de histórico (não existe CompanyPlanHistory equivalente aqui): só
+    # "vinculado agora" bloqueia, não "já foi vinculado alguma vez".
+    linked_companies_count: int = 0
+    editable: bool = True
+
+
+class FiscalAddonPlanListOut(BaseModel):
+    plans: list[FiscalAddonPlanOut]
+
+
 class PriceTableActivateIn(BaseModel):
     confirm_replace: bool = False
 
@@ -1134,6 +1194,16 @@ class CompanyPlanOut(BaseModel):
     expires_at: datetime
     renewed_at: datetime | None
     status: str  # "Ativo" | "Vencido" — calculado, nunca armazenado (ORD-163)
+    # ORD-174 — bloco "Módulo fiscal" da aba Plano, dimensão SEPARADA da
+    # price_table acima. Embutido aqui (não em FiscalConfigOut) porque este
+    # endpoint já é acessível a owner/manager da própria empresa
+    # (_require_company_admin) — FiscalConfigOut é restrito a
+    # superadmin/admin. None quando o módulo nunca foi ativado (nenhum
+    # plano escolhido ainda) — aba mostra "Não contratado" nesse caso.
+    # Não-None com fiscal_module_ativo=False = módulo já teve plano
+    # vinculado mas está desativado agora (histórico preservado, ORD-171).
+    fiscal_addon_plan: FiscalAddonPlanSummaryOut | None = None
+    fiscal_module_ativo: bool = False
 
 
 class CompanyPlanRenewIn(BaseModel):
@@ -3454,10 +3524,20 @@ def _fiscal_config_completo(co: Company, cfg: CompanyFiscalConfig | None) -> boo
     )
 
 
-def _serialize_fiscal_config(co: Company, cfg: CompanyFiscalConfig | None) -> dict:
+async def _serialize_fiscal_config(db: AsyncSession, co: Company, cfg: CompanyFiscalConfig | None) -> dict:
     certificado_cadastrado = bool(cfg and cfg.certificado_arquivo_enc)
     csc_producao_cadastrado = bool(cfg and cfg.csc_producao_enc)
     csc_homologacao_cadastrado = bool(cfg and cfg.csc_homologacao_enc)
+    # ORD-174 — plano de add-on vinculado (se algum). None quando o módulo
+    # nunca foi ativado — aba "Plano" mostra "Não contratado" nesse caso.
+    addon_plan = None
+    if cfg and cfg.fiscal_addon_plan_id:
+        plan = await db.get(FiscalAddonPlan, cfg.fiscal_addon_plan_id)
+        if plan:
+            addon_plan = {
+                "id": plan.id, "name": plan.name,
+                "monthly_price": plan.monthly_price, "price_per_document": plan.price_per_document,
+            }
     return {
         "legal_name": co.legal_name,
         "state_registration": co.state_registration,
@@ -3474,6 +3554,7 @@ def _serialize_fiscal_config(co: Company, cfg: CompanyFiscalConfig | None) -> di
         "ativo": bool(cfg and cfg.ativo),
         "ambiente": cfg.ambiente if cfg else "homologacao",
         "focus_nfe_cadastro_manual": bool(cfg and cfg.focus_nfe_cadastro_manual),
+        "fiscal_addon_plan": addon_plan,
     }
 
 
@@ -3495,7 +3576,7 @@ async def get_fiscal_config(
     cfg = (await db.execute(
         select(CompanyFiscalConfig).filter_by(company_id=company_id)
     )).scalars().first()
-    return _serialize_fiscal_config(co, cfg)
+    return await _serialize_fiscal_config(db, co, cfg)
 
 
 @app.put(
@@ -3538,11 +3619,24 @@ async def update_fiscal_config(
         cfg.id_token_homologacao = body.id_token_homologacao
     if body.ambiente is not None:
         cfg.ambiente = body.ambiente
+    # ORD-174 — precisa ser processado ANTES do bloco de `ativo` abaixo: o
+    # frontend manda os dois campos juntos na mesma chamada quando ativa o
+    # módulo escolhendo um plano agora, e a validação de `ativo` depende do
+    # plano já estar setado em `cfg`.
+    if body.fiscal_addon_plan_id is not None:
+        plan = await db.get(FiscalAddonPlan, body.fiscal_addon_plan_id)
+        if not plan:
+            raise HTTPException(404, "Plano de add-on fiscal não encontrado")
+        cfg.fiscal_addon_plan_id = body.fiscal_addon_plan_id
     if body.ativo is not None:
         if body.ativo and not cfg.focus_nfe_cadastrado_em:
             raise HTTPException(
                 400, detail="Não é possível ativar a emissão antes de cadastrar a empresa na Focus NFe."
             )
+        # ORD-174 — não desvincula ao desativar (mesmo padrão "editable
+        # grudento" da PriceTable): só bloqueia a ATIVAÇÃO sem plano.
+        if body.ativo and not cfg.fiscal_addon_plan_id:
+            raise HTTPException(400, detail="Escolha um plano de add-on fiscal antes de ativar a emissão.")
         cfg.ativo = body.ativo
 
     # ORD-178 — cadastro manual de tokens já existentes na Focus NFe (via
@@ -3566,7 +3660,7 @@ async def update_fiscal_config(
 
     await db.commit()
     await db.refresh(cfg)
-    return _serialize_fiscal_config(co, cfg)
+    return await _serialize_fiscal_config(db, co, cfg)
 
 
 # ── Onboarding na Focus NFe (ORD-170) ─────────────────────────────────────────
@@ -4393,12 +4487,171 @@ async def set_price_table_kind(
     return await _serialize_price_table(db, pt)
 
 
+# ── Planos de add-on fiscal (ORD-174) ───────────────────────────────────────
+# Catálogo comercial da própria plataforma (como PriceTable) — não é dado de
+# empresa, controle por role, não por tenant. Custo do módulo fiscal é uma
+# dimensão SEPARADA da PriceTable (Focus NFe cobra plano fixo + valor por
+# nota, diferente do modelo de transações do totem) — ver Explorer da ORD-174.
+
+async def _count_fiscal_addon_plan_companies(db: AsyncSession, plan_id: int) -> int:
+    result = await db.execute(
+        select(func.count(CompanyFiscalConfig.id)).where(CompanyFiscalConfig.fiscal_addon_plan_id == plan_id)
+    )
+    return result.scalar_one()
+
+
+async def _serialize_fiscal_addon_plan(db: AsyncSession, plan: FiscalAddonPlan) -> dict:
+    linked_count = await _count_fiscal_addon_plan_companies(db, plan.id)
+    return {
+        "id": plan.id,
+        "name": plan.name,
+        "monthly_price": plan.monthly_price,
+        "price_per_document": plan.price_per_document,
+        "created_at": plan.created_at,
+        "linked_companies_count": linked_count,
+        # ORD-174 — sem componente de histórico (diferente de PriceTable):
+        # só "vinculado agora" bloqueia edição/exclusão.
+        "editable": linked_count == 0,
+    }
+
+
+@app.post(
+    "/commercial/fiscal-addon-plans",
+    status_code=201,
+    response_model=FiscalAddonPlanOut,
+    tags=["Comercial"],
+    summary="Criar plano de add-on fiscal",
+)
+async def create_fiscal_addon_plan(
+    body: FiscalAddonPlanIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    plan = FiscalAddonPlan(
+        name=body.name, monthly_price=body.monthly_price, price_per_document=body.price_per_document,
+    )
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+    return await _serialize_fiscal_addon_plan(db, plan)
+
+
+@app.get(
+    "/commercial/fiscal-addon-plans",
+    response_model=FiscalAddonPlanListOut,
+    tags=["Comercial"],
+    summary="Listar planos de add-on fiscal",
+)
+async def list_fiscal_addon_plans(
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    result = await db.execute(select(FiscalAddonPlan).order_by(FiscalAddonPlan.created_at.desc()))
+    plans = result.scalars().all()
+    counts_result = await db.execute(
+        select(CompanyFiscalConfig.fiscal_addon_plan_id, func.count(CompanyFiscalConfig.id))
+        .where(CompanyFiscalConfig.fiscal_addon_plan_id.is_not(None))
+        .group_by(CompanyFiscalConfig.fiscal_addon_plan_id)
+    )
+    counts_by_plan = {row[0]: row[1] for row in counts_result.all()}
+    return {
+        "plans": [
+            {
+                "id": p.id, "name": p.name, "monthly_price": p.monthly_price,
+                "price_per_document": p.price_per_document, "created_at": p.created_at,
+                "linked_companies_count": counts_by_plan.get(p.id, 0),
+                "editable": counts_by_plan.get(p.id, 0) == 0,
+            }
+            for p in plans
+        ]
+    }
+
+
+@app.get(
+    "/commercial/fiscal-addon-plans/{plan_id}",
+    response_model=FiscalAddonPlanOut,
+    tags=["Comercial"],
+    summary="Detalhe do plano de add-on fiscal",
+)
+async def get_fiscal_addon_plan(
+    plan_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    plan = await db.get(FiscalAddonPlan, plan_id)
+    if not plan:
+        raise HTTPException(404, "Plano de add-on fiscal não encontrado")
+    return await _serialize_fiscal_addon_plan(db, plan)
+
+
+@app.put(
+    "/commercial/fiscal-addon-plans/{plan_id}",
+    response_model=FiscalAddonPlanOut,
+    tags=["Comercial"],
+    summary="Editar plano de add-on fiscal (sem empresa vinculada)",
+)
+async def update_fiscal_addon_plan(
+    plan_id: int,
+    body: FiscalAddonPlanIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    plan = await db.get(FiscalAddonPlan, plan_id)
+    if not plan:
+        raise HTTPException(404, "Plano de add-on fiscal não encontrado")
+    if await _count_fiscal_addon_plan_companies(db, plan_id) > 0:
+        raise HTTPException(409, "Não é possível editar — este plano está vinculado a uma ou mais empresas")
+    plan.name = body.name
+    plan.monthly_price = body.monthly_price
+    plan.price_per_document = body.price_per_document
+    await db.commit()
+    await db.refresh(plan)
+    return await _serialize_fiscal_addon_plan(db, plan)
+
+
+@app.delete(
+    "/commercial/fiscal-addon-plans/{plan_id}",
+    status_code=204,
+    tags=["Comercial"],
+    summary="Excluir plano de add-on fiscal (sem empresa vinculada)",
+)
+async def delete_fiscal_addon_plan(
+    plan_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    plan = await db.get(FiscalAddonPlan, plan_id)
+    if not plan:
+        raise HTTPException(404, "Plano de add-on fiscal não encontrado")
+    if await _count_fiscal_addon_plan_companies(db, plan_id) > 0:
+        raise HTTPException(409, "Não é possível excluir — este plano está vinculado a uma ou mais empresas")
+    await db.delete(plan)
+    await db.commit()
+
+
 # ── Plano comercial da empresa (ORD-163) ────────────────────────────────────
 
 async def _serialize_company_plan(db: AsyncSession, plan: CompanyPlan) -> dict:
     price_table = await db.get(PriceTable, plan.price_table_id)
     now = datetime.utcnow()
     tiers = await _get_price_table_tiers(db, price_table.id)  # ORD-177, reaproveita helper da ORD-162
+    # ORD-174 — bloco "Módulo fiscal", dimensão separada da price_table acima.
+    fiscal_cfg = (await db.execute(
+        select(CompanyFiscalConfig).filter_by(company_id=plan.company_id)
+    )).scalars().first()
+    fiscal_addon_plan = None
+    if fiscal_cfg and fiscal_cfg.fiscal_addon_plan_id:
+        addon = await db.get(FiscalAddonPlan, fiscal_cfg.fiscal_addon_plan_id)
+        if addon:
+            fiscal_addon_plan = {
+                "id": addon.id, "name": addon.name,
+                "monthly_price": addon.monthly_price, "price_per_document": addon.price_per_document,
+            }
     return {
         "company_id": plan.company_id,
         "price_table": {
@@ -4421,6 +4674,8 @@ async def _serialize_company_plan(db: AsyncSession, plan: CompanyPlan) -> dict:
         "expires_at": plan.expires_at,
         "renewed_at": plan.renewed_at,
         "status": "Ativo" if plan.expires_at > now else "Vencido",
+        "fiscal_addon_plan": fiscal_addon_plan,
+        "fiscal_module_ativo": bool(fiscal_cfg and fiscal_cfg.ativo),
     }
 
 

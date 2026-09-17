@@ -27,6 +27,9 @@ const MENU = [
   // totem + taxa transacional) — não confundir com "/companies/:id/contract"
   // (CompanyContractScreen, contrato jurídico de UMA empresa cliente).
   { to: "/commercial/price-tables", label: "Tabelas de preço", icon: "tag", roles: ["superadmin", "admin"] },
+  // ORD-174: custo do módulo fiscal — add-on SEPARADO da tabela de preço
+  // acima (mede notas emitidas via Focus NFe, não transações do totem).
+  { to: "/commercial/fiscal-addon-plans", label: "Add-on fiscal", icon: "file-text", roles: ["superadmin", "admin"] },
 ] as const;
 
 const W_OPEN = 220;
