@@ -539,11 +539,16 @@ async def collect_order(
     collection_method = "qr" if body.qr_data is not None else "manual"
     if body.qr_data is not None and not _verify_order_qr(body.qr_data, order_ref):
         raise HTTPException(400, detail="QR inválido")
-    result = await db.execute(
-        select(Order)
-        .where(Order.order_ref == order_ref, Order.company_id == current_user.company_id)
-        .with_for_update()
-    )
+    # ORD-118 (correção) — mesmo bypass já usado em list_orders: superadmin/
+    # admin agem sobre qualquer empresa (ex. board do admin com seletor de
+    # empresa trocada), não só a própria. Sem isso, a query nunca achava o
+    # pedido pra esses roles — 404 "Pedido não encontrado" mesmo com o
+    # pedido existindo, reportado ao vivo (order_ref é unique globalmente,
+    # sem risco de colisão entre empresas ao remover o filtro).
+    order_filters = [Order.order_ref == order_ref]
+    if current_user.role not in ("superadmin", "admin"):
+        order_filters.append(Order.company_id == current_user.company_id)
+    result = await db.execute(select(Order).where(*order_filters).with_for_update())
     order = result.scalars().first()
     if not order: raise HTTPException(404, "Pedido não encontrado")
     if order.status == "completed": raise HTTPException(409, "Pedido já coletado")
@@ -566,11 +571,15 @@ async def collect_order(
     order.status = "completed"
     await db.commit()
     progress_str = f"{len(tickets)}/{len(tickets)}"
-    await broadcast_order_completed(current_user.company_id, order_ref)
+    # ORD-118 (correção) — order.company_id, não current_user.company_id: pra
+    # superadmin/admin agindo cross-empresa, são diferentes — usar o do
+    # usuário faria o evento sair na sala WS errada (totem/balcão da empresa
+    # real nunca veria a atualização em tempo real).
+    await broadcast_order_completed(order.company_id, order_ref)
     if collection_method == "manual" and request is not None:
         emit_audit("order.collected", request,
                    actor=collected_by, actor_id=int(collected_by),
-                   company_id=current_user.company_id, result="success",
+                   company_id=order.company_id, result="success",
                    detail={"method": "manual", "order_ref": order_ref, "progress": progress_str})
     return {"ok": True, "order_ref": order_ref, "collected_at": collected_at.isoformat(),
             "collected_by": collected_by, "progress": progress_str}
@@ -596,18 +605,23 @@ async def mark_order_ready(
     aqui — order-service é deliberadamente agnóstico a esse campo (é do
     company-service); quem decide exibir a ação é o frontend.
     """
-    result = await db.execute(
-        select(Order)
-        .where(Order.order_ref == order_ref, Order.company_id == current_user.company_id)
-        .with_for_update()
-    )
+    # ORD-118/119 (correção) — mesmo bypass de collect_order acima: sem isso,
+    # superadmin/admin agindo numa empresa diferente da própria (board com
+    # seletor de empresa trocada) sempre recebia 404 "Pedido não encontrado".
+    order_filters = [Order.order_ref == order_ref]
+    if current_user.role not in ("superadmin", "admin"):
+        order_filters.append(Order.company_id == current_user.company_id)
+    result = await db.execute(select(Order).where(*order_filters).with_for_update())
     order = result.scalars().first()
     if not order: raise HTTPException(404, "Pedido não encontrado")
     if order.status != "paid": raise HTTPException(409, "Pedido não está aguardando preparo")
     order.status = "ready"
     order.ready_at = datetime.utcnow()
     await db.commit()
-    await broadcast_order_ready(current_user.company_id, order_ref, order.pickup_name)
+    # order.company_id, não current_user.company_id — mesmo motivo do
+    # broadcast em collect_order (evento precisa sair na sala WS da empresa
+    # do pedido, não a do usuário que agiu).
+    await broadcast_order_ready(order.company_id, order_ref, order.pickup_name)
     return {"ok": True, "order_ref": order_ref, "status": "ready"}
 
 @app.get(

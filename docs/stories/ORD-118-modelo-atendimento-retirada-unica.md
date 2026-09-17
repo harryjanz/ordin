@@ -147,3 +147,21 @@ Funcionalidade: Modelo de atendimento — retirada única com QR de pedido
 
 ## Próximos passos
 Upstream completo, sem bloqueadores abertos. **Status: Ready.**
+
+## Correção pós-produção (2026-09-17)
+
+`POST /orders/{order_ref}/collect` filtrava sempre por `Order.company_id == current_user.company_id`
+— sem o bypass que `GET /orders` já tem pra `superadmin`/`admin` agirem sobre qualquer empresa (ex.
+board do admin com o seletor de empresa trocado pra uma diferente da própria). Resultado: 404
+"Pedido não encontrado" mesmo com o pedido existindo, reportado ao vivo pelo usuário
+(`order_ref=P571341`). Corrigido em `services/order/main.py`: mesmo padrão de bypass do
+`list_orders` — `superadmin`/`admin` ignoram o filtro de `company_id`; demais roles continuam
+restritos à própria empresa (isolamento multi-tenant preservado, testado explicitamente).
+
+Achado relacionado no mesmo ponto: o `broadcast_order_completed()` usava `current_user.company_id`
+pra decidir em qual sala de WebSocket emitir o evento — errado pro caso cross-empresa (o totem/
+balcão da empresa real nunca veria a atualização em tempo real). Trocado pra `order.company_id`.
+
+5 testes novos (`test_ord118_collect_ready_cross_empresa.py`, cobre também o `mark_order_ready`
+da ORD-119, mesmo bug/mesma correção). Suíte completa do order-service (77 testes) e `ruff` sem
+regressão.
