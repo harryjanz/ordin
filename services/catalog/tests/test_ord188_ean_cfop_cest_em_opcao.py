@@ -250,3 +250,72 @@ async def test_ean_apagado_na_edicao_de_opcao_vira_null(client, token_owner):
     )
     assert r.status_code == 200
     assert r.json()["options"][0]["ean"] is None
+
+
+# ── GET /catalog/codes/active-in-use — pré-carrega pra validação na modal ──
+# (achado do usuário, 2026-09-18: a checagem só no Salvar do grupo é tarde
+# demais pra UX — precisa dar feedback já digitando/colando na modal)
+
+async def test_active_codes_traz_ean_de_produto_e_opcao_ativos(client, token_owner):
+    await client.post(
+        "/catalog/products",
+        json={"name": "Produto avulso", "price": 9.9, "ean": "7891000100103", "sku": "PRD-1"},
+        headers=auth(token_owner),
+    )
+    await _create_group_with_options(
+        client, token_owner, [{"label": "Coca-Cola", "ean": "7894900010015", "sku": "OPT-1"}],
+    )
+
+    r = await client.get("/catalog/codes/active-in-use", headers=auth(token_owner))
+    assert r.status_code == 200
+    body = r.json()
+    assert "7891000100103" in body["eans"]
+    assert "7894900010015" in body["eans"]
+    assert "PRD-1" in body["skus"]
+    assert "OPT-1" in body["skus"]
+
+
+async def test_active_codes_exclui_produto_informado(client, token_owner):
+    created = await client.post(
+        "/catalog/products",
+        json={"name": "Produto avulso", "price": 9.9, "ean": "7891000100103"},
+        headers=auth(token_owner),
+    )
+    product_id = created.json()["id"]
+
+    r = await client.get(
+        f"/catalog/codes/active-in-use?exclude_product_id={product_id}", headers=auth(token_owner),
+    )
+    assert "7891000100103" not in r.json()["eans"]
+
+
+async def test_active_codes_exclui_grupo_de_opcao_informado(client, token_owner):
+    created = await _create_group_with_options(
+        client, token_owner, [{"label": "Coca-Cola", "ean": "7894900010015"}],
+    )
+    group_id = created.json()["id"]
+
+    r = await client.get(
+        f"/catalog/codes/active-in-use?exclude_option_group_id={group_id}", headers=auth(token_owner),
+    )
+    assert "7894900010015" not in r.json()["eans"]
+
+
+async def test_active_codes_ignora_opcao_inativa(client, token_owner):
+    await _create_group_with_options(
+        client, token_owner, [{"label": "Coca-Cola", "ean": "7894900010015", "active": False}],
+    )
+
+    r = await client.get("/catalog/codes/active-in-use", headers=auth(token_owner))
+    assert "7894900010015" not in r.json()["eans"]
+
+
+async def test_active_codes_isolamento_multi_tenant(client, token_owner, token_company_b):
+    await client.post(
+        "/catalog/products",
+        json={"name": "Produto avulso", "price": 9.9, "ean": "7891000100103"},
+        headers=auth(token_owner),
+    )
+
+    r = await client.get("/catalog/codes/active-in-use", headers=auth(token_company_b))
+    assert "7891000100103" not in r.json()["eans"]

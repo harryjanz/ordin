@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -129,6 +129,21 @@ export default function ProductEditScreen() {
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
   const [productFormError, setProductFormError] = useState("");
   const [productSaving, setProductSaving] = useState(false);
+
+  // Achado do usuário (2026-09-18): checar sku/ean único-quando-ativo só no
+  // Salvar é tarde demais pra UX — pré-carrega uma vez os códigos já ativos
+  // na empresa fora deste produto (mesmo padrão de OptionGroupFormScreen),
+  // GET /catalog/codes/active-in-use.
+  const [activeCodesElsewhere, setActiveCodesElsewhere] = useState<{ skus: string[]; eans: string[] }>({ skus: [], eans: [] });
+  useEffect(() => {
+    if (!productId) return;
+    api.get("/catalog/codes/active-in-use", catalogParams({ exclude_product_id: productId })).then((r) => {
+      setActiveCodesElsewhere({ skus: r.data.skus ?? [], eans: r.data.eans ?? [] });
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId]);
+  const activeEanSetElsewhere = useMemo(() => new Set(activeCodesElsewhere.eans), [activeCodesElsewhere]);
+  const activeSkuSetElsewhere = useMemo(() => new Set(activeCodesElsewhere.skus), [activeCodesElsewhere]);
 
   // ── Classificação fiscal (ORD-169) ───────────────────────────────────────
   // NCM nunca é digitado livre — só escolhido a partir da busca (SearchInput
@@ -538,6 +553,9 @@ export default function ProductEditScreen() {
     );
   }
 
+  const eanConflict = editProd.ean.trim() !== "" && activeEanSetElsewhere.has(editProd.ean.trim());
+  const skuConflict = editProd.sku.trim() !== "" && activeSkuSetElsewhere.has(editProd.sku.trim());
+
   return (
     <div className={styles.page}>
       <Breadcrumb
@@ -551,7 +569,7 @@ export default function ProductEditScreen() {
         <h1 className={styles.h1}>Editando produto</h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/catalog?tab=products")}>Voltar</Button>
-          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (editProd.ean.trim() !== "" && !isValidGtin(editProd.ean))} loading={productSaving}>
+          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (editProd.ean.trim() !== "" && !isValidGtin(editProd.ean)) || eanConflict || skuConflict} loading={productSaving}>
             Salvar
           </Button>
         </div>
@@ -664,6 +682,7 @@ export default function ProductEditScreen() {
               label="SKU"
               value={editProd.sku}
               placeholder="Opcional, único por empresa"
+              errorMessage={skuConflict ? "SKU já em uso por outro produto ou opção ativo" : undefined}
               onChange={(e) => setEditProd({ ...editProd, sku: e.target.value })}
             />
           </div>
@@ -679,7 +698,13 @@ export default function ProductEditScreen() {
               label="EAN / código de barras"
               value={editProd.ean}
               placeholder="Opcional"
-              errorMessage={editProd.ean.trim() && !isValidGtin(editProd.ean) ? "código de barras inválido" : undefined}
+              errorMessage={
+                editProd.ean.trim() && !isValidGtin(editProd.ean)
+                  ? "código de barras inválido"
+                  : eanConflict
+                  ? "código de barras já em uso por outro produto ou opção ativo"
+                  : undefined
+              }
               onChange={(e) => setEditProd({ ...editProd, ean: e.target.value })}
             />
           </div>

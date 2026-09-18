@@ -1475,6 +1475,15 @@ class ProductOut(BaseModel):
 class ProductListOut(BaseModel):
     products: list[ProductOut]
 
+# Decisão do usuário (2026-09-18): a checagem de sku/ean único-quando-ativo
+# atravessa Product e Option, mas só é aplicada de fato no Salvar (backend).
+# Pra dar feedback já na modal de edição de opção/produto, o frontend
+# pré-carrega esse conjunto (ver GET /catalog/codes/active-in-use) e compara
+# no cliente — o Salvar final continua sendo a autoridade, isso aqui é só UX.
+class ActiveCodesOut(BaseModel):
+    skus: list[str]
+    eans: list[str]
+
 # ORD-169 — só os 2 valores fechados no Explorer (produção própria / revenda),
 # venda presencial do totem sempre dentro do estado.
 VALID_CFOP = {"5101", "5102"}
@@ -1926,6 +1935,43 @@ async def list_products(
         products = [p for p in products if _visible(p)]
 
     return {"products": [await _serialize_product(db, p) for p in products]}
+
+@app.get(
+    "/catalog/codes/active-in-use",
+    response_model=ActiveCodesOut,
+    tags=["Catálogo"],
+    summary="SKUs/EANs ativos já em uso pela empresa (Product + Option)",
+)
+async def get_active_codes_in_use(
+    exclude_product_id: int | None = None,
+    exclude_option_group_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id),
+):
+    """Feedback de conflito já na modal (achado do usuário: só validar no
+    Salvar do grupo/produto é tarde demais pra uma boa UX). `exclude_*`
+    evita que o próprio registro sendo editado apareça como conflito consigo
+    mesmo — a checagem definitiva continua sendo em `_set_option_group_options`
+    e nos endpoints de produto, isso aqui é só pra UX antecipada."""
+    product_q = select(Product.sku, Product.ean).filter(
+        Product.company_id == company_id, Product.deleted == False, Product.active == True,
+    )
+    if exclude_product_id is not None:
+        product_q = product_q.filter(Product.id != exclude_product_id)
+    product_rows = (await db.execute(product_q)).all()
+
+    option_q = (
+        select(Option.sku, Option.ean)
+        .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+        .filter(OptionGroup.company_id == company_id, Option.active == True)
+    )
+    if exclude_option_group_id is not None:
+        option_q = option_q.filter(Option.option_group_id != exclude_option_group_id)
+    option_rows = (await db.execute(option_q)).all()
+
+    skus = {sku for sku, _ in product_rows if sku} | {sku for sku, _ in option_rows if sku}
+    eans = {ean for _, ean in product_rows if ean} | {ean for _, ean in option_rows if ean}
+    return {"skus": sorted(skus), "eans": sorted(eans)}
 
 @app.get(
     "/catalog/products/{product_id}",

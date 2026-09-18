@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -110,6 +110,25 @@ export default function OptionGroupFormScreen() {
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Achado do usuário (2026-09-18): checar unicidade só no Salvar do grupo é
+  // tarde demais pra UX — a modal de opção precisa avisar na hora. Pré-carrega
+  // uma vez (sem round-trip por tecla) os sku/ean já ativos na empresa fora
+  // deste grupo (o grupo em si já é coberto pela checagem local contra
+  // `rows`, logo abaixo) — GET /catalog/codes/active-in-use.
+  const [activeCodesElsewhere, setActiveCodesElsewhere] = useState<{ skus: string[]; eans: string[] }>({ skus: [], eans: [] });
+
+  useEffect(() => {
+    api.get(
+      "/catalog/codes/active-in-use",
+      catalogParams(editingGroupId !== null ? { exclude_option_group_id: editingGroupId } : {}),
+    ).then((r) => {
+      setActiveCodesElsewhere({ skus: r.data.skus ?? [], eans: r.data.eans ?? [] });
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingGroupId]);
+  const activeEanSetElsewhere = useMemo(() => new Set(activeCodesElsewhere.eans), [activeCodesElsewhere]);
+  const activeSkuSetElsewhere = useMemo(() => new Set(activeCodesElsewhere.skus), [activeCodesElsewhere]);
 
   useEffect(() => {
     if (editingGroupId === null) return;
@@ -387,16 +406,24 @@ export default function OptionGroupFormScreen() {
   // ao backend) pegava isso, tarde demais e sem destaque nenhum no campo em
   // si. Checagem local aqui replica o alcance real do backend (unicidade
   // por EMPRESA, não só por grupo — mesmo padrão do sku, ver
-  // _set_option_group_options) usando as linhas já carregadas em `rows`,
-  // sem round-trip: se colidir com QUALQUER outra opção do grupo (a lista
-  // completa da empresa não está disponível no cliente), avisa na hora.
-  const draftEanConflict = draftEan.trim() !== "" && rows.some(
-    (r) => r.key !== editingRowKey && (r.ean ?? "").trim() === draftEan.trim()
+  // _set_option_group_options): compara com as outras linhas do grupo (já
+  // carregadas em `rows`, sem round-trip) e com `activeCodesElsewhere`
+  // (produtos + opções de outros grupos, pré-carregado uma vez ao abrir a
+  // tela — achado do usuário, 2026-09-18: só validar no Salvar é tarde
+  // demais).
+  const draftEanConflict = draftEan.trim() !== "" && (
+    rows.some((r) => r.key !== editingRowKey && (r.ean ?? "").trim() === draftEan.trim())
+    || activeEanSetElsewhere.has(draftEan.trim())
+  );
+  const draftSkuConflict = draftSku.trim() !== "" && (
+    rows.some((r) => r.key !== editingRowKey && (r.sku ?? "").trim() === draftSku.trim())
+    || activeSkuSetElsewhere.has(draftSku.trim())
   );
 
   function saveOptionModal() {
     if (!draftLabel.trim()) return;
     if (draftEan.trim() !== "" && (!isValidGtin(draftEan) || draftEanConflict)) return;
+    if (draftSkuConflict) return;
     if (editingRowKey === null) {
       const key = `new-${++newRowSeq}`;
       setRows((prev) => [...prev, {
@@ -448,7 +475,9 @@ export default function OptionGroupFormScreen() {
   );
 
   const canSave = !saving && name.trim().length > 0 && rows.length > 0;
-  const canSaveOption = draftLabel.trim().length > 0 && (draftEan.trim() === "" || (isValidGtin(draftEan) && !draftEanConflict));
+  const canSaveOption = draftLabel.trim().length > 0
+    && (draftEan.trim() === "" || (isValidGtin(draftEan) && !draftEanConflict))
+    && !draftSkuConflict;
 
   async function save() {
     if (!canSave) return;
@@ -697,6 +726,7 @@ export default function OptionGroupFormScreen() {
                     label="SKU"
                     value={draftSku}
                     placeholder="Opcional, único por empresa"
+                    errorMessage={draftSkuConflict ? "SKU já em uso por outro produto ou opção ativo" : undefined}
                     onChange={(e) => setDraftSku(e.target.value)}
                   />
                 </div>
@@ -717,7 +747,7 @@ export default function OptionGroupFormScreen() {
                   draftEan.trim() && !isValidGtin(draftEan)
                     ? "código de barras inválido"
                     : draftEanConflict
-                    ? "código de barras já usado por outra opção deste grupo"
+                    ? "código de barras já em uso por outro produto ou opção ativo"
                     : undefined
                 }
                 onChange={(e) => setDraftEan(e.target.value)}
