@@ -152,6 +152,10 @@ class Product(Base):
     ncm         = Column(String(8), ForeignKey("ncm_codes.codigo"), nullable=True)
     cfop        = Column(String(4), nullable=True)  # "5101" ou "5102", validado na aplicação
     cest        = Column(String(7), nullable=True)  # opcional sempre, Ordin não valida nem sugere
+    # ORD-187 — custo de compra pra produto CFOP 5102 (revenda). Sempre
+    # persiste independente do CFOP atual (troca de CFOP não apaga o valor,
+    # só esconde a exibição na UI) — mesma precisão de price.
+    custo       = Column(Numeric(10, 2), nullable=True)
 
 class Allergen(Base):
     """Master data, não por empresa — lista oficial (RDC 727/2022, Lei
@@ -820,6 +824,7 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         ),
         "cfop": p.cfop,
         "cest": p.cest,
+        "custo": float(p.custo) if p.custo is not None else None,
         "allergens": await _get_product_allergens(db, p.id),
         "option_groups": await _get_product_option_groups(db, p.id),
         "related_products": await _get_product_related(db, p.id),
@@ -1231,6 +1236,7 @@ class ProductOut(BaseModel):
     ncm_descricao: str | None = None
     cfop: str | None = None
     cest: str | None = None
+    custo: float | None = None  # ORD-187
     allergens: list[AllergenOut] = []
     option_groups: list[ProductOptionGroupOut] = []
     # ORD-152: só populado por update_product() ao ativar o produto — os
@@ -1256,6 +1262,12 @@ def _validate_cfop(v: str | None) -> str | None:
     return v
 
 
+def _custo_non_negative(v: float | None) -> float | None:
+    if v is not None and v < 0:
+        raise ValueError("custo não pode ser negativo")
+    return v
+
+
 class ProductIn(BaseModel):
     name: str
     description: str | None = None
@@ -1270,6 +1282,7 @@ class ProductIn(BaseModel):
     ncm: str | None = None
     cfop: str | None = None
     cest: str | None = None
+    custo: float | None = None  # ORD-187 — só relevante pra CFOP 5102, mas aceito sempre
 
     @field_validator("price")
     @classmethod
@@ -1282,6 +1295,11 @@ class ProductIn(BaseModel):
     @classmethod
     def cfop_valid(cls, v: str | None) -> str | None:
         return _validate_cfop(v)
+
+    @field_validator("custo")
+    @classmethod
+    def custo_non_negative(cls, v: float | None) -> float | None:
+        return _custo_non_negative(v)
 
 class ProductUpdate(BaseModel):
     name: str | None = None
@@ -1304,6 +1322,7 @@ class ProductUpdate(BaseModel):
     ncm: str | None = None
     cfop: str | None = None
     cest: str | None = None
+    custo: float | None = None  # ORD-187
 
     @field_validator("price")
     @classmethod
@@ -1316,6 +1335,11 @@ class ProductUpdate(BaseModel):
     @classmethod
     def cfop_valid(cls, v: str | None) -> str | None:
         return _validate_cfop(v)
+
+    @field_validator("custo")
+    @classmethod
+    def custo_non_negative(cls, v: float | None) -> float | None:
+        return _custo_non_negative(v)
 
 class ReorderIn(BaseModel):
     category_id: int
@@ -1865,6 +1889,7 @@ async def create_product(
         ncm=body.ncm,
         cfop=body.cfop,
         cest=body.cest,
+        custo=body.custo,
     )
     db.add(p)
     try:

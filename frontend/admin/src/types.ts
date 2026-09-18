@@ -222,6 +222,7 @@ export interface Product {
   ncm_descricao: string | null;
   cfop: string | null;
   cest: string | null;
+  custo: number | null; // ORD-187 — só relevante pra CFOP 5102
   allergens: Allergen[];
   option_groups: ProductOptionGroup[];
   related_products: RelatedProduct[];

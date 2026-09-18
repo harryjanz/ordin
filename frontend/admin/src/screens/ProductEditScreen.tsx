@@ -42,6 +42,17 @@ const CFOP_OPTIONS: DropdownOptions[] = [
   { value: "5102", label: "5102 — Venda de mercadoria adquirida de terceiros" },
 ];
 
+// ORD-187 — margem calculada ao vivo no cliente (price e custo já estão os
+// dois no estado local do formulário, sem precisar de round-trip pro
+// backend). R$ com 2 casas (padrão BRL), % sem casas (ROUND_HALF_UP —
+// Math.round já cobre pra valores positivos, mesma convenção da ORD-184).
+function calcularMargem(price: number, custo: number | null): { valor: number; percentual: number } | null {
+  if (custo === null || custo === undefined) return null;
+  const valor = Math.round((price - custo) * 100) / 100;
+  const percentual = price > 0 ? Math.round((valor / price) * 100) : 0;
+  return { valor, percentual };
+}
+
 // A descrição sincronizada da Receita Federal vem com traços de hierarquia
 // (ex. "-- Outros" é subitem de nível 2) — sem remover, o rótulo duplicava o
 // travessão: "código — - descrição".
@@ -87,6 +98,7 @@ interface EditProdState {
   ncm: string | null;
   cfop: string | null;
   cest: string;
+  custo: number | null; // ORD-187
 }
 
 // ORD-136 — edição de produto sai do modal (espaço comprometido, mais
@@ -173,6 +185,7 @@ export default function ProductEditScreen() {
           ncm: p.ncm,
           cfop: p.cfop,
           cest: p.cest ?? "",
+          custo: p.custo,
         });
         setNcmQuery(p.ncm && p.ncm_descricao ? ncmLabel(p.ncm, p.ncm_descricao) : "");
         setCategories(categoriesRes.data.categories ?? categoriesRes.data);
@@ -447,6 +460,7 @@ export default function ProductEditScreen() {
         ncm: editProd.ncm,
         cfop: editProd.cfop,
         cest: editProd.cest.trim() || null,
+        custo: editProd.custo,
       }, catalogParams());
       navigate("/catalog?tab=products");
     } catch (err) {
@@ -678,6 +692,34 @@ export default function ProductEditScreen() {
             />
           </div>
         </div>
+
+        {editProd.cfop === "5102" && (
+          <div className={styles.formRow}>
+            <div className={styles.formRowField}>
+              <CurrencyInput
+                label="Custo"
+                value={editProd.custo}
+                onChange={(value: number) => setEditProd({ ...editProd, custo: value })}
+              />
+            </div>
+            <div className={styles.formRowField}>
+              {(() => {
+                const margem = calcularMargem(editProd.price, editProd.custo);
+                if (!margem) {
+                  return <span className={styles.mutedText}>Informe o custo para ver a margem</span>;
+                }
+                return (
+                  <Tag variant={margem.valor < 0 ? "error" : "success"}>
+                    {margem.valor < 0
+                      ? "Margem negativa — este produto está sendo vendido abaixo do custo: "
+                      : "Margem de lucro: "}
+                    {margem.valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} ({margem.percentual}%)
+                  </Tag>
+                );
+              })()}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className={styles.panel}>
