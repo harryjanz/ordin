@@ -484,26 +484,31 @@ async def _serialize_option_group(db: AsyncSession, g: "OptionGroup") -> dict:
     }
 
 async def _set_option_group_options(db: AsyncSession, option_group_id: int, company_id: int, options: list["OptionIn"]) -> None:
-    """Replace completo, mesmo espírito de _set_product_allergens — remove
-    todas as opções antigas do grupo e recria a partir da lista enviada.
-    Efeito colateral aceito (decisão do Tech Explorer, mesmo padrão de
-    allergen_ids): como as opções antigas são removidas e recriadas com id
-    novo, a imagem de cada opção antiga é descartada do bucket junto — editar
-    a lista de opções de um grupo exige re-upload de imagem depois. Se isso
-    virar problema de UX real em ORD-139, é ponto pra revisar lá (endpoint
-    passaria a aceitar id por opção pra edição parcial), não nesta história.
+    """Replace completo do CONTEÚDO do grupo (a lista enviada é sempre a
+    verdade final), mas não mais um replace completo das LINHAS: opção
+    enviada com `id` de uma opção existente é ATUALIZADA no lugar — imagem
+    preservada, sem re-upload forçado. Opção sem `id` é criada. Opção
+    existente que NÃO aparece na lista enviada é removida de verdade (e aí
+    sim a imagem dela é descartada do bucket, porque a opção deixou de
+    existir).
+
+    Correção de um bug de produção pré-existente (ORD-146): antes desta
+    correção, TODA chamada apagava e recriava todas as opções do zero —
+    editar um único campo de uma opção (rótulo, EAN, o que fosse) derrubava
+    a imagem de TODAS as opções do grupo, não só da que mudou. Achado ao
+    testar a ORD-188 em ambiente real — o comportamento já existia desde a
+    ORD-146, não foi introduzido por ela.
 
     active (ORD-145) precisa ser propagado explicitamente aqui — sem isso,
-    toda opção voltaria a "ativa" no próximo replace completo, desfazendo
-    qualquer desativação feita via PATCH /catalog/options/{id}.
+    toda opção voltaria a "ativa" no próximo save, desfazendo qualquer
+    desativação feita via PATCH /catalog/options/{id}.
 
     ORD-146: SKU único por empresa é validado aqui em nível de aplicação —
     Option não tem company_id direto (isolamento via join com OptionGroup),
     então não dá pra usar um UniqueConstraint de banco como Product.sku tem.
-    allergen_ids é validado e persistido em OptionAllergen, que precisa ser
-    deletado explicitamente ANTES do hard delete de Option abaixo (nenhuma
-    FK deste banco usa ondelete=CASCADE — sem isso, o replace completo de
-    um grupo com opção alergênica estoura IntegrityError)."""
+    allergen_ids é substituído por completo pra toda opção que sobrevive ou
+    é criada — mais simples que diffar allergen a allergen, e o volume por
+    opção é sempre pequeno."""
     if not options:
         raise HTTPException(400, detail="Grupo precisa de ao menos uma opção")
 
@@ -545,23 +550,51 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
             raise HTTPException(400, detail="allergen_ids contém id que não existe")
 
     old_result = await db.execute(select(Option).filter_by(option_group_id=option_group_id))
-    old_options = old_result.scalars().all()
-    old_ids = [old.id for old in old_options]
-    for old in old_options:
-        if old.image_url: delete_object(old.image_url)
-        if old.thumbnail_url: delete_object(old.thumbnail_url)
-    if old_ids:
-        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(old_ids)))
-    await db.execute(delete(Option).where(Option.option_group_id == option_group_id))
+    old_options_by_id = {o.id: o for o in old_result.scalars().all()}
+
+    incoming_ids = {opt.id for opt in options if opt.id is not None}
+    invalid_ids = incoming_ids - set(old_options_by_id.keys())
+    if invalid_ids:
+        raise HTTPException(400, detail="id de opção não pertence a este grupo")
+
+    # opções existentes que não aparecem mais na lista enviada: removidas de
+    # verdade — só aqui a imagem é descartada, porque a opção deixou de existir
+    removed_ids = set(old_options_by_id.keys()) - incoming_ids
+    for removed_id in removed_ids:
+        removed = old_options_by_id[removed_id]
+        if removed.image_url: delete_object(removed.image_url)
+        if removed.thumbnail_url: delete_object(removed.thumbnail_url)
+    if removed_ids:
+        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(removed_ids)))
+        await db.execute(delete(Option).where(Option.id.in_(removed_ids)))
+
+    # allergen_ids é sempre substituído por completo pra toda opção que
+    # sobrevive (vai ser atualizada) ou é criada — nunca pras removidas
+    # acima, já deletadas junto com a opção.
+    if incoming_ids:
+        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(incoming_ids)))
 
     new_options = []
     for index, opt in enumerate(options):
-        option = Option(
-            option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index,
-            active=opt.active, description=opt.description, sku=opt.sku,
-            ean=opt.ean, cfop=opt.cfop, cest=opt.cest,
-        )
-        db.add(option)
+        if opt.id is not None:
+            option = old_options_by_id[opt.id]
+            option.label = opt.label
+            option.price_delta = opt.price_delta
+            option.sort_order = index
+            option.active = opt.active
+            option.description = opt.description
+            option.sku = opt.sku
+            option.ean = opt.ean
+            option.cfop = opt.cfop
+            option.cest = opt.cest
+            # image_url/thumbnail_url intocados — é exatamente isso que preserva a imagem
+        else:
+            option = Option(
+                option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index,
+                active=opt.active, description=opt.description, sku=opt.sku,
+                ean=opt.ean, cfop=opt.cfop, cest=opt.cest,
+            )
+            db.add(option)
         new_options.append((option, opt.allergen_ids))
     await db.flush()
     for option, allergen_ids in new_options:
@@ -1128,6 +1161,10 @@ class NcmListOut(BaseModel):
     results: list[NcmOut]
 
 class OptionIn(BaseModel):
+    # correção de bug (achado testando ORD-188): identifica uma opção já
+    # existente pra _set_option_group_options atualizar no lugar em vez de
+    # apagar+recriar — é isso que preserva a imagem. None = opção nova.
+    id: int | None = None
     label: str
     price_delta: float = 0  # acréscimo sobre o preço-base do produto, não preço absoluto — ver ORD-142
     active: bool = True  # ORD-145 — precisa vir no replace completo pra não reativar opção desativada

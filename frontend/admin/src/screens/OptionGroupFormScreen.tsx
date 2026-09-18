@@ -341,8 +341,8 @@ export default function OptionGroupFormScreen() {
   }
 
   // Só entra em jogo na edição: se o conteúdo (não só a ordem) das opções
-  // mudar, o replace completo do backend apaga a imagem de opções que não
-  // mudaram de nada — aviso visual antes de salvar (ver QA Explorer).
+  // mudar, o grupo precisa ir pelo endpoint de replace (.../options), não
+  // pelo de reorder puro — ver save() abaixo.
   const contentChanged = editingGroupId !== null && (() => {
     if (rows.length !== originalRows.length) return true;
     const originalById = new Map(originalRows.map((r) => [r.id, r]));
@@ -361,7 +361,13 @@ export default function OptionGroupFormScreen() {
       return origAllergens !== rowAllergens;
     });
   })();
-  const hasImageAtRisk = contentChanged && originalRows.some((r) => r.image_url);
+  // Correção de bug: o backend agora atualiza opção existente no lugar
+  // (preserva imagem) em vez de apagar+recriar tudo — imagem só é perdida
+  // de verdade quando a opção que a tinha é removida da lista. O aviso
+  // reflete só esse caso, não "qualquer edição" como antes.
+  const hasImageAtRisk = editingGroupId !== null && originalRows.some(
+    (orig) => orig.image_url && !rows.some((r) => r.id === orig.id)
+  );
 
   const canSave = !saving && name.trim().length > 0 && rows.length > 0;
   const canSaveOption = draftLabel.trim().length > 0 && (draftEan.trim() === "" || isValidGtin(draftEan));
@@ -373,6 +379,9 @@ export default function OptionGroupFormScreen() {
     try {
       const { min_selections, max_selections } = advancedMinMax ?? radiosToMinMax(radios, rows.length, maxSelections);
       const optionsPayload = rows.map((r) => ({
+        // correção de bug: manda o id da opção existente pra _set_option_group_options
+        // atualizar no lugar (preserva imagem) em vez de apagar e recriar — null = opção nova.
+        id: r.id,
         label: r.label.trim(), price_delta: r.price_delta ?? 0, active: r.active,
         description: r.description, sku: r.sku,
         ean: r.ean, cfop: r.cfop, cest: r.cest,
@@ -505,7 +514,7 @@ export default function OptionGroupFormScreen() {
         </div>
 
         {hasImageAtRisk && (
-          <Alert variant="warning" text="Salvar vai exigir reenviar as imagens das opções que não foram alteradas agora." fullWidth />
+          <Alert variant="warning" text="Salvar vai remover permanentemente a imagem de opção(ões) excluída(s) da lista." fullWidth />
         )}
 
         <div className={styles.tableScroll}>
