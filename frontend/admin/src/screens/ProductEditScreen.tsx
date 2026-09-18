@@ -94,6 +94,7 @@ interface EditProdState {
   calories: number | null;
   sku: string;
   ean: string;
+  is_umbrella: boolean; // ORD-189 (G4)
   tags: string[];
   allergen_ids: string[];
   option_groups: ProductOptionGroup[];
@@ -193,7 +194,12 @@ export default function ProductEditScreen() {
           api.get("/catalog/allergens"),
           api.get(`/catalog/products/${productId}/menus`, catalogParams()).catch(() => ({ data: { menus: [] } })),
           api.get("/catalog/products", catalogParams()),
-          api.get(`/catalog/products/${productId}/stock`, catalogParams()),
+          // G4 (ORD-189): produto guarda-chuva rejeita este GET com 400 (estoque
+          // migrou pra opção) — não pode derrubar o Promise.all inteiro, senão a
+          // tela inteira quebra pra um produto guarda-chuva.
+          api.get(`/catalog/products/${productId}/stock`, catalogParams()).catch(() => ({
+            data: { has_stock_item: false, quantidade_atual: null, unidade: null, movements: [], total_movements: 0 },
+          })),
         ]);
         if (cancelled) return;
         setStock(stockRes.data);
@@ -218,6 +224,7 @@ export default function ProductEditScreen() {
           cfop: p.cfop,
           cest: p.cest ?? "",
           custo: p.custo,
+          is_umbrella: p.is_umbrella,
         });
         setNcmQuery(p.ncm && p.ncm_descricao ? ncmLabel(p.ncm, p.ncm_descricao) : "");
         setCategories(categoriesRes.data.categories ?? categoriesRes.data);
@@ -698,11 +705,17 @@ export default function ProductEditScreen() {
               label="EAN / código de barras"
               value={editProd.ean}
               placeholder="Opcional"
+              disabled={editProd.is_umbrella}
               errorMessage={
                 editProd.ean.trim() && !isValidGtin(editProd.ean)
                   ? "código de barras inválido"
                   : eanConflict
                   ? "código de barras já em uso por outro produto ou opção ativo"
+                  : undefined
+              }
+              helperMessage={
+                editProd.is_umbrella
+                  ? "produto guarda-chuva: o código de barras é controlado por cada opção, não pelo produto"
                   : undefined
               }
               onChange={(e) => setEditProd({ ...editProd, ean: e.target.value })}
@@ -825,12 +838,18 @@ export default function ProductEditScreen() {
       <div className={styles.panel}>
         <div className={styles.optionsHeader}>
           <h2 className={styles.h2}>Estoque</h2>
-          <Button type="button" size="small" onClick={openStockMovModal}>
-            {stock?.has_stock_item ? "Registrar movimentação" : "Registrar entrada"}
-          </Button>
+          {!editProd.is_umbrella && (
+            <Button type="button" size="small" onClick={openStockMovModal}>
+              {stock?.has_stock_item ? "Registrar movimentação" : "Registrar entrada"}
+            </Button>
+          )}
         </div>
 
-        {!stock?.has_stock_item ? (
+        {editProd.is_umbrella ? (
+          <div className={styles.menusInfo}>
+            produto guarda-chuva: o estoque é controlado por cada opção, não pelo produto
+          </div>
+        ) : !stock?.has_stock_item ? (
           <div className={styles.menusInfo}>Sem controle de estoque ainda.</div>
         ) : (
           <>

@@ -533,6 +533,45 @@ async def _serialize_option_group(db: AsyncSession, g: "OptionGroup") -> dict:
         "options": await _get_option_group_options(db, g.id),
     }
 
+async def _validate_no_retroactive_umbrella_conflict(
+    db: AsyncSession, option_group_id: int, options: list["OptionIn"],
+) -> None:
+    """G4 (ORD-189) — impede que uma opção ganhe ean/cfop se isso tornaria guarda-chuva um
+    produto que já tem dado próprio (ean ou stock_item) que ficaria órfão. Sem migração
+    automática — a Empresa resolve manualmente (limpa o ean do produto, ou zera/resolve o
+    estoque) antes de tentar de novo. Roda ANTES do replace de opções — se rejeitar, nada no
+    grupo é alterado. Mensagens distintas por causa (achado do QA): limpar EAN do produto e
+    resolver estoque existente são ações diferentes, a Empresa precisa saber qual das duas."""
+    if not any(opt.ean or opt.cfop for opt in options):
+        return  # nenhuma opção deste payload está ganhando dado fiscal — nada a checar
+
+    product_ids = (await db.execute(
+        select(ProductOptionGroup.product_id).filter_by(option_group_id=option_group_id)
+    )).scalars().all()
+    if not product_ids:
+        return
+
+    conflicting_ean = (await db.execute(
+        select(Product.id).filter(Product.id.in_(product_ids), Product.ean.isnot(None))
+    )).scalars().first()
+    if conflicting_ean is not None:
+        raise HTTPException(
+            400,
+            detail="produto já tem EAN próprio cadastrado — remova o EAN do produto antes de "
+                   "cadastrar EAN/CFOP nas opções",
+        )
+
+    conflicting_stock = (await db.execute(
+        select(StockItem.product_id).filter(StockItem.product_id.in_(product_ids))
+    )).scalars().first()
+    if conflicting_stock is not None:
+        raise HTTPException(
+            400,
+            detail="produto já tem estoque próprio registrado — resolva o estoque existente "
+                   "antes de cadastrar EAN/CFOP nas opções",
+        )
+
+
 async def _set_option_group_options(db: AsyncSession, option_group_id: int, company_id: int, options: list["OptionIn"]) -> None:
     """Replace completo do CONTEÚDO do grupo (a lista enviada é sempre a
     verdade final), mas não mais um replace completo das LINHAS: opção
@@ -572,6 +611,10 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
     opção é sempre pequeno."""
     if not options:
         raise HTTPException(400, detail="Grupo precisa de ao menos uma opção")
+
+    # G4 (ORD-189) — falha rápido, antes de gastar query de duplicidade, se a
+    # transição em si (opção ganhando dado fiscal com produto já órfão) já é inválida.
+    await _validate_no_retroactive_umbrella_conflict(db, option_group_id, options)
 
     active_skus = [opt.sku for opt in options if opt.sku and opt.active]
     if len(active_skus) != len(set(active_skus)):
@@ -974,6 +1017,7 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "cfop": p.cfop,
         "cest": p.cest,
         "custo": float(p.custo) if p.custo is not None else None,
+        "is_umbrella": await _is_umbrella_product(db, p.id),  # G4 (ORD-189)
         "allergens": await _get_product_allergens(db, p.id),
         "option_groups": await _get_product_option_groups(db, p.id),
         "related_products": await _get_product_related(db, p.id),
@@ -1461,6 +1505,7 @@ class ProductOut(BaseModel):
     cfop: str | None = None
     cest: str | None = None
     custo: float | None = None  # ORD-187
+    is_umbrella: bool = False  # ORD-189 (G4) — computado, nunca persistido
     allergens: list[AllergenOut] = []
     option_groups: list[ProductOptionGroupOut] = []
     # ORD-152: só populado por update_product() ao ativar o produto — os
@@ -1483,6 +1528,24 @@ class ProductListOut(BaseModel):
 class ActiveCodesOut(BaseModel):
     skus: list[str]
     eans: list[str]
+
+async def _is_umbrella_product(db: AsyncSession, product_id: int) -> bool:
+    """G4 (ORD-189) — True se QUALQUER Option de QUALQUER OptionGroup vinculado a este
+    produto (via ProductOptionGroup) tiver ean OU cfop preenchido (campos da G1/ORD-188).
+    Estado computado a cada chamada, nunca persistido — mesmo racional de
+    estoque_controlado (A4). Ter opções não basta pra ser guarda-chuva; ter opções com
+    dado fiscal preenchido, sim."""
+    result = await db.execute(
+        select(Option.id)
+        .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+        .join(ProductOptionGroup, ProductOptionGroup.option_group_id == OptionGroup.id)
+        .filter(
+            ProductOptionGroup.product_id == product_id,
+            or_(Option.ean.isnot(None), Option.cfop.isnot(None)),
+        )
+        .limit(1)
+    )
+    return result.scalars().first() is not None
 
 # ORD-169 — só os 2 valores fechados no Explorer (produção própria / revenda),
 # venda presencial do totem sempre dentro do estado.
@@ -2253,6 +2316,11 @@ async def update_product(
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
     if body.ncm is not None:
         await _validate_ncm_exists(db, body.ncm)
+    # G4 (ORD-189) — checagem de guarda-chuva vem antes da de checksum: não faz
+    # sentido validar formato de um campo que já vai ser rejeitado por não poder
+    # existir ali (EAN migrou pra controle das opções).
+    if body.ean is not None and await _is_umbrella_product(db, product_id):
+        raise HTTPException(400, detail="produto guarda-chuva: EAN é controlado pelas opções, não pelo produto")
     if body.ean is not None and not _is_valid_gtin(body.ean):
         raise HTTPException(400, detail="código de barras inválido")
 
@@ -2447,27 +2515,37 @@ def _validate_stock_unit(unidade: str) -> None:
 
 async def _resolve_stock_owner(
     db: AsyncSession, company_id: int, *, product_id: int | None = None, option_id: int | None = None,
-) -> None:
+) -> "Product | Option":
     """Confirma que o dono (Product OU Option, nunca os dois — chamado sempre com exatamente um
-    dos dois kwargs) pertence à company_id do JWT. 404 se não existir ou for de outra empresa.
+    dos dois kwargs) pertence à company_id do JWT, e devolve a linha já carregada (assinatura
+    final combinada com a G3/ORD-190 — evita segunda consulta quando quem chama precisar ler
+    campos do dono, ex. estoque_minimo). 404 se não existir ou for de outra empresa.
 
     Option não tem company_id direto — mesmo padrão de _set_option_group_options: isolamento
     passa por join com OptionGroup, não por filtro direto. Repetir esse join aqui é obrigatório,
     não opcional — é o caminho de isolamento multi-tenant dedicado pro caminho de Option."""
     if product_id is not None:
         p = (await db.execute(
-            select(Product.id).filter_by(id=product_id, company_id=company_id, deleted=False)
+            select(Product).filter_by(id=product_id, company_id=company_id, deleted=False)
         )).scalars().first()
         if not p:
             raise HTTPException(404)
+        # G4 (ORD-189) — produto guarda-chuva não controla o próprio estoque mais;
+        # cobre GET e POST de movimentação, já que os dois delegam pra esta função.
+        if await _is_umbrella_product(db, product_id):
+            raise HTTPException(
+                400, detail="produto guarda-chuva: estoque é controlado pelas opções, não pelo produto"
+            )
+        return p
     else:
         o = (await db.execute(
-            select(Option.id)
+            select(Option)
             .join(OptionGroup, OptionGroup.id == Option.option_group_id)
             .filter(Option.id == option_id, OptionGroup.company_id == company_id)
         )).scalars().first()
         if not o:
             raise HTTPException(404)
+        return o
 
 
 async def _get_stock_state(

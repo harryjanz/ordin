@@ -247,6 +247,10 @@ export interface Product {
   cfop: string | null;
   cest: string | null;
   custo: number | null; // ORD-187 — só relevante pra CFOP 5102
+  // ORD-189 (G4) — computado, nunca persistido: true quando alguma opção
+  // vinculada já tem ean/cfop próprio (ver docs/estudo-modulo-estoque-erp.md,
+  // Bloco G). EAN e estoque do produto ficam bloqueados nesse estado.
+  is_umbrella: boolean;
   allergens: Allergen[];
   option_groups: ProductOptionGroup[];
   related_products: RelatedProduct[];
