@@ -254,6 +254,7 @@ export default function OptionGroupFormScreen() {
     setDraftCest("");
     setDraftAllergenIds([]);
     setStock(null);  // opção nova ainda não tem id — sem estoque possível
+    setStockMovModalOpen(false);
     setOptionModalOpen(true);
   }
 
@@ -271,6 +272,7 @@ export default function OptionGroupFormScreen() {
     setDraftCest(row.cest ?? "");
     setDraftAllergenIds(row.allergen_ids);
     setStock(null);
+    setStockMovModalOpen(false);
     setOptionModalOpen(true);
     if (row.id !== null) {
       try {
@@ -711,17 +713,67 @@ export default function OptionGroupFormScreen() {
 
               {/* ORD-181 (G2) — só existe pra opção já salva (precisa de id).
                   Mesma posição relativa que ProductEditScreen usa: logo após
-                  a classificação fiscal. */}
+                  a classificação fiscal. Formulário de movimentação é INLINE
+                  aqui dentro (não um segundo Modal empilhado) — feedback do
+                  usuário: um modal de estoque por cima do modal de opção
+                  renderizava atrás dele (briga de z-index) e incomodava
+                  independente do bug em si. */}
               {editingRowKey !== null && (
                 <>
                   <Divider />
                   <div className={styles.optionsHeader}>
                     <div className={styles.formLabel}>Estoque</div>
-                    <Button type="button" size="small" variant="secondary" onClick={openStockMovModal}>
-                      {stock?.has_stock_item ? "Registrar movimentação" : "Registrar entrada"}
-                    </Button>
+                    {!stockMovModalOpen && (
+                      <Button type="button" size="small" variant="secondary" onClick={openStockMovModal}>
+                        {stock?.has_stock_item ? "Registrar movimentação" : "Registrar entrada"}
+                      </Button>
+                    )}
                   </div>
-                  {!stock?.has_stock_item ? (
+
+                  {stockMovModalOpen ? (
+                    <div className={styles.modalForm}>
+                      <div className={styles.formRow}>
+                        <div className={styles.formRowField}>
+                          <Dropdown
+                            label="Tipo"
+                            value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
+                            onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
+                            options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
+                          />
+                        </div>
+                        {!stock?.has_stock_item && (
+                          <div className={styles.formRowField}>
+                            <Dropdown
+                              label="Unidade"
+                              value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
+                              onValueSelected={(opt) => setMovUnidade(opt.value)}
+                              options={STOCK_UNIT_OPTIONS}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <NumberInput
+                        label="Quantidade"
+                        value={movQuantidade ?? undefined}
+                        onChange={(value: number) => setMovQuantidade(value)}
+                        decimalScale={3}
+                        allowNegative={movTipo === "ajuste"}
+                      />
+                      <InputBase
+                        label="Motivo"
+                        placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
+                        value={movMotivo}
+                        onChange={(e) => setMovMotivo(e.target.value)}
+                      />
+                      {movError && <Alert variant="error" text={movError} fullWidth />}
+                      <div className={styles.formActions}>
+                        <Button type="button" onClick={saveStockMovement} disabled={!canSaveStockMov || movSaving}>
+                          {movSaving ? "Salvando…" : "Salvar"}
+                        </Button>
+                        <Button type="button" variant="secondary" onClick={closeStockMovModal}>Cancelar</Button>
+                      </div>
+                    </div>
+                  ) : !stock?.has_stock_item ? (
                     <div className={styles.formHint}>Sem controle de estoque ainda.</div>
                   ) : (
                     <>
@@ -812,54 +864,6 @@ export default function OptionGroupFormScreen() {
           </div>
         </div>
       </Modal>
-
-      <ConfirmDialog
-        open={stockMovModalOpen}
-        title="Registrar movimentação de estoque"
-        message=""
-        onConfirm={saveStockMovement}
-        onCancel={closeStockMovModal}
-        confirmLabel={movSaving ? "Salvando…" : "Salvar"}
-        confirmDisabled={!canSaveStockMov || movSaving}
-        width={480}
-      >
-        <div className={styles.modalForm}>
-          <div className={styles.formRow}>
-            <div className={styles.formRowField}>
-              <Dropdown
-                label="Tipo"
-                value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
-                onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
-                options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
-              />
-            </div>
-            {!stock?.has_stock_item && (
-              <div className={styles.formRowField}>
-                <Dropdown
-                  label="Unidade"
-                  value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
-                  onValueSelected={(opt) => setMovUnidade(opt.value)}
-                  options={STOCK_UNIT_OPTIONS}
-                />
-              </div>
-            )}
-          </div>
-          <NumberInput
-            label="Quantidade"
-            value={movQuantidade ?? undefined}
-            onChange={(value: number) => setMovQuantidade(value)}
-            decimalScale={3}
-            allowNegative={movTipo === "ajuste"}
-          />
-          <InputBase
-            label="Motivo"
-            placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
-            value={movMotivo}
-            onChange={(e) => setMovMotivo(e.target.value)}
-          />
-          {movError && <Alert variant="error" text={movError} fullWidth />}
-        </div>
-      </ConfirmDialog>
     </div>
   );
 }
