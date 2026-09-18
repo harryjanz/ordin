@@ -382,9 +382,21 @@ export default function OptionGroupFormScreen() {
     setDraftPendingPreviewUrl(null);
   }
 
+  // Achado do usuário testando em browser: nada impedia digitar o mesmo EAN
+  // em duas opções do mesmo grupo — só o "Salvar" do grupo inteiro (chamada
+  // ao backend) pegava isso, tarde demais e sem destaque nenhum no campo em
+  // si. Checagem local aqui replica o alcance real do backend (unicidade
+  // por EMPRESA, não só por grupo — mesmo padrão do sku, ver
+  // _set_option_group_options) usando as linhas já carregadas em `rows`,
+  // sem round-trip: se colidir com QUALQUER outra opção do grupo (a lista
+  // completa da empresa não está disponível no cliente), avisa na hora.
+  const draftEanConflict = draftEan.trim() !== "" && rows.some(
+    (r) => r.key !== editingRowKey && (r.ean ?? "").trim() === draftEan.trim()
+  );
+
   function saveOptionModal() {
     if (!draftLabel.trim()) return;
-    if (draftEan.trim() !== "" && !isValidGtin(draftEan)) return;
+    if (draftEan.trim() !== "" && (!isValidGtin(draftEan) || draftEanConflict)) return;
     if (editingRowKey === null) {
       const key = `new-${++newRowSeq}`;
       setRows((prev) => [...prev, {
@@ -436,7 +448,7 @@ export default function OptionGroupFormScreen() {
   );
 
   const canSave = !saving && name.trim().length > 0 && rows.length > 0;
-  const canSaveOption = draftLabel.trim().length > 0 && (draftEan.trim() === "" || isValidGtin(draftEan));
+  const canSaveOption = draftLabel.trim().length > 0 && (draftEan.trim() === "" || (isValidGtin(draftEan) && !draftEanConflict));
 
   async function save() {
     if (!canSave) return;
@@ -701,7 +713,13 @@ export default function OptionGroupFormScreen() {
                 label="EAN / código de barras"
                 value={draftEan}
                 placeholder="Opcional"
-                errorMessage={draftEan.trim() && !isValidGtin(draftEan) ? "código de barras inválido" : undefined}
+                errorMessage={
+                  draftEan.trim() && !isValidGtin(draftEan)
+                    ? "código de barras inválido"
+                    : draftEanConflict
+                    ? "código de barras já usado por outra opção deste grupo"
+                    : undefined
+                }
                 onChange={(e) => setDraftEan(e.target.value)}
               />
               <Dropdown
