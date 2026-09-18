@@ -606,40 +606,43 @@ export default function OptionGroupFormScreen() {
                 maxLength={500}
                 helperMessage="Opcional — ajuda a diferenciar opções com nome pouco óbvio"
               />
-              <InputBase
-                label="SKU"
-                value={draftSku}
-                placeholder="Opcional, único por empresa"
-                onChange={(e) => setDraftSku(e.target.value)}
-              />
-
               {/* ORD-188 — opção que representa um produto real (ex.: cada sabor de
                   um refrigerante) ganha identidade fiscal própria, mesma posição
-                  relativa que Product já usa (logo após SKU). */}
+                  relativa que Product já usa (logo após SKU). Ajuste de layout
+                  (feedback do usuário testando em browser): SKU/CEST divididos
+                  50/50 na mesma linha; EAN e CFOP em linhas próprias, largura
+                  cheia — os dois eram os campos mais apertados no layout
+                  anterior (2 campos numa linha só dentro da coluna principal). */}
               <div className={styles.formRow}>
                 <div className={styles.formRowField}>
                   <InputBase
-                    label="EAN / código de barras"
-                    value={draftEan}
-                    placeholder="Opcional"
-                    errorMessage={draftEan.trim() && !isValidGtin(draftEan) ? "código de barras inválido" : undefined}
-                    onChange={(e) => setDraftEan(e.target.value)}
+                    label="SKU"
+                    value={draftSku}
+                    placeholder="Opcional, único por empresa"
+                    onChange={(e) => setDraftSku(e.target.value)}
                   />
                 </div>
                 <div className={styles.formRowField}>
-                  <Dropdown
-                    label="CFOP"
-                    value={CFOP_OPTIONS.find((o) => o.value === draftCfop) ?? null}
-                    onValueSelected={(opt) => setDraftCfop(opt.value)}
-                    options={CFOP_OPTIONS}
+                  <InputBase
+                    label="CEST"
+                    value={draftCest}
+                    placeholder="Opcional"
+                    onChange={(e) => setDraftCest(e.target.value)}
                   />
                 </div>
               </div>
               <InputBase
-                label="CEST"
-                value={draftCest}
+                label="EAN / código de barras"
+                value={draftEan}
                 placeholder="Opcional"
-                onChange={(e) => setDraftCest(e.target.value)}
+                errorMessage={draftEan.trim() && !isValidGtin(draftEan) ? "código de barras inválido" : undefined}
+                onChange={(e) => setDraftEan(e.target.value)}
+              />
+              <Dropdown
+                label="CFOP"
+                value={CFOP_OPTIONS.find((o) => o.value === draftCfop) ?? null}
+                onValueSelected={(opt) => setDraftCfop(opt.value)}
+                options={CFOP_OPTIONS}
               />
             </div>
 
