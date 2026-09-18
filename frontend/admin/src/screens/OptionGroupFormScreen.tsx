@@ -580,7 +580,7 @@ export default function OptionGroupFormScreen() {
 
       <Modal
         open={optionModalOpen}
-        width={760}
+        width={960}
         onClose={closeOptionModal}
         onBackdropClick={closeOptionModal}
         onCloseButtonClick={closeOptionModal}
