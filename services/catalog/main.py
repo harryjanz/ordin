@@ -33,7 +33,6 @@ from sqlalchemy import (
     String,
     Text,
     Time,
-    UniqueConstraint,
     and_,
     delete,
     func,
@@ -41,7 +40,6 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -129,11 +127,12 @@ class NcmCode(Base):
 
 
 class Product(Base):
+    """Sem UniqueConstraint de banco pra sku/ean (decisão do usuário,
+    2026-09-18): a regra real é "único por empresa quando ATIVO", e
+    atravessa Product e Option juntos — nenhuma das duas condições dá pra
+    expressar como UniqueConstraint simples de uma tabela só. Validado em
+    aplicação, ver _check_active_code_conflict."""
     __tablename__ = "products"
-    __table_args__ = (
-        UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),
-        UniqueConstraint("company_id", "ean", name="uq_products_company_ean"),
-    )
     id          = Column(Integer, primary_key=True)
     company_id  = Column(Integer, nullable=False, index=True)
     category_id = Column(Integer, ForeignKey("categories.id"))
@@ -556,23 +555,45 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
     ORD-146: SKU único por empresa é validado aqui em nível de aplicação —
     Option não tem company_id direto (isolamento via join com OptionGroup),
     então não dá pra usar um UniqueConstraint de banco como Product.sku tem.
+
+    Decisão do usuário (2026-09-18): sku/ean únicos por empresa só quando
+    ATIVOS, atravessando Product e Option juntos (frente de caixa futura vai
+    selecionar item por leitura de código de barras — colisão ali seria um
+    problema bem maior de resolver depois). Opção inativa nunca colide, nem
+    entre si nem com uma ativa. O grupo inteiro sendo substituído (`.filter
+    (Option.option_group_id != option_group_id)`) fica de fora da checagem
+    contra o banco de propósito — a checagem DENTRO do lote recebido (via
+    `set()`) já cobre esse caso, sem risco de falso positivo entre duas
+    opções do mesmo grupo trocando de valor entre si na mesma chamada.
+
     allergen_ids é substituído por completo pra toda opção que sobrevive ou
     é criada — mais simples que diffar allergen a allergen, e o volume por
     opção é sempre pequeno."""
     if not options:
         raise HTTPException(400, detail="Grupo precisa de ao menos uma opção")
 
-    skus = [opt.sku for opt in options if opt.sku]
-    if len(skus) != len(set(skus)):
+    active_skus = [opt.sku for opt in options if opt.sku and opt.active]
+    if len(active_skus) != len(set(active_skus)):
         raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
-    if skus:
+    if active_skus:
         dup_result = await db.execute(
             select(Option.sku)
             .join(OptionGroup, OptionGroup.id == Option.option_group_id)
-            .filter(OptionGroup.company_id == company_id, Option.option_group_id != option_group_id, Option.sku.in_(skus))
+            .filter(
+                OptionGroup.company_id == company_id, Option.option_group_id != option_group_id,
+                Option.active == True, Option.sku.in_(active_skus),
+            )
         )
         if dup_result.scalars().first() is not None:
             raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+        dup_product = await db.execute(
+            select(Product.id).filter(
+                Product.company_id == company_id, Product.deleted == False,
+                Product.active == True, Product.sku.in_(active_skus),
+            )
+        )
+        if dup_product.scalars().first() is not None:
+            raise HTTPException(400, detail="SKU já cadastrado para um produto ativo desta empresa")
 
     # ORD-188 — mesmo padrão acima, replicado pro ean. Checksum primeiro
     # (mais barato, sem ir ao banco) e só então a checagem de duplicidade.
@@ -580,17 +601,28 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
         if opt.ean is not None and not _is_valid_gtin(opt.ean):
             raise HTTPException(400, detail="código de barras inválido")
 
-    eans = [opt.ean for opt in options if opt.ean]
-    if len(eans) != len(set(eans)):
+    active_eans = [opt.ean for opt in options if opt.ean and opt.active]
+    if len(active_eans) != len(set(active_eans)):
         raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
-    if eans:
+    if active_eans:
         dup_ean_result = await db.execute(
             select(Option.ean)
             .join(OptionGroup, OptionGroup.id == Option.option_group_id)
-            .filter(OptionGroup.company_id == company_id, Option.option_group_id != option_group_id, Option.ean.in_(eans))
+            .filter(
+                OptionGroup.company_id == company_id, Option.option_group_id != option_group_id,
+                Option.active == True, Option.ean.in_(active_eans),
+            )
         )
         if dup_ean_result.scalars().first() is not None:
             raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
+        dup_ean_product = await db.execute(
+            select(Product.id).filter(
+                Product.company_id == company_id, Product.deleted == False,
+                Product.active == True, Product.ean.in_(active_eans),
+            )
+        )
+        if dup_ean_product.scalars().first() is not None:
+            raise HTTPException(400, detail="código de barras já cadastrado para um produto ativo desta empresa")
 
     all_allergen_ids = {aid for opt in options for aid in opt.allergen_ids}
     if all_allergen_ids:
@@ -965,6 +997,45 @@ def _is_valid_gtin(code: str) -> bool:
     check = int(code[-1])
     total = sum(d * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(digits)))
     return (10 - total % 10) % 10 == check
+
+
+async def _check_active_code_conflict(
+    db: AsyncSession, company_id: int, field: str, value: str,
+    *, exclude_product_id: int | None = None, exclude_option_id: int | None = None,
+) -> bool:
+    """Decisão do usuário: SKU e EAN precisam ser únicos por empresa quando
+    ATIVOS, atravessando os dois universos (Product e Option) — motivo:
+    frente de caixa futura vai selecionar item por leitura de código de
+    barras, e uma colisão ali seria um problema muito maior de resolver
+    depois. Produto/opção INATIVO nunca colide (nem entre si, nem com um
+    ativo) — só quando alguém tenta ativar (ou salvar já ativo) é que a
+    unicidade é cobrada.
+
+    Sem UniqueConstraint de banco pra isso: a regra é condicional (só conta
+    quando active=True) e atravessa DUAS tabelas — nenhum dos dois casos dá
+    pra expressar como UniqueConstraint simples. Mesmo risco de corrida já
+    aceito hoje pro sku de Option (_set_option_group_options) — validação
+    em aplicação, não constraint de banco; não é regressão introduzida
+    aqui, é extensão consciente do mesmo trade-off já existente."""
+    product_col = getattr(Product, field)
+    q = select(Product.id).filter(
+        Product.company_id == company_id, Product.deleted == False,
+        Product.active == True, product_col == value,
+    )
+    if exclude_product_id is not None:
+        q = q.filter(Product.id != exclude_product_id)
+    if (await db.execute(q)).scalars().first() is not None:
+        return True
+
+    option_col = getattr(Option, field)
+    q = (
+        select(Option.id)
+        .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+        .filter(OptionGroup.company_id == company_id, Option.active == True, option_col == value)
+    )
+    if exclude_option_id is not None:
+        q = q.filter(Option.id != exclude_option_id)
+    return (await db.execute(q)).scalars().first() is not None
 
 # ── Promoções (ORD-166) ──────────────────────────────────────────────────────
 
@@ -2037,6 +2108,13 @@ async def create_product(
         await _validate_ncm_exists(db, body.ncm)
     if body.ean is not None and not _is_valid_gtin(body.ean):
         raise HTTPException(400, detail="código de barras inválido")
+    # Decisão do usuário: sku/ean únicos por empresa quando ativos, atravessando
+    # Product e Option — produto novo nasce sempre ativo (ProductIn não tem
+    # campo active), então a checagem sempre roda na criação.
+    if body.sku is not None and await _check_active_code_conflict(db, company_id, "sku", body.sku):
+        raise HTTPException(400, detail="SKU já cadastrado para um produto ou opção ativo desta empresa")
+    if body.ean is not None and await _check_active_code_conflict(db, company_id, "ean", body.ean):
+        raise HTTPException(400, detail="código de barras já cadastrado para um produto ou opção ativo desta empresa")
     next_sort_order = 0
     if body.category_id is not None:
         count_result = await db.execute(
@@ -2063,19 +2141,12 @@ async def create_product(
         custo=body.custo,
     )
     db.add(p)
-    try:
-        await db.commit()
-    except IntegrityError as e:
-        await db.rollback()
-        # ORD-180 — substring "ean" (não o nome completo da constraint):
-        # SQLite (usado nos testes) formata IntegrityError sem o nome da
-        # constraint ("UNIQUE constraint failed: products.company_id,
-        # products.ean"), só MySQL/Aurora (produção) inclui
-        # "uq_products_company_ean" por extenso. "ean" aparece nos dois
-        # formatos; "sku" nunca aparece na mensagem de conflito de ean.
-        if "ean" in str(e.orig):
-            raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
-        raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+    # Sem UniqueConstraint de banco pra sku/ean desde a decisão do usuário
+    # (regra "único quando ativo" atravessa Product+Option, não expressável
+    # numa constraint de uma tabela só) — checagem já feita acima, antes do
+    # INSERT. Risco de corrida residual aceito conscientemente, mesmo
+    # trade-off já existente pro sku de Option.
+    await db.commit()
     await db.refresh(p)
     if body.allergen_ids is not None:
         await _set_product_allergens(db, p.id, body.allergen_ids)
@@ -2156,20 +2227,25 @@ async def update_product(
     # critério de aceite já registrado na história.
     if "ean" in body.model_fields_set and body.ean is None:
         p.ean = None
+
+    # Decisão do usuário: sku/ean únicos por empresa quando ativos, atravessando
+    # Product e Option. Lido de `p` (já com o body aplicado acima, inclusive o
+    # caso especial de ean=None) pra pegar o estado FINAL, não só o que veio no
+    # payload — cobre tanto editar um produto já ativo quanto reativar um que
+    # estava inativo (os dois casos chegam aqui pelo mesmo caminho, sem
+    # precisar de lógica separada pra "é uma ativação?").
+    if p.active:
+        if p.sku is not None and await _check_active_code_conflict(
+            db, company_id, "sku", p.sku, exclude_product_id=p.id
+        ):
+            raise HTTPException(400, detail="SKU já cadastrado para um produto ou opção ativo desta empresa")
+        if p.ean is not None and await _check_active_code_conflict(
+            db, company_id, "ean", p.ean, exclude_product_id=p.id
+        ):
+            raise HTTPException(400, detail="código de barras já cadastrado para um produto ou opção ativo desta empresa")
+
     await _cascade_deactivate_combos(db, affected_combos)
-    try:
-        await db.commit()
-    except IntegrityError as e:
-        await db.rollback()
-        # ORD-180 — substring "ean" (não o nome completo da constraint):
-        # SQLite (usado nos testes) formata IntegrityError sem o nome da
-        # constraint ("UNIQUE constraint failed: products.company_id,
-        # products.ean"), só MySQL/Aurora (produção) inclui
-        # "uq_products_company_ean" por extenso. "ean" aparece nos dois
-        # formatos; "sku" nunca aparece na mensagem de conflito de ean.
-        if "ean" in str(e.orig):
-            raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
-        raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+    await db.commit()
     if body.allergen_ids is not None:
         await _set_product_allergens(db, p.id, body.allergen_ids)
         await db.commit()
@@ -2740,7 +2816,10 @@ async def delete_option_image(
     response_model=OptionOut,
     tags=["Catálogo"],
     summary="Ativar/desativar uma opção (indisponibilidade temporária, ORD-145)",
-    responses={404: {"description": "Opção não encontrada"}},
+    responses={
+        404: {"description": "Opção não encontrada"},
+        400: {"description": "sku/ean já em uso por outro produto ou opção ativo — só na ativação"},
+    },
 )
 async def set_option_active(
     option_id: int,
@@ -2750,6 +2829,20 @@ async def set_option_active(
 ):
     opt = await _get_option_scoped(db, option_id, company_id)
     if not opt: raise HTTPException(404)
+    # Decisão do usuário: reativar uma opção (achado real — inativa não
+    # colide com nada, mas ao voltar a ficar ativa precisa passar pela
+    # mesma checagem que qualquer sku/ean novo já passa) exige a mesma
+    # validação de unicidade que _set_option_group_options já faz — aqui é
+    # só um dono (não um lote), então usa direto _check_active_code_conflict.
+    if body.active:
+        if opt.sku is not None and await _check_active_code_conflict(
+            db, company_id, "sku", opt.sku, exclude_option_id=opt.id
+        ):
+            raise HTTPException(400, detail="SKU já cadastrado para um produto ou opção ativo desta empresa")
+        if opt.ean is not None and await _check_active_code_conflict(
+            db, company_id, "ean", opt.ean, exclude_option_id=opt.id
+        ):
+            raise HTTPException(400, detail="código de barras já cadastrado para um produto ou opção ativo desta empresa")
     opt.active = body.active
     await db.commit(); await db.refresh(opt)
     return {
@@ -2757,7 +2850,9 @@ async def set_option_active(
         "image_url": presigned_download_url(opt.image_url) if opt.image_url else None,
         "thumbnail_url": presigned_download_url(opt.thumbnail_url) if opt.thumbnail_url else None,
         "sort_order": opt.sort_order, "active": opt.active,
-        "description": opt.description, "sku": opt.sku, "allergens": await _get_option_allergens(db, opt.id),
+        "description": opt.description, "sku": opt.sku,
+        "ean": opt.ean, "cfop": opt.cfop, "cest": opt.cest,  # ORD-188 — faltava aqui (achado nesta correção)
+        "allergens": await _get_option_allergens(db, opt.id),
     }
 
 @app.put(
