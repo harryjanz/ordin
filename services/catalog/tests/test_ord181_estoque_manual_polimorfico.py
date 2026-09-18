@@ -69,7 +69,10 @@ async def test_produto_sem_movimentacao_mostra_estado_vazio(client, token_owner)
     pid = await _create_product(client, token_owner)
     state = await client.get(f"/catalog/products/{pid}/stock", headers=auth(token_owner))
     assert state.status_code == 200
-    assert state.json() == {"has_stock_item": False, "quantidade_atual": None, "unidade": None, "movements": []}
+    assert state.json() == {
+        "has_stock_item": False, "quantidade_atual": None, "unidade": None,
+        "movements": [], "total_movements": 0,
+    }
 
 
 async def test_segunda_entrada_soma(client, token_owner):
@@ -241,3 +244,44 @@ async def test_stock_item_com_dois_donos_e_rejeitado_pelo_banco(client, token_ow
         db.add(svc.StockItem(company_id=1, product_id=pid, option_id=oid, quantidade_atual=0, unidade="un"))
         with pytest.raises(IntegrityError):
             await db.commit()
+
+
+# ── Limite de histórico (achado do usuário — sem limite, cresce sem fim) ────
+
+async def test_historico_limitado_as_mais_recentes_com_total_correto(client, token_owner):
+    import main as svc
+
+    pid = await _create_product(client, token_owner)
+    await client.post(
+        f"/catalog/products/{pid}/stock/movements",
+        json={"tipo": "entrada", "quantidade": 1000, "unidade": "un"},
+        headers=auth(token_owner),
+    )
+    # 24 ajustes a mais, além da entrada inicial = 25 movimentações no total
+    for _ in range(24):
+        r = await client.post(
+            f"/catalog/products/{pid}/stock/movements",
+            json={"tipo": "ajuste", "quantidade": -1, "motivo": "consumo"},
+            headers=auth(token_owner),
+        )
+        assert r.status_code == 201
+
+    state = await client.get(f"/catalog/products/{pid}/stock", headers=auth(token_owner))
+    body = state.json()
+    assert body["total_movements"] == 25
+    assert len(body["movements"]) == svc._STOCK_MOVEMENTS_HISTORY_LIMIT  # 20
+    # as retornadas são as mais recentes (ajustes), não a entrada original
+    assert all(m["tipo"] == "ajuste" for m in body["movements"])
+
+
+async def test_historico_sem_estourar_o_limite_retorna_tudo(client, token_owner):
+    pid = await _create_product(client, token_owner)
+    await client.post(
+        f"/catalog/products/{pid}/stock/movements",
+        json={"tipo": "entrada", "quantidade": 5, "unidade": "un"},
+        headers=auth(token_owner),
+    )
+    state = await client.get(f"/catalog/products/{pid}/stock", headers=auth(token_owner))
+    body = state.json()
+    assert body["total_movements"] == 1
+    assert len(body["movements"]) == 1

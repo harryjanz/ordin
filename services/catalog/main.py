@@ -165,6 +165,13 @@ class Product(Base):
 STOCK_UNITS = ("un", "kg", "g", "L", "ml")  # mesmo racional já usado pra CFOP (linha 155):
                                              # texto simples, validado na aplicação, sem tabela
 
+# Achado do usuário (feedback em browser): sem limite, o histórico de
+# movimentações cresce sem fim — produto de giro alto acumula centenas de
+# linhas ao longo de meses. 20 mais recentes cobre o caso de uso real (ver
+# _get_stock_state) sem paginação completa, que é escopo maior do que o
+# problema pede agora.
+_STOCK_MOVEMENTS_HISTORY_LIMIT = 20
+
 class StockItem(Base):
     """ORD-181 (A2+G2) — dono polimórfico: product_id OU option_id, nunca os
     dois (CheckConstraint XOR). company_id duplicado (evita JOIN em toda
@@ -2323,15 +2330,28 @@ async def _get_stock_state(
         select(StockItem).filter_by(product_id=product_id, option_id=option_id)
     )).scalars().first()
     if not item:
-        return {"has_stock_item": False, "quantidade_atual": None, "unidade": None, "movements": []}
+        return {
+            "has_stock_item": False, "quantidade_atual": None, "unidade": None,
+            "movements": [], "total_movements": 0,
+        }
 
+    # achado do usuário: sem limite, o histórico cresce sem fim (produto de
+    # muito giro pode acumular centenas de movimentações ao longo de meses)
+    # — mostra só as mais recentes, com o total pra a UI avisar que existe
+    # mais além do que está na tela.
+    total_movements = (await db.execute(
+        select(func.count()).select_from(StockMovement).filter_by(stock_item_id=item.id)
+    )).scalar_one()
     movements = (await db.execute(
-        select(StockMovement).filter_by(stock_item_id=item.id).order_by(StockMovement.criado_em.desc())
+        select(StockMovement).filter_by(stock_item_id=item.id)
+        .order_by(StockMovement.criado_em.desc())
+        .limit(_STOCK_MOVEMENTS_HISTORY_LIMIT)
     )).scalars().all()
     return {
         "has_stock_item": True,
         "quantidade_atual": item.quantidade_atual,
         "unidade": item.unidade,
+        "total_movements": total_movements,
         "movements": [
             {"id": m.id, "tipo": m.tipo, "quantidade": m.quantidade, "motivo": m.motivo,
              "criado_por": m.criado_por, "criado_em": m.criado_em}

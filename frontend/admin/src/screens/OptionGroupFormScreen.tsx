@@ -797,6 +797,11 @@ export default function OptionGroupFormScreen() {
                           emptyMessage="Nenhuma movimentação ainda."
                         />
                       </div>
+                      {stock.total_movements > stock.movements.length && (
+                        <p className={styles.formHint}>
+                          Mostrando as {stock.movements.length} movimentações mais recentes de {stock.total_movements} no total.
+                        </p>
+                      )}
                     </>
                   )}
                 </>

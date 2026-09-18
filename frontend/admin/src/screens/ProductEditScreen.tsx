@@ -787,6 +787,11 @@ export default function ProductEditScreen() {
                 emptyMessage="Nenhuma movimentação ainda."
               />
             </div>
+            {stock.total_movements > stock.movements.length && (
+              <p className={styles.menusInfo}>
+                Mostrando as {stock.movements.length} movimentações mais recentes de {stock.total_movements} no total.
+              </p>
+            )}
           </>
         )}
       </div>
