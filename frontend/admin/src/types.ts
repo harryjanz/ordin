@@ -219,6 +219,10 @@ export interface StockState {
   quantidade_atual: number | null;
   unidade: string | null;
   movements: StockMovement[];
+  // total_movements > movements.length quando o histórico foi truncado pro
+  // limite do backend (_STOCK_MOVEMENTS_HISTORY_LIMIT) — a UI usa isso pra
+  // avisar que existe mais histórico além do que está na tela.
+  total_movements: number;
 }
 
 export interface Product {
