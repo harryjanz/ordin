@@ -534,7 +534,12 @@ export default function ProductEditScreen() {
         description_long: editProd.description_long.trim() || null,
         calories: editProd.calories,
         sku: editProd.sku.trim() || null,
-        ean: editProd.ean.trim() || null,
+        // G4 (ORD-189): produto guarda-chuva rejeita QUALQUER ean não-nulo no
+        // payload, mesmo o valor antigo sem alteração — campo desabilitado na
+        // UI, mas editProd.ean ainda carrega o valor legado até a Empresa
+        // resolver manualmente. Omitir a chave (em vez de reenviar) evita que
+        // salvar nome/preço/etc. de um produto guarda-chuva sempre falhe.
+        ...(editProd.is_umbrella ? {} : { ean: editProd.ean.trim() || null }),
         tags: editProd.tags,
         allergen_ids: editProd.allergen_ids.map(Number),
         related_product_ids: editProd.related_products.map((rp) => rp.id),
@@ -560,7 +565,10 @@ export default function ProductEditScreen() {
     );
   }
 
-  const eanConflict = editProd.ean.trim() !== "" && activeEanSetElsewhere.has(editProd.ean.trim());
+  // G4 (ORD-189): produto guarda-chuva não envia mais ean nenhum no Salvar
+  // (ver saveEditProd) — o campo antigo em editProd.ean é só exibição do
+  // valor legado, não participa de validação nenhuma nesse estado.
+  const eanConflict = !editProd.is_umbrella && editProd.ean.trim() !== "" && activeEanSetElsewhere.has(editProd.ean.trim());
   const skuConflict = editProd.sku.trim() !== "" && activeSkuSetElsewhere.has(editProd.sku.trim());
 
   return (
@@ -576,7 +584,7 @@ export default function ProductEditScreen() {
         <h1 className={styles.h1}>Editando produto</h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/catalog?tab=products")}>Voltar</Button>
-          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (editProd.ean.trim() !== "" && !isValidGtin(editProd.ean)) || eanConflict || skuConflict} loading={productSaving}>
+          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (!editProd.is_umbrella && editProd.ean.trim() !== "" && !isValidGtin(editProd.ean)) || eanConflict || skuConflict} loading={productSaving}>
             Salvar
           </Button>
         </div>
@@ -707,7 +715,9 @@ export default function ProductEditScreen() {
               placeholder="Opcional"
               disabled={editProd.is_umbrella}
               errorMessage={
-                editProd.ean.trim() && !isValidGtin(editProd.ean)
+                editProd.is_umbrella
+                  ? undefined
+                  : editProd.ean.trim() && !isValidGtin(editProd.ean)
                   ? "código de barras inválido"
                   : eanConflict
                   ? "código de barras já em uso por outro produto ou opção ativo"
