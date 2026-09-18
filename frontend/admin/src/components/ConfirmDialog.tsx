@@ -25,6 +25,11 @@ export interface ConfirmDialogProps {
   children?: ReactNode;
   /** Desabilita o botão de confirmar (ex: campo obrigatório do children vazio). Só tem efeito com children definido. */
   confirmDisabled?: boolean;
+  /** Largura do Modal em px — repassada direto pro Modal do design system.
+   * Sem valor, usa o default do próprio Modal (o que já valia antes deste
+   * prop existir, sem mudar nenhum uso já existente). Pensada pra diálogos
+   * com children (formulário) mais largo que a confirmação simples padrão. */
+  width?: number;
 }
 
 // Substitui window.confirm() nativo pelo Modal do design system — template
@@ -42,6 +47,7 @@ export default function ConfirmDialog({
   alertIcon,
   children,
   confirmDisabled,
+  width,
 }: ConfirmDialogProps) {
   const textOrAlert = alertVariant
     ? { icon: <Alert text={message} variant={alertVariant} icon={alertIcon} fullWidth /> }
@@ -52,6 +58,7 @@ export default function ConfirmDialog({
     return (
       <Modal
         open={open}
+        width={width}
         onClose={onCancel}
         onBackdropClick={onCancel}
         onCloseButtonClick={onCancel}

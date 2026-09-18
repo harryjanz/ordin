@@ -26,6 +26,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
+import { STOCK_UNIT_OPTIONS, stockUnitLabel } from "../lib/stockUnits";
 import { isValidGtin } from "../lib/validators";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN, minMaxToRadios, radiosToMinMax, type OptionGroupRadios } from "../lib/optionGroupMapping";
 import type { Allergen, OptionGroup, StockState } from "../types";
@@ -71,15 +72,6 @@ const CFOP_OPTIONS: DropdownOptions[] = [
   { value: "5102", label: "5102 — Venda de mercadoria adquirida de terceiros" },
 ];
 
-// ORD-181 — mesmo conjunto fechado já usado em ProductEditScreen, duplicado
-// aqui pelo mesmo motivo do CFOP_OPTIONS acima.
-const STOCK_UNIT_OPTIONS: DropdownOptions[] = [
-  { value: "un", label: "un" },
-  { value: "kg", label: "kg" },
-  { value: "g", label: "g" },
-  { value: "L", label: "L" },
-  { value: "ml", label: "ml" },
-];
 
 let newRowSeq = 0;
 
@@ -734,7 +726,7 @@ export default function OptionGroupFormScreen() {
                   ) : (
                     <>
                       <p className={styles.formHint}>
-                        <strong>{stock.quantidade_atual} {stock.unidade}</strong> em estoque
+                        <strong>{stock.quantidade_atual} {stockUnitLabel(stock.unidade)}</strong> em estoque
                       </p>
                       <div className={styles.tableScroll}>
                         <Table
@@ -743,7 +735,7 @@ export default function OptionGroupFormScreen() {
                             { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
                             {
                               key: "quantidade", header: "Quantidade",
-                              render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stock.unidade}`,
+                              render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`,
                             },
                             { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
                             { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
@@ -829,41 +821,44 @@ export default function OptionGroupFormScreen() {
         onCancel={closeStockMovModal}
         confirmLabel={movSaving ? "Salvando…" : "Salvar"}
         confirmDisabled={!canSaveStockMov || movSaving}
+        width={480}
       >
-        <div className={styles.formRow}>
-          <div className={styles.formRowField}>
-            <Dropdown
-              label="Tipo"
-              value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
-              onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
-              options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
-            />
-          </div>
-          {!stock?.has_stock_item && (
+        <div className={styles.modalForm}>
+          <div className={styles.formRow}>
             <div className={styles.formRowField}>
               <Dropdown
-                label="Unidade"
-                value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
-                onValueSelected={(opt) => setMovUnidade(opt.value)}
-                options={STOCK_UNIT_OPTIONS}
+                label="Tipo"
+                value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
+                onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
+                options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
               />
             </div>
-          )}
+            {!stock?.has_stock_item && (
+              <div className={styles.formRowField}>
+                <Dropdown
+                  label="Unidade"
+                  value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
+                  onValueSelected={(opt) => setMovUnidade(opt.value)}
+                  options={STOCK_UNIT_OPTIONS}
+                />
+              </div>
+            )}
+          </div>
+          <NumberInput
+            label="Quantidade"
+            value={movQuantidade ?? undefined}
+            onChange={(value: number) => setMovQuantidade(value)}
+            decimalScale={3}
+            allowNegative={movTipo === "ajuste"}
+          />
+          <InputBase
+            label="Motivo"
+            placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
+            value={movMotivo}
+            onChange={(e) => setMovMotivo(e.target.value)}
+          />
+          {movError && <Alert variant="error" text={movError} fullWidth />}
         </div>
-        <NumberInput
-          label="Quantidade"
-          value={movQuantidade ?? undefined}
-          onChange={(value: number) => setMovQuantidade(value)}
-          decimalScale={3}
-          allowNegative={movTipo === "ajuste"}
-        />
-        <InputBase
-          label="Motivo"
-          placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
-          value={movMotivo}
-          onChange={(e) => setMovMotivo(e.target.value)}
-        />
-        {movError && <Alert variant="error" text={movError} fullWidth />}
       </ConfirmDialog>
     </div>
   );
