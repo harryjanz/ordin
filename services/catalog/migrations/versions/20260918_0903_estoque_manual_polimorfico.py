@@ -5,16 +5,16 @@ company_id direto (join com OptionGroup), então company_id é denormalizado
 em stock_items pra evitar esse join em toda leitura. Sem backfill — nenhum
 produto/opção tem estoque até a primeira movimentação ser registrada.
 
-Revision ID: 20260918_0900
-Revises: 20260915_0901
-Create Date: 2026-09-18 09:00:00
+Revision ID: 20260918_0903
+Revises: 20260918_0901
+Create Date: 2026-09-18 09:03:00
 
 """
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260918_0900"
-down_revision = "20260915_0901"
+revision = "20260918_0903"
+down_revision = "20260918_0901"
 branch_labels = None
 depends_on = None
 
