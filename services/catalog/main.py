@@ -130,7 +130,10 @@ class NcmCode(Base):
 
 class Product(Base):
     __tablename__ = "products"
-    __table_args__ = (UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),)
+    __table_args__ = (
+        UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),
+        UniqueConstraint("company_id", "ean", name="uq_products_company_ean"),
+    )
     id          = Column(Integer, primary_key=True)
     company_id  = Column(Integer, nullable=False, index=True)
     category_id = Column(Integer, ForeignKey("categories.id"))
@@ -145,6 +148,10 @@ class Product(Base):
     tags        = Column(JSON)  # lista livre de strings, sem lista fechada (ver ORD-075)
     calories    = Column(Integer)  # kcal
     sku         = Column(String(50))  # único por empresa, ver UniqueConstraint acima
+    # ORD-180 — código de barras real (GTIN-8/12/13/14), distinto do sku
+    # (identificador interno de livre escolha). Base pro vínculo automático
+    # com XML de compra (épico de estoque/ERP, histórias B1/C1 futuras).
+    ean         = Column(String(14), nullable=True)
     sort_order  = Column(Integer)  # gerenciado só via create_product (inicial) e /catalog/products/reorder
     created_at  = Column(DateTime, default=datetime.utcnow)
     # ORD-169 — classificação fiscal, todos opcionais (produto vende sem,
@@ -257,6 +264,9 @@ class Option(Base):
     active          = Column(Boolean, nullable=False, default=True)  # ORD-145 — indisponibilidade temporária (estoque/produção), sem excluir a opção
     description     = Column(String(500))  # ORD-146 — mesmo tamanho de Product.description
     sku             = Column(String(50))  # ORD-146 — único por empresa, validado em aplicação (ver _set_option_group_options; Option não tem company_id direto pra um UniqueConstraint de banco)
+    ean             = Column(String(14), nullable=True)   # ORD-188 — mesmo tipo de Product.ean
+    cfop            = Column(String(4), nullable=True)    # ORD-188 — mesmo tipo de Product.cfop, livre em relação ao CFOP do produto pai
+    cest            = Column(String(7), nullable=True)    # ORD-188 — mesmo tipo de Product.cest, sem validação (paridade)
 
 class ProductOptionGroup(Base):
     """min/max_selections_override (ORD-144): permitem que o MESMO grupo
@@ -494,6 +504,9 @@ async def _get_option_group_options(db: AsyncSession, option_group_id: int) -> l
             "active": o.active,
             "description": o.description,
             "sku": o.sku,
+            "ean": o.ean,
+            "cfop": o.cfop,
+            "cest": o.cest,
             "allergens": await _get_option_allergens(db, o.id),
         }
         for o in result.scalars().all()
@@ -510,26 +523,31 @@ async def _serialize_option_group(db: AsyncSession, g: "OptionGroup") -> dict:
     }
 
 async def _set_option_group_options(db: AsyncSession, option_group_id: int, company_id: int, options: list["OptionIn"]) -> None:
-    """Replace completo, mesmo espírito de _set_product_allergens — remove
-    todas as opções antigas do grupo e recria a partir da lista enviada.
-    Efeito colateral aceito (decisão do Tech Explorer, mesmo padrão de
-    allergen_ids): como as opções antigas são removidas e recriadas com id
-    novo, a imagem de cada opção antiga é descartada do bucket junto — editar
-    a lista de opções de um grupo exige re-upload de imagem depois. Se isso
-    virar problema de UX real em ORD-139, é ponto pra revisar lá (endpoint
-    passaria a aceitar id por opção pra edição parcial), não nesta história.
+    """Replace completo do CONTEÚDO do grupo (a lista enviada é sempre a
+    verdade final), mas não mais um replace completo das LINHAS: opção
+    enviada com `id` de uma opção existente é ATUALIZADA no lugar — imagem
+    preservada, sem re-upload forçado. Opção sem `id` é criada. Opção
+    existente que NÃO aparece na lista enviada é removida de verdade (e aí
+    sim a imagem dela é descartada do bucket, porque a opção deixou de
+    existir).
+
+    Correção de um bug de produção pré-existente (ORD-146): antes desta
+    correção, TODA chamada apagava e recriava todas as opções do zero —
+    editar um único campo de uma opção (rótulo, EAN, o que fosse) derrubava
+    a imagem de TODAS as opções do grupo, não só da que mudou. Achado ao
+    testar a ORD-188 em ambiente real — o comportamento já existia desde a
+    ORD-146, não foi introduzido por ela.
 
     active (ORD-145) precisa ser propagado explicitamente aqui — sem isso,
-    toda opção voltaria a "ativa" no próximo replace completo, desfazendo
-    qualquer desativação feita via PATCH /catalog/options/{id}.
+    toda opção voltaria a "ativa" no próximo save, desfazendo qualquer
+    desativação feita via PATCH /catalog/options/{id}.
 
     ORD-146: SKU único por empresa é validado aqui em nível de aplicação —
     Option não tem company_id direto (isolamento via join com OptionGroup),
     então não dá pra usar um UniqueConstraint de banco como Product.sku tem.
-    allergen_ids é validado e persistido em OptionAllergen, que precisa ser
-    deletado explicitamente ANTES do hard delete de Option abaixo (nenhuma
-    FK deste banco usa ondelete=CASCADE — sem isso, o replace completo de
-    um grupo com opção alergênica estoura IntegrityError)."""
+    allergen_ids é substituído por completo pra toda opção que sobrevive ou
+    é criada — mais simples que diffar allergen a allergen, e o volume por
+    opção é sempre pequeno."""
     if not options:
         raise HTTPException(400, detail="Grupo precisa de ao menos uma opção")
 
@@ -545,6 +563,24 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
         if dup_result.scalars().first() is not None:
             raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
 
+    # ORD-188 — mesmo padrão acima, replicado pro ean. Checksum primeiro
+    # (mais barato, sem ir ao banco) e só então a checagem de duplicidade.
+    for opt in options:
+        if opt.ean is not None and not _is_valid_gtin(opt.ean):
+            raise HTTPException(400, detail="código de barras inválido")
+
+    eans = [opt.ean for opt in options if opt.ean]
+    if len(eans) != len(set(eans)):
+        raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
+    if eans:
+        dup_ean_result = await db.execute(
+            select(Option.ean)
+            .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+            .filter(OptionGroup.company_id == company_id, Option.option_group_id != option_group_id, Option.ean.in_(eans))
+        )
+        if dup_ean_result.scalars().first() is not None:
+            raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
+
     all_allergen_ids = {aid for opt in options for aid in opt.allergen_ids}
     if all_allergen_ids:
         found_result = await db.execute(select(Allergen.id).filter(Allergen.id.in_(all_allergen_ids)))
@@ -553,22 +589,51 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
             raise HTTPException(400, detail="allergen_ids contém id que não existe")
 
     old_result = await db.execute(select(Option).filter_by(option_group_id=option_group_id))
-    old_options = old_result.scalars().all()
-    old_ids = [old.id for old in old_options]
-    for old in old_options:
-        if old.image_url: delete_object(old.image_url)
-        if old.thumbnail_url: delete_object(old.thumbnail_url)
-    if old_ids:
-        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(old_ids)))
-    await db.execute(delete(Option).where(Option.option_group_id == option_group_id))
+    old_options_by_id = {o.id: o for o in old_result.scalars().all()}
+
+    incoming_ids = {opt.id for opt in options if opt.id is not None}
+    invalid_ids = incoming_ids - set(old_options_by_id.keys())
+    if invalid_ids:
+        raise HTTPException(400, detail="id de opção não pertence a este grupo")
+
+    # opções existentes que não aparecem mais na lista enviada: removidas de
+    # verdade — só aqui a imagem é descartada, porque a opção deixou de existir
+    removed_ids = set(old_options_by_id.keys()) - incoming_ids
+    for removed_id in removed_ids:
+        removed = old_options_by_id[removed_id]
+        if removed.image_url: delete_object(removed.image_url)
+        if removed.thumbnail_url: delete_object(removed.thumbnail_url)
+    if removed_ids:
+        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(removed_ids)))
+        await db.execute(delete(Option).where(Option.id.in_(removed_ids)))
+
+    # allergen_ids é sempre substituído por completo pra toda opção que
+    # sobrevive (vai ser atualizada) ou é criada — nunca pras removidas
+    # acima, já deletadas junto com a opção.
+    if incoming_ids:
+        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(incoming_ids)))
 
     new_options = []
     for index, opt in enumerate(options):
-        option = Option(
-            option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index,
-            active=opt.active, description=opt.description, sku=opt.sku,
-        )
-        db.add(option)
+        if opt.id is not None:
+            option = old_options_by_id[opt.id]
+            option.label = opt.label
+            option.price_delta = opt.price_delta
+            option.sort_order = index
+            option.active = opt.active
+            option.description = opt.description
+            option.sku = opt.sku
+            option.ean = opt.ean
+            option.cfop = opt.cfop
+            option.cest = opt.cest
+            # image_url/thumbnail_url intocados — é exatamente isso que preserva a imagem
+        else:
+            option = Option(
+                option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index,
+                active=opt.active, description=opt.description, sku=opt.sku,
+                ean=opt.ean, cfop=opt.cfop, cest=opt.cest,
+            )
+            db.add(option)
         new_options.append((option, opt.allergen_ids))
     await db.flush()
     for option, allergen_ids in new_options:
@@ -855,6 +920,7 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "tags": p.tags,
         "calories": p.calories,
         "sku": p.sku,
+        "ean": p.ean,
         "sort_order": p.sort_order,
         "ncm": p.ncm,
         "ncm_descricao": (
@@ -875,6 +941,18 @@ async def _validate_ncm_exists(db: AsyncSession, ncm: str) -> None:
     exists = (await db.execute(select(NcmCode.codigo).filter_by(codigo=ncm))).scalars().first()
     if not exists:
         raise HTTPException(400, detail="ncm não encontrado na tabela de referência")
+
+def _is_valid_gtin(code: str) -> bool:
+    """Checksum padrão GTIN-8/12/13/14 (ORD-180) — peso alternado 3/1 a
+    partir do dígito imediatamente à esquerda do verificador, sempre
+    começando em 3 no índice 0 da leitura invertida, independente do
+    comprimento total (não depende da paridade de len(digits))."""
+    if not code.isdigit() or len(code) not in (8, 12, 13, 14):
+        return False
+    digits = [int(d) for d in code[:-1]]
+    check = int(code[-1])
+    total = sum(d * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(digits)))
+    return (10 - total % 10) % 10 == check
 
 # ── Promoções (ORD-166) ──────────────────────────────────────────────────────
 
@@ -1121,12 +1199,32 @@ class NcmListOut(BaseModel):
     results: list[NcmOut]
 
 class OptionIn(BaseModel):
+    # correção de bug (achado testando ORD-188): identifica uma opção já
+    # existente pra _set_option_group_options atualizar no lugar em vez de
+    # apagar+recriar — é isso que preserva a imagem. None = opção nova.
+    id: int | None = None
     label: str
     price_delta: float = 0  # acréscimo sobre o preço-base do produto, não preço absoluto — ver ORD-142
     active: bool = True  # ORD-145 — precisa vir no replace completo pra não reativar opção desativada
     description: str | None = None  # ORD-146
     sku: str | None = None  # ORD-146 — único por empresa, validado em _set_option_group_options
+    ean: str | None = None  # ORD-188
+    cfop: str | None = None  # ORD-188 — livre, sem forçar igualdade com o produto pai
+    cest: str | None = None  # ORD-188 — sem validador, paridade com Product.cest
     allergen_ids: list[int] = []  # ORD-146 — sempre lista completa (replace completo, não "não mexer")
+
+    @field_validator("cfop")
+    @classmethod
+    def cfop_valid(cls, v: str | None) -> str | None:
+        return _validate_cfop(v)  # reaproveita a função já usada em Product (ORD-169)
+
+    @field_validator("ean")
+    @classmethod
+    def _empty_ean_to_none(cls, v: str | None) -> str | None:
+        # mesmo racional do ProductIn (ORD-180): string vazia do formulário
+        # vira None aqui no schema, evitando colisão de "" contra "" na
+        # checagem de unicidade em aplicação (_set_option_group_options).
+        return v.strip() or None if v is not None else None
 
 class OptionOut(BaseModel):
     id: int
@@ -1137,6 +1235,9 @@ class OptionOut(BaseModel):
     sort_order: int | None = None
     active: bool = True
     description: str | None = None
+    ean: str | None = None  # ORD-188
+    cfop: str | None = None  # ORD-188
+    cest: str | None = None  # ORD-188
     sku: str | None = None
     allergens: list[AllergenOut] = []
 
@@ -1265,6 +1366,7 @@ class ProductOut(BaseModel):
     tags: list[str] | None = None
     calories: int | None = None
     sku: str | None = None
+    ean: str | None = None
     sort_order: int | None = None
     # ORD-169 — classificação fiscal, sempre opcional. ncm_descricao só existe
     # aqui na saída (join com ncm_codes) — o cliente nunca digita o NCM, só
@@ -1308,6 +1410,7 @@ class ProductIn(BaseModel):
     tags: list[str] | None = None
     calories: int | None = None
     sku: str | None = None
+    ean: str | None = None
     allergen_ids: list[int] | None = None
     # ORD-169 — classificação fiscal, sempre opcional no cadastro.
     ncm: str | None = None
@@ -1326,6 +1429,15 @@ class ProductIn(BaseModel):
     def cfop_valid(cls, v: str | None) -> str | None:
         return _validate_cfop(v)
 
+    @field_validator("ean")
+    @classmethod
+    def _empty_ean_to_none(cls, v: str | None) -> str | None:
+        # ORD-180 — string vazia (campo apagado no formulário) normalizada pra
+        # None já no schema, não só no frontend: ean tem UniqueConstraint
+        # (diferente de cest), então duas strings vazias colidiriam entre si
+        # se chegassem cruas no banco (NULL é ignorado pela constraint, "" não).
+        return v.strip() or None if v is not None else None
+
 class ProductUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -1336,6 +1448,7 @@ class ProductUpdate(BaseModel):
     tags: list[str] | None = None
     calories: int | None = None
     sku: str | None = None
+    ean: str | None = None
     allergen_ids: list[int] | None = None
     # ORD-160: replace completo, mesma semântica de allergen_ids. Só na
     # edição (Explorer não cobre cadastrar correlação já na criação).
@@ -1359,6 +1472,11 @@ class ProductUpdate(BaseModel):
     @classmethod
     def cfop_valid(cls, v: str | None) -> str | None:
         return _validate_cfop(v)
+
+    @field_validator("ean")
+    @classmethod
+    def _empty_ean_to_none(cls, v: str | None) -> str | None:
+        return v.strip() or None if v is not None else None
 
 class ReorderIn(BaseModel):
     category_id: int
@@ -1886,6 +2004,8 @@ async def create_product(
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
     if body.ncm is not None:
         await _validate_ncm_exists(db, body.ncm)
+    if body.ean is not None and not _is_valid_gtin(body.ean):
+        raise HTTPException(400, detail="código de barras inválido")
     next_sort_order = 0
     if body.category_id is not None:
         count_result = await db.execute(
@@ -1904,6 +2024,7 @@ async def create_product(
         tags=body.tags,
         calories=body.calories,
         sku=body.sku,
+        ean=body.ean,
         sort_order=next_sort_order,
         ncm=body.ncm,
         cfop=body.cfop,
@@ -1912,8 +2033,16 @@ async def create_product(
     db.add(p)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
+        # ORD-180 — substring "ean" (não o nome completo da constraint):
+        # SQLite (usado nos testes) formata IntegrityError sem o nome da
+        # constraint ("UNIQUE constraint failed: products.company_id,
+        # products.ean"), só MySQL/Aurora (produção) inclui
+        # "uq_products_company_ean" por extenso. "ean" aparece nos dois
+        # formatos; "sku" nunca aparece na mensagem de conflito de ean.
+        if "ean" in str(e.orig):
+            raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
         raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
     await db.refresh(p)
     if body.allergen_ids is not None:
@@ -1974,6 +2103,8 @@ async def update_product(
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
     if body.ncm is not None:
         await _validate_ncm_exists(db, body.ncm)
+    if body.ean is not None and not _is_valid_gtin(body.ean):
+        raise HTTPException(400, detail="código de barras inválido")
 
     affected_combos: list[tuple[int, str]] = []
     if body.active is False:
@@ -1985,11 +2116,27 @@ async def update_product(
         exclude_none=True, exclude={"allergen_ids", "related_product_ids", "confirm_deactivate_combos"}
     ).items():
         setattr(p, field, value)
+    # ORD-180 — achado durante a implementação: exclude_none=True acima descarta
+    # ean=None do loop, então limpar o campo (string vazia normalizada pro
+    # validator) nunca chegaria no produto. model_fields_set distingue "campo
+    # enviado como null" de "campo omitido" — mesma limitação pré-existe pra
+    # sku/cest, fora de escopo corrigir aqui, mas ean precisa funcionar pro
+    # critério de aceite já registrado na história.
+    if "ean" in body.model_fields_set and body.ean is None:
+        p.ean = None
     await _cascade_deactivate_combos(db, affected_combos)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
+        # ORD-180 — substring "ean" (não o nome completo da constraint):
+        # SQLite (usado nos testes) formata IntegrityError sem o nome da
+        # constraint ("UNIQUE constraint failed: products.company_id,
+        # products.ean"), só MySQL/Aurora (produção) inclui
+        # "uq_products_company_ean" por extenso. "ean" aparece nos dois
+        # formatos; "sku" nunca aparece na mensagem de conflito de ean.
+        if "ean" in str(e.orig):
+            raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
         raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
     if body.allergen_ids is not None:
         await _set_product_allergens(db, p.id, body.allergen_ids)
