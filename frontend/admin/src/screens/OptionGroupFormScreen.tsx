@@ -9,6 +9,7 @@ import {
   Dropdown,
   InputBase,
   Modal,
+  NumberInput,
   NumberSpinInput,
   RadioButton,
   RadioGroup,
@@ -27,7 +28,7 @@ import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { isValidGtin } from "../lib/validators";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN, minMaxToRadios, radiosToMinMax, type OptionGroupRadios } from "../lib/optionGroupMapping";
-import type { Allergen, OptionGroup } from "../types";
+import type { Allergen, OptionGroup, StockState } from "../types";
 import styles from "./OptionGroupFormScreen.module.scss";
 
 const IMAGE_MAX_SIZE_MB = 2;
@@ -68,6 +69,16 @@ interface OptionRow {
 const CFOP_OPTIONS: DropdownOptions[] = [
   { value: "5101", label: "5101 — Venda de produção do próprio estabelecimento" },
   { value: "5102", label: "5102 — Venda de mercadoria adquirida de terceiros" },
+];
+
+// ORD-181 — mesmo conjunto fechado já usado em ProductEditScreen, duplicado
+// aqui pelo mesmo motivo do CFOP_OPTIONS acima.
+const STOCK_UNIT_OPTIONS: DropdownOptions[] = [
+  { value: "un", label: "un" },
+  { value: "kg", label: "kg" },
+  { value: "g", label: "g" },
+  { value: "L", label: "L" },
+  { value: "ml", label: "ml" },
 ];
 
 let newRowSeq = 0;
@@ -227,6 +238,16 @@ export default function OptionGroupFormScreen() {
   const [draftCest, setDraftCest] = useState("");
   const [draftAllergenIds, setDraftAllergenIds] = useState<string[]>([]);
 
+  // ── Estoque (ORD-181, G2) — só existe pra opção já salva (tem id) ────────
+  const [stock, setStock] = useState<StockState | null>(null);
+  const [stockMovModalOpen, setStockMovModalOpen] = useState(false);
+  const [movTipo, setMovTipo] = useState<"entrada" | "ajuste">("entrada");
+  const [movUnidade, setMovUnidade] = useState<string | null>(null);
+  const [movQuantidade, setMovQuantidade] = useState<number | null>(null);
+  const [movMotivo, setMovMotivo] = useState("");
+  const [movSaving, setMovSaving] = useState(false);
+  const [movError, setMovError] = useState("");
+
   function openNewOptionModal() {
     setEditingRowKey(null);
     setDraftLabel("");
@@ -240,10 +261,11 @@ export default function OptionGroupFormScreen() {
     setDraftCfop(null);
     setDraftCest("");
     setDraftAllergenIds([]);
+    setStock(null);  // opção nova ainda não tem id — sem estoque possível
     setOptionModalOpen(true);
   }
 
-  function openEditOptionModal(row: OptionRow) {
+  async function openEditOptionModal(row: OptionRow) {
     setEditingRowKey(row.key);
     setDraftLabel(row.label);
     setDraftPrice(row.price_delta);
@@ -256,11 +278,61 @@ export default function OptionGroupFormScreen() {
     setDraftCfop(row.cfop);
     setDraftCest(row.cest ?? "");
     setDraftAllergenIds(row.allergen_ids);
+    setStock(null);
     setOptionModalOpen(true);
+    if (row.id !== null) {
+      try {
+        const r = await api.get(`/catalog/options/${row.id}/stock`, catalogParams());
+        setStock(r.data);
+      } catch {
+        // silencioso — seção de estoque simplesmente não aparece, usuário pode reabrir o modal
+      }
+    }
   }
 
   function closeOptionModal() {
     setOptionModalOpen(false);
+  }
+
+  function openStockMovModal() {
+    setMovTipo("entrada");
+    setMovUnidade(stock?.unidade ?? null);
+    setMovQuantidade(null);
+    setMovMotivo("");
+    setMovError("");
+    setStockMovModalOpen(true);
+  }
+
+  function closeStockMovModal() {
+    setStockMovModalOpen(false);
+  }
+
+  const canSaveStockMov =
+    movQuantidade !== null &&
+    (movTipo === "entrada" ? movQuantidade > 0 : movQuantidade !== 0) &&
+    (stock?.has_stock_item || movUnidade !== null) &&
+    (movTipo !== "ajuste" || movMotivo.trim().length > 0);
+
+  async function saveStockMovement() {
+    const optionId = rows.find((r) => r.key === editingRowKey)?.id;
+    if (optionId == null || !canSaveStockMov) return;
+    setMovSaving(true);
+    setMovError("");
+    try {
+      await api.post(`/catalog/options/${optionId}/stock/movements`, {
+        tipo: movTipo,
+        quantidade: movQuantidade,
+        unidade: stock?.has_stock_item ? undefined : movUnidade,
+        motivo: movMotivo.trim() || null,
+      }, catalogParams());
+      const r = await api.get(`/catalog/options/${optionId}/stock`, catalogParams());
+      setStock(r.data);
+      setStockMovModalOpen(false);
+    } catch (err) {
+      setMovError(parseApiError(err).message || "Erro ao registrar movimentação.");
+    } finally {
+      setMovSaving(false);
+    }
   }
 
   // Opção já existente (tem id): upload/remoção de imagem acontece na hora,
@@ -644,6 +716,47 @@ export default function OptionGroupFormScreen() {
                 onValueSelected={(opt) => setDraftCfop(opt.value)}
                 options={CFOP_OPTIONS}
               />
+
+              {/* ORD-181 (G2) — só existe pra opção já salva (precisa de id).
+                  Mesma posição relativa que ProductEditScreen usa: logo após
+                  a classificação fiscal. */}
+              {editingRowKey !== null && (
+                <>
+                  <Divider />
+                  <div className={styles.optionsHeader}>
+                    <div className={styles.formLabel}>Estoque</div>
+                    <Button type="button" size="small" variant="secondary" onClick={openStockMovModal}>
+                      {stock?.has_stock_item ? "Registrar movimentação" : "Registrar entrada"}
+                    </Button>
+                  </div>
+                  {!stock?.has_stock_item ? (
+                    <div className={styles.formHint}>Sem controle de estoque ainda.</div>
+                  ) : (
+                    <>
+                      <p className={styles.formHint}>
+                        <strong>{stock.quantidade_atual} {stock.unidade}</strong> em estoque
+                      </p>
+                      <div className={styles.tableScroll}>
+                        <Table
+                          columns={[
+                            { key: "criado_em", header: "Data", render: (m) => new Date(m.criado_em).toLocaleString("pt-BR") },
+                            { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
+                            {
+                              key: "quantidade", header: "Quantidade",
+                              render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stock.unidade}`,
+                            },
+                            { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
+                            { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
+                          ]}
+                          rows={stock.movements}
+                          rowKey={(m) => m.id}
+                          emptyMessage="Nenhuma movimentação ainda."
+                        />
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
             </div>
 
             <div className={styles.modalSectionSide}>
@@ -707,6 +820,51 @@ export default function OptionGroupFormScreen() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={stockMovModalOpen}
+        title="Registrar movimentação de estoque"
+        message=""
+        onConfirm={saveStockMovement}
+        onCancel={closeStockMovModal}
+        confirmLabel={movSaving ? "Salvando…" : "Salvar"}
+        confirmDisabled={!canSaveStockMov || movSaving}
+      >
+        <div className={styles.formRow}>
+          <div className={styles.formRowField}>
+            <Dropdown
+              label="Tipo"
+              value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
+              onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
+              options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
+            />
+          </div>
+          {!stock?.has_stock_item && (
+            <div className={styles.formRowField}>
+              <Dropdown
+                label="Unidade"
+                value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
+                onValueSelected={(opt) => setMovUnidade(opt.value)}
+                options={STOCK_UNIT_OPTIONS}
+              />
+            </div>
+          )}
+        </div>
+        <NumberInput
+          label="Quantidade"
+          value={movQuantidade ?? undefined}
+          onChange={(value: number) => setMovQuantidade(value)}
+          decimalScale={3}
+          allowNegative={movTipo === "ajuste"}
+        />
+        <InputBase
+          label="Motivo"
+          placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
+          value={movMotivo}
+          onChange={(e) => setMovMotivo(e.target.value)}
+        />
+        {movError && <Alert variant="error" text={movError} fullWidth />}
+      </ConfirmDialog>
     </div>
   );
 }

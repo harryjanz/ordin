@@ -1,7 +1,8 @@
 import io
 import secrets
 from datetime import datetime
-from typing import Optional
+from decimal import Decimal
+from typing import Literal, Optional
 
 from auth import TokenPayload, get_current_user
 from config import get_cors_origins, require_env
@@ -23,6 +24,7 @@ from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -163,6 +165,47 @@ class Product(Base):
     # persiste independente do CFOP atual (troca de CFOP não apaga o valor,
     # só esconde a exibição na UI) — mesma precisão de price.
     custo       = Column(Numeric(10, 2), nullable=True)
+
+STOCK_UNITS = ("un", "kg", "g", "L", "ml")  # mesmo racional já usado pra CFOP (linha 155):
+                                             # texto simples, validado na aplicação, sem tabela
+
+class StockItem(Base):
+    """ORD-181 (A2+G2) — dono polimórfico: product_id OU option_id, nunca os
+    dois (CheckConstraint XOR). company_id duplicado (evita JOIN em toda
+    consulta de isolamento) — pro caminho Option, resolvido uma única vez na
+    criação via join com OptionGroup (Option não tem company_id direto)."""
+    __tablename__ = "stock_items"
+    __table_args__ = (
+        UniqueConstraint("product_id", name="uq_stock_items_product"),
+        UniqueConstraint("option_id", name="uq_stock_items_option"),
+        # MySQL e SQLite tratam NULL como valor distinto em UNIQUE, então
+        # múltiplas linhas com option_id=NULL (donas product_id) não colidem
+        # entre si na uq_stock_items_option, e vice-versa.
+        CheckConstraint(
+            "(product_id IS NOT NULL AND option_id IS NULL) OR (product_id IS NULL AND option_id IS NOT NULL)",
+            name="ck_stock_items_owner_xor",
+        ),
+    )
+
+    id               = Column(Integer, primary_key=True)
+    company_id       = Column(Integer, nullable=False, index=True)
+    product_id       = Column(Integer, ForeignKey("products.id"), nullable=True)
+    option_id        = Column(Integer, ForeignKey("options.id"), nullable=True)
+    quantidade_atual = Column(Numeric(12, 3), nullable=False, default=0)
+    unidade          = Column(String(2), nullable=False)  # um de STOCK_UNITS
+    created_at       = Column(DateTime, default=datetime.utcnow)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+
+    id             = Column(Integer, primary_key=True)
+    stock_item_id  = Column(Integer, ForeignKey("stock_items.id"), nullable=False, index=True)
+    tipo           = Column(String(10), nullable=False)  # "entrada" | "ajuste"
+    quantidade     = Column(Numeric(12, 3), nullable=False)  # já com sinal aplicado
+    motivo         = Column(String(255), nullable=True)
+    criado_por     = Column(Integer, nullable=False)  # user_id do JWT
+    criado_em      = Column(DateTime, default=datetime.utcnow)
 
 class Allergen(Base):
     """Master data, não por empresa — lista oficial (RDC 727/2022, Lei
@@ -2257,6 +2300,194 @@ async def delete_product_image(
     p.thumbnail_url = None
     await db.commit(); await db.refresh(p)
     return await _serialize_product(db, p)
+
+# ── Estoque manual (ORD-181, A2+G2) ──────────────────────────────────────────
+
+class StockMovementIn(BaseModel):
+    tipo: Literal["entrada", "ajuste"]
+    quantidade: Decimal
+    unidade: str | None = None  # obrigatório só na primeira movimentação
+    motivo: str | None = None
+
+
+def _validate_stock_unit(unidade: str) -> None:
+    if unidade not in STOCK_UNITS:
+        raise HTTPException(400, detail=f"unidade inválida — use uma de {', '.join(STOCK_UNITS)}")
+
+
+async def _resolve_stock_owner(
+    db: AsyncSession, company_id: int, *, product_id: int | None = None, option_id: int | None = None,
+) -> None:
+    """Confirma que o dono (Product OU Option, nunca os dois — chamado sempre com exatamente um
+    dos dois kwargs) pertence à company_id do JWT. 404 se não existir ou for de outra empresa.
+
+    Option não tem company_id direto — mesmo padrão de _set_option_group_options: isolamento
+    passa por join com OptionGroup, não por filtro direto. Repetir esse join aqui é obrigatório,
+    não opcional — é o caminho de isolamento multi-tenant dedicado pro caminho de Option."""
+    if product_id is not None:
+        p = (await db.execute(
+            select(Product.id).filter_by(id=product_id, company_id=company_id, deleted=False)
+        )).scalars().first()
+        if not p:
+            raise HTTPException(404)
+    else:
+        o = (await db.execute(
+            select(Option.id)
+            .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+            .filter(Option.id == option_id, OptionGroup.company_id == company_id)
+        )).scalars().first()
+        if not o:
+            raise HTTPException(404)
+
+
+async def _get_stock_state(
+    db: AsyncSession, company_id: int, *, product_id: int | None = None, option_id: int | None = None,
+) -> dict:
+    await _resolve_stock_owner(db, company_id, product_id=product_id, option_id=option_id)
+    item = (await db.execute(
+        select(StockItem).filter_by(product_id=product_id, option_id=option_id)
+    )).scalars().first()
+    if not item:
+        return {"has_stock_item": False, "quantidade_atual": None, "unidade": None, "movements": []}
+
+    movements = (await db.execute(
+        select(StockMovement).filter_by(stock_item_id=item.id).order_by(StockMovement.criado_em.desc())
+    )).scalars().all()
+    return {
+        "has_stock_item": True,
+        "quantidade_atual": item.quantidade_atual,
+        "unidade": item.unidade,
+        "movements": [
+            {"id": m.id, "tipo": m.tipo, "quantidade": m.quantidade, "motivo": m.motivo,
+             "criado_por": m.criado_por, "criado_em": m.criado_em}
+            for m in movements
+        ],
+    }
+
+
+async def _create_stock_movement(
+    db: AsyncSession, company_id: int, body: "StockMovementIn", current_user: TokenPayload,
+    *, product_id: int | None = None, option_id: int | None = None,
+) -> dict:
+    await _resolve_stock_owner(db, company_id, product_id=product_id, option_id=option_id)
+    item = (await db.execute(
+        select(StockItem).filter_by(product_id=product_id, option_id=option_id)
+    )).scalars().first()
+
+    motivo = (body.motivo or "").strip() or None  # espaço em branco tratado como ausente
+    if body.tipo == "ajuste" and motivo is None:
+        raise HTTPException(400, detail="ajuste exige motivo")
+
+    if item is None:
+        # primeira movimentação — só entrada faz sentido (não existe saldo pra "ajustar" ainda).
+        # O valor inicial já entra certo no INSERT — nenhum UPDATE extra depois disso, senão
+        # dobra a quantidade (a linha acabou de nascer com quantidade_atual=delta).
+        if body.tipo != "entrada":
+            raise HTTPException(400, detail="primeira movimentação precisa ser uma entrada")
+        if body.unidade is None:
+            raise HTTPException(400, detail="unidade é obrigatória na primeira movimentação")
+        _validate_stock_unit(body.unidade)
+        if body.quantidade <= 0:
+            raise HTTPException(400, detail="entrada deve ser positiva")
+        delta = body.quantidade
+        item = StockItem(
+            company_id=company_id, product_id=product_id, option_id=option_id,
+            quantidade_atual=delta, unidade=body.unidade,
+        )
+        db.add(item)
+        await db.flush()  # garante item.id antes do StockMovement
+    else:
+        if body.unidade is not None and body.unidade != item.unidade:
+            raise HTTPException(400, detail=f"unidade já definida como {item.unidade}, não pode ser alterada")
+        if body.tipo == "entrada":
+            if body.quantidade <= 0:
+                raise HTTPException(400, detail="entrada deve ser positiva")
+            delta = body.quantidade
+            await db.execute(
+                update(StockItem).where(StockItem.id == item.id)
+                .values(quantidade_atual=StockItem.quantidade_atual + delta)
+            )
+        else:  # ajuste — pode ser positivo ou negativo, nunca deixa o saldo negativo
+            if body.quantidade == 0:
+                raise HTTPException(400, detail="ajuste não pode ser zero")
+            delta = body.quantidade
+            # UPDATE condicional atômico — sem SELECT FOR UPDATE (frequência de concorrência
+            # baixíssima, ação manual humana), mas seguro contra corrida: o WHERE só passa se o
+            # saldo final não ficar negativo
+            result = await db.execute(
+                update(StockItem)
+                .where(StockItem.id == item.id, StockItem.quantidade_atual + delta >= 0)
+                .values(quantidade_atual=StockItem.quantidade_atual + delta)
+            )
+            if result.rowcount == 0:
+                raise HTTPException(400, detail="ajuste resultaria em quantidade negativa")
+
+    movement = StockMovement(
+        stock_item_id=item.id, tipo=body.tipo, quantidade=delta,
+        motivo=motivo, criado_por=current_user.sub,
+    )
+    db.add(movement)
+    await db.commit()
+    await db.refresh(item)
+    return {"quantidade_atual": item.quantidade_atual, "unidade": item.unidade}
+
+
+@app.get(
+    "/catalog/products/{product_id}/stock",
+    tags=["Catálogo"],
+    summary="Consultar estoque e histórico de movimentações de um produto",
+    responses={404: {"description": "Produto não encontrado ou de outra empresa"}},
+)
+async def get_product_stock(
+    product_id: int, db: AsyncSession = Depends(get_db), company_id: int = Depends(resolve_company_id),
+):
+    return await _get_stock_state(db, company_id, product_id=product_id)
+
+
+@app.post(
+    "/catalog/products/{product_id}/stock/movements",
+    status_code=201,
+    tags=["Catálogo"],
+    summary="Registrar entrada ou ajuste manual de estoque de um produto",
+    responses={
+        400: {"description": "movimentação inválida (unidade, sinal, motivo ou saldo insuficiente)"},
+        404: {"description": "Produto não encontrado ou de outra empresa"},
+    },
+)
+async def create_product_stock_movement(
+    product_id: int, body: StockMovementIn, db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user), company_id: int = Depends(resolve_company_id_write),
+):
+    return await _create_stock_movement(db, company_id, body, current_user, product_id=product_id)
+
+
+@app.get(
+    "/catalog/options/{option_id}/stock",
+    tags=["Catálogo"],
+    summary="Consultar estoque e histórico de movimentações de uma opção",
+    responses={404: {"description": "Opção não encontrada ou de outra empresa"}},
+)
+async def get_option_stock(
+    option_id: int, db: AsyncSession = Depends(get_db), company_id: int = Depends(resolve_company_id),
+):
+    return await _get_stock_state(db, company_id, option_id=option_id)
+
+
+@app.post(
+    "/catalog/options/{option_id}/stock/movements",
+    status_code=201,
+    tags=["Catálogo"],
+    summary="Registrar entrada ou ajuste manual de estoque de uma opção",
+    responses={
+        400: {"description": "movimentação inválida (unidade, sinal, motivo ou saldo insuficiente)"},
+        404: {"description": "Opção não encontrada ou de outra empresa"},
+    },
+)
+async def create_option_stock_movement(
+    option_id: int, body: StockMovementIn, db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user), company_id: int = Depends(resolve_company_id_write),
+):
+    return await _create_stock_movement(db, company_id, body, current_user, option_id=option_id)
 
 # ── Grupos de opção (ORD-138) ────────────────────────────────────────────────
 
