@@ -216,6 +216,7 @@ export interface Product {
   tags: string[] | null;
   calories: number | null;
   sku: string | null;
+  ean: string | null;
   sort_order: number | null;
   // ORD-169 — classificação fiscal, sempre opcional.
   ncm: string | null;

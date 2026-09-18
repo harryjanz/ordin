@@ -28,6 +28,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
+import { isValidGtin } from "../lib/validators";
 import type { Allergen, Category, NcmSearchResult, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct } from "../types";
 import styles from "./ProductEditScreen.module.scss";
 
@@ -79,6 +80,7 @@ interface EditProdState {
   description_long: string;
   calories: number | null;
   sku: string;
+  ean: string;
   tags: string[];
   allergen_ids: string[];
   option_groups: ProductOptionGroup[];
@@ -166,6 +168,7 @@ export default function ProductEditScreen() {
           description_long: p.description_long ?? "",
           calories: p.calories,
           sku: p.sku ?? "",
+          ean: p.ean ?? "",
           tags: p.tags ?? [],
           allergen_ids: (p.allergens ?? []).map((a) => String(a.id)),
           option_groups: p.option_groups ?? [],
@@ -441,6 +444,7 @@ export default function ProductEditScreen() {
         description_long: editProd.description_long.trim() || null,
         calories: editProd.calories,
         sku: editProd.sku.trim() || null,
+        ean: editProd.ean.trim() || null,
         tags: editProd.tags,
         allergen_ids: editProd.allergen_ids.map(Number),
         related_product_ids: editProd.related_products.map((rp) => rp.id),
@@ -478,7 +482,7 @@ export default function ProductEditScreen() {
         <h1 className={styles.h1}>Editando produto</h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/catalog?tab=products")}>Voltar</Button>
-          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0} loading={productSaving}>
+          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (editProd.ean.trim() !== "" && !isValidGtin(editProd.ean))} loading={productSaving}>
             Salvar
           </Button>
         </div>
@@ -592,6 +596,22 @@ export default function ProductEditScreen() {
               value={editProd.sku}
               placeholder="Opcional, único por empresa"
               onChange={(e) => setEditProd({ ...editProd, sku: e.target.value })}
+            />
+          </div>
+        </div>
+
+        {/* ORD-180 — segunda formRow (não a mesma do SKU/Calorias, ver
+            decisão de escopo na história): EAN é o código de barras real do
+            produto, distinto do SKU (identificador interno de livre escolha).
+            Validação de checksum GTIN inline, antes mesmo de tentar salvar. */}
+        <div className={styles.formRow}>
+          <div className={styles.formRowField}>
+            <InputBase
+              label="EAN / código de barras"
+              value={editProd.ean}
+              placeholder="Opcional"
+              errorMessage={editProd.ean.trim() && !isValidGtin(editProd.ean) ? "código de barras inválido" : undefined}
+              onChange={(e) => setEditProd({ ...editProd, ean: e.target.value })}
             />
           </div>
         </div>

@@ -128,7 +128,10 @@ class NcmCode(Base):
 
 class Product(Base):
     __tablename__ = "products"
-    __table_args__ = (UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),)
+    __table_args__ = (
+        UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),
+        UniqueConstraint("company_id", "ean", name="uq_products_company_ean"),
+    )
     id          = Column(Integer, primary_key=True)
     company_id  = Column(Integer, nullable=False, index=True)
     category_id = Column(Integer, ForeignKey("categories.id"))
@@ -143,6 +146,10 @@ class Product(Base):
     tags        = Column(JSON)  # lista livre de strings, sem lista fechada (ver ORD-075)
     calories    = Column(Integer)  # kcal
     sku         = Column(String(50))  # único por empresa, ver UniqueConstraint acima
+    # ORD-180 — código de barras real (GTIN-8/12/13/14), distinto do sku
+    # (identificador interno de livre escolha). Base pro vínculo automático
+    # com XML de compra (épico de estoque/ERP, histórias B1/C1 futuras).
+    ean         = Column(String(14), nullable=True)
     sort_order  = Column(Integer)  # gerenciado só via create_product (inicial) e /catalog/products/reorder
     created_at  = Column(DateTime, default=datetime.utcnow)
     # ORD-169 — classificação fiscal, todos opcionais (produto vende sem,
@@ -812,6 +819,7 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "tags": p.tags,
         "calories": p.calories,
         "sku": p.sku,
+        "ean": p.ean,
         "sort_order": p.sort_order,
         "ncm": p.ncm,
         "ncm_descricao": (
@@ -832,6 +840,18 @@ async def _validate_ncm_exists(db: AsyncSession, ncm: str) -> None:
     exists = (await db.execute(select(NcmCode.codigo).filter_by(codigo=ncm))).scalars().first()
     if not exists:
         raise HTTPException(400, detail="ncm não encontrado na tabela de referência")
+
+def _is_valid_gtin(code: str) -> bool:
+    """Checksum padrão GTIN-8/12/13/14 (ORD-180) — peso alternado 3/1 a
+    partir do dígito imediatamente à esquerda do verificador, sempre
+    começando em 3 no índice 0 da leitura invertida, independente do
+    comprimento total (não depende da paridade de len(digits))."""
+    if not code.isdigit() or len(code) not in (8, 12, 13, 14):
+        return False
+    digits = [int(d) for d in code[:-1]]
+    check = int(code[-1])
+    total = sum(d * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(digits)))
+    return (10 - total % 10) % 10 == check
 
 # ── Promoções (ORD-166) ──────────────────────────────────────────────────────
 
@@ -1222,6 +1242,7 @@ class ProductOut(BaseModel):
     tags: list[str] | None = None
     calories: int | None = None
     sku: str | None = None
+    ean: str | None = None
     sort_order: int | None = None
     # ORD-169 — classificação fiscal, sempre opcional. ncm_descricao só existe
     # aqui na saída (join com ncm_codes) — o cliente nunca digita o NCM, só
@@ -1265,6 +1286,7 @@ class ProductIn(BaseModel):
     tags: list[str] | None = None
     calories: int | None = None
     sku: str | None = None
+    ean: str | None = None
     allergen_ids: list[int] | None = None
     # ORD-169 — classificação fiscal, sempre opcional no cadastro.
     ncm: str | None = None
@@ -1283,6 +1305,15 @@ class ProductIn(BaseModel):
     def cfop_valid(cls, v: str | None) -> str | None:
         return _validate_cfop(v)
 
+    @field_validator("ean")
+    @classmethod
+    def _empty_ean_to_none(cls, v: str | None) -> str | None:
+        # ORD-180 — string vazia (campo apagado no formulário) normalizada pra
+        # None já no schema, não só no frontend: ean tem UniqueConstraint
+        # (diferente de cest), então duas strings vazias colidiriam entre si
+        # se chegassem cruas no banco (NULL é ignorado pela constraint, "" não).
+        return v.strip() or None if v is not None else None
+
 class ProductUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -1293,6 +1324,7 @@ class ProductUpdate(BaseModel):
     tags: list[str] | None = None
     calories: int | None = None
     sku: str | None = None
+    ean: str | None = None
     allergen_ids: list[int] | None = None
     # ORD-160: replace completo, mesma semântica de allergen_ids. Só na
     # edição (Explorer não cobre cadastrar correlação já na criação).
@@ -1316,6 +1348,11 @@ class ProductUpdate(BaseModel):
     @classmethod
     def cfop_valid(cls, v: str | None) -> str | None:
         return _validate_cfop(v)
+
+    @field_validator("ean")
+    @classmethod
+    def _empty_ean_to_none(cls, v: str | None) -> str | None:
+        return v.strip() or None if v is not None else None
 
 class ReorderIn(BaseModel):
     category_id: int
@@ -1843,6 +1880,8 @@ async def create_product(
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
     if body.ncm is not None:
         await _validate_ncm_exists(db, body.ncm)
+    if body.ean is not None and not _is_valid_gtin(body.ean):
+        raise HTTPException(400, detail="código de barras inválido")
     next_sort_order = 0
     if body.category_id is not None:
         count_result = await db.execute(
@@ -1861,6 +1900,7 @@ async def create_product(
         tags=body.tags,
         calories=body.calories,
         sku=body.sku,
+        ean=body.ean,
         sort_order=next_sort_order,
         ncm=body.ncm,
         cfop=body.cfop,
@@ -1869,8 +1909,16 @@ async def create_product(
     db.add(p)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
+        # ORD-180 — substring "ean" (não o nome completo da constraint):
+        # SQLite (usado nos testes) formata IntegrityError sem o nome da
+        # constraint ("UNIQUE constraint failed: products.company_id,
+        # products.ean"), só MySQL/Aurora (produção) inclui
+        # "uq_products_company_ean" por extenso. "ean" aparece nos dois
+        # formatos; "sku" nunca aparece na mensagem de conflito de ean.
+        if "ean" in str(e.orig):
+            raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
         raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
     await db.refresh(p)
     if body.allergen_ids is not None:
@@ -1931,6 +1979,8 @@ async def update_product(
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
     if body.ncm is not None:
         await _validate_ncm_exists(db, body.ncm)
+    if body.ean is not None and not _is_valid_gtin(body.ean):
+        raise HTTPException(400, detail="código de barras inválido")
 
     affected_combos: list[tuple[int, str]] = []
     if body.active is False:
@@ -1942,11 +1992,27 @@ async def update_product(
         exclude_none=True, exclude={"allergen_ids", "related_product_ids", "confirm_deactivate_combos"}
     ).items():
         setattr(p, field, value)
+    # ORD-180 — achado durante a implementação: exclude_none=True acima descarta
+    # ean=None do loop, então limpar o campo (string vazia normalizada pro
+    # validator) nunca chegaria no produto. model_fields_set distingue "campo
+    # enviado como null" de "campo omitido" — mesma limitação pré-existe pra
+    # sku/cest, fora de escopo corrigir aqui, mas ean precisa funcionar pro
+    # critério de aceite já registrado na história.
+    if "ean" in body.model_fields_set and body.ean is None:
+        p.ean = None
     await _cascade_deactivate_combos(db, affected_combos)
     try:
         await db.commit()
-    except IntegrityError:
+    except IntegrityError as e:
         await db.rollback()
+        # ORD-180 — substring "ean" (não o nome completo da constraint):
+        # SQLite (usado nos testes) formata IntegrityError sem o nome da
+        # constraint ("UNIQUE constraint failed: products.company_id,
+        # products.ean"), só MySQL/Aurora (produção) inclui
+        # "uq_products_company_ean" por extenso. "ean" aparece nos dois
+        # formatos; "sku" nunca aparece na mensagem de conflito de ean.
+        if "ean" in str(e.orig):
+            raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
         raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
     if body.allergen_ids is not None:
         await _set_product_allergens(db, p.id, body.allergen_ids)
