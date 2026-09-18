@@ -33,6 +33,7 @@ from sqlalchemy import (
     String,
     Text,
     Time,
+    UniqueConstraint,
     and_,
     delete,
     func,
