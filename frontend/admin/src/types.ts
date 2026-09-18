@@ -202,6 +202,25 @@ export interface PromotionAnnotation {
   final_price: number;
 }
 
+// ORD-181 (A2+G2) — estoque manual, dono polimórfico (Product OU Option).
+// Mesmo shape pros dois: GET /catalog/products/{id}/stock e
+// GET /catalog/options/{id}/stock retornam exatamente isso.
+export interface StockMovement {
+  id: number;
+  tipo: "entrada" | "ajuste";
+  quantidade: number;
+  motivo: string | null;
+  criado_por: number;
+  criado_em: string;
+}
+
+export interface StockState {
+  has_stock_item: boolean;
+  quantidade_atual: number | null;
+  unidade: string | null;
+  movements: StockMovement[];
+}
+
 export interface Product {
   id: number;
   company_id: number;

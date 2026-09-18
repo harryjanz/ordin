@@ -25,10 +25,11 @@ import {
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
 import ConfirmDialog from "../components/ConfirmDialog";
+import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
-import type { Allergen, Category, NcmSearchResult, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct } from "../types";
+import type { Allergen, Category, NcmSearchResult, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct, StockState } from "../types";
 import styles from "./ProductEditScreen.module.scss";
 
 const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
@@ -40,6 +41,16 @@ const IMAGE_TYPES = ["image/jpeg", "image/png"];
 const CFOP_OPTIONS: DropdownOptions[] = [
   { value: "5101", label: "5101 — Venda de produção do próprio estabelecimento" },
   { value: "5102", label: "5102 — Venda de mercadoria adquirida de terceiros" },
+];
+
+// ORD-181 — conjunto fixo (STOCK_UNITS no backend), evita dívida de dado tipo
+// "kg"/"Kg"/"quilo" que a A5 (conversão de verdade) teria que normalizar depois.
+const STOCK_UNIT_OPTIONS: DropdownOptions[] = [
+  { value: "un", label: "un" },
+  { value: "kg", label: "kg" },
+  { value: "g", label: "g" },
+  { value: "L", label: "L" },
+  { value: "ml", label: "ml" },
 ];
 
 // A descrição sincronizada da Receita Federal vem com traços de hierarquia
@@ -121,6 +132,16 @@ export default function ProductEditScreen() {
   const [ncmResults, setNcmResults] = useState<NcmSearchResult[]>([]);
   const ncmSearchTimer = useRef<ReturnType<typeof setTimeout>>();
 
+  // ── Estoque (ORD-181, A2+G2) ──────────────────────────────────────────────
+  const [stock, setStock] = useState<StockState | null>(null);
+  const [stockMovModalOpen, setStockMovModalOpen] = useState(false);
+  const [movTipo, setMovTipo] = useState<"entrada" | "ajuste">("entrada");
+  const [movUnidade, setMovUnidade] = useState<string | null>(null);
+  const [movQuantidade, setMovQuantidade] = useState<number | null>(null);
+  const [movMotivo, setMovMotivo] = useState("");
+  const [movSaving, setMovSaving] = useState(false);
+  const [movError, setMovError] = useState("");
+
   // ── Opções do produto (ORD-140) ──────────────────────────────────────────
   // Só vincula grupo já cadastrado — criação fica em Catálogo > Opções
   // (ORD-139), sem duplicar formulário aqui (decisão pós-implementação,
@@ -146,14 +167,16 @@ export default function ProductEditScreen() {
       setLoading(true);
       setLoadError(null);
       try {
-        const [productRes, categoriesRes, allergensRes, menusRes, productsRes] = await Promise.all([
+        const [productRes, categoriesRes, allergensRes, menusRes, productsRes, stockRes] = await Promise.all([
           api.get(`/catalog/products/${productId}`, catalogParams()),
           api.get("/catalog/categories", catalogParams({ include_inactive: true })),
           api.get("/catalog/allergens"),
           api.get(`/catalog/products/${productId}/menus`, catalogParams()).catch(() => ({ data: { menus: [] } })),
           api.get("/catalog/products", catalogParams()),
+          api.get(`/catalog/products/${productId}/stock`, catalogParams()),
         ]);
         if (cancelled) return;
+        setStock(stockRes.data);
         const p: Product = productRes.data;
         setEditProd({
           id: p.id,
@@ -259,6 +282,47 @@ export default function ProductEditScreen() {
     setEditProd((prev) => (prev ? { ...prev, ncm: null } : prev));
     setNcmQuery("");
     setNcmResults([]);
+  }
+
+  // ── Estoque (ORD-181, A2+G2) ──────────────────────────────────────────────
+  function openStockMovModal() {
+    setMovTipo("entrada");
+    setMovUnidade(stock?.unidade ?? null);
+    setMovQuantidade(null);
+    setMovMotivo("");
+    setMovError("");
+    setStockMovModalOpen(true);
+  }
+
+  function closeStockMovModal() {
+    setStockMovModalOpen(false);
+  }
+
+  const canSaveStockMov =
+    movQuantidade !== null &&
+    (movTipo === "entrada" ? movQuantidade > 0 : movQuantidade !== 0) &&
+    (stock?.has_stock_item || movUnidade !== null) &&
+    (movTipo !== "ajuste" || movMotivo.trim().length > 0);
+
+  async function saveStockMovement() {
+    if (!editProd || !canSaveStockMov) return;
+    setMovSaving(true);
+    setMovError("");
+    try {
+      await api.post(`/catalog/products/${editProd.id}/stock/movements`, {
+        tipo: movTipo,
+        quantidade: movQuantidade,
+        unidade: stock?.has_stock_item ? undefined : movUnidade,
+        motivo: movMotivo.trim() || null,
+      }, catalogParams());
+      const r = await api.get(`/catalog/products/${editProd.id}/stock`, catalogParams());
+      setStock(r.data);
+      setStockMovModalOpen(false);
+    } catch (err) {
+      setMovError(parseApiError(err).message || "Erro ao registrar movimentação.");
+    } finally {
+      setMovSaving(false);
+    }
   }
 
   function resetOptionModal() {
@@ -679,6 +743,87 @@ export default function ProductEditScreen() {
           </div>
         </div>
       </div>
+
+      <div className={styles.panel}>
+        <div className={styles.optionsHeader}>
+          <h2 className={styles.h2}>Estoque</h2>
+          <Button type="button" size="small" onClick={openStockMovModal}>
+            {stock?.has_stock_item ? "Registrar movimentação" : "Registrar entrada"}
+          </Button>
+        </div>
+
+        {!stock?.has_stock_item ? (
+          <div className={styles.menusInfo}>Sem controle de estoque ainda.</div>
+        ) : (
+          <>
+            <p className={styles.menusInfo}>
+              <strong>{stock.quantidade_atual} {stock.unidade}</strong> em estoque
+            </p>
+            <div className={styles.tableScroll}>
+              <Table
+                columns={[
+                  { key: "criado_em", header: "Data", render: (m) => new Date(m.criado_em).toLocaleString("pt-BR") },
+                  { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
+                  {
+                    key: "quantidade", header: "Quantidade",
+                    render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stock.unidade}`,
+                  },
+                  { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
+                  { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
+                ]}
+                rows={stock.movements}
+                rowKey={(m) => m.id}
+                emptyMessage="Nenhuma movimentação ainda."
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={stockMovModalOpen}
+        title="Registrar movimentação de estoque"
+        message=""
+        onConfirm={saveStockMovement}
+        onCancel={closeStockMovModal}
+        confirmLabel={movSaving ? "Salvando…" : "Salvar"}
+        confirmDisabled={!canSaveStockMov || movSaving}
+      >
+        <div className={styles.formRow}>
+          <div className={styles.formRowField}>
+            <Dropdown
+              label="Tipo"
+              value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
+              onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
+              options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
+            />
+          </div>
+          {!stock?.has_stock_item && (
+            <div className={styles.formRowField}>
+              <Dropdown
+                label="Unidade"
+                value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
+                onValueSelected={(opt) => setMovUnidade(opt.value)}
+                options={STOCK_UNIT_OPTIONS}
+              />
+            </div>
+          )}
+        </div>
+        <NumberInput
+          label="Quantidade"
+          value={movQuantidade ?? undefined}
+          onChange={(value: number) => setMovQuantidade(value)}
+          decimalScale={3}
+          allowNegative={movTipo === "ajuste"}
+        />
+        <InputBase
+          label="Motivo"
+          placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
+          value={movMotivo}
+          onChange={(e) => setMovMotivo(e.target.value)}
+        />
+        {movError && <Alert variant="error" text={movError} fullWidth />}
+      </ConfirmDialog>
 
       <div className={styles.panel}>
         <div className={styles.optionsHeader}>
