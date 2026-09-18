@@ -268,6 +268,9 @@ export interface OptionGroupOption {
   // opção que representa uma variante física própria (sabor, bebida).
   description: string | null;
   sku: string | null;
+  ean: string | null; // ORD-188
+  cfop: string | null; // ORD-188 — livre em relação ao CFOP do produto pai
+  cest: string | null; // ORD-188
   allergens: Allergen[];
 }
 

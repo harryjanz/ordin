@@ -221,6 +221,9 @@ class Option(Base):
     active          = Column(Boolean, nullable=False, default=True)  # ORD-145 — indisponibilidade temporária (estoque/produção), sem excluir a opção
     description     = Column(String(500))  # ORD-146 — mesmo tamanho de Product.description
     sku             = Column(String(50))  # ORD-146 — único por empresa, validado em aplicação (ver _set_option_group_options; Option não tem company_id direto pra um UniqueConstraint de banco)
+    ean             = Column(String(14), nullable=True)   # ORD-188 — mesmo tipo de Product.ean
+    cfop            = Column(String(4), nullable=True)    # ORD-188 — mesmo tipo de Product.cfop, livre em relação ao CFOP do produto pai
+    cest            = Column(String(7), nullable=True)    # ORD-188 — mesmo tipo de Product.cest, sem validação (paridade)
 
 class ProductOptionGroup(Base):
     """min/max_selections_override (ORD-144): permitem que o MESMO grupo
@@ -458,6 +461,9 @@ async def _get_option_group_options(db: AsyncSession, option_group_id: int) -> l
             "active": o.active,
             "description": o.description,
             "sku": o.sku,
+            "ean": o.ean,
+            "cfop": o.cfop,
+            "cest": o.cest,
             "allergens": await _get_option_allergens(db, o.id),
         }
         for o in result.scalars().all()
@@ -509,6 +515,24 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
         if dup_result.scalars().first() is not None:
             raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
 
+    # ORD-188 — mesmo padrão acima, replicado pro ean. Checksum primeiro
+    # (mais barato, sem ir ao banco) e só então a checagem de duplicidade.
+    for opt in options:
+        if opt.ean is not None and not _is_valid_gtin(opt.ean):
+            raise HTTPException(400, detail="código de barras inválido")
+
+    eans = [opt.ean for opt in options if opt.ean]
+    if len(eans) != len(set(eans)):
+        raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
+    if eans:
+        dup_ean_result = await db.execute(
+            select(Option.ean)
+            .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+            .filter(OptionGroup.company_id == company_id, Option.option_group_id != option_group_id, Option.ean.in_(eans))
+        )
+        if dup_ean_result.scalars().first() is not None:
+            raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
+
     all_allergen_ids = {aid for opt in options for aid in opt.allergen_ids}
     if all_allergen_ids:
         found_result = await db.execute(select(Allergen.id).filter(Allergen.id.in_(all_allergen_ids)))
@@ -531,6 +555,7 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
         option = Option(
             option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index,
             active=opt.active, description=opt.description, sku=opt.sku,
+            ean=opt.ean, cfop=opt.cfop, cest=opt.cest,
         )
         db.add(option)
         new_options.append((option, opt.allergen_ids))
@@ -1103,7 +1128,23 @@ class OptionIn(BaseModel):
     active: bool = True  # ORD-145 — precisa vir no replace completo pra não reativar opção desativada
     description: str | None = None  # ORD-146
     sku: str | None = None  # ORD-146 — único por empresa, validado em _set_option_group_options
+    ean: str | None = None  # ORD-188
+    cfop: str | None = None  # ORD-188 — livre, sem forçar igualdade com o produto pai
+    cest: str | None = None  # ORD-188 — sem validador, paridade com Product.cest
     allergen_ids: list[int] = []  # ORD-146 — sempre lista completa (replace completo, não "não mexer")
+
+    @field_validator("cfop")
+    @classmethod
+    def cfop_valid(cls, v: str | None) -> str | None:
+        return _validate_cfop(v)  # reaproveita a função já usada em Product (ORD-169)
+
+    @field_validator("ean")
+    @classmethod
+    def _empty_ean_to_none(cls, v: str | None) -> str | None:
+        # mesmo racional do ProductIn (ORD-180): string vazia do formulário
+        # vira None aqui no schema, evitando colisão de "" contra "" na
+        # checagem de unicidade em aplicação (_set_option_group_options).
+        return v.strip() or None if v is not None else None
 
 class OptionOut(BaseModel):
     id: int
@@ -1114,6 +1155,9 @@ class OptionOut(BaseModel):
     sort_order: int | None = None
     active: bool = True
     description: str | None = None
+    ean: str | None = None  # ORD-188
+    cfop: str | None = None  # ORD-188
+    cest: str | None = None  # ORD-188
     sku: str | None = None
     allergens: list[AllergenOut] = []
 

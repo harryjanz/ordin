@@ -6,6 +6,7 @@ import {
   CheckboxMultiselect,
   CurrencyInput,
   Divider,
+  Dropdown,
   InputBase,
   Modal,
   NumberSpinInput,
@@ -15,6 +16,7 @@ import {
   TextArea,
   Upload,
   makeToast,
+  type DropdownOptions,
   type UploadFile,
 } from "design-system";
 import api from "../api";
@@ -23,6 +25,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
+import { isValidGtin } from "../lib/validators";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN, minMaxToRadios, radiosToMinMax, type OptionGroupRadios } from "../lib/optionGroupMapping";
 import type { Allergen, OptionGroup } from "../types";
 import styles from "./OptionGroupFormScreen.module.scss";
@@ -51,8 +54,21 @@ interface OptionRow {
   // ProductEditScreen (initialSelection/onSelectOption trabalham com string).
   description: string | null;
   sku: string | null;
+  // ORD-188 — opção que representa um produto real (ex.: cada sabor de um
+  // refrigerante) ganha identidade fiscal própria, mesmos campos de Product.
+  ean: string | null;
+  cfop: string | null;
+  cest: string | null;
   allergen_ids: string[];
 }
+
+// ORD-188 — mesmo conjunto fechado já usado em ProductEditScreen (ORD-169),
+// duplicado aqui de propósito: não há consumidor comum hoje que justifique
+// extrair um módulo compartilhado só por isso.
+const CFOP_OPTIONS: DropdownOptions[] = [
+  { value: "5101", label: "5101 — Venda de produção do próprio estabelecimento" },
+  { value: "5102", label: "5102 — Venda de mercadoria adquirida de terceiros" },
+];
 
 let newRowSeq = 0;
 
@@ -77,7 +93,9 @@ export default function OptionGroupFormScreen() {
   const [rows, setRows] = useState<OptionRow[]>([]);
   const [originalRows, setOriginalRows] = useState<{
     id: number; label: string; price_delta: number; image_url: string | null;
-    description: string | null; sku: string | null; allergen_ids: string[];
+    description: string | null; sku: string | null;
+    ean: string | null; cfop: string | null; cest: string | null;
+    allergen_ids: string[];
   }[]>([]);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -117,11 +135,14 @@ export default function OptionGroupFormScreen() {
           key: `existing-${o.id}`, id: o.id, label: o.label, price_delta: o.price_delta,
           image_url: o.image_url, thumbnail_url: o.thumbnail_url, pendingFile: null, pendingPreviewUrl: null,
           active: o.active, description: o.description, sku: o.sku,
+          ean: o.ean, cfop: o.cfop, cest: o.cest,
           allergen_ids: o.allergens.map((a) => String(a.id)),
         })));
         setOriginalRows(g.options.map((o) => ({
           id: o.id, label: o.label, price_delta: o.price_delta, image_url: o.image_url,
-          description: o.description, sku: o.sku, allergen_ids: o.allergens.map((a) => String(a.id)),
+          description: o.description, sku: o.sku,
+          ean: o.ean, cfop: o.cfop, cest: o.cest,
+          allergen_ids: o.allergens.map((a) => String(a.id)),
         })));
       } catch {
         if (!cancelled) setLoadError("Erro ao carregar grupo de opção.");
@@ -201,6 +222,9 @@ export default function OptionGroupFormScreen() {
   const [draftUploading, setDraftUploading] = useState(false);
   const [draftDescription, setDraftDescription] = useState("");
   const [draftSku, setDraftSku] = useState("");
+  const [draftEan, setDraftEan] = useState("");
+  const [draftCfop, setDraftCfop] = useState<string | null>(null);
+  const [draftCest, setDraftCest] = useState("");
   const [draftAllergenIds, setDraftAllergenIds] = useState<string[]>([]);
 
   function openNewOptionModal() {
@@ -212,6 +236,9 @@ export default function OptionGroupFormScreen() {
     setDraftPendingPreviewUrl(null);
     setDraftDescription("");
     setDraftSku("");
+    setDraftEan("");
+    setDraftCfop(null);
+    setDraftCest("");
     setDraftAllergenIds([]);
     setOptionModalOpen(true);
   }
@@ -225,6 +252,9 @@ export default function OptionGroupFormScreen() {
     setDraftPendingPreviewUrl(row.pendingPreviewUrl);
     setDraftDescription(row.description ?? "");
     setDraftSku(row.sku ?? "");
+    setDraftEan(row.ean ?? "");
+    setDraftCfop(row.cfop);
+    setDraftCest(row.cest ?? "");
     setDraftAllergenIds(row.allergen_ids);
     setOptionModalOpen(true);
   }
@@ -288,12 +318,14 @@ export default function OptionGroupFormScreen() {
 
   function saveOptionModal() {
     if (!draftLabel.trim()) return;
+    if (draftEan.trim() !== "" && !isValidGtin(draftEan)) return;
     if (editingRowKey === null) {
       const key = `new-${++newRowSeq}`;
       setRows((prev) => [...prev, {
         key, id: null, label: draftLabel.trim(), price_delta: draftPrice ?? 0,
         image_url: null, thumbnail_url: null, pendingFile: draftPendingFile, pendingPreviewUrl: draftPendingPreviewUrl,
         active: true, description: draftDescription.trim() || null, sku: draftSku.trim() || null,
+        ean: draftEan.trim() || null, cfop: draftCfop, cest: draftCest.trim() || null,
         allergen_ids: draftAllergenIds,
       }]);
     } else {
@@ -301,6 +333,7 @@ export default function OptionGroupFormScreen() {
         label: draftLabel.trim(), price_delta: draftPrice ?? 0,
         pendingFile: draftPendingFile, pendingPreviewUrl: draftPendingPreviewUrl,
         description: draftDescription.trim() || null, sku: draftSku.trim() || null,
+        ean: draftEan.trim() || null, cfop: draftCfop, cest: draftCest.trim() || null,
         allergen_ids: draftAllergenIds,
       });
     }
@@ -320,6 +353,9 @@ export default function OptionGroupFormScreen() {
       if (orig.label !== r.label || orig.price_delta !== (r.price_delta ?? 0)) return true;
       if ((orig.description ?? "") !== (r.description ?? "")) return true;
       if ((orig.sku ?? "") !== (r.sku ?? "")) return true;
+      if ((orig.ean ?? "") !== (r.ean ?? "")) return true;
+      if ((orig.cfop ?? "") !== (r.cfop ?? "")) return true;
+      if ((orig.cest ?? "") !== (r.cest ?? "")) return true;
       const origAllergens = [...orig.allergen_ids].sort().join(",");
       const rowAllergens = [...r.allergen_ids].sort().join(",");
       return origAllergens !== rowAllergens;
@@ -328,7 +364,7 @@ export default function OptionGroupFormScreen() {
   const hasImageAtRisk = contentChanged && originalRows.some((r) => r.image_url);
 
   const canSave = !saving && name.trim().length > 0 && rows.length > 0;
-  const canSaveOption = draftLabel.trim().length > 0;
+  const canSaveOption = draftLabel.trim().length > 0 && (draftEan.trim() === "" || isValidGtin(draftEan));
 
   async function save() {
     if (!canSave) return;
@@ -338,7 +374,9 @@ export default function OptionGroupFormScreen() {
       const { min_selections, max_selections } = advancedMinMax ?? radiosToMinMax(radios, rows.length, maxSelections);
       const optionsPayload = rows.map((r) => ({
         label: r.label.trim(), price_delta: r.price_delta ?? 0, active: r.active,
-        description: r.description, sku: r.sku, allergen_ids: r.allergen_ids.map(Number),
+        description: r.description, sku: r.sku,
+        ean: r.ean, cfop: r.cfop, cest: r.cest,
+        allergen_ids: r.allergen_ids.map(Number),
       }));
 
       let groupId = editingGroupId;
@@ -564,6 +602,35 @@ export default function OptionGroupFormScreen() {
                 value={draftSku}
                 placeholder="Opcional, único por empresa"
                 onChange={(e) => setDraftSku(e.target.value)}
+              />
+
+              {/* ORD-188 — opção que representa um produto real (ex.: cada sabor de
+                  um refrigerante) ganha identidade fiscal própria, mesma posição
+                  relativa que Product já usa (logo após SKU). */}
+              <div className={styles.formRow}>
+                <div className={styles.formRowField}>
+                  <InputBase
+                    label="EAN / código de barras"
+                    value={draftEan}
+                    placeholder="Opcional"
+                    errorMessage={draftEan.trim() && !isValidGtin(draftEan) ? "código de barras inválido" : undefined}
+                    onChange={(e) => setDraftEan(e.target.value)}
+                  />
+                </div>
+                <div className={styles.formRowField}>
+                  <Dropdown
+                    label="CFOP"
+                    value={CFOP_OPTIONS.find((o) => o.value === draftCfop) ?? null}
+                    onValueSelected={(opt) => setDraftCfop(opt.value)}
+                    options={CFOP_OPTIONS}
+                  />
+                </div>
+              </div>
+              <InputBase
+                label="CEST"
+                value={draftCest}
+                placeholder="Opcional"
+                onChange={(e) => setDraftCest(e.target.value)}
               />
             </div>
 
