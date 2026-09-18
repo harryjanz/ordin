@@ -390,7 +390,11 @@ export default function ProductEditScreen() {
   async function persistOptionGroupIds(ids: number[]) {
     if (!editProd) return null;
     const r = await api.put(`/catalog/products/${editProd.id}/option-groups`, { option_group_ids: ids }, catalogParams());
-    setEditProd((prev) => (prev ? { ...prev, option_groups: r.data.option_groups } : prev));
+    // G4 (ORD-189): vincular/desvincular grupo pode virar o estado guarda-chuva
+    // (a única opção com ean/cfop pode estar indo embora, ou chegando agora) —
+    // sem reler is_umbrella aqui, o campo EAN/seção Estoque ficava com o
+    // estado antigo até a Empresa sair e voltar pra tela (achado do usuário).
+    setEditProd((prev) => (prev ? { ...prev, option_groups: r.data.option_groups, is_umbrella: r.data.is_umbrella } : prev));
     return r.data;
   }
 
