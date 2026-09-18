@@ -29,6 +29,7 @@ import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
+import { STOCK_UNIT_OPTIONS, stockUnitLabel } from "../lib/stockUnits";
 import { isValidGtin } from "../lib/validators";
 import type { Allergen, Category, NcmSearchResult, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct, StockState } from "../types";
 import styles from "./ProductEditScreen.module.scss";
@@ -54,16 +55,6 @@ function calcularMargem(price: number, custo: number | null): { valor: number; p
   const percentual = price > 0 ? Math.round((valor / price) * 100) : 0;
   return { valor, percentual };
 }
-
-// ORD-181 — conjunto fixo (STOCK_UNITS no backend), evita dívida de dado tipo
-// "kg"/"Kg"/"quilo" que a A5 (conversão de verdade) teria que normalizar depois.
-const STOCK_UNIT_OPTIONS: DropdownOptions[] = [
-  { value: "un", label: "un" },
-  { value: "kg", label: "kg" },
-  { value: "g", label: "g" },
-  { value: "L", label: "L" },
-  { value: "ml", label: "ml" },
-];
 
 // A descrição sincronizada da Receita Federal vem com traços de hierarquia
 // (ex. "-- Outros" é subitem de nível 2) — sem remover, o rótulo duplicava o
@@ -819,7 +810,7 @@ export default function ProductEditScreen() {
         ) : (
           <>
             <p className={styles.menusInfo}>
-              <strong>{stock.quantidade_atual} {stock.unidade}</strong> em estoque
+              <strong>{stock.quantidade_atual} {stockUnitLabel(stock.unidade)}</strong> em estoque
             </p>
             <div className={styles.tableScroll}>
               <Table
@@ -828,7 +819,7 @@ export default function ProductEditScreen() {
                   { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
                   {
                     key: "quantidade", header: "Quantidade",
-                    render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stock.unidade}`,
+                    render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`,
                   },
                   { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
                   { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
@@ -850,41 +841,44 @@ export default function ProductEditScreen() {
         onCancel={closeStockMovModal}
         confirmLabel={movSaving ? "Salvando…" : "Salvar"}
         confirmDisabled={!canSaveStockMov || movSaving}
+        width={480}
       >
-        <div className={styles.formRow}>
-          <div className={styles.formRowField}>
-            <Dropdown
-              label="Tipo"
-              value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
-              onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
-              options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
-            />
-          </div>
-          {!stock?.has_stock_item && (
+        <div className={styles.modalForm}>
+          <div className={styles.formRow}>
             <div className={styles.formRowField}>
               <Dropdown
-                label="Unidade"
-                value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
-                onValueSelected={(opt) => setMovUnidade(opt.value)}
-                options={STOCK_UNIT_OPTIONS}
+                label="Tipo"
+                value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
+                onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
+                options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
               />
             </div>
-          )}
+            {!stock?.has_stock_item && (
+              <div className={styles.formRowField}>
+                <Dropdown
+                  label="Unidade"
+                  value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
+                  onValueSelected={(opt) => setMovUnidade(opt.value)}
+                  options={STOCK_UNIT_OPTIONS}
+                />
+              </div>
+            )}
+          </div>
+          <NumberInput
+            label="Quantidade"
+            value={movQuantidade ?? undefined}
+            onChange={(value: number) => setMovQuantidade(value)}
+            decimalScale={3}
+            allowNegative={movTipo === "ajuste"}
+          />
+          <InputBase
+            label="Motivo"
+            placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
+            value={movMotivo}
+            onChange={(e) => setMovMotivo(e.target.value)}
+          />
+          {movError && <Alert variant="error" text={movError} fullWidth />}
         </div>
-        <NumberInput
-          label="Quantidade"
-          value={movQuantidade ?? undefined}
-          onChange={(value: number) => setMovQuantidade(value)}
-          decimalScale={3}
-          allowNegative={movTipo === "ajuste"}
-        />
-        <InputBase
-          label="Motivo"
-          placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
-          value={movMotivo}
-          onChange={(e) => setMovMotivo(e.target.value)}
-        />
-        {movError && <Alert variant="error" text={movError} fullWidth />}
       </ConfirmDialog>
 
       <div className={styles.panel}>
