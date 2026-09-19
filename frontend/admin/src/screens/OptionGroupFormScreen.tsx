@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Button,
+  Checkbox,
   CheckboxMultiselect,
   CurrencyInput,
   Divider,
@@ -61,6 +62,11 @@ interface OptionRow {
   ean: string | null;
   cfop: string | null;
   cest: string | null;
+  // ORD-190 (G3) — mesmos campos de Product (A3/A5), configuráveis mesmo
+  // antes de existir stock_item pra esta opção.
+  estoque_minimo: number;
+  unidade_compra: string | null;
+  fator_conversao: number | null;
   allergen_ids: string[];
 }
 
@@ -98,6 +104,7 @@ export default function OptionGroupFormScreen() {
     id: number; label: string; price_delta: number; image_url: string | null;
     description: string | null; sku: string | null;
     ean: string | null; cfop: string | null; cest: string | null;
+    estoque_minimo: number; unidade_compra: string | null; fator_conversao: number | null;
     allergen_ids: string[];
   }[]>([]);
   const [formError, setFormError] = useState("");
@@ -158,12 +165,14 @@ export default function OptionGroupFormScreen() {
           image_url: o.image_url, thumbnail_url: o.thumbnail_url, pendingFile: null, pendingPreviewUrl: null,
           active: o.active, description: o.description, sku: o.sku,
           ean: o.ean, cfop: o.cfop, cest: o.cest,
+          estoque_minimo: o.estoque_minimo, unidade_compra: o.unidade_compra, fator_conversao: o.fator_conversao,
           allergen_ids: o.allergens.map((a) => String(a.id)),
         })));
         setOriginalRows(g.options.map((o) => ({
           id: o.id, label: o.label, price_delta: o.price_delta, image_url: o.image_url,
           description: o.description, sku: o.sku,
           ean: o.ean, cfop: o.cfop, cest: o.cest,
+          estoque_minimo: o.estoque_minimo, unidade_compra: o.unidade_compra, fator_conversao: o.fator_conversao,
           allergen_ids: o.allergens.map((a) => String(a.id)),
         })));
       } catch {
@@ -248,6 +257,10 @@ export default function OptionGroupFormScreen() {
   const [draftCfop, setDraftCfop] = useState<string | null>(null);
   const [draftCest, setDraftCest] = useState("");
   const [draftAllergenIds, setDraftAllergenIds] = useState<string[]>([]);
+  // ORD-190 (G3) — mesmos campos de Product (A3/A5).
+  const [draftEstoqueMinimo, setDraftEstoqueMinimo] = useState<number | null>(0);
+  const [draftUnidadeCompra, setDraftUnidadeCompra] = useState("");
+  const [draftFatorConversao, setDraftFatorConversao] = useState<number | null>(null);
 
   // ── Estoque (ORD-181, G2) — só existe pra opção já salva (tem id) ────────
   const [stock, setStock] = useState<StockState | null>(null);
@@ -256,6 +269,7 @@ export default function OptionGroupFormScreen() {
   const [movUnidade, setMovUnidade] = useState<string | null>(null);
   const [movQuantidade, setMovQuantidade] = useState<number | null>(null);
   const [movMotivo, setMovMotivo] = useState("");
+  const [movEmUnidadeCompra, setMovEmUnidadeCompra] = useState(false);
   const [movSaving, setMovSaving] = useState(false);
   const [movError, setMovError] = useState("");
 
@@ -272,6 +286,9 @@ export default function OptionGroupFormScreen() {
     setDraftCfop(null);
     setDraftCest("");
     setDraftAllergenIds([]);
+    setDraftEstoqueMinimo(0);
+    setDraftUnidadeCompra("");
+    setDraftFatorConversao(null);
     setStock(null);  // opção nova ainda não tem id — sem estoque possível
     setStockMovModalOpen(false);
     setOptionModalOpen(true);
@@ -290,6 +307,9 @@ export default function OptionGroupFormScreen() {
     setDraftCfop(row.cfop);
     setDraftCest(row.cest ?? "");
     setDraftAllergenIds(row.allergen_ids);
+    setDraftEstoqueMinimo(row.estoque_minimo);
+    setDraftUnidadeCompra(row.unidade_compra ?? "");
+    setDraftFatorConversao(row.fator_conversao);
     setStock(null);
     setStockMovModalOpen(false);
     setOptionModalOpen(true);
@@ -312,6 +332,7 @@ export default function OptionGroupFormScreen() {
     setMovUnidade(stock?.unidade ?? null);
     setMovQuantidade(null);
     setMovMotivo("");
+    setMovEmUnidadeCompra(false);
     setMovError("");
     setStockMovModalOpen(true);
   }
@@ -337,6 +358,7 @@ export default function OptionGroupFormScreen() {
         quantidade: movQuantidade,
         unidade: stock?.has_stock_item ? undefined : movUnidade,
         motivo: movMotivo.trim() || null,
+        em_unidade_compra: movEmUnidadeCompra,
       }, catalogParams());
       const r = await api.get(`/catalog/options/${optionId}/stock`, catalogParams());
       setStock(r.data);
@@ -419,11 +441,17 @@ export default function OptionGroupFormScreen() {
     rows.some((r) => r.key !== editingRowKey && (r.sku ?? "").trim() === draftSku.trim())
     || activeSkuSetElsewhere.has(draftSku.trim())
   );
+  // ORD-190 (G3) — mesma regra conjunta de Product (A3/A5): os dois campos
+  // de conversão vêm juntos ou nenhum, sem herança do produto pai.
+  const draftConversaoValid = (draftUnidadeCompra.trim() === "") === (draftFatorConversao === null);
+  const draftEstoqueMinimoValid = draftEstoqueMinimo === null || draftEstoqueMinimo >= 0;
+  const draftFatorConversaoValid = draftFatorConversao === null || draftFatorConversao > 0;
 
   function saveOptionModal() {
     if (!draftLabel.trim()) return;
     if (draftEan.trim() !== "" && (!isValidGtin(draftEan) || draftEanConflict)) return;
     if (draftSkuConflict) return;
+    if (!draftConversaoValid || !draftEstoqueMinimoValid || !draftFatorConversaoValid) return;
     if (editingRowKey === null) {
       const key = `new-${++newRowSeq}`;
       setRows((prev) => [...prev, {
@@ -431,6 +459,8 @@ export default function OptionGroupFormScreen() {
         image_url: null, thumbnail_url: null, pendingFile: draftPendingFile, pendingPreviewUrl: draftPendingPreviewUrl,
         active: true, description: draftDescription.trim() || null, sku: draftSku.trim() || null,
         ean: draftEan.trim() || null, cfop: draftCfop, cest: draftCest.trim() || null,
+        estoque_minimo: draftEstoqueMinimo ?? 0,
+        unidade_compra: draftUnidadeCompra.trim() || null, fator_conversao: draftFatorConversao,
         allergen_ids: draftAllergenIds,
       }]);
     } else {
@@ -439,6 +469,8 @@ export default function OptionGroupFormScreen() {
         pendingFile: draftPendingFile, pendingPreviewUrl: draftPendingPreviewUrl,
         description: draftDescription.trim() || null, sku: draftSku.trim() || null,
         ean: draftEan.trim() || null, cfop: draftCfop, cest: draftCest.trim() || null,
+        estoque_minimo: draftEstoqueMinimo ?? 0,
+        unidade_compra: draftUnidadeCompra.trim() || null, fator_conversao: draftFatorConversao,
         allergen_ids: draftAllergenIds,
       });
     }
@@ -461,6 +493,9 @@ export default function OptionGroupFormScreen() {
       if ((orig.ean ?? "") !== (r.ean ?? "")) return true;
       if ((orig.cfop ?? "") !== (r.cfop ?? "")) return true;
       if ((orig.cest ?? "") !== (r.cest ?? "")) return true;
+      if (orig.estoque_minimo !== r.estoque_minimo) return true;
+      if ((orig.unidade_compra ?? "") !== (r.unidade_compra ?? "")) return true;
+      if ((orig.fator_conversao ?? null) !== (r.fator_conversao ?? null)) return true;
       const origAllergens = [...orig.allergen_ids].sort().join(",");
       const rowAllergens = [...r.allergen_ids].sort().join(",");
       return origAllergens !== rowAllergens;
@@ -477,7 +512,8 @@ export default function OptionGroupFormScreen() {
   const canSave = !saving && name.trim().length > 0 && rows.length > 0;
   const canSaveOption = draftLabel.trim().length > 0
     && (draftEan.trim() === "" || (isValidGtin(draftEan) && !draftEanConflict))
-    && !draftSkuConflict;
+    && !draftSkuConflict
+    && draftConversaoValid && draftEstoqueMinimoValid && draftFatorConversaoValid;
 
   async function save() {
     if (!canSave) return;
@@ -492,6 +528,7 @@ export default function OptionGroupFormScreen() {
         label: r.label.trim(), price_delta: r.price_delta ?? 0, active: r.active,
         description: r.description, sku: r.sku,
         ean: r.ean, cfop: r.cfop, cest: r.cest,
+        estoque_minimo: r.estoque_minimo, unidade_compra: r.unidade_compra, fator_conversao: r.fator_conversao,
         allergen_ids: r.allergen_ids.map(Number),
       }));
 
@@ -778,6 +815,40 @@ export default function OptionGroupFormScreen() {
                     )}
                   </div>
 
+                  {/* ORD-190 (G3) — mesmos campos de Product (A3/A5), configuráveis
+                      mesmo antes de existir stock_item pra esta opção; nunca
+                      herdados do produto pai (cada dono configura os próprios). */}
+                  <div className={styles.formRow}>
+                    <div className={styles.formRowField}>
+                      <NumberInput
+                        label="Estoque mínimo"
+                        value={draftEstoqueMinimo ?? undefined}
+                        onChange={(value: number) => setDraftEstoqueMinimo(value)}
+                        decimalScale={3}
+                        errorMessage={!draftEstoqueMinimoValid ? "não pode ser negativo" : undefined}
+                      />
+                    </div>
+                    <div className={styles.formRowField}>
+                      <InputBase
+                        label="Unidade de compra"
+                        placeholder="ex.: caixa, fardo — opcional"
+                        value={draftUnidadeCompra}
+                        errorMessage={!draftConversaoValid ? "preencha os dois campos de conversão, ou nenhum" : undefined}
+                        onChange={(e) => setDraftUnidadeCompra(e.target.value)}
+                      />
+                    </div>
+                    <div className={styles.formRowField}>
+                      <NumberInput
+                        label="Fator de conversão"
+                        placeholder="ex.: 12 (1 caixa = 12 un)"
+                        value={draftFatorConversao ?? undefined}
+                        onChange={(value: number) => setDraftFatorConversao(value)}
+                        decimalScale={3}
+                        errorMessage={!draftFatorConversaoValid ? "deve ser positivo" : undefined}
+                      />
+                    </div>
+                  </div>
+
                   {stockMovModalOpen ? (
                     <div className={styles.modalForm}>
                       <div className={styles.formRow}>
@@ -801,12 +872,24 @@ export default function OptionGroupFormScreen() {
                         )}
                       </div>
                       <NumberInput
-                        label="Quantidade"
+                        label={movEmUnidadeCompra && stock?.unidade_compra ? `Quantidade (em ${stock.unidade_compra})` : "Quantidade"}
                         value={movQuantidade ?? undefined}
                         onChange={(value: number) => setMovQuantidade(value)}
                         decimalScale={3}
                         allowNegative={movTipo === "ajuste"}
                       />
+                      {/* ORD-190 (G3) — só aparece se a opção JÁ SALVA (stock,
+                          não o rascunho da modal) tem conversão configurada;
+                          registrar na unidade de compra converte pela
+                          fator_conversao antes de aplicar ao saldo. */}
+                      {stock?.unidade_compra && (
+                        <Checkbox
+                          id="opt-mov-em-unidade-compra"
+                          label={`Registrar em ${stock.unidade_compra} (converte automaticamente)`}
+                          checked={movEmUnidadeCompra}
+                          onChange={(checked) => setMovEmUnidadeCompra(checked)}
+                        />
+                      )}
                       <InputBase
                         label="Motivo"
                         placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
@@ -827,6 +910,9 @@ export default function OptionGroupFormScreen() {
                     <>
                       <p className={styles.formHint}>
                         <strong>{stock.quantidade_atual} {stockUnitLabel(stock.unidade)}</strong> em estoque
+                        {stock.abaixo_do_minimo && (
+                          <> <Tag variant="error">Abaixo do mínimo ({stock.estoque_minimo} {stockUnitLabel(stock.unidade)})</Tag></>
+                        )}
                       </p>
                       <div className={styles.tableScroll}>
                         <Table
@@ -835,7 +921,14 @@ export default function OptionGroupFormScreen() {
                             { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
                             {
                               key: "quantidade", header: "Quantidade",
-                              render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`,
+                              render: (m) => {
+                                const base = `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`;
+                                // ORD-190 (G3) — registrada na unidade de compra: mostra o valor
+                                // bruto digitado junto do já convertido, não só o convertido.
+                                return m.quantidade_original !== null
+                                  ? `${base} (${m.quantidade_original > 0 ? "+" : ""}${m.quantidade_original} ${m.unidade_original})`
+                                  : base;
+                              },
                             },
                             { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
                             { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },

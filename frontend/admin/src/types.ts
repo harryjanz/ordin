@@ -209,6 +209,10 @@ export interface StockMovement {
   id: number;
   tipo: "entrada" | "ajuste";
   quantidade: number;
+  // ORD-190 (G3) — só preenchidos quando a movimentação foi registrada na
+  // unidade de compra do dono (conversão aplicada); null no caminho de hoje.
+  quantidade_original: number | null;
+  unidade_original: string | null;
   motivo: string | null;
   criado_por: number;
   criado_em: string;
@@ -218,6 +222,11 @@ export interface StockState {
   has_stock_item: boolean;
   quantidade_atual: number | null;
   unidade: string | null;
+  // ORD-190 (G3) — lidos do dono (Product ou Option), não do stock_item.
+  estoque_minimo: number;
+  abaixo_do_minimo: boolean;
+  unidade_compra: string | null;
+  fator_conversao: number | null;
   movements: StockMovement[];
   // total_movements > movements.length quando o histórico foi truncado pro
   // limite do backend (_STOCK_MOVEMENTS_HISTORY_LIMIT) — a UI usa isso pra
@@ -299,6 +308,9 @@ export interface OptionGroupOption {
   ean: string | null; // ORD-188
   cfop: string | null; // ORD-188 — livre em relação ao CFOP do produto pai
   cest: string | null; // ORD-188
+  estoque_minimo: number; // ORD-190
+  unidade_compra: string | null; // ORD-190
+  fator_conversao: number | null; // ORD-190
   allergens: Allergen[];
 }
 

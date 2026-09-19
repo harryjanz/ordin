@@ -71,6 +71,8 @@ async def test_produto_sem_movimentacao_mostra_estado_vazio(client, token_owner)
     assert state.status_code == 200
     assert state.json() == {
         "has_stock_item": False, "quantidade_atual": None, "unidade": None,
+        "estoque_minimo": 0.0, "abaixo_do_minimo": False,  # G3 (ORD-190)
+        "unidade_compra": None, "fator_conversao": None,
         "movements": [], "total_movements": 0,
     }
 

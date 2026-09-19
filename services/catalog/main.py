@@ -1,7 +1,7 @@
 import io
 import secrets
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal, Optional
 
 from auth import TokenPayload, get_current_user
@@ -134,6 +134,17 @@ class Product(Base):
     expressar como UniqueConstraint simples de uma tabela só. Validado em
     aplicação, ver _check_active_code_conflict."""
     __tablename__ = "products"
+    __table_args__ = (
+        # G3 (ORD-190) — mesma constraint de Option (ver mais abaixo): schema
+        # adicionado aqui pra _get_stock_state/_create_stock_movement lerem
+        # owner.estoque_minimo/unidade_compra/fator_conversao sem `if` por
+        # tipo de dono, mesmo A3/A5 (que expõem isso na API/UI de Product)
+        # ainda não estando implementadas — até lá, ficam sempre no default.
+        CheckConstraint(
+            "(unidade_compra IS NULL) = (fator_conversao IS NULL)",
+            name="ck_products_conversao_junta",
+        ),
+    )
     id          = Column(Integer, primary_key=True)
     company_id  = Column(Integer, nullable=False, index=True)
     category_id = Column(Integer, ForeignKey("categories.id"))
@@ -165,6 +176,13 @@ class Product(Base):
     # persiste independente do CFOP atual (troca de CFOP não apaga o valor,
     # só esconde a exibição na UI) — mesma precisão de price.
     custo       = Column(Numeric(10, 2), nullable=True)
+    # G3 (ORD-190) — mesmos 3 campos de Option (ver classe Option abaixo),
+    # só implementados de fato pela A3 (estoque_minimo)/A5 (unidade_compra +
+    # fator_conversao) quando essas histórias forem codadas; até lá, sempre
+    # no default (0 / NULL).
+    estoque_minimo  = Column(Numeric(12, 3), nullable=False, default=0, server_default="0")
+    unidade_compra  = Column(String(30), nullable=True)
+    fator_conversao = Column(Numeric(12, 3), nullable=True)
 
 STOCK_UNITS = ("un", "kg", "g", "L", "ml")  # mesmo racional já usado pra CFOP (linha 155):
                                              # texto simples, validado na aplicação, sem tabela
@@ -210,6 +228,12 @@ class StockMovement(Base):
     stock_item_id  = Column(Integer, ForeignKey("stock_items.id"), nullable=False, index=True)
     tipo           = Column(String(10), nullable=False)  # "entrada" | "ajuste"
     quantidade     = Column(Numeric(12, 3), nullable=False)  # já com sinal aplicado
+    # G3 (ORD-190) — só preenchidos quando a movimentação foi registrada na
+    # unidade de compra do dono (em_unidade_compra=True); nulos no caminho
+    # de hoje (movimentação já na unidade padrão), sem flag extra pra
+    # distinguir "sem conversão" de "conversão zerada".
+    quantidade_original = Column(Numeric(12, 3), nullable=True)
+    unidade_original    = Column(String(30), nullable=True)
     motivo         = Column(String(255), nullable=True)
     criado_por     = Column(Integer, nullable=False)  # user_id do JWT
     criado_em      = Column(DateTime, default=datetime.utcnow)
@@ -265,6 +289,12 @@ class Option(Base):
     nenhum rótulo tipo "grátis" — decisão de UX do protótipo). Ver ORD-142
     pra regra de cálculo com múltiplas opções escolhidas (soma dos deltas)."""
     __tablename__ = "options"
+    __table_args__ = (
+        CheckConstraint(
+            "(unidade_compra IS NULL) = (fator_conversao IS NULL)",
+            name="ck_options_conversao_junta",
+        ),
+    )
     id              = Column(Integer, primary_key=True)
     option_group_id = Column(Integer, ForeignKey("option_groups.id"), nullable=False)
     label           = Column(String(80), nullable=False)
@@ -278,6 +308,13 @@ class Option(Base):
     ean             = Column(String(14), nullable=True)   # ORD-188 — mesmo tipo de Product.ean
     cfop            = Column(String(4), nullable=True)    # ORD-188 — mesmo tipo de Product.cfop, livre em relação ao CFOP do produto pai
     cest            = Column(String(7), nullable=True)    # ORD-188 — mesmo tipo de Product.cest, sem validação (paridade)
+    # G3 (ORD-190) — mesmo racional de Product.estoque_minimo/A3: configurável
+    # antes mesmo de existir stock_item pra essa opção. unidade_compra +
+    # fator_conversao sempre preenchidos juntos (CheckConstraint acima),
+    # nunca herdados do produto pai — cada dono configura os próprios campos.
+    estoque_minimo  = Column(Numeric(12, 3), nullable=False, default=0, server_default="0")
+    unidade_compra  = Column(String(30), nullable=True)
+    fator_conversao = Column(Numeric(12, 3), nullable=True)
 
 class ProductOptionGroup(Base):
     """min/max_selections_override (ORD-144): permitem que o MESMO grupo
@@ -518,6 +555,9 @@ async def _get_option_group_options(db: AsyncSession, option_group_id: int) -> l
             "ean": o.ean,
             "cfop": o.cfop,
             "cest": o.cest,
+            "estoque_minimo": float(o.estoque_minimo),
+            "unidade_compra": o.unidade_compra,
+            "fator_conversao": float(o.fator_conversao) if o.fator_conversao is not None else None,
             "allergens": await _get_option_allergens(db, o.id),
         }
         for o in result.scalars().all()
@@ -713,12 +753,16 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
             option.ean = opt.ean
             option.cfop = opt.cfop
             option.cest = opt.cest
+            option.estoque_minimo = opt.estoque_minimo
+            option.unidade_compra = opt.unidade_compra
+            option.fator_conversao = opt.fator_conversao
             # image_url/thumbnail_url intocados — é exatamente isso que preserva a imagem
         else:
             option = Option(
                 option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index,
                 active=opt.active, description=opt.description, sku=opt.sku,
                 ean=opt.ean, cfop=opt.cfop, cest=opt.cest,
+                estoque_minimo=opt.estoque_minimo, unidade_compra=opt.unidade_compra, fator_conversao=opt.fator_conversao,
             )
             db.add(option)
         new_options.append((option, opt.allergen_ids))
@@ -1339,6 +1383,11 @@ class OptionIn(BaseModel):
     ean: str | None = None  # ORD-188
     cfop: str | None = None  # ORD-188 — livre, sem forçar igualdade com o produto pai
     cest: str | None = None  # ORD-188 — sem validador, paridade com Product.cest
+    # G3 (ORD-190) — mesmos campos de Product (A3/A5), configuráveis mesmo antes
+    # de existir stock_item pra esta opção.
+    estoque_minimo: float = 0
+    unidade_compra: str | None = None
+    fator_conversao: float | None = None
     allergen_ids: list[int] = []  # ORD-146 — sempre lista completa (replace completo, não "não mexer")
 
     @field_validator("cfop")
@@ -1354,6 +1403,26 @@ class OptionIn(BaseModel):
         # checagem de unicidade em aplicação (_set_option_group_options).
         return v.strip() or None if v is not None else None
 
+    @field_validator("estoque_minimo")
+    @classmethod
+    def _estoque_minimo_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("estoque mínimo não pode ser negativo")
+        return v
+
+    @field_validator("fator_conversao")
+    @classmethod
+    def _fator_conversao_positive(cls, v: float | None) -> float | None:
+        if v is not None and v <= 0:
+            raise ValueError("fator de conversão deve ser positivo")
+        return v
+
+    @model_validator(mode="after")
+    def _conversao_junta(self) -> "OptionIn":
+        if (self.unidade_compra is None) != (self.fator_conversao is None):
+            raise ValueError("unidade de compra e fator de conversão devem ser preenchidos juntos")
+        return self
+
 class OptionOut(BaseModel):
     id: int
     label: str
@@ -1367,6 +1436,9 @@ class OptionOut(BaseModel):
     cfop: str | None = None  # ORD-188
     cest: str | None = None  # ORD-188
     sku: str | None = None
+    estoque_minimo: float = 0  # ORD-190
+    unidade_compra: str | None = None  # ORD-190
+    fator_conversao: float | None = None  # ORD-190
     allergens: list[AllergenOut] = []
 
 class OptionActiveIn(BaseModel):
@@ -2506,6 +2578,10 @@ class StockMovementIn(BaseModel):
     quantidade: Decimal
     unidade: str | None = None  # obrigatório só na primeira movimentação
     motivo: str | None = None
+    # G3 (ORD-190) — quantidade acima está na unidade_compra do dono (não na
+    # unidade padrão do stock_item); convertida por fator_conversao antes de
+    # aplicar. False (default) preserva o caminho de hoje, sem conversão.
+    em_unidade_compra: bool = False
 
 
 def _validate_stock_unit(unidade: str) -> None:
@@ -2551,13 +2627,17 @@ async def _resolve_stock_owner(
 async def _get_stock_state(
     db: AsyncSession, company_id: int, *, product_id: int | None = None, option_id: int | None = None,
 ) -> dict:
-    await _resolve_stock_owner(db, company_id, product_id=product_id, option_id=option_id)
+    # G3 (ORD-190) — owner carregado (Product ou Option) pra ler estoque_minimo
+    # sem query extra; nenhum `if` por tipo de dono, os dois têm as mesmas colunas.
+    owner = await _resolve_stock_owner(db, company_id, product_id=product_id, option_id=option_id)
     item = (await db.execute(
         select(StockItem).filter_by(product_id=product_id, option_id=option_id)
     )).scalars().first()
     if not item:
         return {
             "has_stock_item": False, "quantidade_atual": None, "unidade": None,
+            "estoque_minimo": owner.estoque_minimo, "abaixo_do_minimo": False,
+            "unidade_compra": owner.unidade_compra, "fator_conversao": owner.fator_conversao,
             "movements": [], "total_movements": 0,
         }
 
@@ -2577,9 +2657,14 @@ async def _get_stock_state(
         "has_stock_item": True,
         "quantidade_atual": item.quantidade_atual,
         "unidade": item.unidade,
+        "estoque_minimo": owner.estoque_minimo,
+        "abaixo_do_minimo": item.quantidade_atual <= owner.estoque_minimo,  # <= (achado QA da A3)
+        "unidade_compra": owner.unidade_compra,
+        "fator_conversao": owner.fator_conversao,
         "total_movements": total_movements,
         "movements": [
             {"id": m.id, "tipo": m.tipo, "quantidade": m.quantidade, "motivo": m.motivo,
+             "quantidade_original": m.quantidade_original, "unidade_original": m.unidade_original,
              "criado_por": m.criado_por, "criado_em": m.criado_em}
             for m in movements
         ],
@@ -2590,7 +2675,9 @@ async def _create_stock_movement(
     db: AsyncSession, company_id: int, body: "StockMovementIn", current_user: TokenPayload,
     *, product_id: int | None = None, option_id: int | None = None,
 ) -> dict:
-    await _resolve_stock_owner(db, company_id, product_id=product_id, option_id=option_id)
+    # G3 (ORD-190) — owner carregado (Product ou Option) pra ler fator_conversao/
+    # unidade_compra sem query extra; nenhum `if` por tipo de dono.
+    owner = await _resolve_stock_owner(db, company_id, product_id=product_id, option_id=option_id)
     item = (await db.execute(
         select(StockItem).filter_by(product_id=product_id, option_id=option_id)
     )).scalars().first()
@@ -2598,6 +2685,24 @@ async def _create_stock_movement(
     motivo = (body.motivo or "").strip() or None  # espaço em branco tratado como ausente
     if body.tipo == "ajuste" and motivo is None:
         raise HTTPException(400, detail="ajuste exige motivo")
+
+    # G3 (ORD-190) — quantidade recebida está na unidade_compra do dono, convertida
+    # pelo fator antes de aplicar ao stock_item (que sempre guarda na unidade
+    # padrão). quantidade_original/unidade_original preservam o valor bruto
+    # digitado, só pro histórico — quantidade (abaixo) é sempre a já convertida.
+    quantidade_original: Decimal | None = None
+    unidade_original: str | None = None
+    if body.em_unidade_compra:
+        if owner.fator_conversao is None:
+            raise HTTPException(400, detail="dono não tem conversão de unidade configurada")
+        if body.tipo == "entrada" and body.quantidade <= 0:
+            raise HTTPException(400, detail="entrada deve ser positiva")
+        quantidade_original, unidade_original = body.quantidade, owner.unidade_compra
+        quantidade = (body.quantidade * owner.fator_conversao).quantize(
+            Decimal("0.001"), rounding=ROUND_HALF_UP  # achado de QA (A5): 3 casas
+        )
+    else:
+        quantidade = body.quantidade
 
     if item is None:
         # primeira movimentação — só entrada faz sentido (não existe saldo pra "ajustar" ainda).
@@ -2608,9 +2713,9 @@ async def _create_stock_movement(
         if body.unidade is None:
             raise HTTPException(400, detail="unidade é obrigatória na primeira movimentação")
         _validate_stock_unit(body.unidade)
-        if body.quantidade <= 0:
+        if quantidade <= 0:
             raise HTTPException(400, detail="entrada deve ser positiva")
-        delta = body.quantidade
+        delta = quantidade
         item = StockItem(
             company_id=company_id, product_id=product_id, option_id=option_id,
             quantidade_atual=delta, unidade=body.unidade,
@@ -2621,17 +2726,17 @@ async def _create_stock_movement(
         if body.unidade is not None and body.unidade != item.unidade:
             raise HTTPException(400, detail=f"unidade já definida como {item.unidade}, não pode ser alterada")
         if body.tipo == "entrada":
-            if body.quantidade <= 0:
+            if quantidade <= 0:
                 raise HTTPException(400, detail="entrada deve ser positiva")
-            delta = body.quantidade
+            delta = quantidade
             await db.execute(
                 update(StockItem).where(StockItem.id == item.id)
                 .values(quantidade_atual=StockItem.quantidade_atual + delta)
             )
         else:  # ajuste — pode ser positivo ou negativo, nunca deixa o saldo negativo
-            if body.quantidade == 0:
+            if quantidade == 0:
                 raise HTTPException(400, detail="ajuste não pode ser zero")
-            delta = body.quantidade
+            delta = quantidade
             # UPDATE condicional atômico — sem SELECT FOR UPDATE (frequência de concorrência
             # baixíssima, ação manual humana), mas seguro contra corrida: o WHERE só passa se o
             # saldo final não ficar negativo
@@ -2645,6 +2750,7 @@ async def _create_stock_movement(
 
     movement = StockMovement(
         stock_item_id=item.id, tipo=body.tipo, quantidade=delta,
+        quantidade_original=quantidade_original, unidade_original=unidade_original,
         motivo=motivo, criado_por=current_user.sub,
     )
     db.add(movement)
