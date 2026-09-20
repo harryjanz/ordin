@@ -1,13 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   Button,
+  Checkbox,
   CheckboxMultiselect,
   CurrencyInput,
   Divider,
+  Dropdown,
   InputBase,
   Modal,
+  NumberInput,
   NumberSpinInput,
   RadioButton,
   RadioGroup,
@@ -15,16 +18,20 @@ import {
   TextArea,
   Upload,
   makeToast,
+  type DropdownOptions,
   type UploadFile,
 } from "design-system";
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
 import ConfirmDialog from "../components/ConfirmDialog";
+import StockHistoryChart from "../components/StockHistoryChart";
 import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
+import { STOCK_UNIT_OPTIONS, stockUnitLabel } from "../lib/stockUnits";
+import { isValidGtin } from "../lib/validators";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN, minMaxToRadios, radiosToMinMax, type OptionGroupRadios } from "../lib/optionGroupMapping";
-import type { Allergen, OptionGroup } from "../types";
+import type { Allergen, OptionGroup, StockHistoryPoint, StockState } from "../types";
 import styles from "./OptionGroupFormScreen.module.scss";
 
 const IMAGE_MAX_SIZE_MB = 2;
@@ -51,8 +58,27 @@ interface OptionRow {
   // ProductEditScreen (initialSelection/onSelectOption trabalham com string).
   description: string | null;
   sku: string | null;
+  // ORD-188 — opção que representa um produto real (ex.: cada sabor de um
+  // refrigerante) ganha identidade fiscal própria, mesmos campos de Product.
+  ean: string | null;
+  cfop: string | null;
+  cest: string | null;
+  // ORD-190 (G3) — mesmos campos de Product (A3/A5), configuráveis mesmo
+  // antes de existir stock_item pra esta opção.
+  estoque_minimo: number;
+  unidade_compra: string | null;
+  fator_conversao: number | null;
   allergen_ids: string[];
 }
+
+// ORD-188 — mesmo conjunto fechado já usado em ProductEditScreen (ORD-169),
+// duplicado aqui de propósito: não há consumidor comum hoje que justifique
+// extrair um módulo compartilhado só por isso.
+const CFOP_OPTIONS: DropdownOptions[] = [
+  { value: "5101", label: "5101 — Venda de produção do próprio estabelecimento" },
+  { value: "5102", label: "5102 — Venda de mercadoria adquirida de terceiros" },
+];
+
 
 let newRowSeq = 0;
 
@@ -77,7 +103,10 @@ export default function OptionGroupFormScreen() {
   const [rows, setRows] = useState<OptionRow[]>([]);
   const [originalRows, setOriginalRows] = useState<{
     id: number; label: string; price_delta: number; image_url: string | null;
-    description: string | null; sku: string | null; allergen_ids: string[];
+    description: string | null; sku: string | null;
+    ean: string | null; cfop: string | null; cest: string | null;
+    estoque_minimo: number; unidade_compra: string | null; fator_conversao: number | null;
+    allergen_ids: string[];
   }[]>([]);
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -89,6 +118,25 @@ export default function OptionGroupFormScreen() {
     }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Achado do usuário (2026-09-18): checar unicidade só no Salvar do grupo é
+  // tarde demais pra UX — a modal de opção precisa avisar na hora. Pré-carrega
+  // uma vez (sem round-trip por tecla) os sku/ean já ativos na empresa fora
+  // deste grupo (o grupo em si já é coberto pela checagem local contra
+  // `rows`, logo abaixo) — GET /catalog/codes/active-in-use.
+  const [activeCodesElsewhere, setActiveCodesElsewhere] = useState<{ skus: string[]; eans: string[] }>({ skus: [], eans: [] });
+
+  useEffect(() => {
+    api.get(
+      "/catalog/codes/active-in-use",
+      catalogParams(editingGroupId !== null ? { exclude_option_group_id: editingGroupId } : {}),
+    ).then((r) => {
+      setActiveCodesElsewhere({ skus: r.data.skus ?? [], eans: r.data.eans ?? [] });
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingGroupId]);
+  const activeEanSetElsewhere = useMemo(() => new Set(activeCodesElsewhere.eans), [activeCodesElsewhere]);
+  const activeSkuSetElsewhere = useMemo(() => new Set(activeCodesElsewhere.skus), [activeCodesElsewhere]);
 
   useEffect(() => {
     if (editingGroupId === null) return;
@@ -117,11 +165,16 @@ export default function OptionGroupFormScreen() {
           key: `existing-${o.id}`, id: o.id, label: o.label, price_delta: o.price_delta,
           image_url: o.image_url, thumbnail_url: o.thumbnail_url, pendingFile: null, pendingPreviewUrl: null,
           active: o.active, description: o.description, sku: o.sku,
+          ean: o.ean, cfop: o.cfop, cest: o.cest,
+          estoque_minimo: o.estoque_minimo, unidade_compra: o.unidade_compra, fator_conversao: o.fator_conversao,
           allergen_ids: o.allergens.map((a) => String(a.id)),
         })));
         setOriginalRows(g.options.map((o) => ({
           id: o.id, label: o.label, price_delta: o.price_delta, image_url: o.image_url,
-          description: o.description, sku: o.sku, allergen_ids: o.allergens.map((a) => String(a.id)),
+          description: o.description, sku: o.sku,
+          ean: o.ean, cfop: o.cfop, cest: o.cest,
+          estoque_minimo: o.estoque_minimo, unidade_compra: o.unidade_compra, fator_conversao: o.fator_conversao,
+          allergen_ids: o.allergens.map((a) => String(a.id)),
         })));
       } catch {
         if (!cancelled) setLoadError("Erro ao carregar grupo de opção.");
@@ -201,7 +254,26 @@ export default function OptionGroupFormScreen() {
   const [draftUploading, setDraftUploading] = useState(false);
   const [draftDescription, setDraftDescription] = useState("");
   const [draftSku, setDraftSku] = useState("");
+  const [draftEan, setDraftEan] = useState("");
+  const [draftCfop, setDraftCfop] = useState<string | null>(null);
+  const [draftCest, setDraftCest] = useState("");
   const [draftAllergenIds, setDraftAllergenIds] = useState<string[]>([]);
+  // ORD-190 (G3) — mesmos campos de Product (A3/A5).
+  const [draftEstoqueMinimo, setDraftEstoqueMinimo] = useState<number | null>(0);
+  const [draftUnidadeCompra, setDraftUnidadeCompra] = useState("");
+  const [draftFatorConversao, setDraftFatorConversao] = useState<number | null>(null);
+
+  // ── Estoque (ORD-181, G2) — só existe pra opção já salva (tem id) ────────
+  const [stock, setStock] = useState<StockState | null>(null);
+  const [stockHistory, setStockHistory] = useState<StockHistoryPoint[]>([]);
+  const [stockMovModalOpen, setStockMovModalOpen] = useState(false);
+  const [movTipo, setMovTipo] = useState<"entrada" | "ajuste">("entrada");
+  const [movUnidade, setMovUnidade] = useState<string | null>(null);
+  const [movQuantidade, setMovQuantidade] = useState<number | null>(null);
+  const [movMotivo, setMovMotivo] = useState("");
+  const [movEmUnidadeCompra, setMovEmUnidadeCompra] = useState(false);
+  const [movSaving, setMovSaving] = useState(false);
+  const [movError, setMovError] = useState("");
 
   function openNewOptionModal() {
     setEditingRowKey(null);
@@ -212,11 +284,20 @@ export default function OptionGroupFormScreen() {
     setDraftPendingPreviewUrl(null);
     setDraftDescription("");
     setDraftSku("");
+    setDraftEan("");
+    setDraftCfop(null);
+    setDraftCest("");
     setDraftAllergenIds([]);
+    setDraftEstoqueMinimo(0);
+    setDraftUnidadeCompra("");
+    setDraftFatorConversao(null);
+    setStock(null);  // opção nova ainda não tem id — sem estoque possível
+    setStockHistory([]);
+    setStockMovModalOpen(false);
     setOptionModalOpen(true);
   }
 
-  function openEditOptionModal(row: OptionRow) {
+  async function openEditOptionModal(row: OptionRow) {
     setEditingRowKey(row.key);
     setDraftLabel(row.label);
     setDraftPrice(row.price_delta);
@@ -225,12 +306,76 @@ export default function OptionGroupFormScreen() {
     setDraftPendingPreviewUrl(row.pendingPreviewUrl);
     setDraftDescription(row.description ?? "");
     setDraftSku(row.sku ?? "");
+    setDraftEan(row.ean ?? "");
+    setDraftCfop(row.cfop);
+    setDraftCest(row.cest ?? "");
     setDraftAllergenIds(row.allergen_ids);
+    setDraftEstoqueMinimo(row.estoque_minimo);
+    setDraftUnidadeCompra(row.unidade_compra ?? "");
+    setDraftFatorConversao(row.fator_conversao);
+    setStock(null);
+    setStockHistory([]);
+    setStockMovModalOpen(false);
     setOptionModalOpen(true);
+    if (row.id !== null) {
+      try {
+        const r = await api.get(`/catalog/options/${row.id}/stock`, catalogParams());
+        setStock(r.data);
+        const h = await api.get(`/catalog/options/${row.id}/stock/history`, catalogParams());
+        setStockHistory(h.data.points ?? []);
+      } catch {
+        // silencioso — seção de estoque simplesmente não aparece, usuário pode reabrir o modal
+      }
+    }
   }
 
   function closeOptionModal() {
     setOptionModalOpen(false);
+  }
+
+  function openStockMovModal() {
+    setMovTipo("entrada");
+    setMovUnidade(stock?.unidade ?? null);
+    setMovQuantidade(null);
+    setMovMotivo("");
+    setMovEmUnidadeCompra(false);
+    setMovError("");
+    setStockMovModalOpen(true);
+  }
+
+  function closeStockMovModal() {
+    setStockMovModalOpen(false);
+  }
+
+  const canSaveStockMov =
+    movQuantidade !== null &&
+    (movTipo === "entrada" ? movQuantidade > 0 : movQuantidade !== 0) &&
+    (stock?.has_stock_item || movUnidade !== null) &&
+    (movTipo !== "ajuste" || movMotivo.trim().length > 0);
+
+  async function saveStockMovement() {
+    const optionId = rows.find((r) => r.key === editingRowKey)?.id;
+    if (optionId == null || !canSaveStockMov) return;
+    setMovSaving(true);
+    setMovError("");
+    try {
+      await api.post(`/catalog/options/${optionId}/stock/movements`, {
+        tipo: movTipo,
+        quantidade: movQuantidade,
+        unidade: stock?.has_stock_item ? undefined : movUnidade,
+        motivo: movMotivo.trim() || null,
+        em_unidade_compra: movEmUnidadeCompra,
+      }, catalogParams());
+      const r = await api.get(`/catalog/options/${optionId}/stock`, catalogParams());
+      setStock(r.data);
+      const h = await api.get(`/catalog/options/${optionId}/stock/history`, catalogParams());
+      setStockHistory(h.data.points ?? []);
+      setStockMovModalOpen(false);
+    } catch (err) {
+      setMovError(parseApiError(err).message || "Erro ao registrar movimentação.");
+    } finally {
+      setMovSaving(false);
+    }
   }
 
   // Opção já existente (tem id): upload/remoção de imagem acontece na hora,
@@ -286,14 +431,44 @@ export default function OptionGroupFormScreen() {
     setDraftPendingPreviewUrl(null);
   }
 
+  // Achado do usuário testando em browser: nada impedia digitar o mesmo EAN
+  // em duas opções do mesmo grupo — só o "Salvar" do grupo inteiro (chamada
+  // ao backend) pegava isso, tarde demais e sem destaque nenhum no campo em
+  // si. Checagem local aqui replica o alcance real do backend (unicidade
+  // por EMPRESA, não só por grupo — mesmo padrão do sku, ver
+  // _set_option_group_options): compara com as outras linhas do grupo (já
+  // carregadas em `rows`, sem round-trip) e com `activeCodesElsewhere`
+  // (produtos + opções de outros grupos, pré-carregado uma vez ao abrir a
+  // tela — achado do usuário, 2026-09-18: só validar no Salvar é tarde
+  // demais).
+  const draftEanConflict = draftEan.trim() !== "" && (
+    rows.some((r) => r.key !== editingRowKey && (r.ean ?? "").trim() === draftEan.trim())
+    || activeEanSetElsewhere.has(draftEan.trim())
+  );
+  const draftSkuConflict = draftSku.trim() !== "" && (
+    rows.some((r) => r.key !== editingRowKey && (r.sku ?? "").trim() === draftSku.trim())
+    || activeSkuSetElsewhere.has(draftSku.trim())
+  );
+  // ORD-190 (G3) — mesma regra conjunta de Product (A3/A5): os dois campos
+  // de conversão vêm juntos ou nenhum, sem herança do produto pai.
+  const draftConversaoValid = (draftUnidadeCompra.trim() === "") === (draftFatorConversao === null);
+  const draftEstoqueMinimoValid = draftEstoqueMinimo === null || draftEstoqueMinimo >= 0;
+  const draftFatorConversaoValid = draftFatorConversao === null || draftFatorConversao > 0;
+
   function saveOptionModal() {
     if (!draftLabel.trim()) return;
+    if (draftEan.trim() !== "" && (!isValidGtin(draftEan) || draftEanConflict)) return;
+    if (draftSkuConflict) return;
+    if (!draftConversaoValid || !draftEstoqueMinimoValid || !draftFatorConversaoValid) return;
     if (editingRowKey === null) {
       const key = `new-${++newRowSeq}`;
       setRows((prev) => [...prev, {
         key, id: null, label: draftLabel.trim(), price_delta: draftPrice ?? 0,
         image_url: null, thumbnail_url: null, pendingFile: draftPendingFile, pendingPreviewUrl: draftPendingPreviewUrl,
         active: true, description: draftDescription.trim() || null, sku: draftSku.trim() || null,
+        ean: draftEan.trim() || null, cfop: draftCfop, cest: draftCest.trim() || null,
+        estoque_minimo: draftEstoqueMinimo ?? 0,
+        unidade_compra: draftUnidadeCompra.trim() || null, fator_conversao: draftFatorConversao,
         allergen_ids: draftAllergenIds,
       }]);
     } else {
@@ -301,6 +476,9 @@ export default function OptionGroupFormScreen() {
         label: draftLabel.trim(), price_delta: draftPrice ?? 0,
         pendingFile: draftPendingFile, pendingPreviewUrl: draftPendingPreviewUrl,
         description: draftDescription.trim() || null, sku: draftSku.trim() || null,
+        ean: draftEan.trim() || null, cfop: draftCfop, cest: draftCest.trim() || null,
+        estoque_minimo: draftEstoqueMinimo ?? 0,
+        unidade_compra: draftUnidadeCompra.trim() || null, fator_conversao: draftFatorConversao,
         allergen_ids: draftAllergenIds,
       });
     }
@@ -308,8 +486,8 @@ export default function OptionGroupFormScreen() {
   }
 
   // Só entra em jogo na edição: se o conteúdo (não só a ordem) das opções
-  // mudar, o replace completo do backend apaga a imagem de opções que não
-  // mudaram de nada — aviso visual antes de salvar (ver QA Explorer).
+  // mudar, o grupo precisa ir pelo endpoint de replace (.../options), não
+  // pelo de reorder puro — ver save() abaixo.
   const contentChanged = editingGroupId !== null && (() => {
     if (rows.length !== originalRows.length) return true;
     const originalById = new Map(originalRows.map((r) => [r.id, r]));
@@ -320,15 +498,30 @@ export default function OptionGroupFormScreen() {
       if (orig.label !== r.label || orig.price_delta !== (r.price_delta ?? 0)) return true;
       if ((orig.description ?? "") !== (r.description ?? "")) return true;
       if ((orig.sku ?? "") !== (r.sku ?? "")) return true;
+      if ((orig.ean ?? "") !== (r.ean ?? "")) return true;
+      if ((orig.cfop ?? "") !== (r.cfop ?? "")) return true;
+      if ((orig.cest ?? "") !== (r.cest ?? "")) return true;
+      if (orig.estoque_minimo !== r.estoque_minimo) return true;
+      if ((orig.unidade_compra ?? "") !== (r.unidade_compra ?? "")) return true;
+      if ((orig.fator_conversao ?? null) !== (r.fator_conversao ?? null)) return true;
       const origAllergens = [...orig.allergen_ids].sort().join(",");
       const rowAllergens = [...r.allergen_ids].sort().join(",");
       return origAllergens !== rowAllergens;
     });
   })();
-  const hasImageAtRisk = contentChanged && originalRows.some((r) => r.image_url);
+  // Correção de bug: o backend agora atualiza opção existente no lugar
+  // (preserva imagem) em vez de apagar+recriar tudo — imagem só é perdida
+  // de verdade quando a opção que a tinha é removida da lista. O aviso
+  // reflete só esse caso, não "qualquer edição" como antes.
+  const hasImageAtRisk = editingGroupId !== null && originalRows.some(
+    (orig) => orig.image_url && !rows.some((r) => r.id === orig.id)
+  );
 
   const canSave = !saving && name.trim().length > 0 && rows.length > 0;
-  const canSaveOption = draftLabel.trim().length > 0;
+  const canSaveOption = draftLabel.trim().length > 0
+    && (draftEan.trim() === "" || (isValidGtin(draftEan) && !draftEanConflict))
+    && !draftSkuConflict
+    && draftConversaoValid && draftEstoqueMinimoValid && draftFatorConversaoValid;
 
   async function save() {
     if (!canSave) return;
@@ -337,8 +530,14 @@ export default function OptionGroupFormScreen() {
     try {
       const { min_selections, max_selections } = advancedMinMax ?? radiosToMinMax(radios, rows.length, maxSelections);
       const optionsPayload = rows.map((r) => ({
+        // correção de bug: manda o id da opção existente pra _set_option_group_options
+        // atualizar no lugar (preserva imagem) em vez de apagar e recriar — null = opção nova.
+        id: r.id,
         label: r.label.trim(), price_delta: r.price_delta ?? 0, active: r.active,
-        description: r.description, sku: r.sku, allergen_ids: r.allergen_ids.map(Number),
+        description: r.description, sku: r.sku,
+        ean: r.ean, cfop: r.cfop, cest: r.cest,
+        estoque_minimo: r.estoque_minimo, unidade_compra: r.unidade_compra, fator_conversao: r.fator_conversao,
+        allergen_ids: r.allergen_ids.map(Number),
       }));
 
       let groupId = editingGroupId;
@@ -467,7 +666,7 @@ export default function OptionGroupFormScreen() {
         </div>
 
         {hasImageAtRisk && (
-          <Alert variant="warning" text="Salvar vai exigir reenviar as imagens das opções que não foram alteradas agora." fullWidth />
+          <Alert variant="warning" text="Salvar vai remover permanentemente a imagem de opção(ões) excluída(s) da lista." fullWidth />
         )}
 
         <div className={styles.tableScroll}>
@@ -533,7 +732,7 @@ export default function OptionGroupFormScreen() {
 
       <Modal
         open={optionModalOpen}
-        width={760}
+        width={960}
         onClose={closeOptionModal}
         onBackdropClick={closeOptionModal}
         onCloseButtonClick={closeOptionModal}
@@ -559,12 +758,206 @@ export default function OptionGroupFormScreen() {
                 maxLength={500}
                 helperMessage="Opcional — ajuda a diferenciar opções com nome pouco óbvio"
               />
+              {/* ORD-188 — opção que representa um produto real (ex.: cada sabor de
+                  um refrigerante) ganha identidade fiscal própria, mesma posição
+                  relativa que Product já usa (logo após SKU). Ajuste de layout
+                  (feedback do usuário testando em browser): SKU/CEST divididos
+                  50/50 na mesma linha; EAN e CFOP em linhas próprias, largura
+                  cheia — os dois eram os campos mais apertados no layout
+                  anterior (2 campos numa linha só dentro da coluna principal). */}
+              <div className={styles.formRow}>
+                <div className={styles.formRowField}>
+                  <InputBase
+                    label="SKU"
+                    value={draftSku}
+                    placeholder="Opcional, único por empresa"
+                    errorMessage={draftSkuConflict ? "SKU já em uso por outro produto ou opção ativo" : undefined}
+                    onChange={(e) => setDraftSku(e.target.value)}
+                  />
+                </div>
+                <div className={styles.formRowField}>
+                  <InputBase
+                    label="CEST"
+                    value={draftCest}
+                    placeholder="Opcional"
+                    onChange={(e) => setDraftCest(e.target.value)}
+                  />
+                </div>
+              </div>
               <InputBase
-                label="SKU"
-                value={draftSku}
-                placeholder="Opcional, único por empresa"
-                onChange={(e) => setDraftSku(e.target.value)}
+                label="EAN / código de barras"
+                value={draftEan}
+                placeholder="Opcional"
+                errorMessage={
+                  draftEan.trim() && !isValidGtin(draftEan)
+                    ? "código de barras inválido"
+                    : draftEanConflict
+                    ? "código de barras já em uso por outro produto ou opção ativo"
+                    : undefined
+                }
+                onChange={(e) => setDraftEan(e.target.value)}
               />
+              <Dropdown
+                label="CFOP"
+                value={CFOP_OPTIONS.find((o) => o.value === draftCfop) ?? null}
+                onValueSelected={(opt) => setDraftCfop(opt.value)}
+                options={CFOP_OPTIONS}
+              />
+
+              {/* ORD-181 (G2) — só existe pra opção já salva (precisa de id).
+                  Mesma posição relativa que ProductEditScreen usa: logo após
+                  a classificação fiscal. Formulário de movimentação é INLINE
+                  aqui dentro (não um segundo Modal empilhado) — feedback do
+                  usuário: um modal de estoque por cima do modal de opção
+                  renderizava atrás dele (briga de z-index) e incomodava
+                  independente do bug em si. */}
+              {editingRowKey !== null && (
+                <>
+                  <Divider />
+                  <div className={styles.optionsHeader}>
+                    <div className={styles.formLabel}>Estoque</div>
+                    {!stockMovModalOpen && (
+                      <Button type="button" size="small" variant="secondary" onClick={openStockMovModal}>
+                        {stock?.has_stock_item ? "Registrar movimentação" : "Registrar entrada"}
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* ORD-190 (G3) — mesmos campos de Product (A3/A5), configuráveis
+                      mesmo antes de existir stock_item pra esta opção; nunca
+                      herdados do produto pai (cada dono configura os próprios). */}
+                  <div className={styles.formRow}>
+                    <div className={styles.formRowField}>
+                      <NumberInput
+                        label="Estoque mínimo"
+                        value={draftEstoqueMinimo ?? undefined}
+                        onChange={(value: number) => setDraftEstoqueMinimo(value)}
+                        decimalScale={3}
+                        errorMessage={!draftEstoqueMinimoValid ? "não pode ser negativo" : undefined}
+                      />
+                    </div>
+                    <div className={styles.formRowField}>
+                      <InputBase
+                        label="Unidade de compra"
+                        placeholder="ex.: caixa, fardo — opcional"
+                        value={draftUnidadeCompra}
+                        errorMessage={!draftConversaoValid ? "preencha os dois campos de conversão, ou nenhum" : undefined}
+                        onChange={(e) => setDraftUnidadeCompra(e.target.value)}
+                      />
+                    </div>
+                    <div className={styles.formRowField}>
+                      <NumberInput
+                        label="Fator de conversão"
+                        placeholder="ex.: 12 (1 caixa = 12 un)"
+                        value={draftFatorConversao ?? undefined}
+                        onChange={(value: number) => setDraftFatorConversao(value)}
+                        decimalScale={3}
+                        errorMessage={!draftFatorConversaoValid ? "deve ser positivo" : undefined}
+                      />
+                    </div>
+                  </div>
+
+                  {stockMovModalOpen ? (
+                    <div className={styles.modalForm}>
+                      <div className={styles.formRow}>
+                        <div className={styles.formRowField}>
+                          <Dropdown
+                            label="Tipo"
+                            value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
+                            onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
+                            options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
+                          />
+                        </div>
+                        {!stock?.has_stock_item && (
+                          <div className={styles.formRowField}>
+                            <Dropdown
+                              label="Unidade"
+                              value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
+                              onValueSelected={(opt) => setMovUnidade(opt.value)}
+                              options={STOCK_UNIT_OPTIONS}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <NumberInput
+                        label={movEmUnidadeCompra && stock?.unidade_compra ? `Quantidade (em ${stock.unidade_compra})` : "Quantidade"}
+                        value={movQuantidade ?? undefined}
+                        onChange={(value: number) => setMovQuantidade(value)}
+                        decimalScale={3}
+                        allowNegative={movTipo === "ajuste"}
+                      />
+                      {/* ORD-190 (G3) — só aparece se a opção JÁ SALVA (stock,
+                          não o rascunho da modal) tem conversão configurada;
+                          registrar na unidade de compra converte pela
+                          fator_conversao antes de aplicar ao saldo. */}
+                      {stock?.unidade_compra && (
+                        <Checkbox
+                          id="opt-mov-em-unidade-compra"
+                          label={`Registrar em ${stock.unidade_compra} (converte automaticamente)`}
+                          checked={movEmUnidadeCompra}
+                          onChange={(checked) => setMovEmUnidadeCompra(checked)}
+                        />
+                      )}
+                      <InputBase
+                        label="Motivo"
+                        placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
+                        value={movMotivo}
+                        onChange={(e) => setMovMotivo(e.target.value)}
+                      />
+                      {movError && <Alert variant="error" text={movError} fullWidth />}
+                      <div className={styles.formActions}>
+                        <Button type="button" onClick={saveStockMovement} disabled={!canSaveStockMov || movSaving}>
+                          {movSaving ? "Salvando…" : "Salvar"}
+                        </Button>
+                        <Button type="button" variant="secondary" onClick={closeStockMovModal}>Cancelar</Button>
+                      </div>
+                    </div>
+                  ) : !stock?.has_stock_item ? (
+                    <div className={styles.formHint}>Sem controle de estoque ainda.</div>
+                  ) : (
+                    <>
+                      <p className={styles.formHint}>
+                        <strong>{stock.quantidade_atual} {stockUnitLabel(stock.unidade)}</strong> em estoque
+                        {stock.abaixo_do_minimo && (
+                          <> <Tag variant="error">Abaixo do mínimo ({stock.estoque_minimo} {stockUnitLabel(stock.unidade)})</Tag></>
+                        )}
+                      </p>
+                      <div className={styles.tableScroll}>
+                        <Table
+                          columns={[
+                            { key: "criado_em", header: "Data", render: (m) => new Date(m.criado_em).toLocaleString("pt-BR") },
+                            { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
+                            {
+                              key: "quantidade", header: "Quantidade",
+                              render: (m) => {
+                                const base = `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`;
+                                // ORD-190 (G3) — registrada na unidade de compra: mostra o valor
+                                // bruto digitado junto do já convertido, não só o convertido.
+                                return m.quantidade_original !== null
+                                  ? `${base} (${m.quantidade_original > 0 ? "+" : ""}${m.quantidade_original} ${m.unidade_original})`
+                                  : base;
+                              },
+                            },
+                            { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
+                            { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
+                          ]}
+                          rows={stock.movements}
+                          rowKey={(m) => m.id}
+                          emptyMessage="Nenhuma movimentação ainda."
+                        />
+                      </div>
+                      {stock.total_movements > stock.movements.length && (
+                        <p className={styles.formHint}>
+                          Mostrando as {stock.movements.length} movimentações mais recentes de {stock.total_movements} no total.
+                        </p>
+                      )}
+                      {/* ORD-191 (A9) — abaixo da tabela de histórico: a tabela é a
+                          fonte de detalhe por evento, o gráfico é a leitura de tendência. */}
+                      <StockHistoryChart points={stockHistory} unidade={stock.unidade} />
+                    </>
+                  )}
+                </>
+              )}
             </div>
 
             <div className={styles.modalSectionSide}>

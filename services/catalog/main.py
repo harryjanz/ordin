@@ -1,7 +1,9 @@
 import io
 import secrets
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Literal, Optional
+from zoneinfo import ZoneInfo
 
 from auth import TokenPayload, get_current_user
 from config import get_cors_origins, require_env
@@ -23,6 +25,7 @@ from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -39,7 +42,6 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -127,8 +129,23 @@ class NcmCode(Base):
 
 
 class Product(Base):
+    """Sem UniqueConstraint de banco pra sku/ean (decisão do usuário,
+    2026-09-18): a regra real é "único por empresa quando ATIVO", e
+    atravessa Product e Option juntos — nenhuma das duas condições dá pra
+    expressar como UniqueConstraint simples de uma tabela só. Validado em
+    aplicação, ver _check_active_code_conflict."""
     __tablename__ = "products"
-    __table_args__ = (UniqueConstraint("company_id", "sku", name="uq_products_company_sku"),)
+    __table_args__ = (
+        # G3 (ORD-190) — mesma constraint de Option (ver mais abaixo): schema
+        # adicionado aqui pra _get_stock_state/_create_stock_movement lerem
+        # owner.estoque_minimo/unidade_compra/fator_conversao sem `if` por
+        # tipo de dono, mesmo A3/A5 (que expõem isso na API/UI de Product)
+        # ainda não estando implementadas — até lá, ficam sempre no default.
+        CheckConstraint(
+            "(unidade_compra IS NULL) = (fator_conversao IS NULL)",
+            name="ck_products_conversao_junta",
+        ),
+    )
     id          = Column(Integer, primary_key=True)
     company_id  = Column(Integer, nullable=False, index=True)
     category_id = Column(Integer, ForeignKey("categories.id"))
@@ -143,6 +160,10 @@ class Product(Base):
     tags        = Column(JSON)  # lista livre de strings, sem lista fechada (ver ORD-075)
     calories    = Column(Integer)  # kcal
     sku         = Column(String(50))  # único por empresa, ver UniqueConstraint acima
+    # ORD-180 — código de barras real (GTIN-8/12/13/14), distinto do sku
+    # (identificador interno de livre escolha). Base pro vínculo automático
+    # com XML de compra (épico de estoque/ERP, histórias B1/C1 futuras).
+    ean         = Column(String(14), nullable=True)
     sort_order  = Column(Integer)  # gerenciado só via create_product (inicial) e /catalog/products/reorder
     created_at  = Column(DateTime, default=datetime.utcnow)
     # ORD-169 — classificação fiscal, todos opcionais (produto vende sem,
@@ -152,6 +173,71 @@ class Product(Base):
     ncm         = Column(String(8), ForeignKey("ncm_codes.codigo"), nullable=True)
     cfop        = Column(String(4), nullable=True)  # "5101" ou "5102", validado na aplicação
     cest        = Column(String(7), nullable=True)  # opcional sempre, Ordin não valida nem sugere
+    # ORD-187 — custo de compra pra produto CFOP 5102 (revenda). Sempre
+    # persiste independente do CFOP atual (troca de CFOP não apaga o valor,
+    # só esconde a exibição na UI) — mesma precisão de price.
+    custo       = Column(Numeric(10, 2), nullable=True)
+    # G3 (ORD-190) — mesmos 3 campos de Option (ver classe Option abaixo),
+    # só implementados de fato pela A3 (estoque_minimo)/A5 (unidade_compra +
+    # fator_conversao) quando essas histórias forem codadas; até lá, sempre
+    # no default (0 / NULL).
+    estoque_minimo  = Column(Numeric(12, 3), nullable=False, default=0, server_default="0")
+    unidade_compra  = Column(String(30), nullable=True)
+    fator_conversao = Column(Numeric(12, 3), nullable=True)
+
+STOCK_UNITS = ("un", "kg", "g", "L", "ml")  # mesmo racional já usado pra CFOP (linha 155):
+                                             # texto simples, validado na aplicação, sem tabela
+
+# Achado do usuário (feedback em browser): sem limite, o histórico de
+# movimentações cresce sem fim — produto de giro alto acumula centenas de
+# linhas ao longo de meses. 20 mais recentes cobre o caso de uso real (ver
+# _get_stock_state) sem paginação completa, que é escopo maior do que o
+# problema pede agora.
+_STOCK_MOVEMENTS_HISTORY_LIMIT = 20
+
+class StockItem(Base):
+    """ORD-181 (A2+G2) — dono polimórfico: product_id OU option_id, nunca os
+    dois (CheckConstraint XOR). company_id duplicado (evita JOIN em toda
+    consulta de isolamento) — pro caminho Option, resolvido uma única vez na
+    criação via join com OptionGroup (Option não tem company_id direto)."""
+    __tablename__ = "stock_items"
+    __table_args__ = (
+        UniqueConstraint("product_id", name="uq_stock_items_product"),
+        UniqueConstraint("option_id", name="uq_stock_items_option"),
+        # MySQL e SQLite tratam NULL como valor distinto em UNIQUE, então
+        # múltiplas linhas com option_id=NULL (donas product_id) não colidem
+        # entre si na uq_stock_items_option, e vice-versa.
+        CheckConstraint(
+            "(product_id IS NOT NULL AND option_id IS NULL) OR (product_id IS NULL AND option_id IS NOT NULL)",
+            name="ck_stock_items_owner_xor",
+        ),
+    )
+
+    id               = Column(Integer, primary_key=True)
+    company_id       = Column(Integer, nullable=False, index=True)
+    product_id       = Column(Integer, ForeignKey("products.id"), nullable=True)
+    option_id        = Column(Integer, ForeignKey("options.id"), nullable=True)
+    quantidade_atual = Column(Numeric(12, 3), nullable=False, default=0)
+    unidade          = Column(String(2), nullable=False)  # um de STOCK_UNITS
+    created_at       = Column(DateTime, default=datetime.utcnow)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class StockMovement(Base):
+    __tablename__ = "stock_movements"
+
+    id             = Column(Integer, primary_key=True)
+    stock_item_id  = Column(Integer, ForeignKey("stock_items.id"), nullable=False, index=True)
+    tipo           = Column(String(10), nullable=False)  # "entrada" | "ajuste"
+    quantidade     = Column(Numeric(12, 3), nullable=False)  # já com sinal aplicado
+    # G3 (ORD-190) — só preenchidos quando a movimentação foi registrada na
+    # unidade de compra do dono (em_unidade_compra=True); nulos no caminho
+    # de hoje (movimentação já na unidade padrão), sem flag extra pra
+    # distinguir "sem conversão" de "conversão zerada".
+    quantidade_original = Column(Numeric(12, 3), nullable=True)
+    unidade_original    = Column(String(30), nullable=True)
+    motivo         = Column(String(255), nullable=True)
+    criado_por     = Column(Integer, nullable=False)  # user_id do JWT
+    criado_em      = Column(DateTime, default=datetime.utcnow)
 
 class Allergen(Base):
     """Master data, não por empresa — lista oficial (RDC 727/2022, Lei
@@ -204,6 +290,12 @@ class Option(Base):
     nenhum rótulo tipo "grátis" — decisão de UX do protótipo). Ver ORD-142
     pra regra de cálculo com múltiplas opções escolhidas (soma dos deltas)."""
     __tablename__ = "options"
+    __table_args__ = (
+        CheckConstraint(
+            "(unidade_compra IS NULL) = (fator_conversao IS NULL)",
+            name="ck_options_conversao_junta",
+        ),
+    )
     id              = Column(Integer, primary_key=True)
     option_group_id = Column(Integer, ForeignKey("option_groups.id"), nullable=False)
     label           = Column(String(80), nullable=False)
@@ -214,6 +306,16 @@ class Option(Base):
     active          = Column(Boolean, nullable=False, default=True)  # ORD-145 — indisponibilidade temporária (estoque/produção), sem excluir a opção
     description     = Column(String(500))  # ORD-146 — mesmo tamanho de Product.description
     sku             = Column(String(50))  # ORD-146 — único por empresa, validado em aplicação (ver _set_option_group_options; Option não tem company_id direto pra um UniqueConstraint de banco)
+    ean             = Column(String(14), nullable=True)   # ORD-188 — mesmo tipo de Product.ean
+    cfop            = Column(String(4), nullable=True)    # ORD-188 — mesmo tipo de Product.cfop, livre em relação ao CFOP do produto pai
+    cest            = Column(String(7), nullable=True)    # ORD-188 — mesmo tipo de Product.cest, sem validação (paridade)
+    # G3 (ORD-190) — mesmo racional de Product.estoque_minimo/A3: configurável
+    # antes mesmo de existir stock_item pra essa opção. unidade_compra +
+    # fator_conversao sempre preenchidos juntos (CheckConstraint acima),
+    # nunca herdados do produto pai — cada dono configura os próprios campos.
+    estoque_minimo  = Column(Numeric(12, 3), nullable=False, default=0, server_default="0")
+    unidade_compra  = Column(String(30), nullable=True)
+    fator_conversao = Column(Numeric(12, 3), nullable=True)
 
 class ProductOptionGroup(Base):
     """min/max_selections_override (ORD-144): permitem que o MESMO grupo
@@ -451,6 +553,12 @@ async def _get_option_group_options(db: AsyncSession, option_group_id: int) -> l
             "active": o.active,
             "description": o.description,
             "sku": o.sku,
+            "ean": o.ean,
+            "cfop": o.cfop,
+            "cest": o.cest,
+            "estoque_minimo": float(o.estoque_minimo),
+            "unidade_compra": o.unidade_compra,
+            "fator_conversao": float(o.fator_conversao) if o.fator_conversao is not None else None,
             "allergens": await _get_option_allergens(db, o.id),
         }
         for o in result.scalars().all()
@@ -466,41 +574,155 @@ async def _serialize_option_group(db: AsyncSession, g: "OptionGroup") -> dict:
         "options": await _get_option_group_options(db, g.id),
     }
 
+async def _validate_no_retroactive_umbrella_conflict(
+    db: AsyncSession, option_group_id: int, options: list["OptionIn"],
+) -> None:
+    """G4 (ORD-189) — impede que uma opção ganhe ean/cfop se isso tornaria guarda-chuva um
+    produto que já tem dado próprio (ean ou stock_item) que ficaria órfão. Sem migração
+    automática — a Empresa resolve manualmente (limpa o ean do produto, ou zera/resolve o
+    estoque) antes de tentar de novo. Roda ANTES do replace de opções — se rejeitar, nada no
+    grupo é alterado. Mensagens distintas por causa (achado do QA): limpar EAN do produto e
+    resolver estoque existente são ações diferentes, a Empresa precisa saber qual das duas.
+
+    Achado testando ao vivo: só considera TRANSIÇÃO (ean/cfop mudando de valor, ou opção nova
+    já nascendo com um dos dois) — uma opção que já tinha cfop salvo de antes (estado herdado
+    da janela G2→G4, documentada na ORD-181) não pode travar o grupo pra sempre em qualquer
+    save futuro que nem mexe em ean/cfop; só o ATO de introduzir/mudar o dado fiscal é bloqueado."""
+    existing_by_id: dict[int, tuple[str | None, str | None]] = {}
+    ids = [opt.id for opt in options if opt.id is not None]
+    if ids:
+        rows = (await db.execute(select(Option.id, Option.ean, Option.cfop).filter(Option.id.in_(ids)))).all()
+        existing_by_id = {row[0]: (row[1], row[2]) for row in rows}
+
+    transitioning = any(
+        (opt.ean or opt.cfop) and existing_by_id.get(opt.id, (None, None)) != (opt.ean, opt.cfop)
+        for opt in options
+    )
+    if not transitioning:
+        return  # nenhuma opção deste payload está ganhando/mudando dado fiscal — nada a checar
+
+    product_ids = (await db.execute(
+        select(ProductOptionGroup.product_id).filter_by(option_group_id=option_group_id)
+    )).scalars().all()
+    if not product_ids:
+        return
+
+    conflicting_ean = (await db.execute(
+        select(Product.id).filter(Product.id.in_(product_ids), Product.ean.isnot(None))
+    )).scalars().first()
+    if conflicting_ean is not None:
+        raise HTTPException(
+            400,
+            detail="produto já tem EAN próprio cadastrado — remova o EAN do produto antes de "
+                   "cadastrar EAN/CFOP nas opções",
+        )
+
+    conflicting_stock = (await db.execute(
+        select(StockItem.product_id).filter(StockItem.product_id.in_(product_ids))
+    )).scalars().first()
+    if conflicting_stock is not None:
+        raise HTTPException(
+            400,
+            detail="produto já tem estoque próprio registrado — resolva o estoque existente "
+                   "antes de cadastrar EAN/CFOP nas opções",
+        )
+
+
 async def _set_option_group_options(db: AsyncSession, option_group_id: int, company_id: int, options: list["OptionIn"]) -> None:
-    """Replace completo, mesmo espírito de _set_product_allergens — remove
-    todas as opções antigas do grupo e recria a partir da lista enviada.
-    Efeito colateral aceito (decisão do Tech Explorer, mesmo padrão de
-    allergen_ids): como as opções antigas são removidas e recriadas com id
-    novo, a imagem de cada opção antiga é descartada do bucket junto — editar
-    a lista de opções de um grupo exige re-upload de imagem depois. Se isso
-    virar problema de UX real em ORD-139, é ponto pra revisar lá (endpoint
-    passaria a aceitar id por opção pra edição parcial), não nesta história.
+    """Replace completo do CONTEÚDO do grupo (a lista enviada é sempre a
+    verdade final), mas não mais um replace completo das LINHAS: opção
+    enviada com `id` de uma opção existente é ATUALIZADA no lugar — imagem
+    preservada, sem re-upload forçado. Opção sem `id` é criada. Opção
+    existente que NÃO aparece na lista enviada é removida de verdade (e aí
+    sim a imagem dela é descartada do bucket, porque a opção deixou de
+    existir).
+
+    Correção de um bug de produção pré-existente (ORD-146): antes desta
+    correção, TODA chamada apagava e recriava todas as opções do zero —
+    editar um único campo de uma opção (rótulo, EAN, o que fosse) derrubava
+    a imagem de TODAS as opções do grupo, não só da que mudou. Achado ao
+    testar a ORD-188 em ambiente real — o comportamento já existia desde a
+    ORD-146, não foi introduzido por ela.
 
     active (ORD-145) precisa ser propagado explicitamente aqui — sem isso,
-    toda opção voltaria a "ativa" no próximo replace completo, desfazendo
-    qualquer desativação feita via PATCH /catalog/options/{id}.
+    toda opção voltaria a "ativa" no próximo save, desfazendo qualquer
+    desativação feita via PATCH /catalog/options/{id}.
 
     ORD-146: SKU único por empresa é validado aqui em nível de aplicação —
     Option não tem company_id direto (isolamento via join com OptionGroup),
     então não dá pra usar um UniqueConstraint de banco como Product.sku tem.
-    allergen_ids é validado e persistido em OptionAllergen, que precisa ser
-    deletado explicitamente ANTES do hard delete de Option abaixo (nenhuma
-    FK deste banco usa ondelete=CASCADE — sem isso, o replace completo de
-    um grupo com opção alergênica estoura IntegrityError)."""
+
+    Decisão do usuário (2026-09-18): sku/ean únicos por empresa só quando
+    ATIVOS, atravessando Product e Option juntos (frente de caixa futura vai
+    selecionar item por leitura de código de barras — colisão ali seria um
+    problema bem maior de resolver depois). Opção inativa nunca colide, nem
+    entre si nem com uma ativa. O grupo inteiro sendo substituído (`.filter
+    (Option.option_group_id != option_group_id)`) fica de fora da checagem
+    contra o banco de propósito — a checagem DENTRO do lote recebido (via
+    `set()`) já cobre esse caso, sem risco de falso positivo entre duas
+    opções do mesmo grupo trocando de valor entre si na mesma chamada.
+
+    allergen_ids é substituído por completo pra toda opção que sobrevive ou
+    é criada — mais simples que diffar allergen a allergen, e o volume por
+    opção é sempre pequeno."""
     if not options:
         raise HTTPException(400, detail="Grupo precisa de ao menos uma opção")
 
-    skus = [opt.sku for opt in options if opt.sku]
-    if len(skus) != len(set(skus)):
+    # G4 (ORD-189) — falha rápido, antes de gastar query de duplicidade, se a
+    # transição em si (opção ganhando dado fiscal com produto já órfão) já é inválida.
+    await _validate_no_retroactive_umbrella_conflict(db, option_group_id, options)
+
+    active_skus = [opt.sku for opt in options if opt.sku and opt.active]
+    if len(active_skus) != len(set(active_skus)):
         raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
-    if skus:
+    if active_skus:
         dup_result = await db.execute(
             select(Option.sku)
             .join(OptionGroup, OptionGroup.id == Option.option_group_id)
-            .filter(OptionGroup.company_id == company_id, Option.option_group_id != option_group_id, Option.sku.in_(skus))
+            .filter(
+                OptionGroup.company_id == company_id, Option.option_group_id != option_group_id,
+                Option.active == True, Option.sku.in_(active_skus),
+            )
         )
         if dup_result.scalars().first() is not None:
             raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+        dup_product = await db.execute(
+            select(Product.id).filter(
+                Product.company_id == company_id, Product.deleted == False,
+                Product.active == True, Product.sku.in_(active_skus),
+            )
+        )
+        if dup_product.scalars().first() is not None:
+            raise HTTPException(400, detail="SKU já cadastrado para um produto ativo desta empresa")
+
+    # ORD-188 — mesmo padrão acima, replicado pro ean. Checksum primeiro
+    # (mais barato, sem ir ao banco) e só então a checagem de duplicidade.
+    for opt in options:
+        if opt.ean is not None and not _is_valid_gtin(opt.ean):
+            raise HTTPException(400, detail="código de barras inválido")
+
+    active_eans = [opt.ean for opt in options if opt.ean and opt.active]
+    if len(active_eans) != len(set(active_eans)):
+        raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
+    if active_eans:
+        dup_ean_result = await db.execute(
+            select(Option.ean)
+            .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+            .filter(
+                OptionGroup.company_id == company_id, Option.option_group_id != option_group_id,
+                Option.active == True, Option.ean.in_(active_eans),
+            )
+        )
+        if dup_ean_result.scalars().first() is not None:
+            raise HTTPException(400, detail="código de barras já cadastrado para esta empresa")
+        dup_ean_product = await db.execute(
+            select(Product.id).filter(
+                Product.company_id == company_id, Product.deleted == False,
+                Product.active == True, Product.ean.in_(active_eans),
+            )
+        )
+        if dup_ean_product.scalars().first() is not None:
+            raise HTTPException(400, detail="código de barras já cadastrado para um produto ativo desta empresa")
 
     all_allergen_ids = {aid for opt in options for aid in opt.allergen_ids}
     if all_allergen_ids:
@@ -510,22 +732,55 @@ async def _set_option_group_options(db: AsyncSession, option_group_id: int, comp
             raise HTTPException(400, detail="allergen_ids contém id que não existe")
 
     old_result = await db.execute(select(Option).filter_by(option_group_id=option_group_id))
-    old_options = old_result.scalars().all()
-    old_ids = [old.id for old in old_options]
-    for old in old_options:
-        if old.image_url: delete_object(old.image_url)
-        if old.thumbnail_url: delete_object(old.thumbnail_url)
-    if old_ids:
-        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(old_ids)))
-    await db.execute(delete(Option).where(Option.option_group_id == option_group_id))
+    old_options_by_id = {o.id: o for o in old_result.scalars().all()}
+
+    incoming_ids = {opt.id for opt in options if opt.id is not None}
+    invalid_ids = incoming_ids - set(old_options_by_id.keys())
+    if invalid_ids:
+        raise HTTPException(400, detail="id de opção não pertence a este grupo")
+
+    # opções existentes que não aparecem mais na lista enviada: removidas de
+    # verdade — só aqui a imagem é descartada, porque a opção deixou de existir
+    removed_ids = set(old_options_by_id.keys()) - incoming_ids
+    for removed_id in removed_ids:
+        removed = old_options_by_id[removed_id]
+        if removed.image_url: delete_object(removed.image_url)
+        if removed.thumbnail_url: delete_object(removed.thumbnail_url)
+    if removed_ids:
+        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(removed_ids)))
+        await db.execute(delete(Option).where(Option.id.in_(removed_ids)))
+
+    # allergen_ids é sempre substituído por completo pra toda opção que
+    # sobrevive (vai ser atualizada) ou é criada — nunca pras removidas
+    # acima, já deletadas junto com a opção.
+    if incoming_ids:
+        await db.execute(delete(OptionAllergen).where(OptionAllergen.option_id.in_(incoming_ids)))
 
     new_options = []
     for index, opt in enumerate(options):
-        option = Option(
-            option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index,
-            active=opt.active, description=opt.description, sku=opt.sku,
-        )
-        db.add(option)
+        if opt.id is not None:
+            option = old_options_by_id[opt.id]
+            option.label = opt.label
+            option.price_delta = opt.price_delta
+            option.sort_order = index
+            option.active = opt.active
+            option.description = opt.description
+            option.sku = opt.sku
+            option.ean = opt.ean
+            option.cfop = opt.cfop
+            option.cest = opt.cest
+            option.estoque_minimo = opt.estoque_minimo
+            option.unidade_compra = opt.unidade_compra
+            option.fator_conversao = opt.fator_conversao
+            # image_url/thumbnail_url intocados — é exatamente isso que preserva a imagem
+        else:
+            option = Option(
+                option_group_id=option_group_id, label=opt.label, price_delta=opt.price_delta, sort_order=index,
+                active=opt.active, description=opt.description, sku=opt.sku,
+                ean=opt.ean, cfop=opt.cfop, cest=opt.cest,
+                estoque_minimo=opt.estoque_minimo, unidade_compra=opt.unidade_compra, fator_conversao=opt.fator_conversao,
+            )
+            db.add(option)
         new_options.append((option, opt.allergen_ids))
     await db.flush()
     for option, allergen_ids in new_options:
@@ -812,6 +1067,7 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "tags": p.tags,
         "calories": p.calories,
         "sku": p.sku,
+        "ean": p.ean,
         "sort_order": p.sort_order,
         "ncm": p.ncm,
         "ncm_descricao": (
@@ -820,6 +1076,8 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         ),
         "cfop": p.cfop,
         "cest": p.cest,
+        "custo": float(p.custo) if p.custo is not None else None,
+        "is_umbrella": await _is_umbrella_product(db, p.id),  # G4 (ORD-189)
         "allergens": await _get_product_allergens(db, p.id),
         "option_groups": await _get_product_option_groups(db, p.id),
         "related_products": await _get_product_related(db, p.id),
@@ -832,6 +1090,57 @@ async def _validate_ncm_exists(db: AsyncSession, ncm: str) -> None:
     exists = (await db.execute(select(NcmCode.codigo).filter_by(codigo=ncm))).scalars().first()
     if not exists:
         raise HTTPException(400, detail="ncm não encontrado na tabela de referência")
+
+def _is_valid_gtin(code: str) -> bool:
+    """Checksum padrão GTIN-8/12/13/14 (ORD-180) — peso alternado 3/1 a
+    partir do dígito imediatamente à esquerda do verificador, sempre
+    começando em 3 no índice 0 da leitura invertida, independente do
+    comprimento total (não depende da paridade de len(digits))."""
+    if not code.isdigit() or len(code) not in (8, 12, 13, 14):
+        return False
+    digits = [int(d) for d in code[:-1]]
+    check = int(code[-1])
+    total = sum(d * (3 if i % 2 == 0 else 1) for i, d in enumerate(reversed(digits)))
+    return (10 - total % 10) % 10 == check
+
+
+async def _check_active_code_conflict(
+    db: AsyncSession, company_id: int, field: str, value: str,
+    *, exclude_product_id: int | None = None, exclude_option_id: int | None = None,
+) -> bool:
+    """Decisão do usuário: SKU e EAN precisam ser únicos por empresa quando
+    ATIVOS, atravessando os dois universos (Product e Option) — motivo:
+    frente de caixa futura vai selecionar item por leitura de código de
+    barras, e uma colisão ali seria um problema muito maior de resolver
+    depois. Produto/opção INATIVO nunca colide (nem entre si, nem com um
+    ativo) — só quando alguém tenta ativar (ou salvar já ativo) é que a
+    unicidade é cobrada.
+
+    Sem UniqueConstraint de banco pra isso: a regra é condicional (só conta
+    quando active=True) e atravessa DUAS tabelas — nenhum dos dois casos dá
+    pra expressar como UniqueConstraint simples. Mesmo risco de corrida já
+    aceito hoje pro sku de Option (_set_option_group_options) — validação
+    em aplicação, não constraint de banco; não é regressão introduzida
+    aqui, é extensão consciente do mesmo trade-off já existente."""
+    product_col = getattr(Product, field)
+    q = select(Product.id).filter(
+        Product.company_id == company_id, Product.deleted == False,
+        Product.active == True, product_col == value,
+    )
+    if exclude_product_id is not None:
+        q = q.filter(Product.id != exclude_product_id)
+    if (await db.execute(q)).scalars().first() is not None:
+        return True
+
+    option_col = getattr(Option, field)
+    q = (
+        select(Option.id)
+        .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+        .filter(OptionGroup.company_id == company_id, Option.active == True, option_col == value)
+    )
+    if exclude_option_id is not None:
+        q = q.filter(Option.id != exclude_option_id)
+    return (await db.execute(q)).scalars().first() is not None
 
 # ── Promoções (ORD-166) ──────────────────────────────────────────────────────
 
@@ -1078,12 +1387,57 @@ class NcmListOut(BaseModel):
     results: list[NcmOut]
 
 class OptionIn(BaseModel):
+    # correção de bug (achado testando ORD-188): identifica uma opção já
+    # existente pra _set_option_group_options atualizar no lugar em vez de
+    # apagar+recriar — é isso que preserva a imagem. None = opção nova.
+    id: int | None = None
     label: str
     price_delta: float = 0  # acréscimo sobre o preço-base do produto, não preço absoluto — ver ORD-142
     active: bool = True  # ORD-145 — precisa vir no replace completo pra não reativar opção desativada
     description: str | None = None  # ORD-146
     sku: str | None = None  # ORD-146 — único por empresa, validado em _set_option_group_options
+    ean: str | None = None  # ORD-188
+    cfop: str | None = None  # ORD-188 — livre, sem forçar igualdade com o produto pai
+    cest: str | None = None  # ORD-188 — sem validador, paridade com Product.cest
+    # G3 (ORD-190) — mesmos campos de Product (A3/A5), configuráveis mesmo antes
+    # de existir stock_item pra esta opção.
+    estoque_minimo: float = 0
+    unidade_compra: str | None = None
+    fator_conversao: float | None = None
     allergen_ids: list[int] = []  # ORD-146 — sempre lista completa (replace completo, não "não mexer")
+
+    @field_validator("cfop")
+    @classmethod
+    def cfop_valid(cls, v: str | None) -> str | None:
+        return _validate_cfop(v)  # reaproveita a função já usada em Product (ORD-169)
+
+    @field_validator("ean")
+    @classmethod
+    def _empty_ean_to_none(cls, v: str | None) -> str | None:
+        # mesmo racional do ProductIn (ORD-180): string vazia do formulário
+        # vira None aqui no schema, evitando colisão de "" contra "" na
+        # checagem de unicidade em aplicação (_set_option_group_options).
+        return v.strip() or None if v is not None else None
+
+    @field_validator("estoque_minimo")
+    @classmethod
+    def _estoque_minimo_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("estoque mínimo não pode ser negativo")
+        return v
+
+    @field_validator("fator_conversao")
+    @classmethod
+    def _fator_conversao_positive(cls, v: float | None) -> float | None:
+        if v is not None and v <= 0:
+            raise ValueError("fator de conversão deve ser positivo")
+        return v
+
+    @model_validator(mode="after")
+    def _conversao_junta(self) -> "OptionIn":
+        if (self.unidade_compra is None) != (self.fator_conversao is None):
+            raise ValueError("unidade de compra e fator de conversão devem ser preenchidos juntos")
+        return self
 
 class OptionOut(BaseModel):
     id: int
@@ -1094,7 +1448,13 @@ class OptionOut(BaseModel):
     sort_order: int | None = None
     active: bool = True
     description: str | None = None
+    ean: str | None = None  # ORD-188
+    cfop: str | None = None  # ORD-188
+    cest: str | None = None  # ORD-188
     sku: str | None = None
+    estoque_minimo: float = 0  # ORD-190
+    unidade_compra: str | None = None  # ORD-190
+    fator_conversao: float | None = None  # ORD-190
     allergens: list[AllergenOut] = []
 
 class OptionActiveIn(BaseModel):
@@ -1222,6 +1582,7 @@ class ProductOut(BaseModel):
     tags: list[str] | None = None
     calories: int | None = None
     sku: str | None = None
+    ean: str | None = None
     sort_order: int | None = None
     # ORD-169 — classificação fiscal, sempre opcional. ncm_descricao só existe
     # aqui na saída (join com ncm_codes) — o cliente nunca digita o NCM, só
@@ -1231,6 +1592,8 @@ class ProductOut(BaseModel):
     ncm_descricao: str | None = None
     cfop: str | None = None
     cest: str | None = None
+    custo: float | None = None  # ORD-187
+    is_umbrella: bool = False  # ORD-189 (G4) — computado, nunca persistido
     allergens: list[AllergenOut] = []
     option_groups: list[ProductOptionGroupOut] = []
     # ORD-152: só populado por update_product() ao ativar o produto — os
@@ -1245,6 +1608,33 @@ class ProductOut(BaseModel):
 class ProductListOut(BaseModel):
     products: list[ProductOut]
 
+# Decisão do usuário (2026-09-18): a checagem de sku/ean único-quando-ativo
+# atravessa Product e Option, mas só é aplicada de fato no Salvar (backend).
+# Pra dar feedback já na modal de edição de opção/produto, o frontend
+# pré-carrega esse conjunto (ver GET /catalog/codes/active-in-use) e compara
+# no cliente — o Salvar final continua sendo a autoridade, isso aqui é só UX.
+class ActiveCodesOut(BaseModel):
+    skus: list[str]
+    eans: list[str]
+
+async def _is_umbrella_product(db: AsyncSession, product_id: int) -> bool:
+    """G4 (ORD-189) — True se QUALQUER Option de QUALQUER OptionGroup vinculado a este
+    produto (via ProductOptionGroup) tiver ean OU cfop preenchido (campos da G1/ORD-188).
+    Estado computado a cada chamada, nunca persistido — mesmo racional de
+    estoque_controlado (A4). Ter opções não basta pra ser guarda-chuva; ter opções com
+    dado fiscal preenchido, sim."""
+    result = await db.execute(
+        select(Option.id)
+        .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+        .join(ProductOptionGroup, ProductOptionGroup.option_group_id == OptionGroup.id)
+        .filter(
+            ProductOptionGroup.product_id == product_id,
+            or_(Option.ean.isnot(None), Option.cfop.isnot(None)),
+        )
+        .limit(1)
+    )
+    return result.scalars().first() is not None
+
 # ORD-169 — só os 2 valores fechados no Explorer (produção própria / revenda),
 # venda presencial do totem sempre dentro do estado.
 VALID_CFOP = {"5101", "5102"}
@@ -1253,6 +1643,12 @@ VALID_CFOP = {"5101", "5102"}
 def _validate_cfop(v: str | None) -> str | None:
     if v is not None and v not in VALID_CFOP:
         raise ValueError(f"cfop deve ser um de {sorted(VALID_CFOP)}")
+    return v
+
+
+def _custo_non_negative(v: float | None) -> float | None:
+    if v is not None and v < 0:
+        raise ValueError("custo não pode ser negativo")
     return v
 
 
@@ -1265,11 +1661,13 @@ class ProductIn(BaseModel):
     tags: list[str] | None = None
     calories: int | None = None
     sku: str | None = None
+    ean: str | None = None
     allergen_ids: list[int] | None = None
     # ORD-169 — classificação fiscal, sempre opcional no cadastro.
     ncm: str | None = None
     cfop: str | None = None
     cest: str | None = None
+    custo: float | None = None  # ORD-187 — só relevante pra CFOP 5102, mas aceito sempre
 
     @field_validator("price")
     @classmethod
@@ -1283,6 +1681,20 @@ class ProductIn(BaseModel):
     def cfop_valid(cls, v: str | None) -> str | None:
         return _validate_cfop(v)
 
+    @field_validator("custo")
+    @classmethod
+    def custo_non_negative(cls, v: float | None) -> float | None:
+        return _custo_non_negative(v)
+
+    @field_validator("ean")
+    @classmethod
+    def _empty_ean_to_none(cls, v: str | None) -> str | None:
+        # ORD-180 — string vazia (campo apagado no formulário) normalizada pra
+        # None já no schema, não só no frontend: ean tem UniqueConstraint
+        # (diferente de cest), então duas strings vazias colidiriam entre si
+        # se chegassem cruas no banco (NULL é ignorado pela constraint, "" não).
+        return v.strip() or None if v is not None else None
+
 class ProductUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -1293,6 +1705,7 @@ class ProductUpdate(BaseModel):
     tags: list[str] | None = None
     calories: int | None = None
     sku: str | None = None
+    ean: str | None = None
     allergen_ids: list[int] | None = None
     # ORD-160: replace completo, mesma semântica de allergen_ids. Só na
     # edição (Explorer não cobre cadastrar correlação já na criação).
@@ -1304,6 +1717,7 @@ class ProductUpdate(BaseModel):
     ncm: str | None = None
     cfop: str | None = None
     cest: str | None = None
+    custo: float | None = None  # ORD-187
 
     @field_validator("price")
     @classmethod
@@ -1316,6 +1730,16 @@ class ProductUpdate(BaseModel):
     @classmethod
     def cfop_valid(cls, v: str | None) -> str | None:
         return _validate_cfop(v)
+
+    @field_validator("custo")
+    @classmethod
+    def custo_non_negative(cls, v: float | None) -> float | None:
+        return _custo_non_negative(v)
+
+    @field_validator("ean")
+    @classmethod
+    def _empty_ean_to_none(cls, v: str | None) -> str | None:
+        return v.strip() or None if v is not None else None
 
 class ReorderIn(BaseModel):
     category_id: int
@@ -1664,6 +2088,43 @@ async def list_products(
     return {"products": [await _serialize_product(db, p) for p in products]}
 
 @app.get(
+    "/catalog/codes/active-in-use",
+    response_model=ActiveCodesOut,
+    tags=["Catálogo"],
+    summary="SKUs/EANs ativos já em uso pela empresa (Product + Option)",
+)
+async def get_active_codes_in_use(
+    exclude_product_id: int | None = None,
+    exclude_option_group_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id),
+):
+    """Feedback de conflito já na modal (achado do usuário: só validar no
+    Salvar do grupo/produto é tarde demais pra uma boa UX). `exclude_*`
+    evita que o próprio registro sendo editado apareça como conflito consigo
+    mesmo — a checagem definitiva continua sendo em `_set_option_group_options`
+    e nos endpoints de produto, isso aqui é só pra UX antecipada."""
+    product_q = select(Product.sku, Product.ean).filter(
+        Product.company_id == company_id, Product.deleted == False, Product.active == True,
+    )
+    if exclude_product_id is not None:
+        product_q = product_q.filter(Product.id != exclude_product_id)
+    product_rows = (await db.execute(product_q)).all()
+
+    option_q = (
+        select(Option.sku, Option.ean)
+        .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+        .filter(OptionGroup.company_id == company_id, Option.active == True)
+    )
+    if exclude_option_group_id is not None:
+        option_q = option_q.filter(Option.option_group_id != exclude_option_group_id)
+    option_rows = (await db.execute(option_q)).all()
+
+    skus = {sku for sku, _ in product_rows if sku} | {sku for sku, _ in option_rows if sku}
+    eans = {ean for _, ean in product_rows if ean} | {ean for _, ean in option_rows if ean}
+    return {"skus": sorted(skus), "eans": sorted(eans)}
+
+@app.get(
     "/catalog/products/{product_id}",
     response_model=ProductOut,
     tags=["Catálogo"],
@@ -1843,6 +2304,15 @@ async def create_product(
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
     if body.ncm is not None:
         await _validate_ncm_exists(db, body.ncm)
+    if body.ean is not None and not _is_valid_gtin(body.ean):
+        raise HTTPException(400, detail="código de barras inválido")
+    # Decisão do usuário: sku/ean únicos por empresa quando ativos, atravessando
+    # Product e Option — produto novo nasce sempre ativo (ProductIn não tem
+    # campo active), então a checagem sempre roda na criação.
+    if body.sku is not None and await _check_active_code_conflict(db, company_id, "sku", body.sku):
+        raise HTTPException(400, detail="SKU já cadastrado para um produto ou opção ativo desta empresa")
+    if body.ean is not None and await _check_active_code_conflict(db, company_id, "ean", body.ean):
+        raise HTTPException(400, detail="código de barras já cadastrado para um produto ou opção ativo desta empresa")
     next_sort_order = 0
     if body.category_id is not None:
         count_result = await db.execute(
@@ -1861,17 +2331,20 @@ async def create_product(
         tags=body.tags,
         calories=body.calories,
         sku=body.sku,
+        ean=body.ean,
         sort_order=next_sort_order,
         ncm=body.ncm,
         cfop=body.cfop,
         cest=body.cest,
+        custo=body.custo,
     )
     db.add(p)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+    # Sem UniqueConstraint de banco pra sku/ean desde a decisão do usuário
+    # (regra "único quando ativo" atravessa Product+Option, não expressável
+    # numa constraint de uma tabela só) — checagem já feita acima, antes do
+    # INSERT. Risco de corrida residual aceito conscientemente, mesmo
+    # trade-off já existente pro sku de Option.
+    await db.commit()
     await db.refresh(p)
     if body.allergen_ids is not None:
         await _set_product_allergens(db, p.id, body.allergen_ids)
@@ -1931,6 +2404,13 @@ async def update_product(
             raise HTTPException(400, detail="category_id não pertence à empresa ou não existe")
     if body.ncm is not None:
         await _validate_ncm_exists(db, body.ncm)
+    # G4 (ORD-189) — checagem de guarda-chuva vem antes da de checksum: não faz
+    # sentido validar formato de um campo que já vai ser rejeitado por não poder
+    # existir ali (EAN migrou pra controle das opções).
+    if body.ean is not None and await _is_umbrella_product(db, product_id):
+        raise HTTPException(400, detail="produto guarda-chuva: EAN é controlado pelas opções, não pelo produto")
+    if body.ean is not None and not _is_valid_gtin(body.ean):
+        raise HTTPException(400, detail="código de barras inválido")
 
     affected_combos: list[tuple[int, str]] = []
     if body.active is False:
@@ -1942,12 +2422,33 @@ async def update_product(
         exclude_none=True, exclude={"allergen_ids", "related_product_ids", "confirm_deactivate_combos"}
     ).items():
         setattr(p, field, value)
+    # ORD-180 — achado durante a implementação: exclude_none=True acima descarta
+    # ean=None do loop, então limpar o campo (string vazia normalizada pro
+    # validator) nunca chegaria no produto. model_fields_set distingue "campo
+    # enviado como null" de "campo omitido" — mesma limitação pré-existe pra
+    # sku/cest, fora de escopo corrigir aqui, mas ean precisa funcionar pro
+    # critério de aceite já registrado na história.
+    if "ean" in body.model_fields_set and body.ean is None:
+        p.ean = None
+
+    # Decisão do usuário: sku/ean únicos por empresa quando ativos, atravessando
+    # Product e Option. Lido de `p` (já com o body aplicado acima, inclusive o
+    # caso especial de ean=None) pra pegar o estado FINAL, não só o que veio no
+    # payload — cobre tanto editar um produto já ativo quanto reativar um que
+    # estava inativo (os dois casos chegam aqui pelo mesmo caminho, sem
+    # precisar de lógica separada pra "é uma ativação?").
+    if p.active:
+        if p.sku is not None and await _check_active_code_conflict(
+            db, company_id, "sku", p.sku, exclude_product_id=p.id
+        ):
+            raise HTTPException(400, detail="SKU já cadastrado para um produto ou opção ativo desta empresa")
+        if p.ean is not None and await _check_active_code_conflict(
+            db, company_id, "ean", p.ean, exclude_product_id=p.id
+        ):
+            raise HTTPException(400, detail="código de barras já cadastrado para um produto ou opção ativo desta empresa")
+
     await _cascade_deactivate_combos(db, affected_combos)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(400, detail="SKU já cadastrado para esta empresa")
+    await db.commit()
     if body.allergen_ids is not None:
         await _set_product_allergens(db, p.id, body.allergen_ids)
         await db.commit()
@@ -2085,6 +2586,338 @@ async def delete_product_image(
     p.thumbnail_url = None
     await db.commit(); await db.refresh(p)
     return await _serialize_product(db, p)
+
+# ── Estoque manual (ORD-181, A2+G2) ──────────────────────────────────────────
+
+class StockMovementIn(BaseModel):
+    tipo: Literal["entrada", "ajuste"]
+    quantidade: Decimal
+    unidade: str | None = None  # obrigatório só na primeira movimentação
+    motivo: str | None = None
+    # G3 (ORD-190) — quantidade acima está na unidade_compra do dono (não na
+    # unidade padrão do stock_item); convertida por fator_conversao antes de
+    # aplicar. False (default) preserva o caminho de hoje, sem conversão.
+    em_unidade_compra: bool = False
+
+
+def _validate_stock_unit(unidade: str) -> None:
+    if unidade not in STOCK_UNITS:
+        raise HTTPException(400, detail=f"unidade inválida — use uma de {', '.join(STOCK_UNITS)}")
+
+
+async def _resolve_stock_owner(
+    db: AsyncSession, company_id: int, *, product_id: int | None = None, option_id: int | None = None,
+) -> "Product | Option":
+    """Confirma que o dono (Product OU Option, nunca os dois — chamado sempre com exatamente um
+    dos dois kwargs) pertence à company_id do JWT, e devolve a linha já carregada (assinatura
+    final combinada com a G3/ORD-190 — evita segunda consulta quando quem chama precisar ler
+    campos do dono, ex. estoque_minimo). 404 se não existir ou for de outra empresa.
+
+    Option não tem company_id direto — mesmo padrão de _set_option_group_options: isolamento
+    passa por join com OptionGroup, não por filtro direto. Repetir esse join aqui é obrigatório,
+    não opcional — é o caminho de isolamento multi-tenant dedicado pro caminho de Option."""
+    if product_id is not None:
+        p = (await db.execute(
+            select(Product).filter_by(id=product_id, company_id=company_id, deleted=False)
+        )).scalars().first()
+        if not p:
+            raise HTTPException(404)
+        # G4 (ORD-189) — produto guarda-chuva não controla o próprio estoque mais;
+        # cobre GET e POST de movimentação, já que os dois delegam pra esta função.
+        if await _is_umbrella_product(db, product_id):
+            raise HTTPException(
+                400, detail="produto guarda-chuva: estoque é controlado pelas opções, não pelo produto"
+            )
+        return p
+    else:
+        o = (await db.execute(
+            select(Option)
+            .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+            .filter(Option.id == option_id, OptionGroup.company_id == company_id)
+        )).scalars().first()
+        if not o:
+            raise HTTPException(404)
+        return o
+
+
+async def _get_stock_state(
+    db: AsyncSession, company_id: int, *, product_id: int | None = None, option_id: int | None = None,
+) -> dict:
+    # G3 (ORD-190) — owner carregado (Product ou Option) pra ler estoque_minimo
+    # sem query extra; nenhum `if` por tipo de dono, os dois têm as mesmas colunas.
+    owner = await _resolve_stock_owner(db, company_id, product_id=product_id, option_id=option_id)
+    item = (await db.execute(
+        select(StockItem).filter_by(product_id=product_id, option_id=option_id)
+    )).scalars().first()
+    if not item:
+        return {
+            "has_stock_item": False, "quantidade_atual": None, "unidade": None,
+            "estoque_minimo": owner.estoque_minimo, "abaixo_do_minimo": False,
+            "unidade_compra": owner.unidade_compra, "fator_conversao": owner.fator_conversao,
+            "movements": [], "total_movements": 0,
+        }
+
+    # achado do usuário: sem limite, o histórico cresce sem fim (produto de
+    # muito giro pode acumular centenas de movimentações ao longo de meses)
+    # — mostra só as mais recentes, com o total pra a UI avisar que existe
+    # mais além do que está na tela.
+    total_movements = (await db.execute(
+        select(func.count()).select_from(StockMovement).filter_by(stock_item_id=item.id)
+    )).scalar_one()
+    movements = (await db.execute(
+        select(StockMovement).filter_by(stock_item_id=item.id)
+        .order_by(StockMovement.criado_em.desc())
+        .limit(_STOCK_MOVEMENTS_HISTORY_LIMIT)
+    )).scalars().all()
+    return {
+        "has_stock_item": True,
+        "quantidade_atual": item.quantidade_atual,
+        "unidade": item.unidade,
+        "estoque_minimo": owner.estoque_minimo,
+        "abaixo_do_minimo": item.quantidade_atual <= owner.estoque_minimo,  # <= (achado QA da A3)
+        "unidade_compra": owner.unidade_compra,
+        "fator_conversao": owner.fator_conversao,
+        "total_movements": total_movements,
+        "movements": [
+            {"id": m.id, "tipo": m.tipo, "quantidade": m.quantidade, "motivo": m.motivo,
+             "quantidade_original": m.quantidade_original, "unidade_original": m.unidade_original,
+             "criado_por": m.criado_por, "criado_em": m.criado_em}
+            for m in movements
+        ],
+    }
+
+
+async def _create_stock_movement(
+    db: AsyncSession, company_id: int, body: "StockMovementIn", current_user: TokenPayload,
+    *, product_id: int | None = None, option_id: int | None = None,
+) -> dict:
+    # G3 (ORD-190) — owner carregado (Product ou Option) pra ler fator_conversao/
+    # unidade_compra sem query extra; nenhum `if` por tipo de dono.
+    owner = await _resolve_stock_owner(db, company_id, product_id=product_id, option_id=option_id)
+    item = (await db.execute(
+        select(StockItem).filter_by(product_id=product_id, option_id=option_id)
+    )).scalars().first()
+
+    motivo = (body.motivo or "").strip() or None  # espaço em branco tratado como ausente
+    if body.tipo == "ajuste" and motivo is None:
+        raise HTTPException(400, detail="ajuste exige motivo")
+
+    # G3 (ORD-190) — quantidade recebida está na unidade_compra do dono, convertida
+    # pelo fator antes de aplicar ao stock_item (que sempre guarda na unidade
+    # padrão). quantidade_original/unidade_original preservam o valor bruto
+    # digitado, só pro histórico — quantidade (abaixo) é sempre a já convertida.
+    quantidade_original: Decimal | None = None
+    unidade_original: str | None = None
+    if body.em_unidade_compra:
+        if owner.fator_conversao is None:
+            raise HTTPException(400, detail="dono não tem conversão de unidade configurada")
+        if body.tipo == "entrada" and body.quantidade <= 0:
+            raise HTTPException(400, detail="entrada deve ser positiva")
+        quantidade_original, unidade_original = body.quantidade, owner.unidade_compra
+        quantidade = (body.quantidade * owner.fator_conversao).quantize(
+            Decimal("0.001"), rounding=ROUND_HALF_UP  # achado de QA (A5): 3 casas
+        )
+    else:
+        quantidade = body.quantidade
+
+    if item is None:
+        # primeira movimentação — só entrada faz sentido (não existe saldo pra "ajustar" ainda).
+        # O valor inicial já entra certo no INSERT — nenhum UPDATE extra depois disso, senão
+        # dobra a quantidade (a linha acabou de nascer com quantidade_atual=delta).
+        if body.tipo != "entrada":
+            raise HTTPException(400, detail="primeira movimentação precisa ser uma entrada")
+        if body.unidade is None:
+            raise HTTPException(400, detail="unidade é obrigatória na primeira movimentação")
+        _validate_stock_unit(body.unidade)
+        if quantidade <= 0:
+            raise HTTPException(400, detail="entrada deve ser positiva")
+        delta = quantidade
+        item = StockItem(
+            company_id=company_id, product_id=product_id, option_id=option_id,
+            quantidade_atual=delta, unidade=body.unidade,
+        )
+        db.add(item)
+        await db.flush()  # garante item.id antes do StockMovement
+    else:
+        if body.unidade is not None and body.unidade != item.unidade:
+            raise HTTPException(400, detail=f"unidade já definida como {item.unidade}, não pode ser alterada")
+        if body.tipo == "entrada":
+            if quantidade <= 0:
+                raise HTTPException(400, detail="entrada deve ser positiva")
+            delta = quantidade
+            await db.execute(
+                update(StockItem).where(StockItem.id == item.id)
+                .values(quantidade_atual=StockItem.quantidade_atual + delta)
+            )
+        else:  # ajuste — pode ser positivo ou negativo, nunca deixa o saldo negativo
+            if quantidade == 0:
+                raise HTTPException(400, detail="ajuste não pode ser zero")
+            delta = quantidade
+            # UPDATE condicional atômico — sem SELECT FOR UPDATE (frequência de concorrência
+            # baixíssima, ação manual humana), mas seguro contra corrida: o WHERE só passa se o
+            # saldo final não ficar negativo
+            result = await db.execute(
+                update(StockItem)
+                .where(StockItem.id == item.id, StockItem.quantidade_atual + delta >= 0)
+                .values(quantidade_atual=StockItem.quantidade_atual + delta)
+            )
+            if result.rowcount == 0:
+                raise HTTPException(400, detail="ajuste resultaria em quantidade negativa")
+
+    movement = StockMovement(
+        stock_item_id=item.id, tipo=body.tipo, quantidade=delta,
+        quantidade_original=quantidade_original, unidade_original=unidade_original,
+        motivo=motivo, criado_por=current_user.sub,
+    )
+    db.add(movement)
+    await db.commit()
+    await db.refresh(item)
+    return {"quantidade_atual": item.quantidade_atual, "unidade": item.unidade}
+
+
+# ── Gráfico de nível de estoque, 7 dias (ORD-191, A9) ────────────────────────
+
+_STOCK_HISTORY_DAYS = 7
+BR_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+async def _get_stock_history(db: AsyncSession, stock_item_id: int) -> list[dict]:
+    """Reconstrói o nível de estoque ao final de cada um dos últimos 7 dias, sem
+    snapshot diário armazenado: parte da quantidade_atual de AGORA e anda pra trás,
+    subtraindo o delta líquido de cada dia (1 query na janela, agregação em Python).
+
+    Agregação em Python, não SQL (revisa recomendação inicial de QA): CONVERT_TZ é
+    MySQL-only, SQLite (suíte de testes) não suporta — duplicar a query por dialect
+    custaria mais que agregar em memória, dado que o volume por request é sempre 1
+    dono × 7 dias (nunca uma lista de produtos).
+
+    Fuso America/Sao_Paulo na agregação por dia — criado_em é gravado em UTC
+    (datetime.utcnow(), ORD-181); sem a conversão, uma movimentação às 21h de
+    Brasília apareceria no dia seguinte."""
+    item = (await db.execute(select(StockItem).filter_by(id=stock_item_id))).scalars().first()
+    if item is None:
+        return []
+
+    hoje_br = datetime.now(BR_TZ).date()
+    dias = [hoje_br - timedelta(days=i) for i in range(_STOCK_HISTORY_DAYS - 1, -1, -1)]  # mais antigo → mais recente
+
+    inicio_janela_br = datetime.combine(dias[0], datetime.min.time(), tzinfo=BR_TZ)
+    inicio_janela_utc = inicio_janela_br.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+    result = await db.execute(
+        select(StockMovement.criado_em, StockMovement.quantidade)
+        .filter(StockMovement.stock_item_id == stock_item_id, StockMovement.criado_em >= inicio_janela_utc)
+        .order_by(StockMovement.criado_em.asc())
+    )
+    rows = result.all()
+
+    delta_por_dia: dict[date, Decimal] = {d: Decimal(0) for d in dias}
+    total_janela = Decimal(0)
+    for criado_em_utc, quantidade in rows:
+        # criado_em é ingênuo (sem tzinfo) — anexar UTC antes de converter, senão
+        # astimezone() interpretaria como fuso local do servidor, não UTC.
+        dia = criado_em_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(BR_TZ).date()
+        if dia in delta_por_dia:
+            delta_por_dia[dia] += quantidade
+        total_janela += quantidade
+
+    # Saldo no INÍCIO da janela — se o stock_item nasceu dentro da janela, nenhuma
+    # movimentação anterior existe pra capturar, então total_janela == tudo que já
+    # aconteceu com esse item e o saldo fecha em 0 automaticamente, sem checar
+    # StockItem.created_at: impossível ter movimentação antes da criação do item.
+    saldo = item.quantidade_atual - total_janela
+
+    pontos = []
+    for dia in dias:
+        saldo += delta_por_dia[dia]
+        pontos.append({"dia": dia.isoformat(), "quantidade": saldo})
+    return pontos
+
+
+@app.get(
+    "/catalog/products/{product_id}/stock/history",
+    tags=["Catálogo"],
+    summary="Histórico de nível de estoque de um produto nos últimos 7 dias",
+    responses={404: {"description": "Produto não encontrado ou de outra empresa"}},
+)
+async def get_product_stock_history(
+    product_id: int, db: AsyncSession = Depends(get_db), company_id: int = Depends(resolve_company_id),
+):
+    await _resolve_stock_owner(db, company_id, product_id=product_id)  # 404/400 (G2/G4) reaproveitados
+    item = (await db.execute(select(StockItem).filter_by(product_id=product_id))).scalars().first()
+    return {"points": await _get_stock_history(db, item.id) if item else []}
+
+
+@app.get(
+    "/catalog/options/{option_id}/stock/history",
+    tags=["Catálogo"],
+    summary="Histórico de nível de estoque de uma opção nos últimos 7 dias",
+    responses={404: {"description": "Opção não encontrada ou de outra empresa"}},
+)
+async def get_option_stock_history(
+    option_id: int, db: AsyncSession = Depends(get_db), company_id: int = Depends(resolve_company_id),
+):
+    await _resolve_stock_owner(db, company_id, option_id=option_id)
+    item = (await db.execute(select(StockItem).filter_by(option_id=option_id))).scalars().first()
+    return {"points": await _get_stock_history(db, item.id) if item else []}
+
+
+@app.get(
+    "/catalog/products/{product_id}/stock",
+    tags=["Catálogo"],
+    summary="Consultar estoque e histórico de movimentações de um produto",
+    responses={404: {"description": "Produto não encontrado ou de outra empresa"}},
+)
+async def get_product_stock(
+    product_id: int, db: AsyncSession = Depends(get_db), company_id: int = Depends(resolve_company_id),
+):
+    return await _get_stock_state(db, company_id, product_id=product_id)
+
+
+@app.post(
+    "/catalog/products/{product_id}/stock/movements",
+    status_code=201,
+    tags=["Catálogo"],
+    summary="Registrar entrada ou ajuste manual de estoque de um produto",
+    responses={
+        400: {"description": "movimentação inválida (unidade, sinal, motivo ou saldo insuficiente)"},
+        404: {"description": "Produto não encontrado ou de outra empresa"},
+    },
+)
+async def create_product_stock_movement(
+    product_id: int, body: StockMovementIn, db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user), company_id: int = Depends(resolve_company_id_write),
+):
+    return await _create_stock_movement(db, company_id, body, current_user, product_id=product_id)
+
+
+@app.get(
+    "/catalog/options/{option_id}/stock",
+    tags=["Catálogo"],
+    summary="Consultar estoque e histórico de movimentações de uma opção",
+    responses={404: {"description": "Opção não encontrada ou de outra empresa"}},
+)
+async def get_option_stock(
+    option_id: int, db: AsyncSession = Depends(get_db), company_id: int = Depends(resolve_company_id),
+):
+    return await _get_stock_state(db, company_id, option_id=option_id)
+
+
+@app.post(
+    "/catalog/options/{option_id}/stock/movements",
+    status_code=201,
+    tags=["Catálogo"],
+    summary="Registrar entrada ou ajuste manual de estoque de uma opção",
+    responses={
+        400: {"description": "movimentação inválida (unidade, sinal, motivo ou saldo insuficiente)"},
+        404: {"description": "Opção não encontrada ou de outra empresa"},
+    },
+)
+async def create_option_stock_movement(
+    option_id: int, body: StockMovementIn, db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user), company_id: int = Depends(resolve_company_id_write),
+):
+    return await _create_stock_movement(db, company_id, body, current_user, option_id=option_id)
 
 # ── Grupos de opção (ORD-138) ────────────────────────────────────────────────
 
@@ -2317,7 +3150,10 @@ async def delete_option_image(
     response_model=OptionOut,
     tags=["Catálogo"],
     summary="Ativar/desativar uma opção (indisponibilidade temporária, ORD-145)",
-    responses={404: {"description": "Opção não encontrada"}},
+    responses={
+        404: {"description": "Opção não encontrada"},
+        400: {"description": "sku/ean já em uso por outro produto ou opção ativo — só na ativação"},
+    },
 )
 async def set_option_active(
     option_id: int,
@@ -2327,6 +3163,20 @@ async def set_option_active(
 ):
     opt = await _get_option_scoped(db, option_id, company_id)
     if not opt: raise HTTPException(404)
+    # Decisão do usuário: reativar uma opção (achado real — inativa não
+    # colide com nada, mas ao voltar a ficar ativa precisa passar pela
+    # mesma checagem que qualquer sku/ean novo já passa) exige a mesma
+    # validação de unicidade que _set_option_group_options já faz — aqui é
+    # só um dono (não um lote), então usa direto _check_active_code_conflict.
+    if body.active:
+        if opt.sku is not None and await _check_active_code_conflict(
+            db, company_id, "sku", opt.sku, exclude_option_id=opt.id
+        ):
+            raise HTTPException(400, detail="SKU já cadastrado para um produto ou opção ativo desta empresa")
+        if opt.ean is not None and await _check_active_code_conflict(
+            db, company_id, "ean", opt.ean, exclude_option_id=opt.id
+        ):
+            raise HTTPException(400, detail="código de barras já cadastrado para um produto ou opção ativo desta empresa")
     opt.active = body.active
     await db.commit(); await db.refresh(opt)
     return {
@@ -2334,7 +3184,9 @@ async def set_option_active(
         "image_url": presigned_download_url(opt.image_url) if opt.image_url else None,
         "thumbnail_url": presigned_download_url(opt.thumbnail_url) if opt.thumbnail_url else None,
         "sort_order": opt.sort_order, "active": opt.active,
-        "description": opt.description, "sku": opt.sku, "allergens": await _get_option_allergens(db, opt.id),
+        "description": opt.description, "sku": opt.sku,
+        "ean": opt.ean, "cfop": opt.cfop, "cest": opt.cest,  # ORD-188 — faltava aqui (achado nesta correção)
+        "allergens": await _get_option_allergens(db, opt.id),
     }
 
 @app.put(

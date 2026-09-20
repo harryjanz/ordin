@@ -66,3 +66,19 @@ export function isValidCep(raw: string): boolean {
   const cep = normalizeCep(raw);
   return cep.length === 8 && /^\d{8}$/.test(cep);
 }
+
+// ORD-180 — espelha _is_valid_gtin em services/catalog/main.py: peso
+// alternado 3/1 a partir do dígito imediatamente à esquerda do verificador,
+// sempre começando em 3 no índice 0 da leitura invertida (não depende da
+// paridade do comprimento — ver o comentário da versão Python pro detalhe
+// do bug que essa formulação evita).
+const GTIN_VALID_LENGTHS = [8, 12, 13, 14];
+
+export function isValidGtin(raw: string): boolean {
+  const code = raw.trim();
+  if (!GTIN_VALID_LENGTHS.includes(code.length) || !/^\d+$/.test(code)) return false;
+  const digits = [...code.slice(0, -1)].map(Number);
+  const check = Number(code[code.length - 1]);
+  const total = [...digits].reverse().reduce((sum, d, i) => sum + d * (i % 2 === 0 ? 3 : 1), 0);
+  return (10 - (total % 10)) % 10 === check;
+}

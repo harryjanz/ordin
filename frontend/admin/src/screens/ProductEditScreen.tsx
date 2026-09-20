@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
@@ -25,10 +25,14 @@ import {
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
 import ConfirmDialog from "../components/ConfirmDialog";
+import StockHistoryChart from "../components/StockHistoryChart";
+import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
-import type { Allergen, Category, NcmSearchResult, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct } from "../types";
+import { STOCK_UNIT_OPTIONS, stockUnitLabel } from "../lib/stockUnits";
+import { isValidGtin } from "../lib/validators";
+import type { Allergen, Category, NcmSearchResult, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct, StockHistoryPoint, StockState } from "../types";
 import styles from "./ProductEditScreen.module.scss";
 
 const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
@@ -41,6 +45,17 @@ const CFOP_OPTIONS: DropdownOptions[] = [
   { value: "5101", label: "5101 — Venda de produção do próprio estabelecimento" },
   { value: "5102", label: "5102 — Venda de mercadoria adquirida de terceiros" },
 ];
+
+// ORD-187 — margem calculada ao vivo no cliente (price e custo já estão os
+// dois no estado local do formulário, sem precisar de round-trip pro
+// backend). R$ com 2 casas (padrão BRL), % sem casas (ROUND_HALF_UP —
+// Math.round já cobre pra valores positivos, mesma convenção da ORD-184).
+function calcularMargem(price: number, custo: number | null): { valor: number; percentual: number } | null {
+  if (custo === null || custo === undefined) return null;
+  const valor = Math.round((price - custo) * 100) / 100;
+  const percentual = price > 0 ? Math.round((valor / price) * 100) : 0;
+  return { valor, percentual };
+}
 
 // A descrição sincronizada da Receita Federal vem com traços de hierarquia
 // (ex. "-- Outros" é subitem de nível 2) — sem remover, o rótulo duplicava o
@@ -79,6 +94,8 @@ interface EditProdState {
   description_long: string;
   calories: number | null;
   sku: string;
+  ean: string;
+  is_umbrella: boolean; // ORD-189 (G4)
   tags: string[];
   allergen_ids: string[];
   option_groups: ProductOptionGroup[];
@@ -87,6 +104,7 @@ interface EditProdState {
   ncm: string | null;
   cfop: string | null;
   cest: string;
+  custo: number | null; // ORD-187
 }
 
 // ORD-136 — edição de produto sai do modal (espaço comprometido, mais
@@ -114,12 +132,38 @@ export default function ProductEditScreen() {
   const [productFormError, setProductFormError] = useState("");
   const [productSaving, setProductSaving] = useState(false);
 
+  // Achado do usuário (2026-09-18): checar sku/ean único-quando-ativo só no
+  // Salvar é tarde demais pra UX — pré-carrega uma vez os códigos já ativos
+  // na empresa fora deste produto (mesmo padrão de OptionGroupFormScreen),
+  // GET /catalog/codes/active-in-use.
+  const [activeCodesElsewhere, setActiveCodesElsewhere] = useState<{ skus: string[]; eans: string[] }>({ skus: [], eans: [] });
+  useEffect(() => {
+    if (!productId) return;
+    api.get("/catalog/codes/active-in-use", catalogParams({ exclude_product_id: productId })).then((r) => {
+      setActiveCodesElsewhere({ skus: r.data.skus ?? [], eans: r.data.eans ?? [] });
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId]);
+  const activeEanSetElsewhere = useMemo(() => new Set(activeCodesElsewhere.eans), [activeCodesElsewhere]);
+  const activeSkuSetElsewhere = useMemo(() => new Set(activeCodesElsewhere.skus), [activeCodesElsewhere]);
+
   // ── Classificação fiscal (ORD-169) ───────────────────────────────────────
   // NCM nunca é digitado livre — só escolhido a partir da busca (SearchInput
   // reflete o texto selecionado; ncmQuery é o que dirige a busca em si).
   const [ncmQuery, setNcmQuery] = useState("");
   const [ncmResults, setNcmResults] = useState<NcmSearchResult[]>([]);
   const ncmSearchTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  // ── Estoque (ORD-181, A2+G2) ──────────────────────────────────────────────
+  const [stock, setStock] = useState<StockState | null>(null);
+  const [stockHistory, setStockHistory] = useState<StockHistoryPoint[]>([]);
+  const [stockMovModalOpen, setStockMovModalOpen] = useState(false);
+  const [movTipo, setMovTipo] = useState<"entrada" | "ajuste">("entrada");
+  const [movUnidade, setMovUnidade] = useState<string | null>(null);
+  const [movQuantidade, setMovQuantidade] = useState<number | null>(null);
+  const [movMotivo, setMovMotivo] = useState("");
+  const [movSaving, setMovSaving] = useState(false);
+  const [movError, setMovError] = useState("");
 
   // ── Opções do produto (ORD-140) ──────────────────────────────────────────
   // Só vincula grupo já cadastrado — criação fica em Catálogo > Opções
@@ -146,14 +190,25 @@ export default function ProductEditScreen() {
       setLoading(true);
       setLoadError(null);
       try {
-        const [productRes, categoriesRes, allergensRes, menusRes, productsRes] = await Promise.all([
+        const [productRes, categoriesRes, allergensRes, menusRes, productsRes, stockRes, stockHistoryRes] = await Promise.all([
           api.get(`/catalog/products/${productId}`, catalogParams()),
           api.get("/catalog/categories", catalogParams({ include_inactive: true })),
           api.get("/catalog/allergens"),
           api.get(`/catalog/products/${productId}/menus`, catalogParams()).catch(() => ({ data: { menus: [] } })),
           api.get("/catalog/products", catalogParams()),
+          // G4 (ORD-189): produto guarda-chuva rejeita este GET com 400 (estoque
+          // migrou pra opção) — não pode derrubar o Promise.all inteiro, senão a
+          // tela inteira quebra pra um produto guarda-chuva.
+          api.get(`/catalog/products/${productId}/stock`, catalogParams()).catch(() => ({
+            data: { has_stock_item: false, quantidade_atual: null, unidade: null, movements: [], total_movements: 0 },
+          })),
+          // ORD-191 (A9) — mesmo racional acima, produto guarda-chuva também
+          // rejeita este GET.
+          api.get(`/catalog/products/${productId}/stock/history`, catalogParams()).catch(() => ({ data: { points: [] } })),
         ]);
         if (cancelled) return;
+        setStock(stockRes.data);
+        setStockHistory(stockHistoryRes.data.points ?? []);
         const p: Product = productRes.data;
         setEditProd({
           id: p.id,
@@ -166,6 +221,7 @@ export default function ProductEditScreen() {
           description_long: p.description_long ?? "",
           calories: p.calories,
           sku: p.sku ?? "",
+          ean: p.ean ?? "",
           tags: p.tags ?? [],
           allergen_ids: (p.allergens ?? []).map((a) => String(a.id)),
           option_groups: p.option_groups ?? [],
@@ -173,6 +229,8 @@ export default function ProductEditScreen() {
           ncm: p.ncm,
           cfop: p.cfop,
           cest: p.cest ?? "",
+          custo: p.custo,
+          is_umbrella: p.is_umbrella,
         });
         setNcmQuery(p.ncm && p.ncm_descricao ? ncmLabel(p.ncm, p.ncm_descricao) : "");
         setCategories(categoriesRes.data.categories ?? categoriesRes.data);
@@ -261,6 +319,49 @@ export default function ProductEditScreen() {
     setNcmResults([]);
   }
 
+  // ── Estoque (ORD-181, A2+G2) ──────────────────────────────────────────────
+  function openStockMovModal() {
+    setMovTipo("entrada");
+    setMovUnidade(stock?.unidade ?? null);
+    setMovQuantidade(null);
+    setMovMotivo("");
+    setMovError("");
+    setStockMovModalOpen(true);
+  }
+
+  function closeStockMovModal() {
+    setStockMovModalOpen(false);
+  }
+
+  const canSaveStockMov =
+    movQuantidade !== null &&
+    (movTipo === "entrada" ? movQuantidade > 0 : movQuantidade !== 0) &&
+    (stock?.has_stock_item || movUnidade !== null) &&
+    (movTipo !== "ajuste" || movMotivo.trim().length > 0);
+
+  async function saveStockMovement() {
+    if (!editProd || !canSaveStockMov) return;
+    setMovSaving(true);
+    setMovError("");
+    try {
+      await api.post(`/catalog/products/${editProd.id}/stock/movements`, {
+        tipo: movTipo,
+        quantidade: movQuantidade,
+        unidade: stock?.has_stock_item ? undefined : movUnidade,
+        motivo: movMotivo.trim() || null,
+      }, catalogParams());
+      const r = await api.get(`/catalog/products/${editProd.id}/stock`, catalogParams());
+      setStock(r.data);
+      const h = await api.get(`/catalog/products/${editProd.id}/stock/history`, catalogParams());
+      setStockHistory(h.data.points ?? []);
+      setStockMovModalOpen(false);
+    } catch (err) {
+      setMovError(parseApiError(err).message || "Erro ao registrar movimentação.");
+    } finally {
+      setMovSaving(false);
+    }
+  }
+
   function resetOptionModal() {
     setExistingSearch("");
     setSelectedExistingIds([]);
@@ -297,7 +398,11 @@ export default function ProductEditScreen() {
   async function persistOptionGroupIds(ids: number[]) {
     if (!editProd) return null;
     const r = await api.put(`/catalog/products/${editProd.id}/option-groups`, { option_group_ids: ids }, catalogParams());
-    setEditProd((prev) => (prev ? { ...prev, option_groups: r.data.option_groups } : prev));
+    // G4 (ORD-189): vincular/desvincular grupo pode virar o estado guarda-chuva
+    // (a única opção com ean/cfop pode estar indo embora, ou chegando agora) —
+    // sem reler is_umbrella aqui, o campo EAN/seção Estoque ficava com o
+    // estado antigo até a Empresa sair e voltar pra tela (achado do usuário).
+    setEditProd((prev) => (prev ? { ...prev, option_groups: r.data.option_groups, is_umbrella: r.data.is_umbrella } : prev));
     return r.data;
   }
 
@@ -441,12 +546,19 @@ export default function ProductEditScreen() {
         description_long: editProd.description_long.trim() || null,
         calories: editProd.calories,
         sku: editProd.sku.trim() || null,
+        // G4 (ORD-189): produto guarda-chuva rejeita QUALQUER ean não-nulo no
+        // payload, mesmo o valor antigo sem alteração — campo desabilitado na
+        // UI, mas editProd.ean ainda carrega o valor legado até a Empresa
+        // resolver manualmente. Omitir a chave (em vez de reenviar) evita que
+        // salvar nome/preço/etc. de um produto guarda-chuva sempre falhe.
+        ...(editProd.is_umbrella ? {} : { ean: editProd.ean.trim() || null }),
         tags: editProd.tags,
         allergen_ids: editProd.allergen_ids.map(Number),
         related_product_ids: editProd.related_products.map((rp) => rp.id),
         ncm: editProd.ncm,
         cfop: editProd.cfop,
         cest: editProd.cest.trim() || null,
+        custo: editProd.custo,
       }, catalogParams());
       navigate("/catalog?tab=products");
     } catch (err) {
@@ -465,6 +577,12 @@ export default function ProductEditScreen() {
     );
   }
 
+  // G4 (ORD-189): produto guarda-chuva não envia mais ean nenhum no Salvar
+  // (ver saveEditProd) — o campo antigo em editProd.ean é só exibição do
+  // valor legado, não participa de validação nenhuma nesse estado.
+  const eanConflict = !editProd.is_umbrella && editProd.ean.trim() !== "" && activeEanSetElsewhere.has(editProd.ean.trim());
+  const skuConflict = editProd.sku.trim() !== "" && activeSkuSetElsewhere.has(editProd.sku.trim());
+
   return (
     <div className={styles.page}>
       <Breadcrumb
@@ -478,7 +596,7 @@ export default function ProductEditScreen() {
         <h1 className={styles.h1}>Editando produto</h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/catalog?tab=products")}>Voltar</Button>
-          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0} loading={productSaving}>
+          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (!editProd.is_umbrella && editProd.ean.trim() !== "" && !isValidGtin(editProd.ean)) || eanConflict || skuConflict} loading={productSaving}>
             Salvar
           </Button>
         </div>
@@ -591,7 +709,38 @@ export default function ProductEditScreen() {
               label="SKU"
               value={editProd.sku}
               placeholder="Opcional, único por empresa"
+              errorMessage={skuConflict ? "SKU já em uso por outro produto ou opção ativo" : undefined}
               onChange={(e) => setEditProd({ ...editProd, sku: e.target.value })}
+            />
+          </div>
+        </div>
+
+        {/* ORD-180 — segunda formRow (não a mesma do SKU/Calorias, ver
+            decisão de escopo na história): EAN é o código de barras real do
+            produto, distinto do SKU (identificador interno de livre escolha).
+            Validação de checksum GTIN inline, antes mesmo de tentar salvar. */}
+        <div className={styles.formRow}>
+          <div className={styles.formRowField}>
+            <InputBase
+              label="EAN / código de barras"
+              value={editProd.ean}
+              placeholder="Opcional"
+              disabled={editProd.is_umbrella}
+              errorMessage={
+                editProd.is_umbrella
+                  ? undefined
+                  : editProd.ean.trim() && !isValidGtin(editProd.ean)
+                  ? "código de barras inválido"
+                  : eanConflict
+                  ? "código de barras já em uso por outro produto ou opção ativo"
+                  : undefined
+              }
+              helperMessage={
+                editProd.is_umbrella
+                  ? "produto guarda-chuva: o código de barras é controlado por cada opção, não pelo produto"
+                  : undefined
+              }
+              onChange={(e) => setEditProd({ ...editProd, ean: e.target.value })}
             />
           </div>
         </div>
@@ -678,7 +827,133 @@ export default function ProductEditScreen() {
             />
           </div>
         </div>
+
+        {editProd.cfop === "5102" && (
+          <div className={styles.formRow}>
+            <div className={styles.formRowField}>
+              <CurrencyInput
+                label="Custo"
+                value={editProd.custo}
+                onChange={(value: number) => setEditProd({ ...editProd, custo: value })}
+              />
+            </div>
+            <div className={styles.formRowField}>
+              {(() => {
+                const margem = calcularMargem(editProd.price, editProd.custo);
+                if (!margem) {
+                  return <span className={styles.mutedText}>Informe o custo para ver a margem</span>;
+                }
+                return (
+                  <Tag variant={margem.valor < 0 ? "error" : "success"}>
+                    {margem.valor < 0
+                      ? "Margem negativa — este produto está sendo vendido abaixo do custo: "
+                      : "Margem de lucro: "}
+                    {margem.valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} ({margem.percentual}%)
+                  </Tag>
+                );
+              })()}
+            </div>
+          </div>
+        )}
       </div>
+
+      <div className={styles.panel}>
+        <div className={styles.optionsHeader}>
+          <h2 className={styles.h2}>Estoque</h2>
+          {!editProd.is_umbrella && (
+            <Button type="button" size="small" onClick={openStockMovModal}>
+              {stock?.has_stock_item ? "Registrar movimentação" : "Registrar entrada"}
+            </Button>
+          )}
+        </div>
+
+        {editProd.is_umbrella ? (
+          <div className={styles.menusInfo}>
+            produto guarda-chuva: o estoque é controlado por cada opção, não pelo produto
+          </div>
+        ) : !stock?.has_stock_item ? (
+          <div className={styles.menusInfo}>Sem controle de estoque ainda.</div>
+        ) : (
+          <>
+            <p className={styles.menusInfo}>
+              <strong>{stock.quantidade_atual} {stockUnitLabel(stock.unidade)}</strong> em estoque
+            </p>
+            <div className={styles.tableScroll}>
+              <Table
+                columns={[
+                  { key: "criado_em", header: "Data", render: (m) => new Date(m.criado_em).toLocaleString("pt-BR") },
+                  { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
+                  {
+                    key: "quantidade", header: "Quantidade",
+                    render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`,
+                  },
+                  { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
+                  { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
+                ]}
+                rows={stock.movements}
+                rowKey={(m) => m.id}
+                emptyMessage="Nenhuma movimentação ainda."
+              />
+            </div>
+            {stock.total_movements > stock.movements.length && (
+              <p className={styles.menusInfo}>
+                Mostrando as {stock.movements.length} movimentações mais recentes de {stock.total_movements} no total.
+              </p>
+            )}
+            {/* ORD-191 (A9) — abaixo da tabela de histórico: a tabela é a fonte
+                de detalhe por evento, o gráfico é a leitura de tendência. */}
+            <StockHistoryChart points={stockHistory} unidade={stock.unidade} />
+          </>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={stockMovModalOpen}
+        title="Registrar movimentação de estoque"
+        message=""
+        onConfirm={saveStockMovement}
+        onCancel={closeStockMovModal}
+        confirmLabel={movSaving ? "Salvando…" : "Salvar"}
+        confirmDisabled={!canSaveStockMov || movSaving}
+        width={480}
+      >
+        <div className={styles.modalForm}>
+          <div className={styles.formRow}>
+            <div className={styles.formRowField}>
+              <Dropdown
+                label="Tipo"
+                value={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }].find((o) => o.value === movTipo) ?? null}
+                onValueSelected={(opt) => setMovTipo(opt.value as "entrada" | "ajuste")}
+                options={[{ value: "entrada", label: "Entrada" }, { value: "ajuste", label: "Ajuste" }]}
+              />
+            </div>
+            {!stock?.has_stock_item && (
+              <div className={styles.formRowField}>
+                <Dropdown
+                  label="Unidade"
+                  value={STOCK_UNIT_OPTIONS.find((o) => o.value === movUnidade) ?? null}
+                  onValueSelected={(opt) => setMovUnidade(opt.value)}
+                  options={STOCK_UNIT_OPTIONS}
+                />
+              </div>
+            )}
+          </div>
+          <NumberInput
+            label="Quantidade"
+            value={movQuantidade ?? undefined}
+            onChange={(value: number) => setMovQuantidade(value)}
+            decimalScale={3}
+            allowNegative={movTipo === "ajuste"}
+          />
+          <InputBase
+            label="Motivo"
+            placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
+            value={movMotivo}
+            onChange={(e) => setMovMotivo(e.target.value)}
+          />
+          {movError && <Alert variant="error" text={movError} fullWidth />}
+        </div>
+      </ConfirmDialog>
 
       <div className={styles.panel}>
         <div className={styles.optionsHeader}>

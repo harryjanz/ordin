@@ -202,6 +202,45 @@ export interface PromotionAnnotation {
   final_price: number;
 }
 
+// ORD-191 (A9) — GET /catalog/products/{id}/stock/history e
+// GET /catalog/options/{id}/stock/history retornam { points: StockHistoryPoint[] }.
+export interface StockHistoryPoint {
+  dia: string; // ISO "YYYY-MM-DD"
+  quantidade: number;
+}
+
+// ORD-181 (A2+G2) — estoque manual, dono polimórfico (Product OU Option).
+// Mesmo shape pros dois: GET /catalog/products/{id}/stock e
+// GET /catalog/options/{id}/stock retornam exatamente isso.
+export interface StockMovement {
+  id: number;
+  tipo: "entrada" | "ajuste";
+  quantidade: number;
+  // ORD-190 (G3) — só preenchidos quando a movimentação foi registrada na
+  // unidade de compra do dono (conversão aplicada); null no caminho de hoje.
+  quantidade_original: number | null;
+  unidade_original: string | null;
+  motivo: string | null;
+  criado_por: number;
+  criado_em: string;
+}
+
+export interface StockState {
+  has_stock_item: boolean;
+  quantidade_atual: number | null;
+  unidade: string | null;
+  // ORD-190 (G3) — lidos do dono (Product ou Option), não do stock_item.
+  estoque_minimo: number;
+  abaixo_do_minimo: boolean;
+  unidade_compra: string | null;
+  fator_conversao: number | null;
+  movements: StockMovement[];
+  // total_movements > movements.length quando o histórico foi truncado pro
+  // limite do backend (_STOCK_MOVEMENTS_HISTORY_LIMIT) — a UI usa isso pra
+  // avisar que existe mais histórico além do que está na tela.
+  total_movements: number;
+}
+
 export interface Product {
   id: number;
   company_id: number;
@@ -216,12 +255,18 @@ export interface Product {
   tags: string[] | null;
   calories: number | null;
   sku: string | null;
+  ean: string | null;
   sort_order: number | null;
   // ORD-169 — classificação fiscal, sempre opcional.
   ncm: string | null;
   ncm_descricao: string | null;
   cfop: string | null;
   cest: string | null;
+  custo: number | null; // ORD-187 — só relevante pra CFOP 5102
+  // ORD-189 (G4) — computado, nunca persistido: true quando alguma opção
+  // vinculada já tem ean/cfop próprio (ver docs/estudo-modulo-estoque-erp.md,
+  // Bloco G). EAN e estoque do produto ficam bloqueados nesse estado.
+  is_umbrella: boolean;
   allergens: Allergen[];
   option_groups: ProductOptionGroup[];
   related_products: RelatedProduct[];
@@ -267,6 +312,12 @@ export interface OptionGroupOption {
   // opção que representa uma variante física própria (sabor, bebida).
   description: string | null;
   sku: string | null;
+  ean: string | null; // ORD-188
+  cfop: string | null; // ORD-188 — livre em relação ao CFOP do produto pai
+  cest: string | null; // ORD-188
+  estoque_minimo: number; // ORD-190
+  unidade_compra: string | null; // ORD-190
+  fator_conversao: number | null; // ORD-190
   allergens: Allergen[];
 }
 
