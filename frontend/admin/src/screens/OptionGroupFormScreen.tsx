@@ -24,13 +24,14 @@ import {
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
 import ConfirmDialog from "../components/ConfirmDialog";
+import StockHistoryChart from "../components/StockHistoryChart";
 import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { STOCK_UNIT_OPTIONS, stockUnitLabel } from "../lib/stockUnits";
 import { isValidGtin } from "../lib/validators";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN, minMaxToRadios, radiosToMinMax, type OptionGroupRadios } from "../lib/optionGroupMapping";
-import type { Allergen, OptionGroup, StockState } from "../types";
+import type { Allergen, OptionGroup, StockHistoryPoint, StockState } from "../types";
 import styles from "./OptionGroupFormScreen.module.scss";
 
 const IMAGE_MAX_SIZE_MB = 2;
@@ -264,6 +265,7 @@ export default function OptionGroupFormScreen() {
 
   // ── Estoque (ORD-181, G2) — só existe pra opção já salva (tem id) ────────
   const [stock, setStock] = useState<StockState | null>(null);
+  const [stockHistory, setStockHistory] = useState<StockHistoryPoint[]>([]);
   const [stockMovModalOpen, setStockMovModalOpen] = useState(false);
   const [movTipo, setMovTipo] = useState<"entrada" | "ajuste">("entrada");
   const [movUnidade, setMovUnidade] = useState<string | null>(null);
@@ -290,6 +292,7 @@ export default function OptionGroupFormScreen() {
     setDraftUnidadeCompra("");
     setDraftFatorConversao(null);
     setStock(null);  // opção nova ainda não tem id — sem estoque possível
+    setStockHistory([]);
     setStockMovModalOpen(false);
     setOptionModalOpen(true);
   }
@@ -311,12 +314,15 @@ export default function OptionGroupFormScreen() {
     setDraftUnidadeCompra(row.unidade_compra ?? "");
     setDraftFatorConversao(row.fator_conversao);
     setStock(null);
+    setStockHistory([]);
     setStockMovModalOpen(false);
     setOptionModalOpen(true);
     if (row.id !== null) {
       try {
         const r = await api.get(`/catalog/options/${row.id}/stock`, catalogParams());
         setStock(r.data);
+        const h = await api.get(`/catalog/options/${row.id}/stock/history`, catalogParams());
+        setStockHistory(h.data.points ?? []);
       } catch {
         // silencioso — seção de estoque simplesmente não aparece, usuário pode reabrir o modal
       }
@@ -362,6 +368,8 @@ export default function OptionGroupFormScreen() {
       }, catalogParams());
       const r = await api.get(`/catalog/options/${optionId}/stock`, catalogParams());
       setStock(r.data);
+      const h = await api.get(`/catalog/options/${optionId}/stock/history`, catalogParams());
+      setStockHistory(h.data.points ?? []);
       setStockMovModalOpen(false);
     } catch (err) {
       setMovError(parseApiError(err).message || "Erro ao registrar movimentação.");
@@ -943,6 +951,9 @@ export default function OptionGroupFormScreen() {
                           Mostrando as {stock.movements.length} movimentações mais recentes de {stock.total_movements} no total.
                         </p>
                       )}
+                      {/* ORD-191 (A9) — abaixo da tabela de histórico: a tabela é a
+                          fonte de detalhe por evento, o gráfico é a leitura de tendência. */}
+                      <StockHistoryChart points={stockHistory} unidade={stock.unidade} />
                     </>
                   )}
                 </>

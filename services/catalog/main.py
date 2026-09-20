@@ -1,8 +1,9 @@
 import io
 import secrets
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal, Optional
+from zoneinfo import ZoneInfo
 
 from auth import TokenPayload, get_current_user
 from config import get_cors_origins, require_env
@@ -2772,6 +2773,93 @@ async def _create_stock_movement(
     await db.commit()
     await db.refresh(item)
     return {"quantidade_atual": item.quantidade_atual, "unidade": item.unidade}
+
+
+# ── Gráfico de nível de estoque, 7 dias (ORD-191, A9) ────────────────────────
+
+_STOCK_HISTORY_DAYS = 7
+BR_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+async def _get_stock_history(db: AsyncSession, stock_item_id: int) -> list[dict]:
+    """Reconstrói o nível de estoque ao final de cada um dos últimos 7 dias, sem
+    snapshot diário armazenado: parte da quantidade_atual de AGORA e anda pra trás,
+    subtraindo o delta líquido de cada dia (1 query na janela, agregação em Python).
+
+    Agregação em Python, não SQL (revisa recomendação inicial de QA): CONVERT_TZ é
+    MySQL-only, SQLite (suíte de testes) não suporta — duplicar a query por dialect
+    custaria mais que agregar em memória, dado que o volume por request é sempre 1
+    dono × 7 dias (nunca uma lista de produtos).
+
+    Fuso America/Sao_Paulo na agregação por dia — criado_em é gravado em UTC
+    (datetime.utcnow(), ORD-181); sem a conversão, uma movimentação às 21h de
+    Brasília apareceria no dia seguinte."""
+    item = (await db.execute(select(StockItem).filter_by(id=stock_item_id))).scalars().first()
+    if item is None:
+        return []
+
+    hoje_br = datetime.now(BR_TZ).date()
+    dias = [hoje_br - timedelta(days=i) for i in range(_STOCK_HISTORY_DAYS - 1, -1, -1)]  # mais antigo → mais recente
+
+    inicio_janela_br = datetime.combine(dias[0], datetime.min.time(), tzinfo=BR_TZ)
+    inicio_janela_utc = inicio_janela_br.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+    result = await db.execute(
+        select(StockMovement.criado_em, StockMovement.quantidade)
+        .filter(StockMovement.stock_item_id == stock_item_id, StockMovement.criado_em >= inicio_janela_utc)
+        .order_by(StockMovement.criado_em.asc())
+    )
+    rows = result.all()
+
+    delta_por_dia: dict[date, Decimal] = {d: Decimal(0) for d in dias}
+    total_janela = Decimal(0)
+    for criado_em_utc, quantidade in rows:
+        # criado_em é ingênuo (sem tzinfo) — anexar UTC antes de converter, senão
+        # astimezone() interpretaria como fuso local do servidor, não UTC.
+        dia = criado_em_utc.replace(tzinfo=ZoneInfo("UTC")).astimezone(BR_TZ).date()
+        if dia in delta_por_dia:
+            delta_por_dia[dia] += quantidade
+        total_janela += quantidade
+
+    # Saldo no INÍCIO da janela — se o stock_item nasceu dentro da janela, nenhuma
+    # movimentação anterior existe pra capturar, então total_janela == tudo que já
+    # aconteceu com esse item e o saldo fecha em 0 automaticamente, sem checar
+    # StockItem.created_at: impossível ter movimentação antes da criação do item.
+    saldo = item.quantidade_atual - total_janela
+
+    pontos = []
+    for dia in dias:
+        saldo += delta_por_dia[dia]
+        pontos.append({"dia": dia.isoformat(), "quantidade": saldo})
+    return pontos
+
+
+@app.get(
+    "/catalog/products/{product_id}/stock/history",
+    tags=["Catálogo"],
+    summary="Histórico de nível de estoque de um produto nos últimos 7 dias",
+    responses={404: {"description": "Produto não encontrado ou de outra empresa"}},
+)
+async def get_product_stock_history(
+    product_id: int, db: AsyncSession = Depends(get_db), company_id: int = Depends(resolve_company_id),
+):
+    await _resolve_stock_owner(db, company_id, product_id=product_id)  # 404/400 (G2/G4) reaproveitados
+    item = (await db.execute(select(StockItem).filter_by(product_id=product_id))).scalars().first()
+    return {"points": await _get_stock_history(db, item.id) if item else []}
+
+
+@app.get(
+    "/catalog/options/{option_id}/stock/history",
+    tags=["Catálogo"],
+    summary="Histórico de nível de estoque de uma opção nos últimos 7 dias",
+    responses={404: {"description": "Opção não encontrada ou de outra empresa"}},
+)
+async def get_option_stock_history(
+    option_id: int, db: AsyncSession = Depends(get_db), company_id: int = Depends(resolve_company_id),
+):
+    await _resolve_stock_owner(db, company_id, option_id=option_id)
+    item = (await db.execute(select(StockItem).filter_by(option_id=option_id))).scalars().first()
+    return {"points": await _get_stock_history(db, item.id) if item else []}
 
 
 @app.get(

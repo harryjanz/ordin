@@ -25,13 +25,14 @@ import {
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
 import ConfirmDialog from "../components/ConfirmDialog";
+import StockHistoryChart from "../components/StockHistoryChart";
 import Table from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { MAX_SELECTIONS_MAX, MAX_SELECTIONS_MIN } from "../lib/optionGroupMapping";
 import { STOCK_UNIT_OPTIONS, stockUnitLabel } from "../lib/stockUnits";
 import { isValidGtin } from "../lib/validators";
-import type { Allergen, Category, NcmSearchResult, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct, StockState } from "../types";
+import type { Allergen, Category, NcmSearchResult, OptionGroup, OptionGroupOption, Product, ProductMenuRef, ProductOptionGroup, RelatedProduct, StockHistoryPoint, StockState } from "../types";
 import styles from "./ProductEditScreen.module.scss";
 
 const SUGGESTED_TAGS = "novo, mais vendido, picante, vegetariano";
@@ -155,6 +156,7 @@ export default function ProductEditScreen() {
 
   // ── Estoque (ORD-181, A2+G2) ──────────────────────────────────────────────
   const [stock, setStock] = useState<StockState | null>(null);
+  const [stockHistory, setStockHistory] = useState<StockHistoryPoint[]>([]);
   const [stockMovModalOpen, setStockMovModalOpen] = useState(false);
   const [movTipo, setMovTipo] = useState<"entrada" | "ajuste">("entrada");
   const [movUnidade, setMovUnidade] = useState<string | null>(null);
@@ -188,7 +190,7 @@ export default function ProductEditScreen() {
       setLoading(true);
       setLoadError(null);
       try {
-        const [productRes, categoriesRes, allergensRes, menusRes, productsRes, stockRes] = await Promise.all([
+        const [productRes, categoriesRes, allergensRes, menusRes, productsRes, stockRes, stockHistoryRes] = await Promise.all([
           api.get(`/catalog/products/${productId}`, catalogParams()),
           api.get("/catalog/categories", catalogParams({ include_inactive: true })),
           api.get("/catalog/allergens"),
@@ -200,9 +202,13 @@ export default function ProductEditScreen() {
           api.get(`/catalog/products/${productId}/stock`, catalogParams()).catch(() => ({
             data: { has_stock_item: false, quantidade_atual: null, unidade: null, movements: [], total_movements: 0 },
           })),
+          // ORD-191 (A9) — mesmo racional acima, produto guarda-chuva também
+          // rejeita este GET.
+          api.get(`/catalog/products/${productId}/stock/history`, catalogParams()).catch(() => ({ data: { points: [] } })),
         ]);
         if (cancelled) return;
         setStock(stockRes.data);
+        setStockHistory(stockHistoryRes.data.points ?? []);
         const p: Product = productRes.data;
         setEditProd({
           id: p.id,
@@ -346,6 +352,8 @@ export default function ProductEditScreen() {
       }, catalogParams());
       const r = await api.get(`/catalog/products/${editProd.id}/stock`, catalogParams());
       setStock(r.data);
+      const h = await api.get(`/catalog/products/${editProd.id}/stock/history`, catalogParams());
+      setStockHistory(h.data.points ?? []);
       setStockMovModalOpen(false);
     } catch (err) {
       setMovError(parseApiError(err).message || "Erro ao registrar movimentação.");
@@ -892,6 +900,9 @@ export default function ProductEditScreen() {
                 Mostrando as {stock.movements.length} movimentações mais recentes de {stock.total_movements} no total.
               </p>
             )}
+            {/* ORD-191 (A9) — abaixo da tabela de histórico: a tabela é a fonte
+                de detalhe por evento, o gráfico é a leitura de tendência. */}
+            <StockHistoryChart points={stockHistory} unidade={stock.unidade} />
           </>
         )}
       </div>

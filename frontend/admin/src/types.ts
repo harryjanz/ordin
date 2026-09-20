@@ -202,6 +202,13 @@ export interface PromotionAnnotation {
   final_price: number;
 }
 
+// ORD-191 (A9) — GET /catalog/products/{id}/stock/history e
+// GET /catalog/options/{id}/stock/history retornam { points: StockHistoryPoint[] }.
+export interface StockHistoryPoint {
+  dia: string; // ISO "YYYY-MM-DD"
+  quantidade: number;
+}
+
 // ORD-181 (A2+G2) — estoque manual, dono polimórfico (Product OU Option).
 // Mesmo shape pros dois: GET /catalog/products/{id}/stock e
 // GET /catalog/options/{id}/stock retornam exatamente isso.

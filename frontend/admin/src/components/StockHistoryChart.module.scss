@@ -1,0 +1,8 @@
+@import 'design-system/dist/core/scss/styles';
+
+.wrap {
+  padding: 12px 0 0;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  @include rounded('card');
+}
