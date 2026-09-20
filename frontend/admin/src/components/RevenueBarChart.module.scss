@@ -1,145 +1,16 @@
 @import 'design-system/dist/core/scss/styles';
 
+// ORD-193 — Recharts (BarChart/ResponsiveContainer) desenha tudo via SVG
+// agora; as classes de CSS Grid à mão que existiam aqui antes (.chartArea,
+// .yAxis, .chart, .bar, .legend etc.) saíram. Compartilhada com
+// StockHistoryChart.tsx (ORD-191), que usa o mesmo .wrap.
 .wrap {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-bottom: 32px;
-}
-
-.chartArea {
-  display: flex;
-  gap: 12px;
-  padding: 28px 16px 12px;
+  padding: 12px 0 0;
   background: var(--a-surface);
   border: 1px solid var(--a-border);
   @include rounded('card');
-}
-
-.yAxis {
-  position: relative;
-  flex-shrink: 0;
-  width: 44px;
-  height: 236px;
-}
-
-.yTick {
-  position: absolute;
-  right: 0;
-  transform: translateY(-50%);
-  @include font('xs');
-  color: rgba(var(--a-text-rgb), 0.4);
-  white-space: nowrap;
-}
-
-// Grid com 2 linhas: barras (altura fixa 236px, mesma referência da %
-// calculada em cada barra) e rótulos (altura livre) — linhas separadas
-// evitam que o rótulo dispute espaço com a barra mais alta.
-.chart {
-  position: relative;
-  flex: 1;
-  display: grid;
-  grid-auto-flow: column;
-  grid-template-rows: 236px auto;
-  grid-auto-columns: minmax(20px, 1fr);
-  column-gap: 10px;
-  row-gap: 6px;
-  // Linha vertical do eixo (borda esquerda) — indicador visual do eixo de
-  // valores, pedido explicitamente pelo usuário.
-  border-left: 1px solid var(--a-border);
-  padding-left: 8px;
-  padding-right: 8px;
-  overflow-x: auto;
-}
-
-// Com 2 barras por posição (comparação ativada, ORD-103) cada coluna
-// precisa de mais espaço — senão as barras ficam finas demais pra clicar/
-// ver o hover.
-.chartCompare {
-  grid-auto-columns: minmax(32px, 1fr);
-}
-
-// Posicionada em px (não %) — o containing block (.chart) inclui a linha
-// de rótulos abaixo das barras, então uma % aqui mediria contra a altura
-// total (barras + rótulos), não só a faixa de 236px das barras.
-.gridLine {
-  position: absolute;
-  left: 0;
-  right: 0;
-  border-top: 1px dashed var(--a-border);
-  pointer-events: none;
-}
-
-.barCell {
-  grid-row: 1;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 3px;
-  height: 100%;
-}
-
-.bar {
-  flex: 1;
-  min-width: 0;
-  min-height: 2px;
-  background: color('brand-primary');
-  border-radius: 3px 3px 0 0;
-  transition: opacity 0.15s ease;
-
-  &:hover {
-    opacity: 0.8;
-  }
-}
-
-// Barra do período anterior (ORD-103) — cor neutra, deliberadamente menos
-// chamativa que a atual (brand-primary), pra não competir visualmente com
-// o dado que mais importa.
-.barPrevious {
-  flex: 1;
-  min-width: 0;
-  min-height: 2px;
-  background: rgba(var(--a-text-rgb), 0.25);
-  border-radius: 3px 3px 0 0;
-  transition: opacity 0.15s ease;
-
-  &:hover {
-    opacity: 0.8;
-  }
-}
-
-.pointLabel {
-  grid-row: 2;
-  text-align: center;
-  @include font('xs');
-  color: rgba(var(--a-text-rgb), 0.4);
-  white-space: nowrap;
-}
-
-.legend {
-  display: flex;
-  gap: 16px;
-  padding: 0 16px;
-}
-
-.legendItem {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  @include font('xs');
-  color: rgba(var(--a-text-rgb), 0.6);
-}
-
-.legendSwatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-}
-
-.legendSwatchCurrent {
-  background: color('brand-primary');
-}
-
-.legendSwatchPrevious {
-  background: rgba(var(--a-text-rgb), 0.25);
 }
