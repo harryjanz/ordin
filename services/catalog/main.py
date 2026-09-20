@@ -1077,6 +1077,7 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "cfop": p.cfop,
         "cest": p.cest,
         "custo": float(p.custo) if p.custo is not None else None,
+        "estoque_minimo": float(p.estoque_minimo),  # ORD-183 (A3)
         "is_umbrella": await _is_umbrella_product(db, p.id),  # G4 (ORD-189)
         "allergens": await _get_product_allergens(db, p.id),
         "option_groups": await _get_product_option_groups(db, p.id),
@@ -1593,6 +1594,7 @@ class ProductOut(BaseModel):
     cfop: str | None = None
     cest: str | None = None
     custo: float | None = None  # ORD-187
+    estoque_minimo: float = 0  # ORD-183 (A3)
     is_umbrella: bool = False  # ORD-189 (G4) — computado, nunca persistido
     allergens: list[AllergenOut] = []
     option_groups: list[ProductOptionGroupOut] = []
@@ -1668,6 +1670,7 @@ class ProductIn(BaseModel):
     cfop: str | None = None
     cest: str | None = None
     custo: float | None = None  # ORD-187 — só relevante pra CFOP 5102, mas aceito sempre
+    estoque_minimo: float = 0  # ORD-183 (A3) — configurável mesmo sem stock_item existir ainda
 
     @field_validator("price")
     @classmethod
@@ -1695,6 +1698,13 @@ class ProductIn(BaseModel):
         # se chegassem cruas no banco (NULL é ignorado pela constraint, "" não).
         return v.strip() or None if v is not None else None
 
+    @field_validator("estoque_minimo")
+    @classmethod
+    def _estoque_minimo_non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("estoque mínimo não pode ser negativo")
+        return v
+
 class ProductUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -1718,6 +1728,7 @@ class ProductUpdate(BaseModel):
     cfop: str | None = None
     cest: str | None = None
     custo: float | None = None  # ORD-187
+    estoque_minimo: float | None = None  # ORD-183 (A3) — None = não mexer nesse campo
 
     @field_validator("price")
     @classmethod
@@ -1740,6 +1751,13 @@ class ProductUpdate(BaseModel):
     @classmethod
     def _empty_ean_to_none(cls, v: str | None) -> str | None:
         return v.strip() or None if v is not None else None
+
+    @field_validator("estoque_minimo")
+    @classmethod
+    def _estoque_minimo_non_negative(cls, v: float | None) -> float | None:
+        if v is not None and v < 0:
+            raise ValueError("estoque mínimo não pode ser negativo")
+        return v
 
 class ReorderIn(BaseModel):
     category_id: int
@@ -2337,6 +2355,7 @@ async def create_product(
         cfop=body.cfop,
         cest=body.cest,
         custo=body.custo,
+        estoque_minimo=body.estoque_minimo,
     )
     db.add(p)
     # Sem UniqueConstraint de banco pra sku/ean desde a decisão do usuário
