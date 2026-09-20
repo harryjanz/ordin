@@ -96,6 +96,7 @@ interface EditProdState {
   sku: string;
   ean: string;
   is_umbrella: boolean; // ORD-189 (G4)
+  estoque_minimo: number; // ORD-183 (A3)
   tags: string[];
   allergen_ids: string[];
   option_groups: ProductOptionGroup[];
@@ -231,6 +232,7 @@ export default function ProductEditScreen() {
           cest: p.cest ?? "",
           custo: p.custo,
           is_umbrella: p.is_umbrella,
+          estoque_minimo: p.estoque_minimo,
         });
         setNcmQuery(p.ncm && p.ncm_descricao ? ncmLabel(p.ncm, p.ncm_descricao) : "");
         setCategories(categoriesRes.data.categories ?? categoriesRes.data);
@@ -559,6 +561,7 @@ export default function ProductEditScreen() {
         cfop: editProd.cfop,
         cest: editProd.cest.trim() || null,
         custo: editProd.custo,
+        estoque_minimo: editProd.estoque_minimo,
       }, catalogParams());
       navigate("/catalog?tab=products");
     } catch (err) {
@@ -582,6 +585,7 @@ export default function ProductEditScreen() {
   // valor legado, não participa de validação nenhuma nesse estado.
   const eanConflict = !editProd.is_umbrella && editProd.ean.trim() !== "" && activeEanSetElsewhere.has(editProd.ean.trim());
   const skuConflict = editProd.sku.trim() !== "" && activeSkuSetElsewhere.has(editProd.sku.trim());
+  const estoqueMinimoValid = editProd.estoque_minimo >= 0; // ORD-183 (A3)
 
   return (
     <div className={styles.page}>
@@ -596,7 +600,7 @@ export default function ProductEditScreen() {
         <h1 className={styles.h1}>Editando produto</h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/catalog?tab=products")}>Voltar</Button>
-          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (!editProd.is_umbrella && editProd.ean.trim() !== "" && !isValidGtin(editProd.ean)) || eanConflict || skuConflict} loading={productSaving}>
+          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (!editProd.is_umbrella && editProd.ean.trim() !== "" && !isValidGtin(editProd.ean)) || eanConflict || skuConflict || !estoqueMinimoValid} loading={productSaving}>
             Salvar
           </Button>
         </div>
@@ -871,38 +875,52 @@ export default function ProductEditScreen() {
           <div className={styles.menusInfo}>
             produto guarda-chuva: o estoque é controlado por cada opção, não pelo produto
           </div>
-        ) : !stock?.has_stock_item ? (
-          <div className={styles.menusInfo}>Sem controle de estoque ainda.</div>
         ) : (
           <>
-            <p className={styles.menusInfo}>
-              <strong>{stock.quantidade_atual} {stockUnitLabel(stock.unidade)}</strong> em estoque
-            </p>
-            <div className={styles.tableScroll}>
-              <Table
-                columns={[
-                  { key: "criado_em", header: "Data", render: (m) => new Date(m.criado_em).toLocaleString("pt-BR") },
-                  { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
-                  {
-                    key: "quantidade", header: "Quantidade",
-                    render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`,
-                  },
-                  { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
-                  { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
-                ]}
-                rows={stock.movements}
-                rowKey={(m) => m.id}
-                emptyMessage="Nenhuma movimentação ainda."
-              />
-            </div>
-            {stock.total_movements > stock.movements.length && (
-              <p className={styles.menusInfo}>
-                Mostrando as {stock.movements.length} movimentações mais recentes de {stock.total_movements} no total.
-              </p>
+            {/* ORD-183 (A3) — sempre visível, mesmo sem stock_item ainda: a
+                configuração não depende de já existir estoque físico. */}
+            <NumberInput
+              label="Estoque mínimo"
+              value={editProd.estoque_minimo}
+              onChange={(value: number) => setEditProd({ ...editProd, estoque_minimo: value })}
+              decimalScale={3}
+              errorMessage={!estoqueMinimoValid ? "não pode ser negativo" : undefined}
+            />
+            {!stock?.has_stock_item ? (
+              <div className={styles.menusInfo}>Sem controle de estoque ainda.</div>
+            ) : (
+              <>
+                <p className={styles.menusInfo}>
+                  <strong>{stock.quantidade_atual} {stockUnitLabel(stock.unidade)}</strong> em estoque
+                  {stock.abaixo_do_minimo && <> <Tag variant="warning">Abaixo do mínimo</Tag></>}
+                </p>
+                <div className={styles.tableScroll}>
+                  <Table
+                    columns={[
+                      { key: "criado_em", header: "Data", render: (m) => new Date(m.criado_em).toLocaleString("pt-BR") },
+                      { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
+                      {
+                        key: "quantidade", header: "Quantidade",
+                        render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`,
+                      },
+                      { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
+                      { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
+                    ]}
+                    rows={stock.movements}
+                    rowKey={(m) => m.id}
+                    emptyMessage="Nenhuma movimentação ainda."
+                  />
+                </div>
+                {stock.total_movements > stock.movements.length && (
+                  <p className={styles.menusInfo}>
+                    Mostrando as {stock.movements.length} movimentações mais recentes de {stock.total_movements} no total.
+                  </p>
+                )}
+                {/* ORD-191 (A9) — abaixo da tabela de histórico: a tabela é a fonte
+                    de detalhe por evento, o gráfico é a leitura de tendência. */}
+                <StockHistoryChart points={stockHistory} unidade={stock.unidade} />
+              </>
             )}
-            {/* ORD-191 (A9) — abaixo da tabela de histórico: a tabela é a fonte
-                de detalhe por evento, o gráfico é a leitura de tendência. */}
-            <StockHistoryChart points={stockHistory} unidade={stock.unidade} />
           </>
         )}
       </div>
