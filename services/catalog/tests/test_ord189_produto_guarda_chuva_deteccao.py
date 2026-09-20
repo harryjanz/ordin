@@ -259,3 +259,36 @@ async def test_transicao_retroativa_bloqueada_produto_ja_tem_estoque(client, tok
     )
     assert r.status_code == 400
     assert "estoque" in r.json()["detail"]
+
+
+async def test_editar_campo_nao_fiscal_nao_e_bloqueado_por_conflito_retroativo_ja_existente(client, token_owner):
+    # Achado testando ao vivo: um grupo com estado herdado (opção já tinha
+    # cfop de antes, produto já tem ean de antes — janela G2→G4 documentada
+    # na ORD-181) não pode travar PARA SEMPRE qualquer save futuro do grupo
+    # que nem mexe em ean/cfop. Só a introdução/mudança de ean/cfop é bloqueada.
+    product_id = await client.post(
+        "/catalog/products", json={"name": "Produto", "price": 9.9, "ean": "7891000100103"},
+        headers=auth(token_owner),
+    )
+    product_id = product_id.json()["id"]
+    r = await client.post(
+        "/catalog/option-groups",
+        json={"name": "Sabor", "min_selections": 1, "max_selections": 1,
+              "options": [{"label": "Coca-Cola", "cfop": "5102"}]},
+        headers=auth(token_owner),
+    )
+    group_id, option_id = r.json()["id"], r.json()["options"][0]["id"]
+    # vínculo feito via SQL direto (não pela API), simulando o estado herdado
+    # de antes da G4 existir — sem passar pela checagem de transição.
+    import main as svc
+    async with svc.AsyncSessionLocal() as db:
+        db.add(svc.ProductOptionGroup(product_id=product_id, option_group_id=group_id))
+        await db.commit()
+
+    r = await client.put(
+        f"/catalog/option-groups/{group_id}/options",
+        json={"options": [{"id": option_id, "label": "Coca-Cola (renomeada)", "cfop": "5102"}]},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["options"][0]["label"] == "Coca-Cola (renomeada)"

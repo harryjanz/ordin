@@ -581,9 +581,24 @@ async def _validate_no_retroactive_umbrella_conflict(
     automática — a Empresa resolve manualmente (limpa o ean do produto, ou zera/resolve o
     estoque) antes de tentar de novo. Roda ANTES do replace de opções — se rejeitar, nada no
     grupo é alterado. Mensagens distintas por causa (achado do QA): limpar EAN do produto e
-    resolver estoque existente são ações diferentes, a Empresa precisa saber qual das duas."""
-    if not any(opt.ean or opt.cfop for opt in options):
-        return  # nenhuma opção deste payload está ganhando dado fiscal — nada a checar
+    resolver estoque existente são ações diferentes, a Empresa precisa saber qual das duas.
+
+    Achado testando ao vivo: só considera TRANSIÇÃO (ean/cfop mudando de valor, ou opção nova
+    já nascendo com um dos dois) — uma opção que já tinha cfop salvo de antes (estado herdado
+    da janela G2→G4, documentada na ORD-181) não pode travar o grupo pra sempre em qualquer
+    save futuro que nem mexe em ean/cfop; só o ATO de introduzir/mudar o dado fiscal é bloqueado."""
+    existing_by_id: dict[int, tuple[str | None, str | None]] = {}
+    ids = [opt.id for opt in options if opt.id is not None]
+    if ids:
+        rows = (await db.execute(select(Option.id, Option.ean, Option.cfop).filter(Option.id.in_(ids)))).all()
+        existing_by_id = {row[0]: (row[1], row[2]) for row in rows}
+
+    transitioning = any(
+        (opt.ean or opt.cfop) and existing_by_id.get(opt.id, (None, None)) != (opt.ean, opt.cfop)
+        for opt in options
+    )
+    if not transitioning:
+        return  # nenhuma opção deste payload está ganhando/mudando dado fiscal — nada a checar
 
     product_ids = (await db.execute(
         select(ProductOptionGroup.product_id).filter_by(option_group_id=option_group_id)
