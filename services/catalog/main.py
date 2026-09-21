@@ -4375,6 +4375,36 @@ class SupplierInvoiceCreateOut(BaseModel):
     supplier_id: int
 
 
+class SupplierInvoiceListItemOut(BaseModel):
+    id: int
+    supplier_id: int
+    fornecedor_nome: str
+    fornecedor_cnpj: str
+    numero: str | None
+    serie: str | None
+    data_emissao: datetime | None
+    valor_total: float
+    imported_at: datetime | None
+
+
+class SupplierInvoiceListOut(BaseModel):
+    invoices: list[SupplierInvoiceListItemOut]
+
+
+class SupplierInvoiceDetailOut(BaseModel):
+    id: int
+    chave_acesso: str
+    supplier_id: int
+    fornecedor_nome: str
+    fornecedor_cnpj: str
+    numero: str | None
+    serie: str | None
+    data_emissao: datetime | None
+    valor_total: float
+    imported_at: datetime | None
+    itens: list[SupplierInvoicePreviewItemOut]
+
+
 @app.post(
     "/catalog/supplier-invoices/preview",
     response_model=SupplierInvoicePreviewOut,
@@ -4434,6 +4464,103 @@ async def create_supplier_invoice(
     ])
     await db.commit()
     return {"id": invoice.id, "supplier_id": supplier.id}
+
+
+# Achado em teste manual do usuário (ORD-194): o Explorer prometia "aparece na
+# listagem de notas importadas" (Fluxo Principal, passo 3) — histórico
+# estruturado de compras é o valor central da história — mas o Tech Explorer
+# nunca operacionalizou isso num endpoint, e passou batido na revisão por
+# papel. List/detail/delete fecham essa lacuna.
+
+@app.get(
+    "/catalog/supplier-invoices",
+    response_model=SupplierInvoiceListOut,
+    tags=["Fornecedores"],
+    summary="Listar notas de compra importadas",
+)
+async def list_supplier_invoices(
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    result = await db.execute(
+        select(SupplierInvoice, Supplier.nome, Supplier.cnpj)
+        .join(Supplier, Supplier.id == SupplierInvoice.supplier_id)
+        .filter(SupplierInvoice.company_id == company_id)
+        .order_by(SupplierInvoice.imported_at.desc())
+    )
+    return {
+        "invoices": [
+            {
+                "id": inv.id, "supplier_id": inv.supplier_id,
+                "fornecedor_nome": nome, "fornecedor_cnpj": cnpj,
+                "numero": inv.numero, "serie": inv.serie, "data_emissao": inv.data_emissao,
+                "valor_total": float(inv.valor_total), "imported_at": inv.imported_at,
+            }
+            for inv, nome, cnpj in result.all()
+        ],
+    }
+
+
+async def _get_owned_invoice(db: AsyncSession, invoice_id: int, company_id: int) -> SupplierInvoice:
+    invoice = (await db.execute(
+        select(SupplierInvoice).filter_by(id=invoice_id, company_id=company_id)
+    )).scalars().first()
+    if not invoice:
+        raise HTTPException(404)
+    return invoice
+
+
+@app.get(
+    "/catalog/supplier-invoices/{invoice_id}",
+    response_model=SupplierInvoiceDetailOut,
+    tags=["Fornecedores"],
+    summary="Detalhe de uma nota de compra importada, com itens",
+)
+async def get_supplier_invoice(
+    invoice_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    invoice = await _get_owned_invoice(db, invoice_id, company_id)
+    supplier = (await db.execute(select(Supplier).filter_by(id=invoice.supplier_id))).scalars().first()
+    items = (await db.execute(
+        select(SupplierInvoiceItem).filter_by(supplier_invoice_id=invoice.id).order_by(SupplierInvoiceItem.n_item)
+    )).scalars().all()
+    return {
+        "id": invoice.id, "chave_acesso": invoice.chave_acesso, "supplier_id": invoice.supplier_id,
+        "fornecedor_nome": supplier.nome, "fornecedor_cnpj": supplier.cnpj,
+        "numero": invoice.numero, "serie": invoice.serie, "data_emissao": invoice.data_emissao,
+        "valor_total": float(invoice.valor_total), "imported_at": invoice.imported_at,
+        "itens": [
+            {
+                "n_item": it.n_item, "c_prod": it.c_prod, "c_ean": it.c_ean, "x_prod": it.x_prod,
+                "ncm": it.ncm, "cfop": it.cfop, "unidade": it.unidade,
+                "quantidade": float(it.quantidade), "valor_unitario": float(it.valor_unitario),
+                "valor_total": float(it.valor_total),
+            }
+            for it in items
+        ],
+    }
+
+
+@app.delete(
+    "/catalog/supplier-invoices/{invoice_id}",
+    status_code=204,
+    tags=["Fornecedores"],
+    summary="Excluir nota de compra importada",
+)
+async def delete_supplier_invoice(
+    invoice_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    # Exclusão normal (não soft-delete, decisão explícita do usuário): libera
+    # a chave de acesso pra reimportar. Não apaga o Supplier vinculado — pode
+    # ter sido usado/editado independentemente da nota que o criou.
+    invoice = await _get_owned_invoice(db, invoice_id, company_id)
+    await db.execute(delete(SupplierInvoiceItem).where(SupplierInvoiceItem.supplier_invoice_id == invoice.id))
+    await db.delete(invoice)
+    await db.commit()
 
 
 @app.get("/health", response_model=HealthOut, tags=["Catálogo"], summary="Healthcheck")

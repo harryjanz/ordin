@@ -274,6 +274,107 @@ async def test_role_sem_permissao_de_escrita_bloqueado(client, token_kiosk):
     assert r.status_code == 403, r.text
 
 
+# ── Listagem / detalhe / exclusão (achado em teste manual do usuário) ────
+# Explorer prometia "aparece na listagem de notas importadas" (Fluxo
+# Principal), mas o Tech Explorer nunca operacionalizou isso num endpoint —
+# gap real, não escopo cortado de propósito.
+
+async def test_listagem_mostra_notas_confirmadas_mais_recente_primeiro(client, token_owner):
+    r_lista_vazia = await client.get("/catalog/supplier-invoices", headers=auth(token_owner))
+    assert r_lista_vazia.json()["invoices"] == []
+
+    await _confirm(client, token_owner, "nfe_pequena.xml")
+    await _confirm(client, token_owner, "nfe_procnfe.xml")
+
+    r = await client.get("/catalog/supplier-invoices", headers=auth(token_owner))
+    assert r.status_code == 200, r.text
+    invoices = r.json()["invoices"]
+    assert len(invoices) == 2
+    # nfe_procnfe.xml (nNF=46320) confirmada depois de nfe_pequena.xml (nNF=1) — aparece primeiro
+    assert invoices[0]["numero"] == "46320"
+    assert invoices[1]["numero"] == "1"
+    assert all("fornecedor_nome" in i and "valor_total" in i for i in invoices)
+
+
+async def test_previa_sozinha_nao_aparece_na_listagem(client, token_owner):
+    await _preview(client, token_owner, "nfe_pequena.xml")
+    r = await client.get("/catalog/supplier-invoices", headers=auth(token_owner))
+    assert r.json()["invoices"] == []
+
+
+async def test_detalhe_de_nota_confirmada_traz_todos_os_itens(client, token_owner):
+    r_confirm = await _confirm(client, token_owner, "nfe_grande.xml")
+    invoice_id = r_confirm.json()["id"]
+
+    r = await client.get(f"/catalog/supplier-invoices/{invoice_id}", headers=auth(token_owner))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["itens"]) == 41
+    assert body["fornecedor_nome"] == "Alimentos Ltda."
+    assert body["valor_total"] > 0
+
+
+async def test_detalhe_de_nota_inexistente_retorna_404(client, token_owner):
+    r = await client.get("/catalog/supplier-invoices/999999", headers=auth(token_owner))
+    assert r.status_code == 404
+
+
+async def test_isolamento_multi_tenant_na_listagem_e_detalhe(client, token_owner, token_company_b):
+    r_confirm = await _confirm(client, token_owner, "nfe_pequena.xml")
+    invoice_id = r_confirm.json()["id"]
+
+    r_list_b = await client.get("/catalog/supplier-invoices", headers=auth(token_company_b))
+    assert r_list_b.json()["invoices"] == []
+
+    r_detail_b = await client.get(f"/catalog/supplier-invoices/{invoice_id}", headers=auth(token_company_b))
+    assert r_detail_b.status_code == 404
+
+
+async def test_excluir_nota_libera_chave_de_acesso_pra_reimportar(client, token_owner):
+    r_confirm = await _confirm(client, token_owner, "nfe_pequena.xml")
+    invoice_id = r_confirm.json()["id"]
+
+    r_dup = await _confirm(client, token_owner, "nfe_pequena.xml")
+    assert r_dup.status_code == 409
+
+    r_del = await client.delete(f"/catalog/supplier-invoices/{invoice_id}", headers=auth(token_owner))
+    assert r_del.status_code == 204
+
+    r_list = await client.get("/catalog/supplier-invoices", headers=auth(token_owner))
+    assert r_list.json()["invoices"] == []
+
+    # chave livre de novo — reimportação funciona
+    r_reconfirm = await _confirm(client, token_owner, "nfe_pequena.xml")
+    assert r_reconfirm.status_code == 201, r_reconfirm.text
+
+
+async def test_excluir_nota_nao_apaga_o_fornecedor(client, token_owner):
+    r_confirm = await _confirm(client, token_owner, "nfe_pequena.xml")
+    invoice_id, supplier_id = r_confirm.json()["id"], r_confirm.json()["supplier_id"]
+
+    await client.delete(f"/catalog/supplier-invoices/{invoice_id}", headers=auth(token_owner))
+
+    r_suppliers = await client.get("/catalog/suppliers", headers=auth(token_owner))
+    assert supplier_id in [s["id"] for s in r_suppliers.json()["suppliers"]]
+
+
+async def test_excluir_nota_de_outra_empresa_retorna_404(client, token_owner, token_company_b):
+    r_confirm = await _confirm(client, token_owner, "nfe_pequena.xml")
+    invoice_id = r_confirm.json()["id"]
+
+    r_del = await client.delete(f"/catalog/supplier-invoices/{invoice_id}", headers=auth(token_company_b))
+    assert r_del.status_code == 404
+
+    # não foi excluída de verdade
+    r_list = await client.get("/catalog/supplier-invoices", headers=auth(token_owner))
+    assert len(r_list.json()["invoices"]) == 1
+
+
+async def test_excluir_nota_inexistente_retorna_404(client, token_owner):
+    r = await client.delete("/catalog/supplier-invoices/999999", headers=auth(token_owner))
+    assert r.status_code == 404
+
+
 # ── Validação isolada do algoritmo de chave de acesso ─────────────────────
 
 def test_valida_chave_acesso_contra_chaves_reais_autorizadas():
