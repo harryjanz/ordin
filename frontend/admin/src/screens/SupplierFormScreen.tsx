@@ -71,7 +71,7 @@ export default function SupplierFormScreen() {
       } else {
         await api.put(`/catalog/suppliers/${editingId}`, body);
       }
-      navigate("/suppliers");
+      navigate("/stock/suppliers");
     } catch (err) {
       setFormError(parseApiError(err).message || "Erro ao salvar fornecedor.");
     } finally {
@@ -92,14 +92,14 @@ export default function SupplierFormScreen() {
     <div className={styles.page}>
       <Breadcrumb
         items={[
-          { label: "Fornecedores", href: "/suppliers" },
+          { label: "Fornecedores", href: "/stock/suppliers" },
           { label: editingId === null ? "Novo fornecedor" : "Editar fornecedor" },
         ]}
       />
       <div className={styles.header}>
         <h1 className={styles.h1}>{editingId === null ? "Novo fornecedor" : "Editar fornecedor"}</h1>
         <div className={styles.headerActions}>
-          <Button variant="secondary" onClick={() => navigate("/suppliers")}>Voltar</Button>
+          <Button variant="secondary" onClick={() => navigate("/stock/suppliers")}>Voltar</Button>
           <Button onClick={save} disabled={!canSave} loading={saving}>Salvar fornecedor</Button>
         </div>
       </div>

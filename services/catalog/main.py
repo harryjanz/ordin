@@ -1,5 +1,6 @@
 import io
 import secrets
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal, Optional
@@ -21,6 +22,9 @@ from infrastructure.image_storage import (
     upload_product_image,
     upload_product_thumbnail,
 )
+from nfelib import XmlParser
+from nfelib.nfe.bindings.v4_0.nfe_v4_00 import Nfe
+from nfelib.nfe.bindings.v4_0.proc_nfe_v4_00 import NfeProc
 from PIL import Image
 from pydantic import BaseModel, field_validator, model_validator
 from sqlalchemy import (
@@ -31,6 +35,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -43,6 +48,7 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.dialects.mysql import MEDIUMBLOB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -257,6 +263,55 @@ class Supplier(Base):
     telefone   = Column(String(20), nullable=True)
     email      = Column(String(120), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class SupplierInvoice(Base):
+    """B1 (ORD-194) — nota fiscal de compra importada via XML. Só guarda o cabeçalho
+    e preserva o XML original (xml_raw) pra auditoria/reprocessamento — não vincula a
+    Product/Option (isso é C1) nem dá entrada em estoque (continua manual até lá)."""
+    __tablename__ = "supplier_invoices"
+    __table_args__ = (
+        UniqueConstraint("company_id", "chave_acesso", name="uq_supplier_invoices_company_chave"),
+    )
+
+    id           = Column(Integer, primary_key=True)
+    company_id   = Column(Integer, nullable=False, index=True)
+    supplier_id  = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
+    chave_acesso = Column(String(44), nullable=False)
+    numero       = Column(String(20), nullable=True)
+    serie        = Column(String(10), nullable=True)
+    data_emissao = Column(DateTime, nullable=True)
+    valor_total  = Column(Numeric(12, 2), nullable=False)
+    # Bytes crus do XML original, não texto — decodificar como string aqui
+    # corromperia notas em ISO-8859-1 se assumíssemos UTF-8 (achado central
+    # desta história). Quem precisar reler o conteúdo (B2) reparsea com
+    # nfelib a partir destes bytes, nunca decodifica com encoding fixo.
+    # with_variant: MEDIUMBLOB (16MB) só no MySQL real — o dialect mapeia
+    # LargeBinary puro pra BLOB (64KB), que estoura com notas reais de muitos
+    # itens (achado em teste live: XML de 41 itens tem ~71KB). Nos testes
+    # (SQLite in-memory, ver conftest.py) usa o LargeBinary genérico — o
+    # compiler do SQLite não conhece MEDIUMBLOB e SQLite não tem limite de
+    # tamanho de BLOB de qualquer forma.
+    xml_raw      = Column(LargeBinary().with_variant(MEDIUMBLOB, "mysql"), nullable=False)
+    imported_by  = Column(Integer, nullable=False)
+    imported_at  = Column(DateTime, default=datetime.utcnow)
+
+class SupplierInvoiceItem(Base):
+    """B1 (ORD-194) — item bruto da nota importada, como veio no XML (cProd/cEAN
+    originais preservados). Sem FK pra Product/Option de propósito — vínculo é C1."""
+    __tablename__ = "supplier_invoice_items"
+
+    id                  = Column(Integer, primary_key=True)
+    supplier_invoice_id = Column(Integer, ForeignKey("supplier_invoices.id"), nullable=False, index=True)
+    n_item              = Column(Integer, nullable=False)
+    c_prod              = Column(String(60), nullable=True)
+    c_ean               = Column(String(14), nullable=True)
+    x_prod              = Column(String(200), nullable=False)
+    ncm                 = Column(String(8), nullable=True)
+    cfop                = Column(String(4), nullable=True)
+    unidade             = Column(String(10), nullable=True)
+    quantidade          = Column(Numeric(15, 4), nullable=False)
+    valor_unitario      = Column(Numeric(15, 4), nullable=False)
+    valor_total         = Column(Numeric(15, 2), nullable=False)
 
 class Allergen(Base):
     """Master data, não por empresa — lista oficial (RDC 727/2022, Lei
@@ -4145,6 +4200,241 @@ async def delete_supplier(
         raise HTTPException(404)
     await db.delete(s)
     await db.commit()
+
+# ── Upload de XML de NF de compra (B1, ORD-194) ──────────────────────────────
+
+_XML_PARSER = XmlParser()
+
+def _valida_chave_acesso(chave: str) -> bool:
+    """Chave de acesso: 44 dígitos, último é dígito verificador mod-11 com pesos
+    CÍCLICOS de 2 a 9 (não a lista fixa de CNPJ — confirmado via pesquisa e
+    testado contra chaves reais autorizadas, ver docs/stories/ORD-194)."""
+    if len(chave) != 44 or not chave.isdigit():
+        return False
+    base, dv = chave[:43], chave[43]
+    pesos = [2, 3, 4, 5, 6, 7, 8, 9]
+    total = sum(int(d) * pesos[i % 8] for i, d in enumerate(reversed(base)))
+    resto = total % 11
+    dv_calc = 0 if resto in (0, 1) else 11 - resto
+    return str(dv_calc) == dv
+
+
+@dataclass
+class _ParsedInvoiceItem:
+    n_item: int
+    c_prod: str | None
+    c_ean: str | None
+    x_prod: str
+    ncm: str | None
+    cfop: str | None
+    unidade: str | None
+    quantidade: Decimal
+    valor_unitario: Decimal
+    valor_total: Decimal
+
+
+@dataclass
+class _ParsedInvoice:
+    chave_acesso: str
+    emit_cnpj: str
+    emit_nome: str
+    numero: str | None
+    serie: str | None
+    data_emissao: datetime | None
+    valor_total: Decimal
+    itens: list[_ParsedInvoiceItem]
+
+
+def _parse_nfe(raw: bytes) -> _ParsedInvoice:
+    """Ordem de validação (ver Tech Explorer, docs/stories/ORD-194): estrutura →
+    dígito verificador → mod → finNFe → extrai campos. Cada camada só roda se a
+    anterior passou, com mensagem de erro específica — "bem formado" não é o
+    mesmo que "íntegro", que não é o mesmo que "é uma nota de compra normal"."""
+    try:
+        proc = _XML_PARSER.from_bytes(raw, NfeProc)
+        inf = proc.NFe.infNFe
+    except Exception:  # noqa: BLE001 — entrada não confiável, qualquer falha de parsing vira 400
+        try:
+            nfe = _XML_PARSER.from_bytes(raw, Nfe)
+            inf = nfe.infNFe
+        except Exception as e:  # entrada não confiável — qualquer falha de parsing vira 400
+            raise HTTPException(400, detail="arquivo não é um XML de NF-e válido") from e
+
+    chave = inf.Id.removeprefix("NFe")
+    if not _valida_chave_acesso(chave):
+        raise HTTPException(400, detail="chave de acesso inválida")
+
+    # xsdata mantém .value como STRING aqui ("55"/"1"), não int — confirmado
+    # testando contra XML real (achado durante a implementação: comparar com
+    # int 55 rejeitava 100% das notas válidas, silenciosamente).
+    if inf.ide.mod.value != "55":
+        raise HTTPException(400, detail="não é uma NF-e de compra (verifique se não é uma NFC-e)")
+    if inf.ide.finNFe.value != "1":
+        raise HTTPException(
+            400, detail="só notas normais são aceitas — devolução/complementar/ajuste não são suportadas"
+        )
+
+    itens = [
+        _ParsedInvoiceItem(
+            n_item=int(d.nItem),
+            c_prod=d.prod.cProd,
+            c_ean=None if d.prod.cEAN in (None, "", "SEM GTIN") else d.prod.cEAN,
+            x_prod=d.prod.xProd,
+            ncm=d.prod.NCM,
+            cfop=d.prod.CFOP,
+            unidade=d.prod.uCom,
+            quantidade=Decimal(d.prod.qCom),
+            valor_unitario=Decimal(d.prod.vUnCom),
+            valor_total=Decimal(d.prod.vProd),
+        )
+        for d in inf.det
+    ]
+
+    return _ParsedInvoice(
+        chave_acesso=chave,
+        emit_cnpj=inf.emit.CNPJ,
+        emit_nome=inf.emit.xNome,
+        numero=inf.ide.nNF,
+        serie=inf.ide.serie,
+        data_emissao=datetime.fromisoformat(inf.ide.dhEmi) if inf.ide.dhEmi else None,
+        valor_total=Decimal(inf.total.ICMSTot.vNF),
+        itens=itens,
+    )
+
+
+async def _find_supplier_by_cnpj(db: AsyncSession, company_id: int, cnpj: str) -> Supplier | None:
+    return (await db.execute(
+        select(Supplier).filter_by(company_id=company_id, cnpj=cnpj)
+    )).scalars().first()
+
+
+async def _invoice_already_imported(db: AsyncSession, company_id: int, chave_acesso: str) -> bool:
+    result = await db.execute(
+        select(SupplierInvoice.id).filter_by(company_id=company_id, chave_acesso=chave_acesso)
+    )
+    return result.scalars().first() is not None
+
+
+class SupplierInvoicePreviewItemOut(BaseModel):
+    n_item: int
+    c_prod: str | None
+    c_ean: str | None
+    x_prod: str
+    ncm: str | None
+    cfop: str | None
+    unidade: str | None
+    quantidade: float
+    valor_unitario: float
+    valor_total: float
+
+
+class SupplierInvoicePreviewFornecedorOut(BaseModel):
+    existing_supplier_id: int | None
+    cnpj: str
+    nome: str
+    sera_criado: bool
+
+
+class SupplierInvoicePreviewOut(BaseModel):
+    chave_acesso: str
+    already_imported: bool
+    fornecedor: SupplierInvoicePreviewFornecedorOut
+    numero: str | None
+    serie: str | None
+    data_emissao: datetime | None
+    valor_total: float
+    itens: list[SupplierInvoicePreviewItemOut]
+
+
+def _preview_payload(parsed: _ParsedInvoice, existing_supplier: Supplier | None, already_imported: bool) -> dict:
+    return {
+        "chave_acesso": parsed.chave_acesso,
+        "already_imported": already_imported,
+        "fornecedor": {
+            "existing_supplier_id": existing_supplier.id if existing_supplier else None,
+            "cnpj": parsed.emit_cnpj,
+            "nome": existing_supplier.nome if existing_supplier else parsed.emit_nome,
+            "sera_criado": existing_supplier is None,
+        },
+        "numero": parsed.numero, "serie": parsed.serie, "data_emissao": parsed.data_emissao,
+        "valor_total": float(parsed.valor_total),
+        "itens": [
+            {
+                "n_item": item.n_item, "c_prod": item.c_prod, "c_ean": item.c_ean, "x_prod": item.x_prod,
+                "ncm": item.ncm, "cfop": item.cfop, "unidade": item.unidade,
+                "quantidade": float(item.quantidade), "valor_unitario": float(item.valor_unitario),
+                "valor_total": float(item.valor_total),
+            }
+            for item in parsed.itens
+        ],
+    }
+
+
+class SupplierInvoiceCreateOut(BaseModel):
+    id: int
+    supplier_id: int
+
+
+@app.post(
+    "/catalog/supplier-invoices/preview",
+    response_model=SupplierInvoicePreviewOut,
+    tags=["Fornecedores"],
+    summary="Prévia de importação de XML de NF de compra — não persiste nada",
+)
+async def preview_supplier_invoice(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    raw = await file.read()
+    parsed = _parse_nfe(raw)
+    existing_supplier = await _find_supplier_by_cnpj(db, company_id, parsed.emit_cnpj)
+    already_imported = await _invoice_already_imported(db, company_id, parsed.chave_acesso)
+    return _preview_payload(parsed, existing_supplier, already_imported)
+
+
+@app.post(
+    "/catalog/supplier-invoices",
+    response_model=SupplierInvoiceCreateOut,
+    status_code=201,
+    tags=["Fornecedores"],
+    summary="Confirmar importação de XML de NF de compra",
+    responses={409: {"description": "Nota já importada anteriormente (mesma chave de acesso)"}},
+)
+async def create_supplier_invoice(
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    raw = await file.read()
+    parsed = _parse_nfe(raw)
+    if await _invoice_already_imported(db, company_id, parsed.chave_acesso):
+        raise HTTPException(409, detail="Nota já importada anteriormente")
+    supplier = await _find_supplier_by_cnpj(db, company_id, parsed.emit_cnpj)
+    if supplier is None:
+        supplier = Supplier(company_id=company_id, nome=parsed.emit_nome, cnpj=parsed.emit_cnpj)
+        db.add(supplier)
+        await db.flush()  # garante supplier.id antes do SupplierInvoice
+    invoice = SupplierInvoice(
+        company_id=company_id, supplier_id=supplier.id, chave_acesso=parsed.chave_acesso,
+        numero=parsed.numero, serie=parsed.serie, data_emissao=parsed.data_emissao,
+        valor_total=parsed.valor_total, xml_raw=raw,  # bytes crus, ver comentário no model
+        imported_by=int(current_user.sub),
+    )
+    db.add(invoice)
+    await db.flush()  # garante invoice.id antes dos itens
+    db.add_all([
+        SupplierInvoiceItem(
+            supplier_invoice_id=invoice.id, n_item=item.n_item, c_prod=item.c_prod, c_ean=item.c_ean,
+            x_prod=item.x_prod, ncm=item.ncm, cfop=item.cfop, unidade=item.unidade,
+            quantidade=item.quantidade, valor_unitario=item.valor_unitario, valor_total=item.valor_total,
+        )
+        for item in parsed.itens
+    ])
+    await db.commit()
+    return {"id": invoice.id, "supplier_id": supplier.id}
+
 
 @app.get("/health", response_model=HealthOut, tags=["Catálogo"], summary="Healthcheck")
 def health(): return {"service": "catalog", "status": "ok"}

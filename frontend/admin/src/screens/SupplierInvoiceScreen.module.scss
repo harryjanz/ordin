@@ -1,0 +1,27 @@
+@import 'design-system/dist/core/scss/styles';
+
+// ORD-194 (B1, achado da revisão de frontend) — Table.tsx não tem paginação/
+// scroll embutido; nota com muitos itens precisa do mesmo wrapper já usado
+// em ComboFormScreen/ProductEditScreen pra listas longas, rolando só a
+// tabela, nunca a página inteira.
+.itemsScroll {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.previewHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--a-surface);
+  margin-bottom: 16px;
+}
+
+.previewTotal {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 4px;
+  font-weight: 700;
+}
