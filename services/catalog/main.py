@@ -1080,6 +1080,21 @@ async def _stock_items_by_product(db: AsyncSession, product_ids: list[int]) -> d
     result = await db.execute(select(StockItem).filter(StockItem.product_id.in_(product_ids)))
     return {si.product_id: si for si in result.scalars().all()}
 
+def _classify_stock_state(item: "StockItem | None", estoque_minimo: Decimal) -> str:
+    """A8 (ORD-192) — partição em 4 estados mutuamente exclusivos, cobrindo 100%
+    dos produtos. Ordem importa: "esgotado" é checado ANTES de "baixo" — garante
+    precedência quando quantidade_atual==0 e estoque_minimo também é 0 (caso mais
+    comum, produto sem mínimo configurado), achado da revisão de QA. Produto
+    guarda-chuva (G4) nunca tem stock_item próprio — sempre cai em "indefinido",
+    limitação conhecida e aceita, pendência formal pra C1."""
+    if item is None:
+        return "indefinido"
+    if item.quantidade_atual == 0:
+        return "esgotado"
+    if item.quantidade_atual <= estoque_minimo:  # mesmo <= já fixado na ORD-183
+        return "baixo"
+    return "com_estoque"
+
 async def _availability_map(db: AsyncSession, company_id: int, product_ids: list[int]) -> dict[int, bool]:
     """A4b (ORD-186) — mesma regra de disponibilidade (menu + estoque) já usada por
     `_visible` em list_products (ORD-185), extraída pra reuso pela checagem prévia do
@@ -2143,6 +2158,7 @@ async def list_categories(
 async def list_products(
     category_id: int | None = None,
     include_inactive: bool = False,
+    stock_filter: Literal["com_estoque", "baixo", "esgotado", "indefinido"] | None = None,
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id),
 ):
@@ -2150,7 +2166,9 @@ async def list_products(
     superadmin/admin). Filtrável por `category_id`. Por padrão só produtos
     ativos (usado pelo totem); `include_inactive=true` também traz os
     desativados (usado pela gestão de catálogo no admin). Produtos excluídos
-    definitivamente (`deleted=True`) nunca aparecem, nem com include_inactive."""
+    definitivamente (`deleted=True`) nunca aparecem, nem com include_inactive.
+    `stock_filter` (A8, ORD-192) é o filtro de estado de estoque da listagem
+    do admin — independente de `include_inactive`."""
     q = select(Product).filter_by(company_id=company_id, deleted=False)
     if not include_inactive:
         q = q.filter_by(active=True)
@@ -2160,6 +2178,15 @@ async def list_products(
     result = await db.execute(q)
     products = result.scalars().all()
 
+    # A8 (ORD-192) — um único batch fetch, reaproveitado pelos dois filtros que
+    # possam precisar dele: A4 (menu+estoque do totem, só quando
+    # include_inactive=False) e A8 (stock_filter, qualquer valor de
+    # include_inactive). Sem essa unificação, a combinação include_inactive=
+    # False + stock_filter dispararia a mesma query duas vezes.
+    stock_by_product: dict[int, StockItem] = {}
+    if not include_inactive or stock_filter is not None:
+        stock_by_product = await _stock_items_by_product(db, [p.id for p in products])
+
     if not include_inactive:
         menus_by_cat = await _menus_by_category(db, company_id)
         menus_by_prod = await _menus_by_product(db, company_id)
@@ -2167,8 +2194,6 @@ async def list_products(
         # stock_item depois da 1ª movimentação, e a 1ª movimentação só pode ser
         # entrada (regra já validada na ORD-181) — logo "tem stock_item" já É a
         # regra de rollout, sem flag extra pra manter em sincronia.
-        stock_by_product = await _stock_items_by_product(db, [p.id for p in products])
-
         def _visible(p: "Product") -> bool:
             linked = list(menus_by_prod.get(p.id, []))
             if p.category_id is not None:
@@ -2180,6 +2205,12 @@ async def list_products(
             return not (stock_item is not None and stock_item.quantidade_atual <= p.estoque_minimo)
 
         products = [p for p in products if _visible(p)]
+
+    if stock_filter is not None:
+        products = [
+            p for p in products
+            if _classify_stock_state(stock_by_product.get(p.id), p.estoque_minimo) == stock_filter
+        ]
 
     return {"products": [await _serialize_product(db, p) for p in products]}
 
