@@ -53,7 +53,7 @@ export default function App() {
   const {
     token, company, terminal, cart, cpf, consumptionType, completedOrder, screen,
     setToken, setCompany, setTerminal, setScreen,
-    addToCart, removeFromCart, setCpf, setConsumptionType, setCompletedOrder,
+    addToCart, removeFromCart, removeUnavailableFromCart, setCpf, setConsumptionType, setCompletedOrder,
     newOrder, goIdle, resetSession, touch,
   } = useStore();
 
@@ -83,6 +83,9 @@ export default function App() {
   const [refusedMethod, setRefusedMethod] = useState<string>("");
   const [warnCountdown, setWarnCountdown] = useState(0);
   const [showInactivityModal, setShowInactivityModal] = useState(false);
+  // ORD-186 (A4b) — checagem prévia de disponibilidade antes de cobrar no TEF.
+  const [removedItemsModal, setRemovedItemsModal] = useState<string[] | null>(null);
+  const [availabilityCheckFailed, setAvailabilityCheckFailed] = useState(false);
 
   // ── inatividade — apenas nas telas do fluxo do cliente ───────────────────
   const watchedScreens = ["catalog", "cpf", "payment"];
@@ -182,6 +185,35 @@ export default function App() {
   // sairia com o consumption_type da renderização anterior (null).
   async function handleCpfDone(c: string | null, consumptionTypeOverride?: ConsumptionType | null, pickupName?: string | null) {
     setCpf(c);
+
+    // ORD-186 (A4b) — checagem prévia de disponibilidade: nunca cobrar o
+    // cliente por item que esgotou enquanto ele montava o carrinho. Falha na
+    // própria chamada é fail-safe (bloqueia o avanço, não assume "tudo
+    // disponível") — diferente de "item indisponível", que é resposta válida.
+    const productIds = new Set<number>();
+    for (const line of cart) {
+      if (line.kind === "combo" && line.comboItems) {
+        for (const ci of line.comboItems) productIds.add(ci.product_id);
+      } else {
+        productIds.add(line.id);
+      }
+    }
+    let unavailableIds: number[] = [];
+    try {
+      const res = await api.post("/catalog/products/check-availability", {
+        product_ids: Array.from(productIds),
+      });
+      unavailableIds = res.data.unavailable_product_ids ?? [];
+    } catch {
+      setAvailabilityCheckFailed(true);
+      return;
+    }
+    if (unavailableIds.length > 0) {
+      const removedNames = removeUnavailableFromCart(unavailableIds);
+      setRemovedItemsModal(removedNames);
+      return;
+    }
+
     try {
       // ORD-150 — combo explode em N itens normais (preço real de cada
       // componente, igual um produto avulso) e a economia vira o `discount`
@@ -348,6 +380,105 @@ export default function App() {
               }}
             >
               Continuar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ORD-186 (A4b) — itens removidos do carrinho por esgotarem antes da
+          checagem prévia. Modal com confirmação explícita, não toast
+          auto-dismiss (regra de UX do totem, CLAUDE.md) — conteúdo relevante
+          pro cliente não pode depender dele ver a tela no momento certo. */}
+      {removedItemsModal && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 999,
+          background: "rgba(0,0,0,0.75)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: T.surface,
+            border: `1px solid ${T.border}`,
+            borderRadius: 20,
+            padding: "40px 48px",
+            textAlign: "center",
+            maxWidth: 420,
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div>
+            <h3 style={{ color: T.text, fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+              Alguns itens esgotaram
+            </h3>
+            <p style={{ color: T.muted, fontSize: 15, marginBottom: 24 }}>
+              Alguns itens esgotaram enquanto você montava seu pedido e foram removidos do
+              carrinho: <strong style={{ color: T.text }}>{removedItemsModal.join(", ")}</strong>.
+              Você pode continuar com o restante do pedido.
+            </p>
+            <button
+              onClick={() => {
+                setRemovedItemsModal(null);
+                if (cart.length === 0) setScreen("catalog");
+              }}
+              style={{
+                padding: "0 40px",
+                minHeight: 64,
+                background: T.btn,
+                color: T.btnText,
+                border: "none",
+                borderRadius: 999,
+                fontSize: 18,
+                fontWeight: 800,
+                fontFamily: "'Lexend', sans-serif",
+                cursor: "pointer",
+                boxShadow: T.glow,
+              }}
+            >
+              Entendi, continuar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ORD-186 (A4b) — falha na própria chamada de checagem (rede, catalog-
+          service fora do ar) — fail-safe: bloqueia o avanço, não assume
+          disponibilidade. Diferente do modal acima (que é resposta válida
+          "alguns itens esgotaram"), este é "não consegui nem perguntar". */}
+      {availabilityCheckFailed && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 999,
+          background: "rgba(0,0,0,0.75)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: T.surface,
+            border: `1px solid ${T.border}`,
+            borderRadius: 20,
+            padding: "40px 48px",
+            textAlign: "center",
+            maxWidth: 380,
+          }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>⚠️</div>
+            <h3 style={{ color: T.text, fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
+              Não foi possível confirmar disponibilidade
+            </h3>
+            <p style={{ color: T.muted, fontSize: 15, marginBottom: 24 }}>
+              Tente novamente.
+            </p>
+            <button
+              onClick={() => setAvailabilityCheckFailed(false)}
+              style={{
+                padding: "0 40px",
+                minHeight: 64,
+                background: T.btn,
+                color: T.btnText,
+                border: "none",
+                borderRadius: 999,
+                fontSize: 18,
+                fontWeight: 800,
+                fontFamily: "'Lexend', sans-serif",
+                cursor: "pointer",
+                boxShadow: T.glow,
+              }}
+            >
+              Entendi
             </button>
           </div>
         </div>
