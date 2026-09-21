@@ -119,6 +119,33 @@ async def test_isolamento_na_edicao_e_exclusao(client, token_owner, token_compan
     assert r_del.status_code == 404
 
 
+# GET /catalog/suppliers/{id} — achado em teste manual do usuário (ORD-194):
+# a tela de edição sempre chamou esse endpoint pra pré-carregar o form, mas
+# ele nunca existiu (só list/create/update/delete) — 405, não 404, porque o
+# path casava (PUT/DELETE do mesmo id) mas não o método GET. Nunca tinha
+# sido clicado "Editar" ao vivo antes até agora.
+async def test_busca_fornecedor_por_id(client, token_owner):
+    r = await _create_supplier(client, token_owner, nome="Distribuidora XYZ")
+    supplier_id = r.json()["id"]
+
+    r_get = await client.get(f"/catalog/suppliers/{supplier_id}", headers=auth(token_owner))
+    assert r_get.status_code == 200, r_get.text
+    assert r_get.json()["nome"] == "Distribuidora XYZ"
+
+
+async def test_busca_fornecedor_inexistente_retorna_404(client, token_owner):
+    r = await client.get("/catalog/suppliers/999999", headers=auth(token_owner))
+    assert r.status_code == 404
+
+
+async def test_isolamento_na_busca_por_id(client, token_owner, token_company_b):
+    r = await _create_supplier(client, token_company_b)
+    supplier_id = r.json()["id"]
+
+    r_get = await client.get(f"/catalog/suppliers/{supplier_id}", headers=auth(token_owner))
+    assert r_get.status_code == 404
+
+
 async def test_role_sem_permissao_de_escrita_bloqueado(client, token_kiosk):
     # kiosk usa o mesmo _WRITE_ROLES check que cashier (nenhum dos dois está
     # em _WRITE_ROLES) — não existe fixture token_cashier no conftest, kiosk
