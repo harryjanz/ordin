@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, InputBase } from "design-system";
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
-import { formatCnpj } from "../lib/masks";
+import { formatCnpj, formatPhone } from "../lib/masks";
 import { isValidCnpj, normalizeCnpj } from "../lib/validators";
 import { parseApiError } from "../lib/apiErrors";
 import type { Supplier } from "../types";
@@ -63,7 +63,7 @@ export default function SupplierFormScreen() {
       const body = {
         nome: nome.trim(),
         cnpj: normalizeCnpj(cnpj),
-        telefone: telefone.trim() || null,
+        telefone: formatPhone(telefone) || null,
         email: email.trim() || null,
       };
       if (editingId === null) {
@@ -130,7 +130,7 @@ export default function SupplierFormScreen() {
             <InputBase
               label="Telefone"
               placeholder="(11) 99999-9999"
-              value={telefone}
+              value={formatPhone(telefone)}
               onChange={(e) => setTelefone(e.target.value)}
             />
           </div>
