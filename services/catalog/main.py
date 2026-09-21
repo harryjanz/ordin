@@ -6,6 +6,7 @@ from typing import Literal, Optional
 from zoneinfo import ZoneInfo
 
 from auth import TokenPayload, get_current_user
+from cnpj import is_valid_cnpj, normalize_cnpj
 from config import get_cors_origins, require_env
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -238,6 +239,24 @@ class StockMovement(Base):
     motivo         = Column(String(255), nullable=True)
     criado_por     = Column(Integer, nullable=False)  # user_id do JWT
     criado_em      = Column(DateTime, default=datetime.utcnow)
+
+class Supplier(Base):
+    """ORD-182 (A6) — cadastro simples de fornecedor: nome, CNPJ (obrigatório,
+    validado por checksum, único por empresa), contato. Escopo deliberadamente
+    estreito — só alimenta B1 (importação de XML) e C1 (vínculo automático por
+    código do fornecedor), que exigem fornecedor com NF de verdade. Fornecedor
+    informal (sem nota fiscal) usa A2 (ajuste manual de estoque), que não
+    depende de Supplier."""
+    __tablename__ = "suppliers"
+    __table_args__ = (UniqueConstraint("company_id", "cnpj", name="uq_suppliers_company_cnpj"),)
+
+    id         = Column(Integer, primary_key=True)
+    company_id = Column(Integer, nullable=False, index=True)
+    nome       = Column(String(120), nullable=False)
+    cnpj       = Column(String(14), nullable=False)
+    telefone   = Column(String(20), nullable=True)
+    email      = Column(String(120), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class Allergen(Base):
     """Master data, não por empresa — lista oficial (RDC 727/2022, Lei
@@ -3907,6 +3926,133 @@ async def internal_product_fiscal(
     if not p:
         raise HTTPException(404)
     return {"ncm": p.ncm, "cfop": p.cfop, "cest": p.cest}
+
+# ── Fornecedores (ORD-182, A6) ────────────────────────────────────────────
+
+class SupplierIn(BaseModel):
+    nome: str
+    cnpj: str
+    telefone: str | None = None
+    email: str | None = None
+
+    @field_validator("nome")
+    @classmethod
+    def _nome_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("nome não pode ser vazio")
+        return v
+
+    @field_validator("cnpj")
+    @classmethod
+    def _cnpj_not_blank(cls, v: str) -> str:
+        v = normalize_cnpj(v)
+        if not v:
+            raise ValueError("CNPJ é obrigatório")
+        return v
+
+class SupplierOut(BaseModel):
+    id: int
+    nome: str
+    cnpj: str
+    telefone: str | None
+    email: str | None
+    created_at: datetime
+
+class SupplierListOut(BaseModel):
+    suppliers: list[SupplierOut]
+
+@app.get(
+    "/catalog/suppliers",
+    response_model=SupplierListOut,
+    tags=["Fornecedores"],
+    summary="Listar fornecedores da empresa",
+)
+async def list_suppliers(
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),  # cashier não vê nem a lista
+):
+    result = await db.execute(select(Supplier).filter_by(company_id=company_id).order_by(Supplier.nome))
+    return {"suppliers": result.scalars().all()}
+
+@app.post(
+    "/catalog/suppliers",
+    response_model=SupplierOut,
+    status_code=201,
+    tags=["Fornecedores"],
+    summary="Cadastrar fornecedor",
+)
+async def create_supplier(
+    body: SupplierIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    if not is_valid_cnpj(body.cnpj):
+        raise HTTPException(400, detail="CNPJ inválido")
+    # pré-checagem via SELECT (não IntegrityError) — mesmo padrão já usado
+    # pra SKU/EAN neste arquivo; race condition entre saves simultâneos
+    # aceita conscientemente, mesma decisão já documentada pro SKU/EAN.
+    dup = (await db.execute(
+        select(Supplier.id).filter_by(company_id=company_id, cnpj=body.cnpj)
+    )).scalars().first()
+    if dup is not None:
+        raise HTTPException(400, detail="CNPJ já cadastrado para esta empresa")
+    s = Supplier(company_id=company_id, nome=body.nome, cnpj=body.cnpj,
+                 telefone=body.telefone, email=body.email)
+    db.add(s)
+    await db.commit()
+    await db.refresh(s)
+    return s
+
+@app.put(
+    "/catalog/suppliers/{supplier_id}",
+    response_model=SupplierOut,
+    tags=["Fornecedores"],
+    summary="Editar fornecedor",
+)
+async def update_supplier(
+    supplier_id: int,
+    body: SupplierIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    s = (await db.execute(
+        select(Supplier).filter_by(id=supplier_id, company_id=company_id)
+    )).scalars().first()
+    if not s:
+        raise HTTPException(404)
+    if not is_valid_cnpj(body.cnpj):
+        raise HTTPException(400, detail="CNPJ inválido")
+    dup = (await db.execute(
+        select(Supplier.id).filter(
+            Supplier.company_id == company_id, Supplier.cnpj == body.cnpj, Supplier.id != supplier_id,
+        )
+    )).scalars().first()
+    if dup is not None:
+        raise HTTPException(400, detail="CNPJ já cadastrado para esta empresa")
+    s.nome, s.cnpj, s.telefone, s.email = body.nome, body.cnpj, body.telefone, body.email
+    await db.commit()
+    await db.refresh(s)
+    return s
+
+@app.delete(
+    "/catalog/suppliers/{supplier_id}",
+    status_code=204,
+    tags=["Fornecedores"],
+    summary="Excluir fornecedor",
+)
+async def delete_supplier(
+    supplier_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    s = (await db.execute(
+        select(Supplier).filter_by(id=supplier_id, company_id=company_id)
+    )).scalars().first()
+    if not s:
+        raise HTTPException(404)
+    await db.delete(s)
+    await db.commit()
 
 @app.get("/health", response_model=HealthOut, tags=["Catálogo"], summary="Healthcheck")
 def health(): return {"service": "catalog", "status": "ok"}
