@@ -13,7 +13,8 @@ responsavel: Backend SR + Frontend
 História **B1** do épico de estoque/ERP (`docs/estudo-modulo-estoque-erp.md`, Bloco B —
 Importação de XML). Primeira história do bloco, depende só de A6 (`ORD-182`, mergeada). Permite à
 Empresa importar o XML de uma nota fiscal de compra recebida de um fornecedor, ver uma prévia dos
-dados extraídos antes de confirmar, e guardar a nota importada — sem digitar item por item.
+dados extraídos antes de confirmar, e guardar a nota importada — sem digitar cabeçalho e itens da
+nota na mão.
 
 ## Persona
 **Empresa** (owner/manager/admin que faz a gestão de compras/estoque).
@@ -22,7 +23,14 @@ dados extraídos antes de confirmar, e guardar a nota importada — sem digitar 
 
 ### História
 Como **Empresa**, quero importar o XML de uma nota fiscal de compra que recebi do meu fornecedor,
-ver uma prévia dos dados antes de confirmar, para não precisar digitar cada item manualmente.
+ver uma prévia dos dados antes de confirmar, para ter um histórico estruturado das minhas compras
+sem digitar cabeçalho e itens na mão.
+
+**Correção pós-revisão de PM**: a redação original prometia "não precisar digitar cada item
+manualmente" de um jeito que sugeria que B1 substitui a entrada de estoque (A2) — não substitui.
+B1 só guarda a nota importada (fornecedor + itens brutos do XML); dar entrada de estoque a partir
+dela continua manual até **C1** (vínculo automático) existir. O valor real e imediato de B1 é
+**histórico estruturado de compras** — não "elimina digitação de estoque".
 
 ### Contexto e motivação
 Hoje toda entrada de estoque é manual (A2/`ORD-181`) — pra quem compra de poucos fornecedores em
@@ -43,13 +51,20 @@ desde G1/`ORD-188`). B1 sozinho já entrega valor (substitui digitar nota por co
 ### Decisão de escopo — fluxo em dois passos, prévia sem estado no servidor
 1. Empresa faz upload do XML → `POST /catalog/supplier-invoices/preview` **parseia e retorna a
    prévia sem persistir nada** (nem a nota, nem o fornecedor).
-2. Empresa revisa a prévia (fornecedor, itens, total) e confirma → `POST /catalog/supplier-invoices`
-   **reenvia o mesmo arquivo** (não um id de uma prévia em cache) e aí sim persiste.
+2. Empresa revisa a prévia (fornecedor, itens, total) e clica em "Confirmar importação".
+
+**Correção pós-revisão de PM — clareza de UX, não mudança de comportamento**: "o segundo passo
+reenvia o mesmo arquivo" é detalhe de implementação (o `File` já escolhido no passo 1 fica em
+memória no navegador; o clique em "Confirmar" só faz um segundo `POST` com esse mesmo objeto, pra
+`/catalog/supplier-invoices`), **não uma ação nova da Empresa** — ela nunca vê um segundo diálogo
+de escolher arquivo, nem precisa saber que o XML foi enviado duas vezes ao servidor. A versão
+anterior deste doc estava ambígua nesse ponto o suficiente pra alguém implementar errado (pedindo
+o arquivo de novo na tela).
 
 Prévia sem estado (stateless) evita cache de prévia expirando, invalidação, ou nota "meio
 importada" se o navegador fechar entre os dois passos — o único estado de verdade é o que foi
-confirmado. Custo: o arquivo é parseado duas vezes (prévia + confirmação), aceitável — XMLs de NF-e
-são pequenos (a pesquisa técnica abaixo encontrou exemplos reais de 5 KB a 68 KB).
+confirmado. Custo: o arquivo é parseado duas vezes no backend (prévia + confirmação), aceitável —
+XMLs de NF-e são pequenos (a pesquisa técnica abaixo encontrou exemplos reais de 5 KB a 68 KB).
 
 ### Decisão de escopo — fornecedor casado por CNPJ, criado automaticamente se não existir
 O CNPJ do emitente do XML (`emit/CNPJ`) é comparado com os fornecedores já cadastrados (A6,
@@ -63,6 +78,25 @@ A prévia é só leitura — a Empresa não edita valores/quantidades antes de c
 Se o XML estiver errado, a correção é no próprio fornecedor (pedir XML corrigido) ou via ajuste
 manual de estoque depois (A2), não editando o documento fiscal importado. Simplifica o escopo e
 evita o produto mentir sobre o que a nota fiscal realmente diz.
+
+### Decisão de escopo — só NF-e de compra normal, modelo 55 (achado da revisão de PM)
+NF-e carrega dois campos em `ide` que decidem se o documento é o que B1 espera: `mod` (modelo —
+**55** é NF-e, **65** é NFC-e, o documento que o próprio Ordin já emite pro cliente final na venda,
+`ORD-171`) e `finNFe` (finalidade — 1=normal, 2=complementar, 3=ajuste, **4=devolução/retorno**).
+Sem checar os dois, dois erros silenciosos são possíveis: um cliente sobe por engano a **própria
+NFC-e de venda** (modelo 65) achando que é nota de compra; ou sobe uma nota de **devolução**
+(mercadoria saindo, não entrando) que fica indistinguível de uma compra normal na listagem.
+**Decisão**: `mod != "55"` ou `finNFe != "1"` são rejeitados na prévia, com mensagem específica
+("este XML não é uma NF-e de compra normal") — não silenciosamente aceitos como se fossem compra.
+Complementar/ajuste/devolução ficam fora de escopo desta história, sem prazo definido pra cobrir.
+
+### Limitação conhecida — fornecedor criado a partir de CNPJ errado (achado da revisão de PM)
+Se o CNPJ do emitente no XML estiver digitado errado pelo próprio fornecedor (acontece, embora
+raro — CNPJ tem dígito verificador que pega a maioria dos erros), a confirmação cria um `Supplier`
+novo em vez de reconhecer um já existente. Não é bloqueante pra v1 — detectar fornecedor "parecido"
+(nome similar, CNPJ quase igual) é sofisticação de C1, não desta história — mas fica registrado
+como limitação conhecida, não descoberta tardia. Mitigação disponível hoje: a Empresa pode editar
+manualmente o `Supplier` criado (ORD-182 já tem edição) pra corrigir o CNPJ depois.
 
 ### 🔎 Achado técnico — massa de teste realista e cuidado com encoding (pedido explícito do usuário)
 Antes de fechar o Tech Explorer, o usuário levantou duas preocupações que mudam decisões técnicas
@@ -124,6 +158,8 @@ Achados adicionais de uma nota real inspecionada durante a pesquisa (grounding r
 - [ ] XML mal formado ou que não é NF-e é rejeitado com mensagem clara, sem persistir nada
 - [ ] Prévia e confirmação funcionam corretamente com XML em UTF-8 e em ISO-8859-1
 - [ ] Item com `cEAN` vazio aparece normalmente na prévia, sem erro
+- [ ] XML com `mod` diferente de "55" (ex: NFC-e, modelo 65) é rejeitado com mensagem específica
+- [ ] XML com `finNFe` diferente de "1" (complementar/ajuste/devolução) é rejeitado com mensagem específica
 
 ## QA Explorer
 
@@ -183,6 +219,31 @@ Feature: Upload de XML de NF de compra com prévia
     Quando tento fazer upload pra prévia
     Então o sistema rejeita com mensagem clara, distinguindo de "arquivo corrompido"
 
+  Scenario: NFC-e (modelo 65) é rejeitada — não é nota de compra
+    Dado um XML de NFC-e válida (ide/mod = "65"), como as que o próprio Ordin emite na venda
+    Quando tento fazer upload pra prévia
+    Então o sistema rejeita com mensagem específica ("não é uma NF-e de compra"), distinta do erro
+    de "não é XML"/"não é NF-e nenhuma"
+
+  Scenario: Nota de devolução (finNFe=4) é rejeitada
+    Dado um XML de NF-e válida com ide/finNFe = "4" (devolução/retorno — mercadoria saindo, não
+    entrando)
+    Quando tento fazer upload pra prévia
+    Então o sistema rejeita com mensagem específica, sem confundir com uma compra normal
+
+  Scenario: Chave de acesso com dígito verificador adulterado é rejeitada
+    Dado um XML estruturalmente válido (passa no parser), mas com o chNFe/Id da infNFe alterado de
+    propósito de forma que o dígito verificador (mod-11) não bate com os 43 dígitos anteriores
+    Quando tento fazer upload pra prévia
+    Então o sistema rejeita com mensagem de integridade, mesmo a estrutura XML sendo válida —
+    "bem formado" não é o mesmo que "íntegro"
+
+  Scenario: Nota com valor total zero é aceita normalmente
+    Dado uma NF-e válida com vNF = 0.00 (ex: amostra grátis, bonificação do fornecedor)
+    Quando faço upload pra prévia e confirmo
+    Então a nota é importada normalmente, sem nenhuma validação de "valor precisa ser positivo"
+    bloqueando o fluxo — valor zero é um dado fiscal válido, não um erro
+
   Scenario: Prévia é sempre sem estado — repetir a prévia não cria nada
     Dado um XML válido
     Quando chamo a prévia duas vezes seguidas com o mesmo arquivo
@@ -202,20 +263,30 @@ Feature: Upload de XML de NF de compra com prévia
 
 ### Lacunas encontradas
 1. **Massa de teste com XML real, não inventado** (achado do usuário) — resolvido: vendorizar
-   subconjunto dos 16 XMLs reais de `akretion/nfelib` (MIT) como fixtures, mais uma variante gerada
-   manualmente em ISO-8859-1 a partir de um desses (mesmo conteúdo, encoding diferente, com
-   acentuação real) pro cenário de encoding.
+   subconjunto dos 16 XMLs reais de `akretion/nfelib` (MIT) como fixtures. **Nota desta revisão**:
+   o fixture ISO-8859-1 é **derivado**, não outro "real" — nenhum dos 16 XMLs vendorizados foi
+   confirmado como Latin-1; pega-se um dos reais (UTF-8) e re-codifica manualmente com acentuação
+   real, preservando o conteúdo. Deixar isso explícito evita que a implementação perca tempo
+   caçando um "real" ISO-8859-1 que pode nem existir no conjunto vendorizado.
 2. **Encoding não pode ser assumido** (achado do usuário) — resolvido: `nfelib`/`xsdata` opera sobre
    bytes crus e respeita o encoding declarado no prólogo do XML; Tech Explorer documenta a regra
    explícita de nunca decodificar a string antes de parsear.
-3. **Chave de acesso tem dígito verificador próprio** (achado desta revisão): a chave de 44 dígitos
-   tem um dígito verificador (`cDV`) calculado por mod-11 sobre os 43 primeiros — vale validar esse
-   dígito como defesa extra contra XML corrompido/adulterado, mesmo que a lib de parsing já garanta
-   estrutura válida (estrutura válida ≠ conteúdo íntegro).
+3. **Chave de acesso tem dígito verificador próprio** (achado da revisão anterior) — **fechado
+   nesta revisão**: agora tem cenário Gherkin próprio (chave adulterada rejeitada), não fica mais
+   só registrado como nota sem teste correspondente.
+4. **Critérios de aceite `mod`/`finNFe` (achado da revisão de PM) não tinham cenário** — **fechado
+   nesta revisão**: 2 cenários novos (NFC-e modelo 65 rejeitada; devolução finNFe=4 rejeitada).
+5. **Valor total zero** (achado desta revisão): caso real (amostra grátis/bonificação) que uma
+   validação ingênua de "valor > 0" rejeitaria por engano — cenário novo garante que é aceito.
+6. **Volume de itens** (autoavaliação, não é gap): "poucos itens" vs. "muitos itens" já está coberto
+   implicitamente pela escolha de fixtures de tamanhos diferentes (Tech Explorer já pede 1 pequeno +
+   1 maior entre os 16 reais) — não precisa de cenário Gherkin dedicado, cobertura de tamanho vem
+   dos fixtures escolhidos, não de um caso de teste a mais.
 
 ### O que ainda impede o avanço pro Tech Explorer
-Nada bloqueante — revisão de QA aprovada com os cenários acima, incorporando as duas preocupações
-do usuário como cenários formais (não só nota de rodapé).
+Nada bloqueante — revisão de QA aprovada com os cenários acima. Os 3 achados da revisão anterior que
+ainda não tinham cenário correspondente (dígito verificador, mod, finNFe) foram fechados nesta
+passada — nenhum "achado" fica só registrado sem virar teste.
 
 ## Tech Explorer
 
@@ -243,11 +314,32 @@ a string em Python antes de entregar pro parser.
 solto. B1 só precisa dos dados de `infNFe` em qualquer um dos dois casos — o protocolo de
 autorização (`protNFe`) não é usado por esta história.
 
-### Validação de chave de acesso — reaproveitar o mesmo racional de checksum já usado no projeto
-Chave de acesso: 44 dígitos, últimos 1 = dígito verificador (`cDV`), calculado por mod-11 sobre os
-43 primeiros — mesma família de algoritmo já usada em CNPJ (`services/catalog/cnpj.py`, ORD-182) e
-EAN (`_is_valid_gtin`, ORD-180). Validar o dígito antes de aceitar a nota é defesa em profundidade
-contra XML corrompido, mesmo que a estrutura já tenha passado pelo parser.
+### Validação de chave de acesso — mod-11, mas **pesos diferentes** do CNPJ (achado da revisão de backend)
+Chave de acesso: 44 dígitos, último = dígito verificador (`cDV`), mod-11 sobre os 43 primeiros —
+mesma família de algoritmo de CNPJ/EAN, mas **não é a mesma função**: CNPJ usa uma lista fixa de
+pesos (`services/catalog/cnpj.py`); a chave de acesso usa pesos **cíclicos de 2 a 9**, aplicados da
+direita pra esquerda, resto 0 ou 1 → dígito 0, senão `11 - resto` — confirmado via pesquisa
+(algoritmo documentado publicamente na literatura técnica de NF-e), não suposição. Precisa de uma
+função nova e pequena (`_valida_chave_acesso`), não dá pra reaproveitar `cnpj.py`/`_is_valid_gtin`
+como uma função só — a família é a mesma (mod-11), o peso não.
+
+### Ordem de validação em `_parse_nfe` (achado da revisão de backend — faltava no doc anterior)
+1. **Estrutura via `nfelib`** (`NfeProc.from_bytes` → fallback `NFe.from_bytes`) — se nenhum dos
+   dois parsear, `HTTPException(400, "arquivo não é um XML de NF-e válido")`. Falha aqui cobre
+   tanto "não é XML" quanto "é XML mas não tem a forma de uma NF-e".
+2. **Dígito verificador da chave de acesso** (`_valida_chave_acesso`) — estrutura válida não
+   garante conteúdo íntegro; roda logo depois do parser, antes de interpretar qualquer campo de
+   negócio. Falha → `HTTPException(400, "chave de acesso inválida")`.
+3. **`ide/mod == "55"`** — senão `HTTPException(400, "não é uma NF-e de compra (verifique se não é
+   uma NFC-e)")`.
+4. **`ide/finNFe == "1"`** — senão `HTTPException(400, "só notas normais são aceitas — devolução/
+   complementar/ajuste não são suportadas nesta versão")`.
+5. Extrai os campos de negócio (`emit`, `det[]`, `total/ICMSTot/vNF`) — **sem** validar `vNF > 0`;
+   zero é um valor fiscal legítimo (amostra grátis/bonificação), não um erro (achado de QA).
+
+Validar estrutura → integridade → classificação (mod/finNFe) → extrair, nessa ordem: cada passo só
+faz sentido se o anterior passou, e mensagens de erro específicas por camada (não um "XML inválido"
+genérico pros quatro casos) ajudam a Empresa a entender o que corrigir.
 
 ### Models (`services/catalog/main.py`)
 
@@ -348,11 +440,21 @@ async def create_supplier_invoice(
     return {"id": invoice.id, "supplier_id": supplier.id}
 ```
 
-`_parse_nfe(raw: bytes)` centraliza o uso de `nfelib` + a tentativa `NfeProc` → fallback `NFe` +
-validação do dígito verificador da chave — usada pelos dois endpoints, nunca duplicada.
+`_parse_nfe(raw: bytes)` centraliza as 4 validações da seção acima (estrutura → dígito verificador
+→ `mod` → `finNFe`) — usada pelos dois endpoints, nunca duplicada.
 
 `resolve_company_id_write`/`_WRITE_ROLES` — mesmo padrão já usado em A6 (`ORD-182`): cashier/kiosk
 bloqueados a nível de API.
+
+**Corrida na dedup por chave de acesso** (achado da revisão de backend, não é gap novo): o
+`SELECT` em `_invoice_already_imported` antes do `INSERT` tem uma janela de corrida teórica entre
+duas confirmações simultâneas do mesmo XML — sem `try/except IntegrityError` ao redor do
+`db.commit()`. **Mesmo padrão já aceito conscientemente** pra conflito de SKU/EAN neste arquivo: a
+`UniqueConstraint("company_id", "chave_acesso")` no banco já é a rede de segurança real; o
+pré-check via `SELECT` só melhora a mensagem de erro no caso comum (não-concorrente). Frequência de
+concorrência real aqui é baixíssima (confirmar a MESMA nota duas vezes ao mesmo tempo exige ação
+humana duplicada em paralelo) — não introduzir tratamento novo só pra esta história quando o
+padrão já existente não trata o mesmo caso pra SKU/EAN.
 
 ### Migration
 `services/catalog/migrations/versions/YYYYMMDD_HHMM_supplier_invoices.py` — cria `supplier_invoices`
@@ -361,11 +463,34 @@ bloqueados a nível de API.
 ### Nova dependência
 `services/catalog/requirements.txt` ganha `nfelib` — única dependência nova desta história.
 
-### Frontend (`frontend/admin`)
-Tela nova `SupplierInvoiceUploadScreen.tsx` (ou aba dentro da tela de Fornecedores — decisão de UX
-menor, não crítica): dropzone de upload → chama `/preview` → mostra os dados extraídos (fornecedor,
-itens em tabela, total) → botão "Confirmar importação" chama `/supplier-invoices` reenviando o
-mesmo arquivo. Erro de "já importada" ou "XML inválido" mostrado inline, sem travar a tela.
+### Frontend (`frontend/admin`) — decisão de posição fechada (achado da revisão de PM)
+A versão anterior deste doc deixou "tela nova ou aba dentro de Fornecedores" como "decisão de UX
+menor, não crítica" — não é menor: é exatamente o gatilho já registrado como pendência (ver decisão
+de projeto sobre consolidar telas de estoque sob um item de sidebar só, adiada de propósito até B1
+existir — "Fornecedores" sozinha não justificava abas, uma segunda tela relacionada justifica).
+
+**Decisão**: sidebar ganha um item **"Estoque"** (substitui o item solo "Fornecedores" já existente
+de A6/`ORD-182`), com abas internas — mesmo padrão já usado em `CommercialScreen.tsx` (`ORD-174`):
+"Fornecedores" (tela já existente, só perde o próprio título — vira conteúdo da aba) e "Notas de
+compra" (tela nova desta história: dropzone de upload → chama `/preview` → mostra os dados
+extraídos em tabela → botão "Confirmar importação" chama `/supplier-invoices` reenviando o mesmo
+`File` já selecionado, sem pedir o arquivo de novo). Erro de "já importada" ou "XML não é NF-e de
+compra válida" mostrado inline, sem travar a tela. Migração do item de sidebar existente é
+mecânica — mesmo escopo do diff que fez a consolidação de `Comercial` (~90 linhas, sem tocar lógica
+das telas). Complexidade interna da tela nova (upload/prévia/confirmação) não muda o tamanho desse
+diff — o wrapper de abas só decide qual componente renderizar, mesma forma em qualquer um dos dois.
+
+**Componentes reaproveitados, confirmado no código-fonte do design-system (achado da revisão de
+frontend, faltava no doc anterior)**:
+- **Upload**: mesmo `Upload`/`UploadListFiles` já usado pra imagem de produto
+  (`ProductEditScreen.tsx`, linha ~678) — nenhum dos dois componentes tem lógica interna de preview
+  de imagem ou suposição de tipo de arquivo; `types` é só um filtro de MIME
+  (`types={["image/jpeg", "image/png"]}` vira `types={["text/xml", "application/xml"]}`). Zero
+  componente novo necessário.
+- **Tabela da prévia**: `Table.tsx` não tem paginação/scroll embutido — nota com muitos itens
+  precisa do mesmo wrapper já usado em 3 lugares do projeto (`ComboFormScreen.module.scss`,
+  `ProductEditScreen.module.scss` ×2): `max-height` + `overflow-y: auto` em volta da tabela, não a
+  página inteira rolando.
 
 ### Massa de teste (endereça a preocupação do usuário)
 `services/catalog/tests/fixtures/nfe/` — vendorizar 3–4 XMLs reais de
@@ -394,29 +519,44 @@ Nada bloqueante.
 
 ## Ready
 
-Upstream repassado formalmente por papel (PM, QA, backend), incorporando duas preocupações trazidas
-diretamente pelo usuário como achados formais, não como nota de rodapé:
+Upstream repassado **duas vezes**: uma primeira passada de escrita (eu, sozinho, incorporando as
+duas preocupações trazidas pelo usuário — massa de teste real e encoding), e um repasse formal
+de verdade por papel (skills de PM/QA/backend-sr/frontend, cada uma relendo o que já estava escrito
+como se fosse a primeira vez, não confirmando o que já existia). O repasse achou **8 problemas
+reais** que a primeira passada sozinha não tinha pego — registrado aqui pra não virar prática de
+"autodeclarar Ready sem revisão de papel de verdade":
 
-**Explorer:** [x] história · [x] decisão de escopo (B1 só importa/guarda, não vincula a produto nem
-dá entrada em estoque — isso é C1) · [x] fluxo em dois passos sem estado no servidor · [x]
-fornecedor casado por CNPJ ou criado automaticamente · [x] dependências (A6, satisfeita) · [x]
-critérios de aceite. **Achado técnico do usuário incorporado na Explorer**: massa de teste precisa
-vir de XML real (resolvido com fixtures de `akretion/nfelib`, MIT) e encoding não pode ser assumido
-como UTF-8 (resolvido com leitura em bytes crus).
+**Explorer (revisão de PM):** achou que a motivação superestimava o que B1 resolve (corrigido — B1
+entrega histórico estruturado de compras, não elimina a entrada manual de estoque, que continua
+até C1 existir); achou que "reenviar o XML" no fluxo de 2 passos estava ambíguo o suficiente pra
+sugerir que a Empresa escolhe o arquivo duas vezes (corrigido — é detalhe de implementação, o
+`File` fica em memória no navegador); achou 2 validações de negócio faltando, `ide/mod` (rejeitar
+NFC-e) e `ide/finNFe` (rejeitar devolução/complementar/ajuste); achou "onde a tela vive" registrado
+como "decisão menor, não crítica" quando era exatamente o gatilho já esperado pra consolidar
+Fornecedores + Notas de compra sob um item de sidebar "Estoque" (fechado).
 
-**QA Explorer:** [x] happy path com nota real de 5 itens · [x] fornecedor existente vs. criado
-automaticamente · [x] dedup por chave de acesso · [x] item com EAN vazio · [x] cenário dedicado de
-UTF-8 **e** de ISO-8859-1 com os mesmos nomes acentuados (validação cruzada dos dois) · [x] arquivo
-não-XML e XML que não é NF-e rejeitados com mensagens distintas · [x] prévia sem estado (idempotente)
-· [x] isolamento multi-tenant · [x] bloqueio de role sem permissão de escrita. **Achado desta
-revisão**: chave de acesso tem dígito verificador próprio (mod-11) — validar como defesa extra.
+**QA Explorer (revisão de QA):** achou que os 2 critérios novos do PM (`mod`/`finNFe`) não tinham
+nenhum cenário Gherkin correspondente (adicionados); achou que "chave de acesso tem dígito
+verificador" — um achado já registrado numa revisão anterior — nunca tinha virado um cenário
+testável (fechado, achado registrado sem teste é loop quebrado); achou que valor total zero
+(amostra grátis/bonificação) não estava coberto e podia ser rejeitado por engano por uma validação
+ingênua (cenário novo garantindo que é aceito). Confirmou que o cenário ISO-8859-1 depende de
+fixture derivado (não outro "real"), e que cobertura de volume de itens já vem dos tamanhos de
+fixture escolhidos, sem precisar de cenário dedicado.
 
-**Tech Explorer:** [x] decisão de usar `nfelib` (Python, MIT, gerada do XSD oficial) em vez de
-parsing manual — resolve estrutura, envelope duplo (`NFe`/`nfeProc`) e encoding de uma vez · [x]
-models (2 tabelas novas, sem FK pra `Product`/`Option` de propósito) · [x] endpoints (prévia sem
-estado + confirmação) · [x] migration · [x] massa de teste concreta (fixtures reais vendorizados +
-1 variante ISO-8859-1 gerada) · [x] riscos — API exata de bytes/encoding do `nfelib` a confirmar na
-implementação, sem bloquear o desenho.
+**Tech Explorer (revisão de backend-sr):** **pesquisou de verdade** (não assumiu) se o dígito
+verificador da chave de acesso usa o mesmo algoritmo do CNPJ — não usa: pesos cíclicos de 2 a 9,
+diferente da lista fixa do CNPJ, confirmado via fonte pública, não suposição — precisa de função
+nova, não reaproveita `cnpj.py`. Definiu a ordem exata das 4 validações em `_parse_nfe` (estrutura
+→ dígito verificador → `mod` → `finNFe` → extrai campos, sem validar `vNF > 0`). Avaliou o risco de
+corrida na dedup por chave de acesso e confirmou que é o mesmo padrão já aceito conscientemente
+pra SKU/EAN neste projeto — não introduziu tratamento novo assimétrico.
+
+**Frontend (revisão de frontend):** confirmou no código-fonte (não assumiu) que `Upload`/
+`UploadListFiles` do design-system não têm nenhuma lógica interna de imagem — servem pra XML só
+trocando a prop `types`, zero componente novo. Achou que `Table.tsx` não tem paginação/scroll
+embutido e que a tabela de itens da prévia (nota pode ter muitos itens) precisava do wrapper
+`max-height` + `overflow-y: auto` já usado em 3 lugares do projeto — não estava no doc.
 
 **Status: Ready.** Primeira história do Bloco B — desbloqueia B2 (conta a pagar opcional) e é
 pré-requisito de C1 (vínculo automático por EAN/`cProd`).
