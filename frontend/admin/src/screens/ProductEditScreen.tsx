@@ -97,6 +97,8 @@ interface EditProdState {
   ean: string;
   is_umbrella: boolean; // ORD-189 (G4)
   estoque_minimo: number; // ORD-183 (A3)
+  unidade_compra: string; // ORD-184 (A5)
+  fator_conversao: number | null; // ORD-184 (A5)
   tags: string[];
   allergen_ids: string[];
   option_groups: ProductOptionGroup[];
@@ -163,6 +165,7 @@ export default function ProductEditScreen() {
   const [movUnidade, setMovUnidade] = useState<string | null>(null);
   const [movQuantidade, setMovQuantidade] = useState<number | null>(null);
   const [movMotivo, setMovMotivo] = useState("");
+  const [movEmUnidadeCompra, setMovEmUnidadeCompra] = useState(false); // ORD-184 (A5)
   const [movSaving, setMovSaving] = useState(false);
   const [movError, setMovError] = useState("");
 
@@ -233,6 +236,8 @@ export default function ProductEditScreen() {
           custo: p.custo,
           is_umbrella: p.is_umbrella,
           estoque_minimo: p.estoque_minimo,
+          unidade_compra: p.unidade_compra ?? "",
+          fator_conversao: p.fator_conversao,
         });
         setNcmQuery(p.ncm && p.ncm_descricao ? ncmLabel(p.ncm, p.ncm_descricao) : "");
         setCategories(categoriesRes.data.categories ?? categoriesRes.data);
@@ -327,6 +332,7 @@ export default function ProductEditScreen() {
     setMovUnidade(stock?.unidade ?? null);
     setMovQuantidade(null);
     setMovMotivo("");
+    setMovEmUnidadeCompra(false);
     setMovError("");
     setStockMovModalOpen(true);
   }
@@ -351,6 +357,7 @@ export default function ProductEditScreen() {
         quantidade: movQuantidade,
         unidade: stock?.has_stock_item ? undefined : movUnidade,
         motivo: movMotivo.trim() || null,
+        em_unidade_compra: movEmUnidadeCompra,
       }, catalogParams());
       const r = await api.get(`/catalog/products/${editProd.id}/stock`, catalogParams());
       setStock(r.data);
@@ -562,6 +569,8 @@ export default function ProductEditScreen() {
         cest: editProd.cest.trim() || null,
         custo: editProd.custo,
         estoque_minimo: editProd.estoque_minimo,
+        unidade_compra: editProd.unidade_compra.trim() || null,
+        fator_conversao: editProd.fator_conversao,
       }, catalogParams());
       navigate("/catalog?tab=products");
     } catch (err) {
@@ -586,6 +595,10 @@ export default function ProductEditScreen() {
   const eanConflict = !editProd.is_umbrella && editProd.ean.trim() !== "" && activeEanSetElsewhere.has(editProd.ean.trim());
   const skuConflict = editProd.sku.trim() !== "" && activeSkuSetElsewhere.has(editProd.sku.trim());
   const estoqueMinimoValid = editProd.estoque_minimo >= 0; // ORD-183 (A3)
+  // ORD-184 (A5) — mesma regra conjunta de Option (G3): os dois campos de
+  // conversão vêm juntos ou nenhum.
+  const conversaoValid = (editProd.unidade_compra.trim() === "") === (editProd.fator_conversao === null);
+  const fatorConversaoValid = editProd.fator_conversao === null || editProd.fator_conversao > 0;
 
   return (
     <div className={styles.page}>
@@ -600,7 +613,7 @@ export default function ProductEditScreen() {
         <h1 className={styles.h1}>Editando produto</h1>
         <div className={styles.headerActions}>
           <Button variant="secondary" onClick={() => navigate("/catalog?tab=products")}>Voltar</Button>
-          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (!editProd.is_umbrella && editProd.ean.trim() !== "" && !isValidGtin(editProd.ean)) || eanConflict || skuConflict || !estoqueMinimoValid} loading={productSaving}>
+          <Button onClick={saveEditProd} disabled={productSaving || !editProd.name.trim() || editProd.price <= 0 || (!editProd.is_umbrella && editProd.ean.trim() !== "" && !isValidGtin(editProd.ean)) || eanConflict || skuConflict || !estoqueMinimoValid || !conversaoValid || !fatorConversaoValid} loading={productSaving}>
             Salvar
           </Button>
         </div>
@@ -879,13 +892,38 @@ export default function ProductEditScreen() {
           <>
             {/* ORD-183 (A3) — sempre visível, mesmo sem stock_item ainda: a
                 configuração não depende de já existir estoque físico. */}
-            <NumberInput
-              label="Estoque mínimo"
-              value={editProd.estoque_minimo}
-              onChange={(value: number) => setEditProd({ ...editProd, estoque_minimo: value })}
-              decimalScale={3}
-              errorMessage={!estoqueMinimoValid ? "não pode ser negativo" : undefined}
-            />
+            <div className={styles.formRow}>
+              <div className={styles.formRowField}>
+                <NumberInput
+                  label="Estoque mínimo"
+                  value={editProd.estoque_minimo}
+                  onChange={(value: number) => setEditProd({ ...editProd, estoque_minimo: value })}
+                  decimalScale={3}
+                  errorMessage={!estoqueMinimoValid ? "não pode ser negativo" : undefined}
+                />
+              </div>
+              {/* ORD-184 (A5) — mesmos campos de Option (G3), configuráveis mesmo
+                  sem stock_item ainda; nunca herdados de nada. */}
+              <div className={styles.formRowField}>
+                <InputBase
+                  label="Unidade de compra"
+                  placeholder="ex.: caixa, fardo — opcional"
+                  value={editProd.unidade_compra}
+                  errorMessage={!conversaoValid ? "preencha os dois campos de conversão, ou nenhum" : undefined}
+                  onChange={(e) => setEditProd({ ...editProd, unidade_compra: e.target.value })}
+                />
+              </div>
+              <div className={styles.formRowField}>
+                <NumberInput
+                  label="Fator de conversão"
+                  placeholder="ex.: 12 (1 caixa = 12 un)"
+                  value={editProd.fator_conversao ?? undefined}
+                  onChange={(value: number) => setEditProd({ ...editProd, fator_conversao: value })}
+                  decimalScale={3}
+                  errorMessage={!fatorConversaoValid ? "deve ser positivo" : undefined}
+                />
+              </div>
+            </div>
             {!stock?.has_stock_item ? (
               <div className={styles.menusInfo}>Sem controle de estoque ainda.</div>
             ) : (
@@ -901,7 +939,14 @@ export default function ProductEditScreen() {
                       { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
                       {
                         key: "quantidade", header: "Quantidade",
-                        render: (m) => `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`,
+                        render: (m) => {
+                          const base = `${m.quantidade > 0 ? "+" : ""}${m.quantidade} ${stockUnitLabel(stock.unidade)}`;
+                          // ORD-184 (A5) — registrada na unidade de compra: mostra o valor
+                          // bruto digitado junto do já convertido, não só o convertido.
+                          return m.quantidade_original !== null
+                            ? `${base} (${m.quantidade_original > 0 ? "+" : ""}${m.quantidade_original} ${m.unidade_original})`
+                            : base;
+                        },
                       },
                       { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
                       { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
@@ -957,12 +1002,24 @@ export default function ProductEditScreen() {
             )}
           </div>
           <NumberInput
-            label="Quantidade"
+            label={movEmUnidadeCompra && stock?.unidade_compra ? `Quantidade (em ${stock.unidade_compra})` : "Quantidade"}
             value={movQuantidade ?? undefined}
             onChange={(value: number) => setMovQuantidade(value)}
             decimalScale={3}
             allowNegative={movTipo === "ajuste"}
           />
+          {/* ORD-184 (A5) — só aparece se o produto JÁ SALVO (stock, não o
+              rascunho do formulário) tem conversão configurada; registrar na
+              unidade de compra converte pela fator_conversao antes de aplicar
+              ao saldo. */}
+          {stock?.unidade_compra && (
+            <Checkbox
+              id="prod-mov-em-unidade-compra"
+              label={`Registrar em ${stock.unidade_compra} (converte automaticamente)`}
+              checked={movEmUnidadeCompra}
+              onChange={(checked) => setMovEmUnidadeCompra(checked)}
+            />
+          )}
           <InputBase
             label="Motivo"
             placeholder={movTipo === "ajuste" ? "Obrigatório" : "Opcional"}
