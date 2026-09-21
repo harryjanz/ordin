@@ -578,6 +578,17 @@ export interface FiscalAddonPlanSummary {
   price_per_document: number;
 }
 
+// ORD-182 (A6) — cadastro simples de fornecedor, por empresa (não é catálogo
+// da plataforma, diferente de FiscalAddonPlan/PriceTable acima).
+export interface Supplier {
+  id: number;
+  nome: string;
+  cnpj: string;
+  telefone: string | null;
+  email: string | null;
+  created_at: string;
+}
+
 // ORD-170 — corpo de erro repassado 1:1 da Focus NFe (erros[] pode vir vazio).
 export interface FocusNfeErrorDetail {
   codigo: string;
