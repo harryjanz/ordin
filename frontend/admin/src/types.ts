@@ -622,6 +622,26 @@ export interface SupplierInvoicePreview {
   itens: SupplierInvoicePreviewItem[];
 }
 
+// Gap fechado após teste manual do usuário: o Explorer prometia "aparece na
+// listagem de notas importadas" mas o Tech Explorer original nunca
+// operacionalizou isso num endpoint — ver docs/stories/ORD-194.
+export interface SupplierInvoiceListItem {
+  id: number;
+  supplier_id: number;
+  fornecedor_nome: string;
+  fornecedor_cnpj: string;
+  numero: string | null;
+  serie: string | null;
+  data_emissao: string | null;
+  valor_total: number;
+  imported_at: string | null;
+}
+
+export interface SupplierInvoiceDetail extends SupplierInvoiceListItem {
+  chave_acesso: string;
+  itens: SupplierInvoicePreviewItem[];
+}
+
 // ORD-170 — corpo de erro repassado 1:1 da Focus NFe (erros[] pode vir vazio).
 export interface FocusNfeErrorDetail {
   codigo: string;
