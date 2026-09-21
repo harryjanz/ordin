@@ -207,15 +207,15 @@ export default function SupplierInvoiceScreen() {
               <span>Importado em {fmtDate(detailTarget.imported_at)}</span>
             </div>
 
-            <div className={styles.itemsScroll}>
-              <Table
-                variant="compact"
-                columns={itemColumns}
-                rows={detailTarget.itens}
-                rowKey={(i) => i.n_item}
-                emptyMessage="Nenhum item nesta nota."
-              />
-            </div>
+            <div className={styles.previewTotal}>Total: {fmtBRL(detailTarget.valor_total)}</div>
+
+            <Table
+              variant="compact"
+              columns={itemColumns}
+              rows={detailTarget.itens}
+              rowKey={(i) => i.n_item}
+              emptyMessage="Nenhum item nesta nota."
+            />
 
             <div className={styles.previewTotal}>Total: {fmtBRL(detailTarget.valor_total)}</div>
           </>
@@ -267,15 +267,15 @@ export default function SupplierInvoiceScreen() {
               )}
             </div>
 
-            <div className={styles.itemsScroll}>
-              <Table
-                variant="compact"
-                columns={itemColumns}
-                rows={preview.itens}
-                rowKey={(i) => i.n_item}
-                emptyMessage="Nenhum item nesta nota."
-              />
-            </div>
+            <div className={styles.previewTotal}>Total: {fmtBRL(preview.valor_total)}</div>
+
+            <Table
+              variant="compact"
+              columns={itemColumns}
+              rows={preview.itens}
+              rowKey={(i) => i.n_item}
+              emptyMessage="Nenhum item nesta nota."
+            />
 
             <div className={styles.previewTotal}>Total: {fmtBRL(preview.valor_total)}</div>
 

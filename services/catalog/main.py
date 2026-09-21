@@ -4557,6 +4557,14 @@ async def delete_supplier_invoice(
     # Exclusão normal (não soft-delete, decisão explícita do usuário): libera
     # a chave de acesso pra reimportar. Não apaga o Supplier vinculado — pode
     # ter sido usado/editado independentemente da nota que o criou.
+    #
+    # Seguro hoje só porque B1 não vincula nada a estoque ainda. Regra
+    # fechada com o usuário (2026-09-21, ver docs/estudo-modulo-estoque-
+    # erp.md): a partir de C1 (vínculo automático por EAN/cProd), se algum
+    # item desta nota já gerou estoque VENDIDO (baixa efetivada), a exclusão
+    # precisa ser bloqueada — senão quebra o rastro de auditoria compra→
+    # venda. Adicionar a checagem aqui quando C1 existir, não só na
+    # migration/model novos.
     invoice = await _get_owned_invoice(db, invoice_id, company_id)
     await db.execute(delete(SupplierInvoiceItem).where(SupplierInvoiceItem.supplier_invoice_id == invoice.id))
     await db.delete(invoice)
