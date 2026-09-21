@@ -1156,6 +1156,8 @@ async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
         "cest": p.cest,
         "custo": float(p.custo) if p.custo is not None else None,
         "estoque_minimo": float(p.estoque_minimo),  # ORD-183 (A3)
+        "unidade_compra": p.unidade_compra,  # ORD-184 (A5)
+        "fator_conversao": float(p.fator_conversao) if p.fator_conversao is not None else None,  # ORD-184 (A5)
         "is_umbrella": await _is_umbrella_product(db, p.id),  # G4 (ORD-189)
         "allergens": await _get_product_allergens(db, p.id),
         "option_groups": await _get_product_option_groups(db, p.id),
@@ -1673,6 +1675,8 @@ class ProductOut(BaseModel):
     cest: str | None = None
     custo: float | None = None  # ORD-187
     estoque_minimo: float = 0  # ORD-183 (A3)
+    unidade_compra: str | None = None  # ORD-184 (A5)
+    fator_conversao: float | None = None  # ORD-184 (A5)
     is_umbrella: bool = False  # ORD-189 (G4) — computado, nunca persistido
     allergens: list[AllergenOut] = []
     option_groups: list[ProductOptionGroupOut] = []
@@ -1755,6 +1759,8 @@ class ProductIn(BaseModel):
     cest: str | None = None
     custo: float | None = None  # ORD-187 — só relevante pra CFOP 5102, mas aceito sempre
     estoque_minimo: float = 0  # ORD-183 (A3) — configurável mesmo sem stock_item existir ainda
+    unidade_compra: str | None = None  # ORD-184 (A5)
+    fator_conversao: float | None = None  # ORD-184 (A5)
 
     @field_validator("price")
     @classmethod
@@ -1789,6 +1795,19 @@ class ProductIn(BaseModel):
             raise ValueError("estoque mínimo não pode ser negativo")
         return v
 
+    @field_validator("fator_conversao")
+    @classmethod
+    def _fator_conversao_positive(cls, v: float | None) -> float | None:
+        if v is not None and v <= 0:
+            raise ValueError("fator de conversão deve ser positivo")
+        return v
+
+    @model_validator(mode="after")
+    def _conversao_junta(self) -> "ProductIn":
+        if (self.unidade_compra is None) != (self.fator_conversao is None):
+            raise ValueError("unidade de compra e fator de conversão devem ser preenchidos juntos")
+        return self
+
 class ProductUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -1813,6 +1832,14 @@ class ProductUpdate(BaseModel):
     cest: str | None = None
     custo: float | None = None  # ORD-187
     estoque_minimo: float | None = None  # ORD-183 (A3) — None = não mexer nesse campo
+    # ORD-184 (A5) — mesma semântica de "None = não mexer nesse campo". Sem
+    # model_validator de "os dois juntos" aqui (diferente de ProductIn):
+    # numa edição parcial, enviar só um dos dois é legítimo quando o outro já
+    # está configurado de uma edição anterior. A checagem do par completo é
+    # feita em update_product() sobre o estado FINAL (depois do merge), não
+    # sobre o payload isolado — mesmo padrão já usado ali pra sku/ean.
+    unidade_compra: str | None = None
+    fator_conversao: float | None = None
 
     @field_validator("price")
     @classmethod
@@ -1841,6 +1868,13 @@ class ProductUpdate(BaseModel):
     def _estoque_minimo_non_negative(cls, v: float | None) -> float | None:
         if v is not None and v < 0:
             raise ValueError("estoque mínimo não pode ser negativo")
+        return v
+
+    @field_validator("fator_conversao")
+    @classmethod
+    def _fator_conversao_positive(cls, v: float | None) -> float | None:
+        if v is not None and v <= 0:
+            raise ValueError("fator de conversão deve ser positivo")
         return v
 
 class ReorderIn(BaseModel):
@@ -2486,6 +2520,8 @@ async def create_product(
         cest=body.cest,
         custo=body.custo,
         estoque_minimo=body.estoque_minimo,
+        unidade_compra=body.unidade_compra,
+        fator_conversao=body.fator_conversao,
     )
     db.add(p)
     # Sem UniqueConstraint de banco pra sku/ean desde a decisão do usuário
@@ -2579,6 +2615,13 @@ async def update_product(
     # critério de aceite já registrado na história.
     if "ean" in body.model_fields_set and body.ean is None:
         p.ean = None
+
+    # ORD-184 (A5) — checagem sobre o estado FINAL (depois do merge acima),
+    # não sobre o payload isolado — permite editar só um dos dois campos
+    # quando o outro já estava configurado de uma edição anterior, mas
+    # rejeita qualquer combinação final que deixe só um preenchido.
+    if (p.unidade_compra is None) != (p.fator_conversao is None):
+        raise HTTPException(400, detail="unidade de compra e fator de conversão devem ser preenchidos juntos")
 
     # Decisão do usuário: sku/ean únicos por empresa quando ativos, atravessando
     # Product e Option. Lido de `p` (já com o body aplicado acima, inclusive o
