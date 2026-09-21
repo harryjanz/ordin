@@ -29,6 +29,10 @@ interface TotemStore {
   setScreen: (s: Screen) => void;
   addToCart: (item: CartItem) => void;
   removeFromCart: (key: string) => void;
+  // ORD-186 (A4b) — remove do carrinho todo item avulso cujo product_id esteja
+  // na lista, e todo COMBO cujo qualquer componente esteja (decisão de PM: não
+  // dá pra vender metade de um combo). Retorna os nomes removidos pro modal.
+  removeUnavailableFromCart: (unavailableIds: number[]) => string[];
   setCpf: (c: string | null) => void;
   setConsumptionType: (c: ConsumptionType) => void;
   setCompletedOrder: (o: CompletedOrder) => void;
@@ -52,7 +56,7 @@ function getInitialScreen(): Screen {
 
 export const useStore = create<TotemStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       token: null,
       company: null,
       terminal: null,
@@ -92,6 +96,20 @@ export const useStore = create<TotemStore>()(
           if (item.qty === 1) return { cart: s.cart.filter((i) => i.key !== key) };
           return { cart: s.cart.map((i) => i.key === key ? { ...i, qty: i.qty - 1 } : i) };
         }),
+
+      removeUnavailableFromCart: (unavailableIds) => {
+        const unavailableSet = new Set(unavailableIds);
+        const removedNames: string[] = [];
+        const keptCart = get().cart.filter((line) => {
+          const hit = line.kind === "combo" && line.comboItems
+            ? line.comboItems.some((ci) => unavailableSet.has(ci.product_id))
+            : unavailableSet.has(line.id);
+          if (hit) removedNames.push(line.name);
+          return !hit;
+        });
+        set({ cart: keptCart });
+        return removedNames;
+      },
 
       newOrder: () =>
         set({

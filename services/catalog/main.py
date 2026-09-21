@@ -1061,6 +1061,40 @@ async def _stock_items_by_product(db: AsyncSession, product_ids: list[int]) -> d
     result = await db.execute(select(StockItem).filter(StockItem.product_id.in_(product_ids)))
     return {si.product_id: si for si in result.scalars().all()}
 
+async def _availability_map(db: AsyncSession, company_id: int, product_ids: list[int]) -> dict[int, bool]:
+    """A4b (ORD-186) — mesma regra de disponibilidade (menu + estoque) já usada por
+    `_visible` em list_products (ORD-185), extraída pra reuso pela checagem prévia do
+    checkout. Duplicação pequena aceita conscientemente (ORD-185 já em produção quando
+    esta história foi implementada) — regra simples, baixo risco de divergência.
+
+    True = disponível. product_id inexistente ou de outra empresa nunca aparece com
+    True — fica False, tratado como indisponível pelo chamador (fail-safe, nunca
+    confirma o que não achou)."""
+    availability: dict[int, bool] = dict.fromkeys(product_ids, False)
+    if not product_ids:
+        return availability
+
+    result = await db.execute(
+        select(Product).filter(
+            Product.id.in_(product_ids), Product.company_id == company_id, Product.deleted == False
+        )
+    )
+    products = {p.id: p for p in result.scalars().all()}
+
+    menus_by_cat = await _menus_by_category(db, company_id)
+    menus_by_prod = await _menus_by_product(db, company_id)
+    stock_by_product = await _stock_items_by_product(db, list(products.keys()))
+
+    for pid, p in products.items():
+        linked = list(menus_by_prod.get(pid, []))
+        if p.category_id is not None:
+            linked += menus_by_cat.get(p.category_id, [])
+        menu_ok = not linked or any(_is_menu_active_now(m) for m in linked)
+        stock_item = stock_by_product.get(pid)
+        stock_ok = not (stock_item is not None and stock_item.quantidade_atual <= p.estoque_minimo)
+        availability[pid] = menu_ok and stock_ok
+    return availability
+
 async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
     """Monta o dict de saída trocando as keys de S3 guardadas no banco por
     URLs assinadas (temporárias) — o cliente nunca vê a key crua."""
@@ -1620,6 +1654,12 @@ class ProductOut(BaseModel):
 class ProductListOut(BaseModel):
     products: list[ProductOut]
 
+class CheckAvailabilityIn(BaseModel):
+    product_ids: list[int]
+
+class CheckAvailabilityOut(BaseModel):
+    unavailable_product_ids: list[int]
+
 # Decisão do usuário (2026-09-18): a checagem de sku/ean único-quando-ativo
 # atravessa Product e Option, mas só é aplicada de fato no Salvar (backend).
 # Pra dar feedback já na modal de edição de opção/produto, o frontend
@@ -2123,6 +2163,27 @@ async def list_products(
         products = [p for p in products if _visible(p)]
 
     return {"products": [await _serialize_product(db, p) for p in products]}
+
+@app.post(
+    "/catalog/products/check-availability",
+    response_model=CheckAvailabilityOut,
+    tags=["Catálogo"],
+    summary="Checar disponibilidade de uma lista de produtos antes do checkout",
+)
+async def check_products_availability(
+    body: CheckAvailabilityIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id),
+):
+    """A4b (ORD-186) — checagem prévia do carrinho antes de POST /orders, pra não
+    cobrar o cliente por item que esgotou enquanto ele navegava. `resolve_company_id`
+    (não `_write`) aceita o papel `kiosk` do totem, mesma auth de list_products.
+    Isolamento multi-tenant e "produto inexistente" resolvidos de graça por
+    `_availability_map`: id de outra empresa nunca vira True."""
+    unique_ids = list(set(body.product_ids))
+    availability = await _availability_map(db, company_id, unique_ids)
+    unavailable = [pid for pid, ok in availability.items() if not ok]
+    return {"unavailable_product_ids": unavailable}
 
 @app.get(
     "/catalog/codes/active-in-use",
