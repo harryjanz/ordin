@@ -56,6 +56,21 @@ const PRODUCT_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
   { value: "all", label: "Todos" },
 ];
 
+// A8 (ORD-192) — 4 estados mutuamente exclusivos, mesma partição do backend
+// (_classify_stock_state). Diferente dos outros filtros de produto (nome/
+// categoria/status), que filtram no cliente sobre a lista já carregada, este
+// precisa de round-trip: a listagem não traz quantidade_atual (só
+// estoque_minimo), então o estado real só existe no backend.
+type StockFilter = "" | "com_estoque" | "baixo" | "esgotado" | "indefinido";
+
+const PRODUCT_STOCK_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "", label: "Todos" },
+  { value: "com_estoque", label: "Com estoque" },
+  { value: "baixo", label: "Estoque baixo" },
+  { value: "esgotado", label: "Esgotado" },
+  { value: "indefinido", label: "Indefinido" },
+];
+
 const MENU_STATUS_FILTER_OPTIONS: DropdownOptions[] = [
   { value: "active", label: "Ativos" },
   { value: "inactive", label: "Inativos" },
@@ -279,6 +294,7 @@ export default function CatalogScreen() {
   const [productNameFilter, setProductNameFilter] = useState("");
   const [productCategoryFilter, setProductCategoryFilter] = useState(""); // "" = todas as categorias
   const [productStatusFilter, setProductStatusFilter] = useState<StatusFilter>("active");
+  const [productStockFilter, setProductStockFilter] = useState<StockFilter>("");
   const productRequestId = useRef(0);
 
   // Só categorias ativas — o backend rejeita mover produto pra categoria
@@ -301,7 +317,11 @@ export default function CatalogScreen() {
       // Sem category_id — traz produtos de todas as categorias; o filtro
       // de categoria é aplicado no cliente (mesma lista serve pro
       // dropdown "Todas" e pra filtro específico, sem round-trip extra).
-      const r = await api.get("/catalog/products", catalogParams({ include_inactive: true }));
+      // stock_filter (A8) é exceção: precisa ir pro backend, ver StockFilter acima.
+      const r = await api.get("/catalog/products", catalogParams({
+        include_inactive: true,
+        stock_filter: productStockFilter || undefined,
+      }));
       if (thisRequest !== productRequestId.current) return; // resposta obsoleta, ignorar
       setProducts(r.data.products ?? r.data);
       setErrProducts(null);
@@ -315,12 +335,13 @@ export default function CatalogScreen() {
     if (!hasCompanyContext) { setProducts([]); return; }
     loadProducts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasCompanyContext, companyId]);
+  }, [hasCompanyContext, companyId, productStockFilter]);
 
   function clearProductFilters() {
     setProductNameFilter("");
     setProductCategoryFilter("");
     setProductStatusFilter("active");
+    setProductStockFilter("");
   }
 
   const filteredProducts = products
@@ -341,7 +362,9 @@ export default function CatalogScreen() {
   // chamada falharia. Drag-and-drop (não mais setas — pedido direto do
   // usuário) via Pointer Events na própria Table (ver components/Table.tsx),
   // mesmo mecanismo do drag-and-drop de Preparo, com suporte a touch.
-  const canReorderProducts = Boolean(productCategoryFilter) && !productNameFilter && productStatusFilter === "all";
+  // A8 — stock_filter também precisa estar vazio: com ele ligado a lista
+  // visível é um subconjunto da categoria (mesmo motivo de nome/status acima).
+  const canReorderProducts = Boolean(productCategoryFilter) && !productNameFilter && productStatusFilter === "all" && !productStockFilter;
 
   async function reorderProducts(orderedIds: (string | number)[]) {
     if (!productCategoryFilter) return;
@@ -956,6 +979,12 @@ export default function CatalogScreen() {
               onValueSelected={(opt) => setProductStatusFilter(opt.value as StatusFilter)}
               options={PRODUCT_STATUS_FILTER_OPTIONS}
             />
+            <Dropdown
+              label="Estoque"
+              value={PRODUCT_STOCK_FILTER_OPTIONS.find((o) => o.value === productStockFilter) ?? PRODUCT_STOCK_FILTER_OPTIONS[0]}
+              onValueSelected={(opt) => setProductStockFilter(opt.value as StockFilter)}
+              options={PRODUCT_STOCK_FILTER_OPTIONS}
+            />
             <Button type="button" variant="secondary" onClick={clearProductFilters}>Limpar filtros</Button>
             <Button type="button" onClick={openNewProduct}>+ Novo produto</Button>
           </div>
@@ -964,7 +993,7 @@ export default function CatalogScreen() {
             <div className={styles.reorderHint}>
               {canReorderProducts
                 ? "Arraste pelo ⠿ para reordenar — a ordem aqui é a mesma exibida no totem."
-                : "Reordenar só é possível com o filtro de nome vazio e status em \"Todos\", dentro de uma categoria específica."}
+                : "Reordenar só é possível com os filtros de nome e estoque vazios e status em \"Todos\", dentro de uma categoria específica."}
             </div>
           )}
 
