@@ -12,6 +12,15 @@ Você está atuando no step **QA Explorer** da esteira **Upstream** do projeto O
 - [ ] Cenários de borda cobertos
 - [ ] Cenários de erro cobertos
 - [ ] Cenários revisados e aprovados pelo PM
+- [ ] **Rastreabilidade 1:1 com os Critérios de aceite funcionais do Explorer** — todo critério tem
+      pelo menos um cenário Gherkin; todo cenário aponta pra pelo menos um critério. Critério sem
+      cenário é bloqueador, não avança pro Tech Explorer.
+- [ ] **Se a história persiste algo novo, ela é CRUD por baixo mesmo que a redação pareça só "fluxo
+      de negócio"** — aplicar também o checklist de "CRUD de dados" abaixo (leitura/listagem
+      inclusa), não só o de "Fluxos de negócio". (Achado no ORD-194: "importar XML de nota" lê como
+      fluxo de negócio, mas cria um registro persistente — o checklist de CRUD, que já exige
+      "Leitura de registro próprio → sucesso", teria pego a falta de listagem se tivesse sido
+      aplicado.)
 
 ## Formato Gherkin
 

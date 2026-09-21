@@ -50,6 +50,11 @@ O objetivo do upstream é garantir que nenhuma história entre no sprint sem est
 - Contexto e motivação documentados
 - Dependências de outros serviços ou histórias identificadas
 - Wireframe ou mockup anexado (se frontend)
+- **Cada passo do Fluxo Principal tem um Critério de Aceite Funcional correspondente** — nenhum
+  comportamento pode existir só em prosa no Fluxo Principal sem virar um item checável na lista de
+  critérios. (Achado no ORD-194: "nota confirmada aparece na listagem" ficou só no Fluxo Principal,
+  nunca virou critério de aceite, e por isso nunca chegou a Gherkin nem a endpoint — a história foi
+  implementada sem listagem, visualização ou exclusão de notas importadas.)
 
 ---
 
@@ -60,6 +65,9 @@ O objetivo do upstream é garantir que nenhuma história entre no sprint sem est
 - Happy path coberto em Gherkin
 - Cenários de borda e erro documentados
 - Cenários revisados e aprovados pelo PM
+- **Rastreabilidade 1:1 com os Critérios de Aceite Funcionais do Explorer** — todo critério tem
+  pelo menos um cenário Gherkin; todo cenário aponta pra pelo menos um critério. Critério sem
+  cenário é bloqueador, não pode avançar pro Tech Explorer.
 
 ---
 
@@ -71,6 +79,9 @@ O objetivo do upstream é garantir que nenhuma história entre no sprint sem est
 - Estimativa de esforço definida
 - Riscos técnicos identificados
 - Sem bloqueios não resolvidos
+- **Todo cenário Gherkin que implica estado persistido ou visível pro usuário tem um endpoint (ou
+  tela) correspondente na solução técnica** — se o Gherkin descreve "nota aparece na listagem" mas
+  a lista de endpoints não tem um GET de listagem, isso é lacuna, não implementação implícita.
 
 ---
 
@@ -81,6 +92,13 @@ O objetivo do upstream é garantir que nenhuma história entre no sprint sem est
 - Todos os campos anteriores preenchidos
 - Estimativa acordada
 - História priorizada no backlog
+- **Checklist de rastreabilidade ponta a ponta, revisado contra o texto bruto do Fluxo Principal**
+  (não contra os artefatos intermediários): cada passo do Fluxo Principal → critério de aceite →
+  cenário Gherkin → endpoint/tela. Uma tabela simples com essas 4 colunas, sem célula vazia, é
+  suficiente. Esse é o gate que existe especificamente porque revisão step-a-step (cada fase só
+  audita a fase anterior) deixa passar comportamento que nunca saiu da prosa do Explorer — inclusive
+  numa revisão formal por papel, se ela também for feita step-a-step em vez de reler o Fluxo
+  Principal original.
 - ✅ Pode entrar no próximo sprint
 
 ---

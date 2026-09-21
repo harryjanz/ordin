@@ -14,6 +14,10 @@ Você está atuando no step **Explorer** da esteira **Upstream** do projeto Ordi
 - [ ] Dependências com outros serviços ou histórias identificadas
 - [ ] Wireframe ou mockup referenciado (se envolver frontend)
 - [ ] Critérios de aceite funcionais escritos (o que é verdadeiro quando a história estiver pronta)
+- [ ] **Cada passo do Fluxo principal tem um Critério de aceite funcional correspondente** —
+      nenhum comportamento pode existir só em prosa no Fluxo principal sem virar item checável na
+      lista de critérios (achado no ORD-194: "nota aparece na listagem" ficou só no Fluxo principal,
+      nunca virou critério, e por isso nunca chegou a Gherkin nem a endpoint)
 
 ## Template de saída do Explorer
 

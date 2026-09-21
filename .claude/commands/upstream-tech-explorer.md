@@ -15,6 +15,11 @@ Você está atuando no step **Tech Explorer** da esteira **Upstream** do projeto
 - [ ] Eventos de fila necessários documentados (publicador e consumidor)
 - [ ] Estimativa de esforço definida (horas ou pontos)
 - [ ] Riscos técnicos identificados
+- [ ] **Todo cenário Gherkin do QA Explorer que implica estado persistido ou visível pro usuário
+      tem um endpoint (ou tela) correspondente na lista acima** — se o Gherkin descreve "nota
+      aparece na listagem" mas não existe um GET de listagem na seção Endpoints, isso é lacuna a
+      resolver agora, não implementação implícita que "alguém vai lembrar de fazer". Ler os
+      cenários de novo depois de escrever os endpoints e cruzar um a um, não confiar em memória.
 
 ## Template de solução técnica
 
