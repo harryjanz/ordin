@@ -1051,6 +1051,16 @@ async def _menus_by_product(db: AsyncSession, company_id: int) -> dict[int, list
         out.setdefault(product_id, []).append(menu)
     return out
 
+async def _stock_items_by_product(db: AsyncSession, product_ids: list[int]) -> dict[int, "StockItem"]:
+    """A4 (ORD-185) — mesmo padrão de _menus_by_category/_menus_by_product: 1 query com IN (...)
+    pra todos os produtos já carregados na página, não 1 query por produto dentro do loop de
+    _visible (sem N+1). Sem filtro de company_id aqui de propósito — product_ids já veio de uma
+    query de Product já filtrada por company_id, então já está implicitamente isolado por tenant."""
+    if not product_ids:
+        return {}
+    result = await db.execute(select(StockItem).filter(StockItem.product_id.in_(product_ids)))
+    return {si.product_id: si for si in result.scalars().all()}
+
 async def _serialize_product(db: AsyncSession, p: "Product") -> dict:
     """Monta o dict de saída trocando as keys de S3 guardadas no banco por
     URLs assinadas (temporárias) — o cliente nunca vê a key crua."""
@@ -2094,12 +2104,21 @@ async def list_products(
     if not include_inactive:
         menus_by_cat = await _menus_by_category(db, company_id)
         menus_by_prod = await _menus_by_product(db, company_id)
+        # A4 (ORD-185) — estoque_controlado não é coluna nova: um produto só tem
+        # stock_item depois da 1ª movimentação, e a 1ª movimentação só pode ser
+        # entrada (regra já validada na ORD-181) — logo "tem stock_item" já É a
+        # regra de rollout, sem flag extra pra manter em sincronia.
+        stock_by_product = await _stock_items_by_product(db, [p.id for p in products])
 
         def _visible(p: "Product") -> bool:
             linked = list(menus_by_prod.get(p.id, []))
             if p.category_id is not None:
                 linked += menus_by_cat.get(p.category_id, [])
-            return not linked or any(_is_menu_active_now(m) for m in linked)
+            if linked and not any(_is_menu_active_now(m) for m in linked):
+                return False
+            stock_item = stock_by_product.get(p.id)
+            # achado de QA (ORD-183): <=, não só <
+            return not (stock_item is not None and stock_item.quantidade_atual <= p.estoque_minimo)
 
         products = [p for p in products if _visible(p)]
 
