@@ -149,6 +149,12 @@ Achados adicionais de uma nota real inspecionada durante a pesquisa (grounding r
 - **Histórias futuras que consomem esta**: B2 (conta a pagar opcional a partir da nota importada,
   usa o bloco `cobr`/`dup` do XML); C1 (vínculo automático por EAN/`cProd`, consome
   `supplier_invoice_item` pra saber o que ainda não foi vinculado a um produto).
+- **Regra pendente pra C1 (achado em teste manual do usuário, 2026-09-21)**: `DELETE
+  /catalog/supplier-invoices/{id}` existe desde B1 e hoje é exclusão normal, sem trava — seguro
+  porque B1 não vincula nada a estoque ainda. A partir de C1, excluir uma nota cujos itens já
+  geraram estoque **vendido** (baixa efetivada) precisa ser bloqueado — quebraria o rastro de
+  auditoria entre a compra e a venda. Detalhe completo da regra em
+  `docs/estudo-modulo-estoque-erp.md`, seção "Regra de negócio fechada com o usuário (2026-09-21)".
 
 ### Critérios de aceite funcionais
 - [ ] Upload de XML válido gera prévia sem persistir nada

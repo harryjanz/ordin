@@ -787,6 +787,33 @@ certa), mas precisa ser resolvida quando **C1** (vínculo automático por EAN/`c
 já que C1 vai precisar buscar por EAN nos dois universos (`Product` e `Option`) ao mesmo tempo.
 Pergunta a responder lá: colidir é erro, aviso, ou permitido de propósito?
 
+### Regra de negócio fechada com o usuário (2026-09-21): nota importada não pode ser excluída
+depois que o estoque que ela gerou for movimentado como venda
+
+B1 (`ORD-194`) já implementa exclusão de nota importada (normal, não soft-delete — libera a chave
+de acesso pra reimportar). Isso é seguro **hoje** porque B1 não vincula nada a estoque — excluir só
+apaga o registro histórico da nota e seus itens brutos, nada mais depende deles ainda.
+
+Isso deixa de ser seguro a partir de **C1** (vínculo automático por EAN/`cProd`): uma vez que um
+`supplier_invoice_item` gera entrada de estoque vinculada a um `Product`/`Option`, e esse estoque é
+baixado por uma venda (D1, baixa automática, ou baixa manual já existente desde A2), excluir a nota
+de origem quebraria o rastro de auditoria entre "de onde veio esse estoque" e "o que foi vendido a
+partir dele" — sem essa trava, dava pra apagar a evidência de uma compra depois de já ter vendido o
+que ela trouxe.
+
+**Regra a implementar em C1 (ou C2, dependendo de onde a baixa por venda for modelada)**: bloquear
+`DELETE /catalog/supplier-invoices/{id}` (endpoint já existe, em `services/catalog/main.py`, B1) se
+qualquer item da nota tiver gerado uma entrada de estoque que já foi total ou parcialmente
+consumida por uma saída de venda. Nota com itens vinculados mas **ainda não vendidos** continua
+podendo ser excluída — a trava é sobre rastro de venda já efetivada, não sobre o vínculo em si.
+Mensagem de erro deve deixar claro o motivo (ex: "esta nota já gerou estoque vendido, não pode mais
+ser excluída"), não só um 409 genérico.
+
+Quem revisar C1 (Tech Explorer) precisa decidir a consulta exata (provavelmente um `JOIN` entre
+`supplier_invoice_items` → tabela de vínculo criada por C1 → `stock_movements` de saída) e se a
+checagem é por item (permite excluir se nenhum item vendeu) ou pela nota inteira (qualquer item
+vendido bloqueia a nota toda) — a leitura mais segura, na falta de outra decisão, é a segunda.
+
 ---
 
 Todas as perguntas em aberto deste levantamento — incluindo as de arquitetura, UX, viabilidade
