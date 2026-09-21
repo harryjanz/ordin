@@ -4078,6 +4078,24 @@ async def create_supplier(
     await db.refresh(s)
     return s
 
+@app.get(
+    "/catalog/suppliers/{supplier_id}",
+    response_model=SupplierOut,
+    tags=["Fornecedores"],
+    summary="Buscar fornecedor por id",
+)
+async def get_supplier(
+    supplier_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    s = (await db.execute(
+        select(Supplier).filter_by(id=supplier_id, company_id=company_id)
+    )).scalars().first()
+    if not s:
+        raise HTTPException(404)
+    return s
+
 @app.put(
     "/catalog/suppliers/{supplier_id}",
     response_model=SupplierOut,
