@@ -217,11 +217,26 @@ usado hoje só quando o item tem `c_ean`) passa a também aparecer quando o vín
 | 7 | Nota futura do mesmo fornecedor+código aplica o fator automaticamente via C1, sem cair na fila | *Nota futura do mesmo fornecedor e código já aplica o fator automaticamente* |
 | 8 | Nenhuma sigla ambígua entra na tabela de sinônimos (`LT` isolado excluído) | *Sigla ambígua "LT" isolada não está na tabela de sinônimos* |
 
+**Critério 4 vs. 8 — por que os dois existem, não é redundância**: 4 garante *comportamento em
+runtime* (nem C1 nem C2 resolvem "LT" sozinho, mesmo que um bug de código tentasse); 8 garante que
+o *dado* em si — a tabela de sinônimos — nunca contém "LT" como chave (protege contra alguém
+adicionar "LT" de volta num PR futuro sem reler a Decisão 1). Um não implica o outro
+automaticamente: um bypass que resolvesse "LT" por outro caminho, mesmo com a tabela certa,
+quebraria 4 sem quebrar 8. Revisado no repasse de PM.
+
 Cenários adicionais sem numeração 1:1 direta, cobrindo robustez e isolamento multi-tenant (mesmo
 padrão já obrigatório em C1/C2, `docs/ARQUITETURA.md` §6):
 *Dropdown de unidade não pré-seleciona quando a unidade da nota é desconhecida (não cadastrada)*,
 *Isolamento multi-tenant do fator de conversão por fornecedor*, *Item sem GTIN de embalagem nem
 código do fornecedor — unidade normaliza, fator de conversão por fornecedor não se aplica*.
+
+**Nota técnica pro Tech Explorer (isolamento multi-tenant do fator de conversão)**: a proteção já
+vem do *schema*, não é uma checagem nova a implementar. `Supplier` tem `UniqueConstraint(company_id,
+cnpj)` (`main.py:265`) — duas empresas com fornecedor de mesmo CNPJ têm linhas `Supplier`
+totalmente separadas, com `supplier_id` diferente (PK global, nunca reaproveitada entre empresas).
+Como `SupplierProductCode` chaveia por `(company_id, supplier_id, c_prod)`, não existe caminho de
+query que colida os dois `supplier_id` — o cenário de isolamento é rede de segurança contra
+regressão futura, não uma trava a construir do zero.
 
 **Critério de fronteira, sem cenário Gherkin** (mesma convenção do critério 14 de C2): o fluxo
 alternativo "fornecedor muda a unidade usada pro mesmo código" (`CX12` → `CX24`), citado no Explorer
