@@ -1,6 +1,6 @@
 ---
 id: ORD-196
-status: Tech Explorer
+status: Ready
 estimativa: 13 pontos (revisado de 8, Tech Explorer — ver seção Estimativa)
 ---
 
@@ -57,9 +57,17 @@ Cortar qualquer uma das 3 reabre exatamente o problema que a pesquisa expôs.
 
 ### Decisão 2 — o que "aplicação retroativa" significa de verdade
 
-**Recomendação: toda resolução (vincular ou criar produto novo) grava a associação nova E oferece
-aplicar a mesma resolução a outros itens pendentes já importados que batem no mesmo critério —
-sempre com confirmação explícita, nunca silenciosa.**
+**Recomendação: toda resolução (vincular, criar produto novo OU ignorar) oferece aplicar a mesma
+decisão a outros itens pendentes já importados que batem no mesmo critério — sempre com confirmação
+explícita, nunca silenciosa.**
+
+> **Achado no repasse (PM, depois do Tech Explorer)**: a versão original desta Decisão 2 escopava
+> retroatividade só pra "vincular ou criar produto novo". O Tech Explorer desenhou o endpoint
+> `/ignore` já oferecendo o mesmo mecanismo (ignorar em lote outros pendentes com o mesmo código) —
+> ampliando o escopo sem que isso tivesse sido decidido aqui. Aprovado conscientemente nesta revisão:
+> faz sentido simétrico (um item irrelevante pro estoque, tipo copo descartável, tende a aparecer
+> de novo em outras notas do mesmo fornecedor) e reaproveita o mecanismo já existente pros outros
+> dois casos, sem custo extra de design. Refletido no Critério de aceite e no QA Explorer abaixo.
 
 "Aplicação retroativa" já estava no nome da história antes desta Explorer (`docs/estudo-modulo-
 estoque-erp.md`), mas nunca foi detalhado o que significa. Duas coisas distintas, as duas fazem
@@ -118,8 +126,10 @@ não bloqueia C2 e não deve ser cobrado no Tech Explorer desta história.
    pré-preenche a quantidade a dar entrada (mesma lógica de `qCom`/`qTrib` já usada por C1, editável)
    → confirma.
 5. Se **Criar produto novo**: formulário pré-preenchido com nome (`x_prod`), unidade e valor do
-   item da nota — Empresa completa os campos obrigatórios do cadastro de produto (ex: categoria) →
-   salva → produto criado E imediatamente vinculado ao item, mesma entrada de estoque do passo 4.
+   item da nota — Empresa completa os campos obrigatórios do cadastro de produto (só nome e preço
+   são obrigatórios; categoria é opcional, igual ao cadastro normal do Catálogo — confirmado no
+   Tech Explorer) → salva → produto criado E imediatamente vinculado ao item, mesma entrada de
+   estoque do passo 4.
 6. Se **Ignorar**: item marcado como "não controla estoque" — sai da fila permanentemente, sem
    gerar entrada de estoque.
 7. Ao confirmar uma resolução de vínculo (passo 4 ou 5): sistema busca outros itens pendentes de
@@ -174,9 +184,9 @@ não bloqueia C2 e não deve ser cobrado no Tech Explorer desta história.
 - [ ] Toda resolução por vínculo (existente ou produto novo) grava a associação em
       `product_gtin_alt` ou `supplier_product_code`, conforme o tipo de código do item, para
       casamento automático em notas futuras.
-- [ ] Ao resolver um item por vínculo, o sistema identifica outros itens pendentes de notas já
-      importadas que batem no mesmo critério e oferece aplicar a mesma resolução a eles, mostrando
-      a quantidade afetada antes de confirmar.
+- [ ] Ao resolver um item (por vínculo, criação de produto novo ou marcação como ignorado), o
+      sistema identifica outros itens pendentes de notas já importadas que batem no mesmo critério
+      e oferece aplicar a mesma decisão a eles, mostrando a quantidade afetada antes de confirmar.
 - [ ] Aplicação retroativa nunca é automática ou silenciosa — sempre exige confirmação explícita.
 - [ ] Empresa que recusa a aplicação retroativa consegue resolver só o item atual, sem efeito nos
       demais.
@@ -213,8 +223,10 @@ resolvidos antes de `Ready`:
    (`supplier_id`, `c_prod`) idêntico. Itens sem `c_ean` nem `c_prod` (ex: `COPODESC300` do nosso
    teste) não têm nada pra persistir — resolução se aplica só a ELE, sem candidatos retroativos.
 2. **Formulário de "criar produto novo"** — usar o formulário completo do Catálogo ou uma versão
-   reduzida com defaults? (ex: `category_id` é obrigatório no cadastro de produto hoje — precisa de
-   uma categoria "Sem categoria" default, ou bloquear a criação até a Empresa escolher uma?)
+   reduzida com defaults? **RESOLVIDO no Tech Explorer**: `category_id` já é opcional em `ProductIn`
+   hoje (`services/catalog/main.py:1886`) — a suposição de que seria obrigatório estava errada
+   (também corrigida no Fluxo Principal e no QA Explorer desta história, achado no repasse). Nenhum
+   default especial é necessário.
 3. **Volume esperado da tela "Pendências"** — precisa paginação/filtro server-side desde o início
    (mesmo padrão já usado em `SupplierInvoiceScreen`), ou o volume típico é baixo o bastante pra uma
    lista simples? Recomendo seguir o padrão já estabelecido (server-side) por consistência, mas é
@@ -228,12 +240,12 @@ resolvidos antes de `Ready`:
 |---|---|---|
 | 1 | Tela "Pendências" lista itens de todas as notas, filtro por fornecedor/motivo | *Listagem agregada de pendências*, *Filtro por fornecedor*, *Filtro por motivo de pendência*, *Sem itens pendentes* |
 | 2 | Detalhe da nota também resolve, sem precisar ir pra Pendências | *Resolver item pendente a partir do detalhe da nota* |
-| 3 | Vincular a existente por nome/SKU/EAN | *Vincular por nome*, *Vincular por SKU*, *Vincular por EAN*, *Vincular a produto de outra empresa — isolamento* |
+| 3 | Vincular a existente por nome/SKU/EAN | *Vincular por nome*, *Vincular por SKU*, *Vincular por EAN*, *Vincular a uma opção existente*, *Vincular a produto de outra empresa — isolamento* |
 | 4 | Entrada de estoque na quantidade correta (qCom/qTrib) | *Entrada de estoque respeita qTrib divergente e consistente* |
-| 5 | Criar produto novo pré-preenchido a partir do item | *Criar produto novo — dados válidos*, *Criar produto novo — categoria obrigatória ausente* |
+| 5 | Criar produto novo pré-preenchido a partir do item | *Criar produto novo — dados válidos*, *Criar produto novo sem categoria — sucesso*, *Criar produto novo sem preço — erro de validação* |
 | 6 | Ignorar remove da fila sem gerar entrada | *Ignorar item pendente*, *Item ignorado não gera movimentação de estoque* |
 | 7 | Grava associação (GTIN de embalagem ou código do fornecedor) pra casamento futuro | *Vincular grava GTIN de embalagem*, *Vincular grava código do fornecedor*, *Criar produto novo também grava associação* |
-| 8 | Identifica candidatos retroativos e oferece aplicar, mostrando a quantidade | *Candidatos retroativos por GTIN de embalagem*, *Candidatos retroativos por fornecedor+código*, *Nenhum candidato retroativo encontrado* |
+| 8 | Identifica candidatos retroativos e oferece aplicar, mostrando a quantidade (vincular, criar produto ou ignorar) | *Candidatos retroativos por GTIN de embalagem*, *Candidatos retroativos por fornecedor+código*, *Nenhum candidato retroativo encontrado*, *Ignorar em lote via aplicação retroativa* |
 | 9 | Retroativo nunca é automático/silencioso | *Aplicação retroativa exige confirmação explícita* |
 | 10 | Recusar retroativo resolve só o item atual | *Empresa recusa aplicação retroativa* |
 | 11 | `guarda_chuva` só vincula a opção, nunca ao produto guarda-chuva | *Vincular item guarda-chuva a uma opção — sucesso*, *Vincular item guarda-chuva ao produto — erro* |
@@ -241,11 +253,14 @@ resolvidos antes de `Ready`:
 | 13 | Item resolvido sai da fila permanentemente | *Item vinculado some da fila*, *Item ignorado some da fila*, *Item de produto novo some da fila* |
 | 14 | Cadastro de vínculo em lote fora de escopo | Critério negativo (exclusão de escopo) — não gera cenário Gherkin, mesma convenção usada em C1 pra critérios de fronteira; verificado no Tech Explorer por ausência de endpoint/tela, não por comportamento em runtime |
 
-Cenários adicionais sem numeração 1:1 direta, cobrindo exceções herdadas de C1 e isolamento
-multi-tenant explícito (fora do escopo de um único critério, atravessam vários):
+Cenários adicionais sem numeração 1:1 direta, cobrindo exceções herdadas de C1, robustez do
+endpoint de aplicação em lote, e isolamento multi-tenant explícito (fora do escopo de um único
+critério, atravessam vários):
 *Vincular item com conflito de concorrência — sucesso ao tentar de novo*, *Vincular item com
-conflito de concorrência — colide de novo*, *Isolamento multi-tenant na listagem de Pendências*,
-*Isolamento multi-tenant na aplicação retroativa*, *Ignorar item de outra empresa — erro*.
+conflito de concorrência — colide de novo*, *Aplicação retroativa com falha parcial não derruba os
+outros candidatos*, *Tentar resolver item já resolvido — erro*, *Isolamento multi-tenant na
+listagem de Pendências*, *Isolamento multi-tenant na aplicação retroativa*, *Ignorar item de outra
+empresa — erro*.
 
 ### Cenários Gherkin
 
@@ -311,6 +326,17 @@ Feature: Fila de pendência com resolução manual (C2)
     Quando busco esse nome no painel de resolução
     Então esse produto de outra empresa não aparece nos resultados da busca
 
+  Scenario: Vincular a uma opção existente
+    Dado um item pendente sem EAN nem código do fornecedor reconhecido
+    E uma opção "Coca-Cola" cadastrada num grupo de opções da minha empresa (fora de um cenário de
+      guarda-chuva forçado)
+    Quando busco por "Coca-Cola" no painel de resolução
+    Então a busca retorna essa opção, junto com qualquer produto de mesmo nome, indicando o tipo
+    E consigo vincular o item a essa opção
+    # busca de opção é caminho novo (GET /catalog/options/search não existia antes desta história) —
+    # os cenários de guarda-chuva já testam vincular a opção, mas só nesse caminho forçado; este
+    # cobre a busca/vínculo a opção como capacidade geral, achado no repasse de QA
+
   Scenario: Entrada de estoque respeita qTrib divergente e consistente
     Dado um item pendente cujo qTrib diverge de qCom e cuja conta bate com o valor total do item
       (mesma regra de tolerância já usada em C1)
@@ -341,9 +367,16 @@ Feature: Fila de pendência com resolução manual (C2)
     Então um novo produto é criado no catálogo
     E o item é imediatamente vinculado a esse produto, com entrada de estoque na quantidade do item
 
-  Scenario: Criar produto novo — categoria obrigatória ausente
+  Scenario: Criar produto novo sem categoria — sucesso
+    Dado um item pendente sem nenhum produto correspondente no catálogo
+    Quando escolho "Criar produto novo" e salvo sem escolher nenhuma categoria
+    Então o produto é criado normalmente, sem categoria, e o item é vinculado a ele
+    # categoria é opcional no cadastro de produto — mesma regra do Catálogo, achado no repasse do
+    # Tech Explorer que corrigiu uma suposição errada desta história
+
+  Scenario: Criar produto novo sem preço — erro de validação
     Dado que estou no formulário de "Criar produto novo" a partir de um item pendente
-    Quando tento salvar sem escolher uma categoria
+    Quando tento salvar sem informar um preço
     Então recebo um erro de validação e o produto não é criado
 
   Scenario: Criar produto novo também grava associação
@@ -367,6 +400,15 @@ Feature: Fila de pendência com resolução manual (C2)
     Dado um item pendente que pertence a uma nota de compra de outra empresa
     Quando tento marcá-lo como "não controla estoque" usando meu próprio usuário
     Então recebo um erro e nada é alterado
+
+  Scenario: Ignorar em lote via aplicação retroativa
+    Dado 2 notas já importadas, cada uma com um item pendente do mesmo código, sem relevância pro
+      controle de estoque
+    Quando marco o item pendente de uma delas como "não controla estoque"
+    E o sistema me avisa que existe 1 outro item pendente com o mesmo código
+    E confirmo explicitamente aplicar a mesma decisão a ele
+    Então os 2 itens saem da fila de pendências
+    E nenhum dos dois gera entrada de estoque
 
   # ── Aplicação retroativa (Critério 8, 9, 10) ────────────────────────────
 
@@ -411,6 +453,15 @@ Feature: Fila de pendência com resolução manual (C2)
     Quando vinculo o meu item e o sistema procura candidatos retroativos
     Então o item da outra empresa NUNCA aparece como candidato, mesmo com o código idêntico
 
+  Scenario: Aplicação retroativa com falha parcial não derruba os outros candidatos
+    Dado que o sistema encontrou 3 outros itens pendentes candidatos ao vincular o item atual
+    E um desses 3 candidatos, nesse meio-tempo, virou um caso de conflito de concorrência
+    Quando confirmo explicitamente aplicar a resolução aos 3 candidatos
+    Então os outros 2 candidatos recebem entrada de estoque e saem da fila normalmente
+    E o candidato que falhou continua pendente, sem que isso afete os outros dois
+    # comportamento explicitamente decidido no Tech Explorer (except (HTTPException, IntegrityError):
+    # continue) mas sem cenário — achado no repasse de QA
+
   # ── Casos herdados de C1 (Critério 11, 12) ─────────────────────────────
 
   Scenario: Vincular item guarda-chuva a uma opção — sucesso
@@ -444,6 +495,12 @@ Feature: Fila de pendência com resolução manual (C2)
     Dado um item pendente por "conflito de concorrência"
     Quando tento vincular esse item de novo e ocorre uma nova colisão simultânea
     Então o item continua pendente pelo mesmo motivo, e vejo uma mensagem de erro clara
+
+  Scenario: Tentar resolver item já resolvido — erro
+    Dado um item pendente que acabei de vincular a um produto com sucesso
+    Quando tento resolvê-lo de novo (ex: duplo clique no botão "Resolver" antes da tela atualizar)
+    Então recebo um erro informando que o item já foi resolvido
+    E nenhuma segunda entrada de estoque é criada por engano
 
   # ── Fila e isolamento (Critério 1, 13) ──────────────────────────────────
 
@@ -617,6 +674,24 @@ return {"item": _serialize_item(item), "retroactive_candidates": retroactive_can
 `_upsert_*`: tenta `INSERT`, captura `IntegrityError` (já existe — outra resolução ganhou a corrida)
 e simplesmente ignora (a associação já está lá, é exatamente o que este `INSERT` tentaria criar).
 
+> **Verificado no repasse (Backend)**: `_create_stock_movement` (`services/catalog/main.py:3018-
+> 3103`) levanta TODOS os seus `HTTPException` antes do único `await db.commit()` da função (linha
+> 3101) — confirmado lendo a função linha a linha. Ou seja, não existe caminho onde essa função
+> commita a movimentação de estoque e DEPOIS lança uma exceção — a preocupação inicial de "item
+> nunca fica resolvido mas a movimentação já foi commitada POR CAUSA de uma exceção" não se
+> confirma, é seguro.
+
+> **Achado real (Backend), relacionado mas diferente**: existe uma janela entre o commit interno de
+> `_create_stock_movement` (que já persiste a movimentação de estoque) e o commit seguinte do
+> handler de `/link` (que marca `item.link_source="manual"`). Numa queda de processo exatamente
+> nessa janela — rara, mas não impossível — o estoque já subiu, mas o item continua parecendo
+> pendente. Diferente de C1 (onde isso já é um trade-off aceito, sem botão de retry humano), aqui a
+> consequência é mais visível: um usuário vendo a tela travada pode clicar "Resolver" de novo,
+> gerando uma SEGUNDA entrada de estoque pro mesmo item. Mitigação recomendada (barata, sem redesenho
+> de transação): o frontend desabilita o botão "Resolver" imediatamente ao clicar e, se a resposta
+> falhar por timeout/erro de rede, recarrega o item antes de permitir nova tentativa — se o item já
+> veio como resolvido no reload, o botão nem aparece mais. Registrado como Risco #5 abaixo.
+
 Erros: 400 (produto/opção não encontrado, guarda-chuva, unidade obrigatória ausente), 404 (item não
 existe ou é de outra empresa), 409 (item já resolvido por outra requisição — variante do mesmo
 `conflito_concorrencia`).
@@ -698,17 +773,85 @@ cujo `label`/`sku`/`ean` contém o texto, com o nome do grupo (`option_group.nam
 pra dar contexto (ex: "Coca-Cola — grupo Refrigerantes"). O frontend chama os dois endpoints em
 paralelo e mistura os resultados num único combobox com um indicador visual de tipo (Produto/Opção).
 
-### Migrations
-
-Só índices — nenhuma tabela ou coluna nova:
+**Achado no repasse (Backend)**: faltava o pseudocódigo dos 3 helpers referenciados só pelo nome —
+mesmo nível de detalhe dado a todo o resto do Tech Explorer:
 
 ```python
-op.create_index("ix_supplier_invoice_items_c_ean", "supplier_invoice_items", ["c_ean"])
-op.create_index("ix_supplier_invoice_items_c_prod", "supplier_invoice_items", ["c_prod"])
-op.create_index("ix_supplier_invoice_items_link_source", "supplier_invoice_items", ["link_source"])
+async def _find_retroactive_candidates_by_ean(
+    db, company_id: int, c_ean: str, *, exclude_item_id: int,
+) -> list[SupplierInvoiceItem]:
+    # GTIN de embalagem é global entre fornecedores (nível 2) — sem filtro de supplier_id aqui,
+    # de propósito, mesma regra de C1.
+    result = await db.execute(
+        select(SupplierInvoiceItem)
+        .join(SupplierInvoice, SupplierInvoice.id == SupplierInvoiceItem.supplier_invoice_id)
+        .filter(
+            SupplierInvoice.company_id == company_id,
+            SupplierInvoiceItem.link_source.is_(None),
+            SupplierInvoiceItem.c_ean == c_ean,
+            SupplierInvoiceItem.id != exclude_item_id,
+        )
+    )
+    return result.scalars().all()
+
+
+async def _find_retroactive_candidates_by_supplier_code(
+    db, company_id: int, supplier_id: int, c_prod: str, *, exclude_item_id: int,
+) -> list[SupplierInvoiceItem]:
+    # Código do fornecedor é escopado POR fornecedor (nível 3) — supplier_id aqui é sempre o do
+    # item de ORIGEM (quem está sendo resolvido agora), não de cada candidato individualmente: um
+    # candidato só entra na lista se pertencer a uma nota do MESMO fornecedor, porque é exatamente
+    # esse o critério que faz `supplier_product_code` (chave (company_id, supplier_id, c_prod))
+    # casar automaticamente depois — candidato de outro fornecedor nunca bateria mesmo que o cProd
+    # seja igual por coincidência.
+    result = await db.execute(
+        select(SupplierInvoiceItem)
+        .join(SupplierInvoice, SupplierInvoice.id == SupplierInvoiceItem.supplier_invoice_id)
+        .filter(
+            SupplierInvoice.company_id == company_id,
+            SupplierInvoice.supplier_id == supplier_id,
+            SupplierInvoiceItem.link_source.is_(None),
+            SupplierInvoiceItem.c_prod == c_prod,
+            SupplierInvoiceItem.id != exclude_item_id,
+        )
+    )
+    return result.scalars().all()
 ```
 
-Justificativa: as 3 novas queries desta história (busca de candidatos retroativos por `c_ean`, por
+`GET /catalog/options/search`:
+```python
+async def search_options(q: str, db=Depends(get_db), company_id: int = Depends(resolve_company_id)):
+    result = await db.execute(
+        select(Option, OptionGroup.name)
+        .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+        .filter(
+            OptionGroup.company_id == company_id,  # isolamento — mesmo padrão de _resolve_stock_owner
+            or_(Option.label.ilike(f"%{q}%"), Option.sku.ilike(f"%{q}%"), Option.ean.ilike(f"%{q}%")),
+        )
+        .limit(20)
+    )
+    return [{"id": o.id, "label": f"{o.label} — grupo {group_name}", "sku": o.sku, "ean": o.ean}
+            for o, group_name in result.all()]
+```
+
+### Migrations
+
+Só índices — nenhuma tabela ou coluna nova. **Corrigido no repasse (Backend)**: a versão original
+tinha 3 índices de coluna única (`c_ean`, `c_prod`, `link_source` separados); toda query real desta
+história filtra `link_source IS NULL` **E** (`c_ean = X` OU `c_prod = X`) ao mesmo tempo — um índice
+composto cobre os dois filtros numa só busca, enquanto 2 índices separados forçam o MySQL a escolher
+só um deles e filtrar o resto linha a linha. `link_source` fica como primeira coluna dos dois
+compostos (prefixo esquerdo) — cobre sozinho também a listagem da tela "Pendências"
+(`WHERE link_source IS NULL`), então não precisa de um terceiro índice dedicado a ele:
+
+```python
+op.create_index("ix_supplier_invoice_items_link_source_ean", "supplier_invoice_items",
+                 ["link_source", "c_ean"])
+op.create_index("ix_supplier_invoice_items_link_source_prod", "supplier_invoice_items",
+                 ["link_source", "c_prod"])
+```
+
+Justificativa: as novas queries desta história (busca de candidatos retroativos por `c_ean`, por
 `c_prod`, e listagem de pendências filtrando `link_source IS NULL`) rodam com frequência bem maior
 que qualquer leitura pré-C2 dessas colunas — sem índice, cada resolução de item paga um table scan
 de `supplier_invoice_items` pra achar candidatos, e a tela "Pendências" pagaria o mesmo a cada
@@ -723,19 +866,54 @@ Nenhum — tudo dentro de `catalog-service`, mesmo padrão de B1/C1.
 - **Nova tela `PendingItemsScreen.tsx`** — nova aba "Pendências" em Estoque, ao lado de Fornecedores
   / Notas de compra. Estrutura igual à listagem de `SupplierInvoiceScreen` (filtro server-side +
   `Table` + `Pagination`, mesmo padrão de debounce nos campos de texto).
-- **Componente compartilhado `ResolvePendingItemPanel.tsx`** (modal ou painel lateral) — usado tanto
-  pela tela nova quanto pelo botão "Resolver" adicionado à coluna "Vínculo" de
-  `SupplierInvoiceScreen.tsx` (view "detail") pra itens pendentes. 3 seções: busca de produto/opção
-  (autocomplete combinando os dois endpoints acima), formulário de criar produto novo (reaproveita
-  os mesmos campos do formulário de Catálogo, sem duplicar componente), botão "Ignorar". Depois de
-  confirmar vincular/criar, se `retroactive_candidates` vier não-vazio, mostra um segundo passo:
-  lista dos candidatos (nota, fornecedor, quantidade) com botão explícito "Aplicar também a estes N
-  itens" — só chama `retroactive/apply` se a Empresa clicar nesse botão.
+- **Componente compartilhado `ResolvePendingItemPanel.tsx`** — usado tanto pela tela nova quanto pelo
+  botão "Resolver" adicionado à coluna "Vínculo" de `SupplierInvoiceScreen.tsx` (view "detail") pra
+  itens pendentes. 3 seções: busca de produto/opção, formulário de criar produto novo, botão
+  "Ignorar". Depois de confirmar vincular/criar, se `retroactive_candidates` vier não-vazio, mostra
+  um segundo passo: lista dos candidatos (nota, fornecedor, quantidade) com botão explícito "Aplicar
+  também a estes N itens" — só chama `retroactive/apply` se a Empresa clicar nesse botão.
 - **`SupplierInvoiceScreen.tsx`**: coluna "Vínculo" (já existe, ver C1) ganha um botão "Resolver" ao
   lado da Tag quando `link_source === null`. `linkStatusTag` (já existe) ganha 2 variantes novas:
   `"manual"` → `success`, "Vinculado (manual)"; `"ignorado"` → `neutral`/`greyscale`, "Ignorado".
 - **`types.ts`**: `SupplierInvoiceDetailItem.link_source` ganha `"manual" | "ignorado"` na union.
   Novos tipos: `PendingItem`, `RetroactiveCandidate`, `LinkItemIn`, `CreateProductFromItemIn`.
+
+**4 achados do repasse (Frontend), depois de reler `frontend/admin/src/screens/SupplierInvoiceScreen.
+tsx`, `ProductEditScreen.tsx` e o design system vendorizado:**
+
+1. **Busca combinada de produto+opção — sem debounce/loading definido, e "combobox" não existe no
+   design system.** `frontend/admin/vendor/design-system/dist/components/` não tem nenhum componente
+   de autocomplete/combobox pronto. O precedente real do próprio admin é
+   `ProductEditScreen.tsx:1091-1104` ("correlacionar produtos"): `InputBase` + lista filtrada
+   renderizada logo abaixo — mas aquele caso filtra uma lista já carregada em memória (client-side),
+   o que não escala aqui porque a busca desta história é contra 2 endpoints REMOTOS (`GET /catalog/
+   products?q=`, `GET /catalog/options/search?q=`). Desenho recomendado: `InputBase` + debounce de
+   500ms (mesmo valor já usado nos filtros de `SupplierInvoiceScreen.tsx:80`) disparando as 2
+   chamadas em paralelo (`Promise.all`), com um único estado de loading combinado (`loading =
+   loadingProducts || loadingOptions`) e a lista de resultados mesclada abaixo do campo, cada item
+   com um indicador de tipo (Produto/Opção) — mesmo padrão visual do `relatedSearch`, adaptado pra
+   busca remota.
+2. **"Reaproveita os mesmos campos do formulário de Catálogo, sem duplicar componente" não é viável
+   como está escrito** — `ProductEditScreen.tsx` tem **1.231 linhas**, é uma tela monolítica que
+   mistura edição de produto com upload de imagem, alérgenos, produtos correlacionados, estoque e
+   busca de NCM, tudo no mesmo state. Não existe hoje nenhum componente de formulário EXTRAÍDO e
+   reaproveitável — só a tela inteira. Extrair um formulário reaproveitável dali é um projeto à parte,
+   fora do escopo (e do orçamento de 13 pontos) desta história. Recomendação corrigida: construir um
+   mini-formulário NOVO e propositalmente pequeno dentro do próprio `ResolvePendingItemPanel`, só com
+   os campos que o Explorer já promete (nome, unidade, valor, categoria opcional) — sem tentar
+   reaproveitar `ProductEditScreen`.
+3. **Confirmação de aplicação retroativa não precisa de componente novo** — `ConfirmDialog`
+   (`frontend/admin/src/components/ConfirmDialog.tsx:14-27`) já aceita `children` (conteúdo livre
+   entre a mensagem e os botões, usado por outros fluxos do admin) — a lista de N candidatos
+   (nota/fornecedor/quantidade) entra como `children`, sem precisar de um Modal customizado.
+4. **Painel funcionando como modal E inline não tem precedente direto, mas o mecanismo pra viabilizar
+   isso já existe** — o componente `Table` (`frontend/admin/src/components/Table.tsx:21-24`) já
+   suporta uma linha expansível (`renderExpanded`/`expandedRowKey`, usado desde ORD-080). Recomendação:
+   `ResolvePendingItemPanel` nasce como componente "burro" (só recebe props, não sabe se está num
+   Modal ou inline); a tela "Pendências" o embrulha num `Modal` do design system, e
+   `SupplierInvoiceScreen.tsx` o encaixa via `renderExpanded` da própria `Table` que já lista os itens
+   da nota — reaproveita um mecanismo já testado em vez de inventar um novo padrão de "inline" do
+   zero.
 
 ### Estimativa
 
@@ -763,4 +941,29 @@ tela alterada (Tag/coluna) e nenhuma tela nova.
    pode ter sido resolvido por outra pessoa nesse meio-tempo; o loop de `retroactive/apply` já trata
    isso (`if target.link_source is not None: continue`, sem erro) — comportamento definido, não
    uma lacuna.
+5. **Janela entre o commit de `_create_stock_movement` e o commit que marca o item como resolvido**
+   (achado no repasse de Backend) — numa queda de processo bem no meio dessa janela, o estoque já
+   subiu mas o item ainda parece pendente; um clique de retry do usuário nesse estado geraria uma
+   segunda entrada. Mitigação no frontend (desabilitar o botão + recarregar o item antes de permitir
+   nova tentativa em caso de erro), não no backend — redesenhar a transação pra ser atômica exigiria
+   não reaproveitar `_create_stock_movement` como está, custo desproporcional pra uma janela de
+   milissegundos que só um crash de processo abriria.
+
+## Repasse por papel (antes de Ready)
+
+| Papel | Achado | Ação |
+|---|---|---|
+| PM | Fluxo Principal + cenário Gherkin assumiam "categoria obrigatória" no cadastro de produto — suposição errada, nunca verificada contra o código | Corrigido: `category_id` é opcional (confirmado em `ProductIn`); Fluxo Principal, "Em aberto", Critério e cenário Gherkin atualizados |
+| PM | Tech Explorer desenhou aplicação retroativa também pro "ignorar", mas a Decisão 2 do Explorer só escopava vincular/criar produto | Ampliado conscientemente: Decisão 2 e Critério 8 agora cobrem os 3 tipos de resolução |
+| QA | Nenhum cenário testava falha parcial no lote de aplicação retroativa (comportamento explícito do Tech Explorer: `continue` por candidato) | Cenário novo: *Aplicação retroativa com falha parcial não derruba os outros candidatos* |
+| QA | Busca/vínculo a uma Opção só era testada no caminho forçado de guarda-chuva, nunca como capacidade geral | Cenário novo: *Vincular a uma opção existente* |
+| QA | Nenhum cenário cobria tentar resolver um item já resolvido (dupla submissão/double-click) | Cenário novo: *Tentar resolver item já resolvido — erro* |
+| Backend | Preocupação de commit órfão em `_create_stock_movement` | Verificado no código (`main.py:3018-3103`): todo `HTTPException` precede o único commit da função — sem problema |
+| Backend | Achado real relacionado: janela entre o commit de `_create_stock_movement` e o commit que resolve o item, amplificada pelo retry humano que C2 introduz | Documentado como Risco #5, com mitigação no frontend (desabilitar botão + reload antes de retry) |
+| Backend | 3 índices de coluna única não atendem bem o padrão de query real (`link_source IS NULL AND c_ean/c_prod = X`) | Trocado por 2 índices compostos (`link_source, c_ean`) e (`link_source, c_prod`) |
+| Backend | Faltava pseudocódigo dos helpers de busca de candidatos e do endpoint de opções | Pseudocódigo completo adicionado pros 3 |
+| Frontend | Busca combinada produto+opção sem debounce/loading definidos; design system não tem componente de combobox pronto | Desenho explícito: `InputBase` + debounce 500ms + `Promise.all` + lista mesclada, mesmo padrão visual do precedente em `ProductEditScreen` |
+| Frontend | "Reaproveitar formulário de Catálogo sem duplicar componente" não é viável — não existe componente extraído, só uma tela de 1.231 linhas | Corrigido: mini-formulário novo e propositalmente pequeno, não extração de `ProductEditScreen` |
+| Frontend | Confirmação de aplicação retroativa parecia precisar de componente novo | Verificado: `ConfirmDialog` já aceita `children`, serve sem mudança |
+| Frontend | Painel reaproveitado como modal E inline não tinha precedente nem mecanismo definido | `Table.tsx` já suporta `renderExpanded` (ORD-080) — reaproveitado em vez de criar padrão novo |
 
