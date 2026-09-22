@@ -1,7 +1,7 @@
 ---
 id: ORD-197
-status: QA Explorer
-estimativa: 8 pontos (a confirmar no Tech Explorer)
+status: Tech Explorer
+estimativa: 5 pontos (revisado de 8, Tech Explorer — ver seção Estimativa)
 ---
 
 # Correlação entre unidade livre da NF-e e as unidades de estoque do Ordin
@@ -214,7 +214,7 @@ usado hoje só quando o item tem `c_ean`) passa a também aparecer quando o vín
 | 4 | Sigla ambígua (`LT` sozinho) nunca resolve automaticamente — sempre fallback manual | *Casamento automático preserva a unidade crua quando a nota usa a sigla ambígua "LT"*, *Dropdown de unidade não pré-seleciona quando a unidade da nota é a sigla ambígua "LT"* |
 | 5 | `SupplierProductCode` ganha `quantidade_por_unidade` opcional | *Vincular manualmente por código do fornecedor informando o fator de conversão*, *Vincular manualmente por código do fornecedor sem informar o fator* |
 | 6 | Vincular por código do fornecedor informando o fator grava e aplica na entrada atual | *Vincular manualmente por código do fornecedor informando o fator de conversão* |
-| 7 | Nota futura do mesmo fornecedor+código aplica o fator automaticamente via C1, sem cair na fila | *Nota futura do mesmo fornecedor e código já aplica o fator automaticamente* |
+| 7 | Nota futura do mesmo fornecedor+código aplica o fator automaticamente via C1, sem cair na fila | *Nota futura do mesmo fornecedor e código já aplica o fator automaticamente*, *Aplicação retroativa (nível 3) também aplica o fator de conversão do fornecedor* |
 | 8 | Nenhuma sigla ambígua entra na tabela de sinônimos (`LT` isolado excluído) | *Sigla ambígua "LT" isolada não está na tabela de sinônimos* |
 
 **Critério 4 vs. 8 — por que os dois existem, não é redundância**: 4 garante *comportamento em
@@ -337,6 +337,14 @@ Feature: Correlação entre unidade livre da NF-e e as unidades de estoque do Or
     Então C1 casa o item automaticamente (nível 3), sem cair na fila de pendência
     E a entrada de estoque é lançada com quantidade 36 (3 × 12)
 
+  Scenario: Aplicação retroativa (nível 3) também aplica o fator de conversão do fornecedor
+    Dado que resolvi manualmente um item pendente por código do fornecedor "CX12", informando
+    quantidade_por_unidade igual a 12, e existem outros 2 itens pendentes de notas anteriores do
+    mesmo fornecedor com o mesmo código
+    Quando confirmo a aplicação retroativa aos 2 itens candidatos
+    Então a entrada de estoque de cada candidato é lançada multiplicando a quantidade recebida dele
+    pelo fator 12, não a quantidade crua
+
   Scenario: Isolamento multi-tenant do fator de conversão por fornecedor
     Dado que a empresa "Burger House" gravou quantidade_por_unidade igual a 12 para o fornecedor
     "Alimentos Ltda." (CNPJ X) e código "CX12"
@@ -354,6 +362,265 @@ Feature: Correlação entre unidade livre da NF-e e as unidades de estoque do Or
     Então o campo "Unidade de estoque" vem pré-selecionado com "kg" (normalização independe do nível de casamento)
     E não há campo de fator de conversão por fornecedor disponível, já que não existe candidato de nível 2 nem 3 possível
 ```
+
+## Tech Explorer
+
+**Pré-requisito**: esta história pressupõe C2 (`ORD-196`) já mergeado em `main` — todo trecho de
+código citado abaixo hoje só existe em `feature/ord-196-fila-pendencia-resolucao-manual` (PR #160).
+
+### Achado — inconsistência na tabela de sinônimos do Explorer
+
+A tabela markdown da Decisão 1 lista `L` → "L, LT, LTS, LITRO, LITROS" (incluindo `LT`), mas o
+parágrafo "Risco explícito" logo abaixo recomenda excluir `LT` explicitamente — as duas partes do
+mesmo documento se contradizem. O QA Explorer já escreveu os cenários seguindo a prosa (LT excluído,
+"LITROS" como exemplo do grupo `L`, cenário dedicado confirmando ausência de "LT"). A implementação
+segue a prosa. Tabela final corrigida (a usar no código, substitui a da Decisão 1):
+
+| `STOCK_UNIT` | Sinônimos aceitos |
+|---|---|
+| `un` | UN, UND, UNI, UNID, UNIT, UNIDAD |
+| `kg` | KG, KGS, KILO, QUILO, QUILOG |
+| `g` | G, GR, GRS, GRAMA, GRAMAS |
+| `L` | L, LTS, LITRO, LITROS *(sem `LT` — deliberado, ver Decisão 1)* |
+| `ml` | ML, MILILITRO, MILILITROS *(a Decisão 1 tinha "MILILI" — truncamento, corrigido aqui)* |
+
+Segundo achado menor, mesma natureza: `ml` → "ML, MILILI" na Decisão 1 é claramente um
+truncamento (nenhuma outra sigla da tabela para pela metade) — corrigido acima pro padrão
+singular/plural já usado nos outros 4 grupos.
+
+### Serviços impactados
+
+- `catalog`: único serviço tocado. Função de normalização nova (interna, não é endpoint), coluna
+  nova em `SupplierProductCode`, mudança de comportamento em 4 endpoints já existentes de C2
+  (nenhum endpoint novo). Frontend admin: 2 condições booleanas em `ResolvePendingItemPanel.tsx`.
+
+### Onde a normalização roda (risco técnico #1, resolvido)
+
+`_ParsedInvoiceItem` (dataclass que alimenta tanto a persistência de `SupplierInvoiceItem.unidade`
+quanto o matching de C1) é construído com `unidade=d.prod.uCom` cru. A normalização entra bem
+nesse ponto, não em dois lugares separados:
+
+```python
+# main.py, perto de STOCK_UNITS (linha 203)
+UNIT_SYNONYMS: dict[str, str] = {
+    "UN": "un", "UND": "un", "UNI": "un", "UNID": "un", "UNIT": "un", "UNIDAD": "un",
+    "KG": "kg", "KGS": "kg", "KILO": "kg", "QUILO": "kg", "QUILOG": "kg",
+    "G": "g", "GR": "g", "GRS": "g", "GRAMA": "g", "GRAMAS": "g",
+    "L": "L", "LTS": "L", "LITRO": "L", "LITROS": "L",  # "LT" deliberadamente ausente
+    "ML": "ml", "MILILITRO": "ml", "MILILITROS": "ml",
+}
+
+def normalize_unit(raw: str | None) -> str | None:
+    """Sinônimo pra STOCK_UNIT, ou None se não reconhecido — nunca lança
+    exceção, nunca adivinha. Sigla ambígua (ex: "LT" sozinha) some da tabela
+    de propósito, não por bug — cai aqui como None igual qualquer outra
+    sigla desconhecida."""
+    if raw is None:
+        return None
+    return UNIT_SYNONYMS.get(raw.strip().upper())
+```
+
+Uso na construção do item parseado (`_ParsedInvoiceItem`, dentro do loop `for d in inf.det`):
+
+```python
+unidade=normalize_unit(d.prod.uCom) or d.prod.uCom,  # fallback preserva o texto cru, nunca None
+```
+
+Justificativa de rodar aqui (e não separadamente em C1/persistência e em C2/pré-seleção): as duas
+chaves de matching (`c_ean`, `c_prod`) nunca dependem de `unidade` — normalizar antes não afeta
+nenhum dos 3 níveis de casamento de C1, só o valor que acaba em `SupplierInvoiceItem.unidade`. Um
+único ponto de normalização evita a tabela divergir entre dois lugares com o tempo (mesmo racional
+já usado pela Decisão 2 do Explorer pra escolher backend em vez de frontend).
+
+**Trade-off aceito, não é risco novo**: o texto cru da nota ("UND") deixa de ficar em
+`SupplierInvoiceItem.unidade` (vira "un" direto) — já era o comportamento pedido pelo Critério 2,
+não uma perda de dado real: `SupplierInvoice.xml_raw` (`main.py:302`) preserva o XML original
+inteiro pra qualquer reprocessamento/auditoria futura, então o texto cru nunca é perdido de
+verdade, só não fica mais numa coluna própria.
+
+### Endpoints alterados (nenhum endpoint novo)
+
+#### POST /catalog/supplier-invoices/items/{item_id}/link
+**Serviço:** catalog · **Auth:** JWT, role admin/owner/manager/superadmin · **company_id:** JWT
+
+Request — mesmo shape de `LinkItemIn` (campo `quantidade_por_unidade` já existe, sem mudança de
+schema). Mudança é de comportamento: hoje, quando o item só tem `c_prod` (nível 3, sem `c_ean`), o
+valor de `quantidade_por_unidade` enviado é descartado silenciosamente. Passa a ser gravado:
+
+```python
+elif item.c_prod:
+    invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+    await _upsert_supplier_product_code(
+        db, company_id, invoice.supplier_id, item.c_prod, body.product_id, body.option_id,
+        body.quantidade_por_unidade,  # NOVO — antes não era passado
+        created_by,
+    )
+```
+
+Sem nova validação obrigatória pro caminho `c_prod` — a trava `if item.c_ean and
+body.quantidade_por_unidade is None: raise 400` continua só pra nível 2 (GTIN), conforme Critério 5
+("campo opcional") e o Fluxo Principal do Explorer ("*se* a Empresa informa"). Mesma mudança nos
+outros 2 endpoints de resolução, no ramo `elif item.c_prod:` de cada um:
+
+#### POST /catalog/supplier-invoices/items/{item_id}/create-product
+Idêntico ao `/link` — mesmo ramo `elif item.c_prod:`, mesma chamada com o parâmetro novo.
+
+#### POST /catalog/supplier-invoices/items/{item_id}/create-option
+Idêntico — mesmo ramo, mesma chamada.
+
+#### POST /catalog/supplier-invoices/items/retroactive/apply
+Hoje só o candidato de nível 2 (`target.c_ean`) recalcula a quantidade com o fator de
+`ProductGtinAlt`; o `else` (nível 3, código do fornecedor) usa `target.quantidade` puro sempre —
+mesma classe de bug já corrigida pra nível 2 durante a implementação de C2, nunca existiu pra
+nível 3 porque o fator não existia ainda. Corrigido:
+
+```python
+quantidade_lancar = target.quantidade
+if target.c_ean:
+    alt = (await db.execute(
+        select(ProductGtinAlt).filter_by(company_id=company_id, gtin=target.c_ean)
+    )).scalars().first()
+    if alt:
+        quantidade_lancar = target.quantidade * alt.quantidade_por_unidade
+elif target.c_prod:
+    # target_invoice já é buscado no bloco de validação do critério, acima
+    # neste mesmo loop (`else` de `if source.c_ean`) — reaproveita, não
+    # busca de novo.
+    spc = (await db.execute(
+        select(SupplierProductCode).filter_by(
+            company_id=company_id, supplier_id=target_invoice.supplier_id, c_prod=target.c_prod,
+        )
+    )).scalars().first()
+    if spc and spc.quantidade_por_unidade:
+        quantidade_lancar = target.quantidade * spc.quantidade_por_unidade
+```
+
+### C1 — casamento automático (nível 3)
+
+`_match_supplier_invoice_item`, ramo do nível 3, passa a multiplicar pelo fator quando ele existe
+(senão mantém quantidade crua — fator implícito 1, comportamento idêntico ao atual pra toda linha
+que ainda não tem fator gravado):
+
+```python
+if spc:
+    fator = spc.quantidade_por_unidade or Decimal(1)
+    return ("supplier_code", spc.product_id, spc.option_id, item.quantidade * fator)
+```
+
+### `_upsert_supplier_product_code` — assinatura nova
+
+```python
+async def _upsert_supplier_product_code(
+    db: AsyncSession, company_id: int, supplier_id: int, c_prod: str,
+    product_id: int | None, option_id: int | None,
+    quantidade_por_unidade: Decimal | None,  # NOVO parâmetro
+    created_by: int,
+) -> None:
+    db.add(SupplierProductCode(
+        company_id=company_id, supplier_id=supplier_id, c_prod=c_prod,
+        product_id=product_id, option_id=option_id,
+        quantidade_por_unidade=quantidade_por_unidade,  # NOVO
+        created_by=created_by,
+    ))
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+```
+
+### Migrations
+
+- Tabela `supplier_product_code`: adicionar coluna `quantidade_por_unidade` (`Numeric(12, 3)`,
+  **nullable** — diferente de `ProductGtinAlt.quantidade_por_unidade`, que é `NOT NULL` porque
+  aquela linha só existe quando há conversão; aqui a maioria das linhas nunca terá fator, é
+  genuinamente opcional). Nenhum índice novo — não entra em nenhum filtro de busca.
+
+```python
+# services/catalog/migrations/versions/YYYYMMDD_HHMM_supplier_product_code_fator_conversao.py
+def upgrade():
+    op.add_column(
+        "supplier_product_code",
+        sa.Column("quantidade_por_unidade", sa.Numeric(12, 3), nullable=True),
+    )
+
+def downgrade():
+    op.drop_column("supplier_product_code", "quantidade_por_unidade")
+```
+
+Modelo SQLAlchemy (`class SupplierProductCode`, `main.py:370`) ganha a coluna correspondente,
+`nullable=True`.
+
+### Impacto em outros serviços
+
+Nenhum. Só `catalog-service` — mesmo escopo de C1/C2.
+
+### Eventos de fila
+
+Nenhum evento novo — não muda nenhum contrato de fila existente (C1/C2 não publicam eventos hoje).
+
+### Frontend — `ResolvePendingItemPanel.tsx`
+
+Duas condições booleanas mudam, nenhuma tela nova, nenhum componente novo:
+
+```typescript
+// Antes: só aparecia (e era obrigatório) com GTIN de embalagem
+const showQuantidadePorUnidade = Boolean(item.c_ean);
+
+// Depois: aparece com GTIN OU código do fornecedor — mas só é obrigatório
+// no primeiro caso (Critério 5: opcional pra nível 3)
+const showQuantidadePorUnidade = Boolean(item.c_ean || item.c_prod);
+const requireQuantidadePorUnidade = Boolean(item.c_ean);
+```
+
+O botão de confirmar troca a condição de `disabled` de `showQuantidadePorUnidade &&
+quantidadePorUnidade == null` para `requireQuantidadePorUnidade && quantidadePorUnidade == null`.
+Nenhuma outra mudança necessária:
+
+- `quantidadeFinal` (`quantidade * quantidadePorUnidade` quando ambos setados, senão `quantidade`
+  cru) já trata o caso opcional corretamente por construção — se o usuário não informar o fator pro
+  caminho `c_prod`, cai automaticamente no fator implícito 1, sem código novo.
+- A pré-seleção do Dropdown de unidade (`STOCK_UNIT_OPTIONS.find(...)`, comparação
+  case-insensitive) não muda — como C1 agora grava `SupplierInvoiceItem.unidade` já normalizado, o
+  match exato que já existe passa a acertar mais vezes de graça, sem tocar nessa função. Critério 3
+  sai "de brinde" da mudança de backend, não precisa de lógica nova no componente.
+
+### Estimativa
+
+| Frente | Estimativa |
+|---|---|
+| `UNIT_SYNONYMS` + `normalize_unit` + hook em `_ParsedInvoiceItem` | ~1h |
+| Migration + coluna no modelo | ~0.5h |
+| `_upsert_supplier_product_code` + 3 call sites | ~1h |
+| C1 (nível 3 com fator) | ~0.5h |
+| `apply_retroactive` (nível 3 com fator) | ~1h (mais cuidado — mesmo padrão que já gerou bug real em C2) |
+| Testes backend (Scenario Outline dos 5 sinônimos, LT excluído, C1, C2 pré-seleção, fator nível 3, retroativo nível 3, isolamento multi-tenant, borda sem c_ean/c_prod) | ~3h |
+| Frontend (2 condições + teste manual) | ~1h |
+| **Total** | **~8h ≈ 5 pontos** |
+
+**Revisão pra baixo em relação à estimativa do Explorer** (8 pontos "a confirmar"): a história
+parecia maior na superfície (tabela de sinônimos + fator de conversão + 2 fluxos) mas não introduz
+nenhum endpoint, tela ou tabela nova — é tudo mudança cirúrgica em 4 endpoints e 1 coluna já
+existentes, reaproveitando 100% da infraestrutura de C1/C2. Mesmo padrão de revisão que C2 teve
+(mas na direção oposta: C2 revisou 8→13, aqui revisa 8→5).
+
+### Riscos
+
+- **Onde normalizar** — resolvido acima (ponto único, na construção de `_ParsedInvoiceItem`).
+- **Coluna nova em tabela já usada em produção pelo `apply_retroactive` e por C1** — migration é só
+  `ADD COLUMN` nullable, sem backfill, sem lock longo esperado (MySQL moderno faz `ADD COLUMN`
+  nullable como operação metadata-only na maioria dos casos). Risco baixo, mas vale rodar em
+  horário de baixo tráfego mesmo assim, mesma cautela de toda migration em tabela quente.
+  Linhas existentes de `SupplierProductCode` ficam com `quantidade_por_unidade = NULL` — C1 já
+  trata isso como fator implícito 1 (`spc.quantidade_por_unidade or Decimal(1)`), sem quebrar nada
+  do que já está casando automaticamente hoje.
+- **Reaproveitar `target_invoice` no `apply_retroactive`**: depende de o bloco de validação do
+  critério (que já busca `target_invoice` só no `else` de `if source.c_ean`) ser executado sempre
+  antes do bloco de cálculo de quantidade, na mesma ordem do código atual — confirmar isso com um
+  teste que exercite o candidato de nível 3 explicitamente. **Lacuna encontrada e já fechada**: o
+  QA Explorer só cobria o caminho de C1 (*Nota futura do mesmo fornecedor e código já aplica o
+  fator automaticamente*), não `apply_retroactive` — acrescentado o cenário *Aplicação retroativa
+  (nível 3) também aplica o fator de conversão do fornecedor* no QA Explorer antes deste documento
+  fechar, já mapeado no Critério 7 da tabela de rastreabilidade.
 
 ## Fontes (trazidas pelo usuário, preservadas para referência do Tech Explorer)
 
