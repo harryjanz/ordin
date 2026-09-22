@@ -1,6 +1,6 @@
 ---
 id: ORD-195
-status: Tech Explorer
+status: Ready
 estimativa: 8 pontos (revisado de 5, Tech Explorer)
 fase: null
 sprint: null
@@ -151,10 +151,12 @@ não dá pra lançar estoque nele").
 - **Nota já confirmada antes de C1 existir** (toda nota importada via B1 até aqui): não é
   revinculada retroativamente por esta história — aplicação retroativa é explicitamente escopo de
   **C2** ("fila de pendência... e aplicação retroativa de estoque").
-- **Exclusão de nota com itens já vinculados e vendidos**: já é regra fechada desde a revisão de B1
-  (ver `docs/estudo-modulo-estoque-erp.md`) — bloquear `DELETE /catalog/supplier-invoices/{id}` nesse
-  caso é **parte desta história**, já que é C1 que passa a existir o vínculo que torna a exclusão
-  perigosa.
+- **Exclusão de nota com itens já vinculados e vendidos — ⚠️ REVERTIDO no repasse (ver Tech
+  Explorer)**: a regra combinada na revisão de B1 (`docs/estudo-modulo-estoque-erp.md`) pressupunha
+  que dava pra saber se o estoque gerado por uma nota já foi vendido — o repasse por papel achou que
+  **não existe esse dado no sistema** (não há conceito de "saída por venda" em nenhuma tabela; D1,
+  baixa automática no pagamento, nunca foi implementada). Fica **fora do escopo de C1** — `DELETE`
+  continua sem restrição, igual hoje desde B1. Vira requisito registrado pra quando D1 existir.
 
 ### Dependências
 - **Depende de A1** (`ORD-180`, EAN em Product — mergeada), **A6** (`ORD-182`, fornecedor —
@@ -189,24 +191,48 @@ não dá pra lançar estoque nele").
       dos três níveis) ou se ficou pendente
 - [ ] Item que casa com um `Product` guarda-chuva não recebe entrada de estoque direta (comportamento
       exato — pendência ou erro distinto — decidido no Tech Explorer)
-- [ ] `DELETE /catalog/supplier-invoices/{id}` passa a ser bloqueado se qualquer item da nota já
-      gerou estoque que foi vendido (baixa efetivada) — antes de C1 essa checagem não existia porque
-      não havia vínculo nenhum
+- ~~`DELETE /catalog/supplier-invoices/{id}` passa a ser bloqueado se qualquer item da nota já gerou
+      estoque que foi vendido~~ — **removido no repasse por papel**: não existe dado no sistema que
+      represente "estoque vendido" (não há conceito de saída por venda; D1 nunca foi implementada).
+      `DELETE` continua sem restrição por C1. Vira requisito registrado pra D1, não critério desta
+      história — ver Tech Explorer.
 - [ ] Casamento por EAN de venda (nível 1) nunca é ambíguo (não pode achar mais de um `Product`/
       `Option` ativo com o mesmo EAN — já garantido pela regra de unicidade fechada antes desta
       história)
 - [ ] `product_gtin_alt` também respeita unicidade por empresa — o mesmo GTIN de embalagem não pode
       apontar pra dois produtos/opções diferentes na mesma empresa ao mesmo tempo
+- [ ] Uma entrega que precisaria ser dividida entre múltiplos produtos de destino (ex: fardo em
+      parte vendido inteiro, em parte decomposto) nunca casa automaticamente por nenhum dos três
+      níveis — sempre pendente, resolução manual fica pra C2 (achado do usuário, ver decisão de
+      escopo acima; gap encontrado no repasse PM — estava descrito em prosa mas não formalizado
+      como critério)
 
 ## Wireframe / Mockup
 Não introduz tela nova — estende a tela de detalhe de nota já existente (B1,
-`SupplierInvoiceScreen.tsx`, view `"detail"`) com uma coluna ou indicador por item mostrando o
-resultado do vínculo (ex: tag "Vinculado — Product #6" / tag "Pendente"). Mockup detalhado fica pro
-Tech Explorer de frontend.
+`SupplierInvoiceScreen.tsx`, view `"detail"`) com uma coluna nova ("Vínculo") na tabela de itens,
+usando o mesmo padrão de `Tag` já usado no cabeçalho da prévia (`Tag variant="success"`/`"warning"`
+pra "Fornecedor já cadastrado"/"Novo fornecedor").
+
+**Resolvido no repasse de frontend** (achado da revisão PM: 7 estados possíveis — 3 vinculado + 4
+pendente — sem mockup nenhum antes disso):
+
+| Estado | Rótulo | `variant` |
+|---|---|---|
+| `link_source="ean"` | Vinculado (EAN) | `success` |
+| `link_source="gtin_alt"` | Vinculado (embalagem) | `success` |
+| `link_source="supplier_code"` | Vinculado (fornecedor) | `success` |
+| `pendente_motivo=null` | Pendente | `warning` |
+| `pendente_motivo="guarda_chuva"` | Pendente (produto guarda-chuva) | `warning` |
+| `pendente_motivo="sem_estoque_iniciado"` | Pendente (sem estoque iniciado) | `warning` |
+| `pendente_motivo="conflito_concorrencia"` | Pendente (conflito — tente novamente) | `error` |
+
+`error` só pro conflito de concorrência (achado do repasse backend) — é o único estado que
+representa uma falha técnica rara, não um "aguardando cadastro" normal; os outros 6 usam
+`success`/`warning` pra manter a distinção clara entre "automático" e "precisa de ação humana".
 
 ## O que ainda está vago pra avançar ao QA Explorer
-- **Formato exato do indicador de vínculo na tela de detalhe** (tag, coluna nova, ícone) — decisão
-  de frontend, não bloqueia QA Explorer (cenários Gherkin testam o dado, não o pixel).
+- ~~Formato exato do indicador de vínculo na tela de detalhe~~ — **resolvido no repasse de
+  frontend**, ver tabela de rótulos/variantes acima.
 - **Comportamento exato pro caso guarda-chuva** (pendência automática vs. erro visível distinto) —
   fica como pergunta explícita pro Tech Explorer, não impede escrever os cenários de QA (o
   cenário em si — "item casa com guarda-chuva" — já está claro, só a resposta exata que falta).
@@ -233,9 +259,10 @@ de implementação que o Tech Explorer resolve normalmente. Pode avançar pro QA
 | GTIN de embalagem conhecido (nível 2) → entrada automática multiplicada | `Vínculo por GTIN de embalagem conhecido (nível 2)`, `GTIN de embalagem vale pra qualquer fornecedor` |
 | `cProd` mapeado (nível 3) → entrada automática mesmo sem EAN | `Vínculo por código do fornecedor já mapeado (nível 3)`, `Mapeamento de cProd é isolado por fornecedor` |
 | Sem correspondência nos três níveis → pendente, sem travar confirmação | `Item sem qualquer correspondência fica pendente`, `GTIN de embalagem nunca visto vira pendência` |
+| Entrega que precisaria dividir entre produtos nunca casa automaticamente | `Fardo com uso misto (vender inteiro e decompor) sempre casa num destino só, nunca divide` |
+| (garantia adicional, achado no repasse QA) Nível 1 sempre vence em caso de colisão entre tabelas | `Nível 1 sempre vence quando o mesmo código existiria nos dois níveis` |
 | Detalhe da nota mostra vinculado (por qual nível) ou pendente | (mesmos cenários acima — cada um verifica o estado retornado pra tela de detalhe) |
 | Guarda-chuva não recebe entrada direta | `Item casa com produto guarda-chuva` |
-| `DELETE` bloqueado se item já vendido | `Exclusão bloqueada após venda do estoque vinculado`, `Exclusão ainda permitida sem venda` |
 | EAN de venda nunca ambíguo (nível 1) | `Regressão — dois itens ativos não podem ter o mesmo EAN` |
 | `product_gtin_alt` único por empresa | `Regressão — GTIN de embalagem não pode apontar pra dois produtos` |
 
@@ -337,7 +364,7 @@ Feature: Vínculo automático de itens de nota de compra por EAN/GTIN de embalag
     E os outros itens da mesma nota que casaram (por qualquer um dos três níveis) continuam
       vinculados normalmente
 
-  Scenario: Fardo com uso misto (vender inteiro e decompor) nunca casa sozinho
+  Scenario: Fardo com uso misto (vender inteiro e decompor) sempre casa num destino só, nunca divide
     Dado um GTIN de fardo cadastrado em product_gtin_alt apontando SÓ pro Product "Coca-Cola Lata
       350ml" (decomposição), sem entrada equivalente pro Product "Fardo Coca-Cola 350ml"
     E um item da nota com esse mesmo cEAN de fardo
@@ -356,19 +383,10 @@ Feature: Vínculo automático de itens de nota de compra por EAN/GTIN de embalag
     E o item fica sinalizado como não resolvido automaticamente (mecanismo exato — mesma
       fila de "pendente" ou um estado distinto — decidido no Tech Explorer)
 
-  # ── Bloqueio de exclusão pós-venda ─────────────────────────────────────
-
-  Scenario: Exclusão bloqueada após venda do estoque vinculado
-    Dado uma nota confirmada com um item vinculado que gerou entrada de estoque
-    E esse estoque já foi baixado por uma venda
-    Quando a Empresa tenta excluir a nota
-    Então a exclusão é rejeitada com uma mensagem explicando o motivo
-    E a nota continua existindo
-
-  Scenario: Exclusão ainda permitida sem venda
-    Dado uma nota confirmada com itens vinculados, mas nenhum estoque gerado por ela foi vendido ainda
-    Quando a Empresa exclui a nota
-    Então a exclusão funciona normalmente (mesmo comportamento já existente desde B1)
+  # ── Bloqueio de exclusão pós-venda: REMOVIDO no repasse — ver Tech Explorer.
+  # Não existe dado no sistema que represente "estoque vendido" (sem D1). DELETE
+  # continua sem restrição por C1, mesmo comportamento de B1 — nada a testar aqui
+  # que já não estivesse coberto pelos testes de exclusão de B1.
 
   # ── Isolamento multi-tenant ────────────────────────────────────────────
 
@@ -386,6 +404,28 @@ Feature: Vínculo automático de itens de nota de compra por EAN/GTIN de embalag
     Então o item da empresa B NÃO vincula automaticamente
     E fica pendente (GTIN de embalagem é global de fabricante, mas o CADASTRO dele em
       product_gtin_alt é por empresa — cada empresa ensina o próprio catálogo)
+
+  Scenario: Mapeamento de cProd da empresa A não vaza pra empresa B
+    Dado um mapeamento salvo em supplier_product_code pela empresa A, fornecedor X, código "COD-01"
+    E o MESMO fornecedor X também tem cadastro na empresa B (CNPJ igual, Supplier é por empresa)
+    E uma nota confirmada pela empresa B com um item do fornecedor X e cProd "COD-01"
+    Quando a nota da empresa B é confirmada
+    Então o item da empresa B NÃO vincula automaticamente
+    E fica pendente (o mapeamento da empresa A nunca é visível pra empresa B, mesmo com o mesmo
+      fornecedor e o mesmo código — isolamento é por company_id, símétrico aos outros dois níveis)
+
+  # ── Precedência entre níveis ────────────────────────────────────────────
+
+  Scenario: Nível 1 sempre vence quando o mesmo código existiria nos dois níveis
+    Dado um Product "X" com EAN de venda "1234567890123"
+    E um cadastro em product_gtin_alt com gtin "1234567890123" apontando pro Product "Y" (cadastro
+      indevido — C2 deveria impedir isso na escrita, mas nada no schema de C1 proíbe hoje)
+    Quando um item da nota chega com cEAN "1234567890123"
+    E a nota é confirmada
+    Então o item vincula ao Product "X" (nível 1), nunca ao Product "Y" (nível 2)
+    E isso é proteção de código (ordem de checagem), não de dado — reforça que C2 precisa
+      validar na escrita de product_gtin_alt que o GTIN não colide com nenhum EAN de venda
+      já cadastrado na empresa
 
   # ── Regressão — garantias herdadas das regras de unicidade ────────────
 
@@ -418,13 +458,40 @@ Feature: Vínculo automático de itens de nota de compra por EAN/GTIN de embalag
   emissores populam isso corretamente na prática. Tech Explorer deve implementar o refinamento por
   `qTrib` como **oportunista** (usa quando aparece e bate a conta), nunca como premissa — o
   casamento por `product_gtin_alt` continua sendo o caminho confiável pra pacotes com GTIN próprio.
+- **Achado no repasse QA — `product_gtin_alt` pode colidir silenciosamente com EAN de venda**:
+  nada no schema impede cadastrar em `product_gtin_alt` um GTIN que já é `Product.ean`/`Option.ean`
+  de outro item na mesma empresa. Quando isso acontece, o nível 2 fica permanentemente inalcançável
+  pra aquele código (nível 1 sempre intercepta primeiro) — sem erro, sem aviso. Não é bug do C1 (o
+  algoritmo em si é determinístico), mas **C2** (quem escreve em `product_gtin_alt`) precisa
+  validar na escrita que o GTIN não colide com nenhum EAN de venda já cadastrado — registrado aqui
+  pra não se perder até C2 ser desenhada.
+
+### 🛑 Achado no repasse QA — Critério de Aceite #6 (bloqueio de exclusão pós-venda) é inviável hoje
+
+Verificação no código antes de aceitar o critério como "pronto pra Tech Explorer": `StockMovementIn.tipo`
+só aceita `Literal["entrada", "ajuste"]` (`services/catalog/main.py:2840`) — **não existe nenhum
+tipo de movimentação "saída"/venda em todo o catalog-service**. D1 (baixa automática no pagamento,
+Bloco D do épico, `docs/estudo-modulo-estoque-erp.md`) nunca foi implementado.
+
+O Critério de Aceite "`DELETE` bloqueado se qualquer item da nota já gerou estoque que foi vendido"
+(herdado da revisão de B1, antes desta investigação de código) **não tem como ser verdadeiro nem
+falso hoje** — não existe nenhum dado no banco que represente "este estoque foi vendido". O Tech
+Explorer desta história também nunca detalhou o mecanismo desse endpoint (ficou só na promessa
+herdada, sem desenho) — não é falta de detalhe, é uma dependência não declarada (C1 → D1, que não
+está no grafo de dependências do épico).
+
+**Isto bloqueia Ready até ser resolvido com o usuário** — ver seção "O que ainda impede o avanço".
 
 ### O que ainda impede o avanço pro Tech Explorer
-Nada bloqueia. Cenários revisados e alinhados com os 10 critérios de aceite do Explorer, com 1:1
-confirmado na tabela de rastreabilidade acima — incluindo os cenários de regressão que formalizam
-as garantias de unicidade (EAN de venda e GTIN de embalagem) que o casamento automático depende
-pra nunca ser ambíguo, e o cenário que documenta o limite deliberado da história (fardo de uso
-misto não é dividido automaticamente — sempre pendência, resolução fica pra C2).
+**Na época em que este QA Explorer foi originalmente escrito**: nada bloqueava — cenários alinhados
+com os 10 critérios do Explorer, 1:1 confirmado na rastreabilidade.
+
+**Correção feita no repasse por papel, antes de Ready**: o critério de bloqueio de exclusão
+pós-venda (#6) foi escrito sem verificar se o código já suporta o conceito de "estoque vendido" —
+não suporta (ver achado acima). Isso não impediu o Tech Explorer de avançar pra maior parte do
+escopo (o resto da história é independente), mas o Tech Explorer também não detalhou esse endpoint
+por causa disso — a lacuna só ficou visível nesta revisão. Resolução fica pra decisão do usuário
+antes de Ready (ver seção correspondente no Tech Explorer).
 
 ## Tech Explorer
 
@@ -491,7 +558,7 @@ class SupplierProductCode(Base):
 product_id           = Column(Integer, ForeignKey("products.id"), nullable=True)
 option_id            = Column(Integer, ForeignKey("options.id"), nullable=True)
 link_source          = Column(String(20), nullable=True)  # "ean" | "gtin_alt" | "supplier_code" | None
-pendente_motivo      = Column(String(30), nullable=True)  # só quando link_source é None; ex: "guarda_chuva"
+pendente_motivo      = Column(String(30), nullable=True)  # só quando link_source é None; "guarda_chuva" | "sem_estoque_iniciado" | "conflito_concorrencia" | None (sem correspondência em nenhum nível)
 
 # Dados brutos da nota que B1 descartava (achado desta revisão — necessário pro refinamento por qTrib)
 unidade_tributavel          = Column(String(10), nullable=True)
@@ -590,11 +657,20 @@ for db_item, parsed_item in zip(persisted_items, parsed.itens):
                 StockMovementIn(tipo="entrada", quantidade=qtd, motivo=f"Vínculo automático — nota #{invoice.id}"),
                 current_user, product_id=product_id, option_id=option_id,
             )
-        except HTTPException as e:
-            # guarda-chuva (_resolve_stock_owner) ou StockItem inexistente ainda —
-            # nunca deixa a confirmação da nota falhar por causa do vínculo
+        except (HTTPException, IntegrityError) as e:
+            # HTTPException: guarda-chuva (_resolve_stock_owner) ou StockItem inexistente ainda.
+            # IntegrityError (achado no repasse backend): duas notas diferentes com item do mesmo
+            # EAN confirmadas quase ao mesmo tempo podem colidir no INSERT do StockItem novo (só
+            # uma sobrevive à UniqueConstraint) — sem isso na captura, um 500 derrubava a
+            # confirmação inteira da nota por causa de uma corrida rara no vínculo automático,
+            # quebrando a garantia de que a nota nunca fica inconsistente por causa de C1.
+            await db.rollback()  # desfaz só a tentativa de stock movement, não a nota já commitada
             link_source, product_id, option_id = None, None, None
-            pendente_motivo = "guarda_chuva" if "guarda-chuva" in e.detail else "sem_estoque_iniciado"
+            pendente_motivo = (
+                "guarda_chuva" if isinstance(e, HTTPException) and "guarda-chuva" in e.detail
+                else "sem_estoque_iniciado" if isinstance(e, HTTPException)
+                else "conflito_concorrencia"
+            )
     db_item.product_id, db_item.option_id = product_id, option_id
     db_item.link_source, db_item.pendente_motivo = link_source, pendente_motivo
     if link_source: vinculados += 1
@@ -623,6 +699,11 @@ inconsistente, só alguns itens ficam sem vínculo (viram pendência, resolvidos
   `valor_unitario_tributavel`) + 2 FKs.
 - `product_gtin_alt`: tabela nova (schema acima).
 - `supplier_product_code`: tabela nova (schema acima).
+- **Achado no repasse backend**: `Product.ean` (`main.py:173`) e `Option.ean` (`main.py:383`) não
+  têm índice — hoje só custa caro na escrita ocasional (`_check_active_code_conflict`); C1 faz essa
+  mesma busca por item de nota, ficando quente. Adicionar `Index("ix_products_company_ean",
+  "company_id", "ean")` e equivalente em `Option` **nesta migration**, já que C1 é quem torna isso
+  necessário.
 - **`product_gtin_alt`/`supplier_product_code` ficam vazias até C2 existir** — nada de errado
   nisso (mesmo padrão de B1 criando `supplier_invoice_item` antes de C1 existir pra consumir),
   mas vale avisar no rollout: logo após o deploy de C1, só o nível 1 (EAN de venda) vai
@@ -657,7 +738,7 @@ investigação desta revisão, com GTIN de embalagem e refinamento por `qTrib`, 
 significativamente mais rica que "vínculo por EAN + tabela de código de fornecedor" original).
 - Backend: 2 tabelas novas + migration de `supplier_invoice_items` + algoritmo de casamento (3
   níveis) + integração com `_create_stock_movement`/`_resolve_stock_owner` + resposta enriquecida
-  em 2 endpoints já existentes + testes (pelo menos os 21 cenários do QA Explorer).
+  em 2 endpoints já existentes + testes (pelo menos os 18 cenários do QA Explorer).
 - Frontend: indicador de vínculo por item na tela de detalhe (B1) — pequeno, reaproveita a
   tabela/Table.tsx já existente, só uma coluna/tag nova.
 
@@ -670,3 +751,24 @@ código existente, não suposição:
   reaproveitado sem inventar nada novo.
 - Cadastro proativo de GTIN fora do fluxo de pendência → confirmado que fica fora do escopo de
   C1, é uma pergunta pra quando C2 for desenhada (não bloqueia C1 sozinha).
+- Formato do indicador de vínculo na tela → resolvido no repasse de frontend (tabela de
+  rótulos/variantes na seção Wireframe/Mockup).
+
+## Repasse por papel (antes de Ready)
+
+Revisão formal PM → QA → Backend → Frontend, cada um lendo o doc fresco e buscando inconsistência
+real, não confirmando por confirmar (mesmo padrão já usado em B1/`ORD-194`). Achados, todos já
+corrigidos no próprio doc:
+
+| Papel | Achado | Correção |
+|---|---|---|
+| PM | Critério de aceite faltando pra "nunca divide entre produtos" (só estava em prosa/Gherkin) | Critério de aceite #11 adicionado |
+| PM | Título de cenário Gherkin contradizia o próprio corpo ("nunca casa sozinho" vs. "casa no nível 2") | Título corrigido |
+| QA | Sem cenário testando precedência entre nível 1 e nível 2 quando os dois bateriam | Cenário de regressão adicionado + achado de risco de dado (nada impede `product_gtin_alt` colidir com EAN de venda — registrado pra C2 validar) |
+| QA | Isolamento multi-tenant tinha cenário pra nível 1 e 2, faltava nível 3 (`cProd`) | Cenário adicionado |
+| QA | **Critério #6 (bloqueio de exclusão pós-venda) é inviável** — não existe "saída por venda" no sistema, D1 nunca foi implementada | **Removido do escopo de C1**, registrado como requisito pendente na descrição de D1 (`docs/estudo-modulo-estoque-erp.md`) |
+| Backend | `except HTTPException` no loop de vínculo não capturava `IntegrityError` de uma corrida real (duas notas com o mesmo EAN quase simultâneas) — um 500 derrubaria a nota inteira | `except (HTTPException, IntegrityError)`, novo `pendente_motivo="conflito_concorrencia"` |
+| Backend | `Product.ean`/`Option.ean` sem índice — C1 torna essa busca quente | Índice novo adicionado à migration desta história |
+| Frontend | Wireframe/Mockup subespecificado (7 estados possíveis, nenhum rótulo definido) | Tabela de rótulos/variantes de `Tag` adicionada |
+
+Nenhum achado ficou sem correção. História pronta pra **Ready**.

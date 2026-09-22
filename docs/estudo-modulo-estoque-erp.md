@@ -573,6 +573,17 @@ coleta de ticket (`services/order/tests/`, ORD-017) — reduz risco de D1, não 
 | D1 | Baixa automática no pagamento (CFOP 5102) com `SELECT FOR UPDATE` | 5 | A2, A3, A4 |
 | D2 | Estorno automático quando a baixa falhar (reaproveita `_try_cancel_fiscal_document`) | 3 | D1 |
 
+**Requisito registrado pra D1 (achado no repasse de C1/`ORD-195`, 2026-09-22)**: a revisão de B1
+(`ORD-194`) já tinha combinado que uma nota de compra não pode ser excluída depois que o estoque
+que ela gerou for vendido — mas isso pressupõe um conceito de "saída por venda" que só passa a
+existir com **D1**. C1 tentou implementar esse bloqueio e achou, na prática (revisão de código
+antes de aceitar o critério), que `StockMovementIn.tipo` só aceita `"entrada"`/`"ajuste"` — não há
+nenhum dado hoje que represente "isto foi vendido". Ficou fora do escopo de C1 (`DELETE
+/catalog/supplier-invoices/{id}` continua sem restrição). **Quando D1 for desenhada**, o Tech
+Explorer dela precisa: (1) decidir como marcar que uma saída de estoque veio de uma venda
+(distinto de um ajuste manual), e (2) adicionar o bloqueio de exclusão em `supplier_invoice`
+usando esse dado — reabrindo o critério que ficou pendente aqui.
+
 ### Bloco E — Ficha técnica, Fase 2 (24 pontos)
 
 | ID | História (resumo) | Pontos | Depende de |
