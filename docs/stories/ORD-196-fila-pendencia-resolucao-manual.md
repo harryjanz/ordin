@@ -1041,6 +1041,42 @@ Pendência aberta, levantada pelo usuário nesta mesma sessão: a unidade da NF-
 texto livre, sem enum fechado do SEFAZ — hoje só normalizamos por igualdade exata (case-insensitive)
 contra os 5 valores de `STOCK_UNITS`. Uma tabela pequena de sinônimos (`"LT"→"L"`, `"GR"→"g"`,
 `"UND"/"PC"→"un"` etc.) ampliaria o pré-preenchimento automático sem mudar o comportamento (o
-Dropdown continua sendo a decisão final do usuário). Não implementado ainda — registrado aqui pra
-não se perder, decisão de fazer ou não fica pro usuário.
+Dropdown continua sendo a decisão final do usuário). Não implementado ainda — virou história própria
+`ORD-197-correlacao-unidade-nota-fiscal.md` (Explorer escrito), pra não bloquear o fechamento de C2.
+
+## Implementação — extensão: criar opção nova em grupo existente (2026-09-22, pré-merge)
+
+Gap encontrado revisando C2 já implementado: a aba "Criar produto novo" assumia que todo item
+pendente sem correspondência é sempre um PRODUTO novo — mas pode ser só um sabor/variante nova de um
+grupo de opção que já existe (ex: nota chega com "Guaraná Antarctica" e a Empresa já tem o grupo
+"Refrigerantes Lata 350ml" com Coca-Cola/Fanta/etc.). Sem essa opção, a única saída pra esse caso era
+"Vincular a existente" contra uma opção que ainda não existe — impossível — ou criar um produto solto
+fora do grupo, perdendo a modelagem.
+
+Implementado: a aba "Criar produto novo" virou um `RadioGroup` com duas opções — "Produto novo"
+(fluxo inalterado) e "Opção em grupo existente" (novo). O segundo caminho pede o grupo de destino
+(`GET /catalog/option-groups`, endpoint já existente) e chama um endpoint novo,
+`POST /catalog/supplier-invoices/items/{item_id}/create-option`.
+
+Achado técnico ao implementar: `_set_option_group_options` (a função que já existia, usada por
+`PUT /catalog/option-groups/{id}`) faz **replace completo** da lista de opções do grupo — qualquer
+opção do grupo que não esteja na lista enviada é apagada. Criar a opção nova direto com essa função
+teria apagado Coca-Cola/Fanta/etc. do grupo. Resolvido com um helper novo, `_add_option_to_group`,
+que relê o estado atual do grupo (cada opção existente convertida de volta pra `OptionIn`, allergen
+ids inclusos) e reenvia a lista completa (existentes + a nova) — a opção recém-criada é recuperada
+depois filtrando por id fora do conjunto anterior à chamada.
+
+Mesmo contrato de quantidade já estabelecido em `/link` e `/create-product`: o backend nunca
+multiplica `quantidade` por `quantidade_por_unidade` sozinho — quem faz a conta é o cliente (o
+frontend calcula `quantidadeFinal`, já reaproveitado do achado 8 acima). `quantidade_por_unidade` só
+é persistido em `product_gtin_alt`/`supplier_product_code` pra casamento automático futuro.
+
+Testado ao vivo contra dado real do ambiente de dev: criada uma opção nova no grupo "Refrigerantes
+Lata 350ml" (que já tinha 4 opções) a partir de um item pendente; confirmado por query direta no
+banco que as 4 opções existentes não foram tocadas, a opção nova foi criada vinculada ao grupo certo,
+o item pendente ficou `link_source="manual"` apontando pra ela, o `stock_item`/`stock_movement`
+foram gravados com a quantidade certa, e `product_gtin_alt` foi gravado apontando `option_id` (não
+`product_id`) pro EAN do item. 3 testes novos cobrindo sucesso, gravação de GTIN de embalagem e
+isolamento multi-tenant (grupo de outra empresa → 404) — suíte completa (492 testes) e ruff seguem
+verdes.
 
