@@ -1,7 +1,7 @@
 ---
 id: ORD-196
-status: QA Explorer
-estimativa: 8 pontos (herdado de docs/estudo-modulo-estoque-erp.md, a confirmar no Tech Explorer)
+status: Tech Explorer
+estimativa: 13 pontos (revisado de 8, Tech Explorer — ver seção Estimativa)
 ---
 
 # C2 — Fila de pendência com resolução manual + aplicação retroativa de estoque
@@ -460,4 +460,307 @@ Feature: Fila de pendência com resolução manual (C2)
     Quando acesso a tela "Pendências" com meu usuário
     Então esse item de outra empresa não aparece na minha lista
 ```
+
+## Tech Explorer
+
+### Serviços impactados
+
+- `catalog-service`: único serviço tocado (mesmo padrão de C1). Reaproveita `_create_stock_movement`/
+  `_resolve_stock_owner` (A2/G3/C1), as tabelas `product_gtin_alt`/`supplier_product_code` (schema já
+  existe, criado por C1 — nenhuma tabela nova nesta história), e o endpoint de criação de produto
+  já existente (refatorado, ver abaixo).
+
+### Decisão de design — o que grava em `link_source` numa resolução manual
+
+C1 usa `link_source: "ean" | "gtin_alt" | "supplier_code" | None`. Adiciono dois valores novos:
+
+- **`"manual"`** — item resolvido por uma ação humana em C2 (vincular a existente ou criar produto
+  novo), distinto dos 3 valores automáticos de C1. Importante manter a distinção: a associação nova
+  gravada em `product_gtin_alt`/`supplier_product_code` é o que faz a PRÓXIMA nota casar sozinha —
+  mas o item ATUAL foi resolvido por um humano, e isso é informação relevante pra UI (Tag "Vinculado
+  (manual)") e pra qualquer relatório futuro de "quanto do vínculo é automático vs. manual".
+- **`"ignorado"`** — item marcado como "não controla estoque". `product_id`/`option_id` continuam
+  `None`, `pendente_motivo` é limpo pra `None`. Como a query de pendências filtra por
+  `link_source IS NULL`, um item ignorado sai da fila automaticamente, sem precisar de coluna nova.
+
+**Nenhuma migration de schema pra colunas existentes** — `link_source` já é `String(20)`, sem
+`CHECK` de banco (só documentado em comentário), os 2 valores novos cabem sem alterar o tipo. A
+migration desta história só adiciona índices (ver "Migrations" abaixo).
+
+### Decisão de design — quando grava `product_gtin_alt` vs. `supplier_product_code` vs. nada
+
+Resolve o item #1 "Em aberto" do Explorer com uma regra binária, sem ambiguidade:
+
+- **Item pendente TEM `c_ean`** → é candidato a nível 2 (nenhum item com `c_ean` que bateria com o
+  EAN de venda de um produto ficaria pendente — C1 já teria casado no nível 1). Grava
+  `ProductGtinAlt(company_id, gtin=item.c_ean, product_id/option_id, quantidade_por_unidade)`.
+  `quantidade_por_unidade` é informada pelo usuário no formulário de vínculo (não dá pra inferir
+  sozinho — é a mesma limitação que já existia em C1, aqui só quem resolve manualmente sabe quantas
+  unidades tem a embalagem).
+- **Item pendente NÃO tem `c_ean` mas TEM `c_prod`** → candidato a nível 3. Grava
+  `SupplierProductCode(company_id, supplier_id, c_prod=item.c_prod, product_id/option_id)`, onde
+  `supplier_id` vem da nota (`SupplierInvoice.supplier_id`) à qual o item pertence.
+  `quantidade_por_unidade` não se aplica aqui — código do fornecedor não carrega proporção.
+- **Item pendente não tem nem `c_ean` nem `c_prod`** (ex: `COPODESC300` do teste do C1) → nada pra
+  persistir. `link_source="manual"`, sem nenhuma linha nova em `product_gtin_alt`/
+  `supplier_product_code`. A resolução vale só pra ESTE item — não existe candidato retroativo
+  possível (não há critério de correspondência pra buscar outros).
+- **`UniqueConstraint`s já existentes** (`uq_product_gtin_alt_company_gtin`,
+  `uq_supplier_product_code`) cobrem o caso de dois usuários resolverem o mesmo GTIN/código quase
+  simultaneamente — trata como o mesmo `IntegrityError` → `pendente_motivo="conflito_concorrencia"`
+  já usado por C1, reaproveitado aqui.
+
+### Decisão de design — dois passos pra aplicação retroativa (Critério 9)
+
+Pra garantir que "nunca é automático/silencioso" (Critério 9) sem precisar de um endpoint de
+"preview" separado, a resolução acontece em até 2 chamadas:
+
+1. `POST .../link` (ou `.../create-product`) resolve SÓ o item atual e devolve, na resposta, a
+   lista de candidatos retroativos encontrados (pode ser vazia).
+2. Se a Empresa confirma explicitamente (Critério 9/10), o frontend chama
+   `POST .../retroactive/apply` com os ids escolhidos — nunca acontece dentro da mesma chamada que
+   resolveu o item original.
+
+Isso resolve certo o cenário "nenhum candidato encontrado → não pergunta nada" (não existe uma
+segunda chamada se a lista vier vazia) e "recusar → só o item atual muda" (frontend simplesmente não
+chama o passo 2).
+
+### Endpoints
+
+#### `GET /catalog/supplier-invoices/pending-items`
+
+**Serviço:** catalog-service · **Auth:** JWT, role admin/owner · **company_id:** do JWT
+
+Query params: `fornecedor: str | None`, `motivo: Literal["sem_correspondencia","guarda_chuva",
+"sem_estoque_iniciado","conflito_concorrencia"] | None` (`"sem_correspondencia"` = `pendente_motivo
+IS NULL`), `skip: int = 0`, `limit: int = 50` — mesmo padrão de paginação/filtro server-side de
+`GET /catalog/supplier-invoices` (resolve o item #3 "Em aberto" do Explorer: sim, server-side desde
+o início, por consistência).
+
+Query: `SELECT ... FROM supplier_invoice_items JOIN supplier_invoices ON ... WHERE
+supplier_invoices.company_id = :company_id AND supplier_invoice_items.link_source IS NULL` +
+filtros opcionais, `JOIN suppliers` pro nome do fornecedor.
+
+Response 200:
+```json
+{
+  "items": [
+    {
+      "id": 42, "supplier_invoice_id": 8, "numero": "12345", "serie": "1",
+      "fornecedor_nome": "Distribuidora de Bebidas Sul Ltda",
+      "c_prod": "GUA350", "c_ean": "7891991010924", "x_prod": "GUARANA ANTARCTICA LATA 350ML",
+      "unidade": "UN", "quantidade": 12.0, "valor_unitario": 3.60, "valor_total": 43.20,
+      "pendente_motivo": null
+    }
+  ],
+  "total": 1
+}
+```
+
+#### `POST /catalog/supplier-invoices/items/{item_id}/link`
+
+**Auth:** JWT, role admin/owner · **company_id:** do JWT (valida que o item pertence a uma nota da
+empresa, senão 404)
+
+Request:
+```json
+{
+  "product_id": 1026, "option_id": null,
+  "quantidade": 24.0,
+  "unidade": null,
+  "quantidade_por_unidade": null
+}
+```
+- `product_id` XOR `option_id` (igual G3/C1).
+- `quantidade`: pré-preenchida pelo frontend com `item.quantidade` (ou `item.quantidade *
+  quantidade_por_unidade` se o item tem `c_ean`), mas editável — mesmo espírito de C1.
+- `unidade`: obrigatória só quando o dono (produto/opção) ainda não tem `StockItem`
+  (`pendente_motivo == "sem_estoque_iniciado"`) — mesma regra de `_create_stock_movement`,
+  reaproveitada sem mudança (Critério 12).
+- `quantidade_por_unidade`: obrigatória quando `item.c_ean is not None` (vira nível 2), ignorada
+  quando `item.c_ean is None`.
+
+Corpo do handler (pseudocódigo):
+```python
+item = await _get_pending_item_scoped(db, item_id, company_id)  # 404 se não existir/outra empresa
+if item.link_source is not None:
+    raise HTTPException(400, detail="item já resolvido")
+
+await _create_stock_movement(
+    db, company_id,
+    StockMovementIn(tipo="entrada", quantidade=body.quantidade, unidade=body.unidade,
+                     motivo=f"Resolução manual — nota de compra #{item.supplier_invoice_id}"),
+    current_user, product_id=body.product_id, option_id=body.option_id,
+)  # mesma exceção HTTPException 400 se guarda-chuva/dados inválidos — propaga, não silencia
+
+item.product_id, item.option_id = body.product_id, body.option_id
+item.link_source = "manual"
+item.pendente_motivo = None
+await db.commit()
+
+retroactive_candidates = []
+if item.c_ean:
+    await _upsert_product_gtin_alt(db, company_id, item.c_ean, body.product_id, body.option_id,
+                                    body.quantidade_por_unidade)
+    retroactive_candidates = await _find_retroactive_candidates_by_ean(db, company_id, item.c_ean,
+                                                                        exclude_item_id=item.id)
+elif item.c_prod:
+    invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+    await _upsert_supplier_product_code(db, company_id, invoice.supplier_id, item.c_prod,
+                                         body.product_id, body.option_id)
+    retroactive_candidates = await _find_retroactive_candidates_by_supplier_code(
+        db, company_id, invoice.supplier_id, item.c_prod, exclude_item_id=item.id)
+
+return {"item": _serialize_item(item), "retroactive_candidates": retroactive_candidates}
+```
+
+`_upsert_*`: tenta `INSERT`, captura `IntegrityError` (já existe — outra resolução ganhou a corrida)
+e simplesmente ignora (a associação já está lá, é exatamente o que este `INSERT` tentaria criar).
+
+Erros: 400 (produto/opção não encontrado, guarda-chuva, unidade obrigatória ausente), 404 (item não
+existe ou é de outra empresa), 409 (item já resolvido por outra requisição — variante do mesmo
+`conflito_concorrencia`).
+
+#### `POST /catalog/supplier-invoices/items/{item_id}/create-product`
+
+Mesmo formato do `POST /catalog/products` (reaproveita `ProductIn`) **+** os campos
+`quantidade`/`unidade`/`quantidade_por_unidade` do endpoint anterior. Internamente:
+
+```python
+product = await _create_product_row(db, company_id, body_product_in)  # ver refatoração abaixo
+# resto idêntico ao handler de /link, usando product.id como product_id
+```
+
+Response 201 inclui o produto criado (`ProductOut`) + o mesmo formato de `retroactive_candidates`.
+
+#### `POST /catalog/supplier-invoices/items/{item_id}/ignore`
+
+Sem corpo. `item.link_source = "ignorado"`, `product_id`/`option_id` continuam `None`,
+`pendente_motivo = None`. Também retorna `retroactive_candidates` (mesmo critério de busca por
+`c_ean`/`c_prod`, mas os candidatos aqui seriam marcados como ignorados também, não vinculados —
+oferece a mesma pergunta de aplicação retroativa, só que pra "ignorar em lote").
+
+#### `POST /catalog/supplier-invoices/items/retroactive/apply`
+
+Request: `{"source_item_id": 42, "item_ids": [43, 51], "action": "link" | "ignore"}`
+
+```python
+source = await _get_pending_item_scoped(db, body.source_item_id, company_id)
+# source já foi resolvido pela chamada anterior — reusa product_id/option_id/link_source dele
+for target_id in body.item_ids:
+    target = await _get_pending_item_scoped(db, target_id, company_id)
+    if target.link_source is not None:
+        continue  # já resolvido nesse meio-tempo, não é erro, só pula
+    # valida que o candidato REALMENTE bate no critério (defesa contra manipulação do client)
+    if source.c_ean and target.c_ean != source.c_ean: raise HTTPException(400, ...)
+    if not source.c_ean and (target.c_prod != source.c_prod or ...): raise HTTPException(400, ...)
+    if body.action == "ignore":
+        target.link_source = "ignorado"
+    else:
+        try:
+            await _create_stock_movement(db, company_id, StockMovementIn(tipo="entrada", ...),
+                                          current_user, product_id=source.product_id, option_id=source.option_id)
+            target.product_id, target.option_id = source.product_id, source.option_id
+            target.link_source = "manual"
+        except (HTTPException, IntegrityError):
+            continue  # este candidato específico falha, não derruba os outros — mesmo espírito de C1
+    target.pendente_motivo = None
+    await db.commit()  # por item, mesmo motivo do loop de C1 (rollback não pode expirar os outros)
+return {"aplicados": ..., "falhas": ...}
+```
+
+**Validação servidor-side do critério, não só confiar no que o client mandou em `item_ids`** — acima
+(`if source.c_ean and target.c_ean != source.c_ean`) é essencial: o endpoint nunca aplica a um item
+que não bate de verdade no critério, mesmo que o client peça (defesa contra bug de frontend OU
+manipulação direta da API) — é também o que garante o isolamento multi-tenant do Critério de
+isolamento retroativo: `_get_pending_item_scoped` já filtra por `company_id`, então um item de outra
+empresa nunca é resolvido nem como candidato nem como alvo direto.
+
+### Reaproveitamento — refatoração de `create_product`
+
+`services/catalog/main.py:2612-2668` (handler de `POST /catalog/products`) mistura validação +
+criação do `Product` + resposta HTTP. Extraio a parte de validação+criação (linhas ~2617-2668, tudo
+antes do `return`) pra uma função `_create_product_row(db, company_id, body: ProductIn) -> Product`,
+chamada pelos DOIS lugares (endpoint existente E o novo `/create-product`). O endpoint existente vira
+uma casca fina que chama a função e monta o `ProductOut`. **Risco baixo**: a função extraída não
+muda nenhum comportamento, é puro reaproveitamento de código já testado — rodar a suíte completa de
+testes de `POST /catalog/products` depois da extração é suficiente pra confirmar que nada quebrou.
+
+### Endpoints novos de busca (autocomplete de "vincular a existente")
+
+`GET /catalog/products` (`services/catalog/main.py:2322`) ganha um parâmetro novo `q: str | None`
+(filtra por `name ILIKE`/`sku`/`ean` contendo o texto) — reaproveitado tanto pelo catálogo quanto por
+este autocomplete, sem endpoint novo.
+
+`GET /catalog/options/search?q=...` — **endpoint novo**, porque hoje não existe nenhuma forma de
+listar opções fora do contexto de um grupo específico. Retorna opções de todos os grupos da empresa
+cujo `label`/`sku`/`ean` contém o texto, com o nome do grupo (`option_group.name`) junto no label
+pra dar contexto (ex: "Coca-Cola — grupo Refrigerantes"). O frontend chama os dois endpoints em
+paralelo e mistura os resultados num único combobox com um indicador visual de tipo (Produto/Opção).
+
+### Migrations
+
+Só índices — nenhuma tabela ou coluna nova:
+
+```python
+op.create_index("ix_supplier_invoice_items_c_ean", "supplier_invoice_items", ["c_ean"])
+op.create_index("ix_supplier_invoice_items_c_prod", "supplier_invoice_items", ["c_prod"])
+op.create_index("ix_supplier_invoice_items_link_source", "supplier_invoice_items", ["link_source"])
+```
+
+Justificativa: as 3 novas queries desta história (busca de candidatos retroativos por `c_ean`, por
+`c_prod`, e listagem de pendências filtrando `link_source IS NULL`) rodam com frequência bem maior
+que qualquer leitura pré-C2 dessas colunas — sem índice, cada resolução de item paga um table scan
+de `supplier_invoice_items` pra achar candidatos, e a tela "Pendências" pagaria o mesmo a cada
+carregamento.
+
+### Impacto em outros serviços
+
+Nenhum — tudo dentro de `catalog-service`, mesmo padrão de B1/C1.
+
+### Frontend
+
+- **Nova tela `PendingItemsScreen.tsx`** — nova aba "Pendências" em Estoque, ao lado de Fornecedores
+  / Notas de compra. Estrutura igual à listagem de `SupplierInvoiceScreen` (filtro server-side +
+  `Table` + `Pagination`, mesmo padrão de debounce nos campos de texto).
+- **Componente compartilhado `ResolvePendingItemPanel.tsx`** (modal ou painel lateral) — usado tanto
+  pela tela nova quanto pelo botão "Resolver" adicionado à coluna "Vínculo" de
+  `SupplierInvoiceScreen.tsx` (view "detail") pra itens pendentes. 3 seções: busca de produto/opção
+  (autocomplete combinando os dois endpoints acima), formulário de criar produto novo (reaproveita
+  os mesmos campos do formulário de Catálogo, sem duplicar componente), botão "Ignorar". Depois de
+  confirmar vincular/criar, se `retroactive_candidates` vier não-vazio, mostra um segundo passo:
+  lista dos candidatos (nota, fornecedor, quantidade) com botão explícito "Aplicar também a estes N
+  itens" — só chama `retroactive/apply` se a Empresa clicar nesse botão.
+- **`SupplierInvoiceScreen.tsx`**: coluna "Vínculo" (já existe, ver C1) ganha um botão "Resolver" ao
+  lado da Tag quando `link_source === null`. `linkStatusTag` (já existe) ganha 2 variantes novas:
+  `"manual"` → `success`, "Vinculado (manual)"; `"ignorado"` → `neutral`/`greyscale`, "Ignorado".
+- **`types.ts`**: `SupplierInvoiceDetailItem.link_source` ganha `"manual" | "ignorado"` na union.
+  Novos tipos: `PendingItem`, `RetroactiveCandidate`, `LinkItemIn`, `CreateProductFromItemIn`.
+
+### Estimativa
+
+**13 pontos** (revisado de 8, o placeholder do `docs/estudo-modulo-estoque-erp.md` — igual a C1, que
+também subiu de 5 pra 8 no próprio Tech Explorer). Justificativa: 4 endpoints novos + 1 refatoração +
+2 endpoints de busca no backend, mais 1 tela nova + 1 componente compartilhado complexo (3 modos de
+resolução + fluxo de confirmação retroativa) no frontend — escopo real é maior que C1, que teve só 1
+tela alterada (Tag/coluna) e nenhuma tela nova.
+
+### Riscos
+
+1. **Refatoração de `create_product`** — risco baixo, mas é código em produção já usado pelo
+   Catálogo; mitigação: suíte de testes existente de `POST /catalog/products` roda inalterada depois
+   da extração, qualquer regressão aparece imediatamente.
+2. **Autocomplete de opções é endpoint novo, sem precedente no serviço** — primeira vez que se lista
+   opções fora do contexto de um grupo; atenção redobrada ao isolamento multi-tenant (join com
+   `OptionGroup.company_id`, mesmo padrão de `_resolve_stock_owner`) já que é código genuinamente
+   novo, não reaproveitado.
+3. **Validação servidor-side do critério de retroatividade é obrigatória, não só confiança no
+   client** — se o endpoint `retroactive/apply` confiasse cegamente em `item_ids` vindo do frontend,
+   um bug ali (ou uma chamada direta à API) poderia aplicar uma resolução errada a um item que não
+   bate no critério. Mitigado no pseudocódigo acima com a validação explícita antes de cada
+   aplicação.
+4. **Corrida entre o passo 1 (resolver item atual) e o passo 2 (aplicar retroativo)** — um candidato
+   pode ter sido resolvido por outra pessoa nesse meio-tempo; o loop de `retroactive/apply` já trata
+   isso (`if target.link_source is not None: continue`, sem erro) — comportamento definido, não
+   uma lacuna.
 
