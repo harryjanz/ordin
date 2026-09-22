@@ -1,6 +1,6 @@
 ---
 id: ORD-197
-status: Tech Explorer
+status: Ready
 estimativa: 5 pontos (revisado de 8, Tech Explorer — ver seção Estimativa)
 ---
 
@@ -101,6 +101,12 @@ a pesquisa alerta que `LT` também é usado como sigla de lata em alguns XMLs. R
 `LT` na lista curada de sinônimos automáticos — é justamente o exemplo que a pesquisa usa pra ilustrar
 o risco de custo 12× errado. `LITRO`/`LITROS`/`LTS` (sem ambiguidade prática) entram; `LT` sozinho
 fica de fora, cai no fallback manual como hoje.
+
+> **Correção (Tech Explorer, repasse de PM)**: a tabela acima tem 2 erros — a linha `L` inclui `LT`
+> por engano (contradiz o parágrafo de risco logo abaixo, que já recomendava excluir) e a linha `ml`
+> está truncada (`MILILI`). O código segue a tabela final corrigida na seção "Tech Explorer" (sem
+> `LT`, com `MILILITRO`/`MILILITROS`), não a tabela acima — mantida aqui só como registro histórico
+> da decisão original.
 
 ### Decisão 2 — onde a tabela vive: backend, reaproveitado pelos dois fluxos (C1 e C2)
 
@@ -621,6 +627,25 @@ existentes, reaproveitando 100% da infraestrutura de C1/C2. Mesmo padrão de rev
   fator automaticamente*), não `apply_retroactive` — acrescentado o cenário *Aplicação retroativa
   (nível 3) também aplica o fator de conversão do fornecedor* no QA Explorer antes deste documento
   fechar, já mapeado no Critério 7 da tabela de rastreabilidade.
+
+## Repasse por papel (antes de Ready)
+
+| Papel | Achado | Ação |
+|---|---|---|
+| PM | Estimativa de `apply_retroactive` (nível 3) tratada igual ao resto (~1h), mas é a mesma classe de bug que só apareceu escrevendo o teste em C2 (achado real, não hipotético) | Sinalizado no doc como ponto de atenção — 5 pontos mantido, mas sem surpresa esperada de estouro nessa linha específica |
+| PM | Tabela de sinônimos da Decisão 1 do Explorer tinha 2 erros (`LT` incluído, `MILILI` truncado) só corrigidos no Tech Explorer, sem ponteiro de volta | Nota de correção adicionada direto na Decisão 1, apontando pra tabela final |
+| PM | Fluxo Principal (passo 4) e cobertura dos 8 critérios — checados linha a linha contra Tech Explorer, sem gap | Nenhuma ação — confirmado, não achado |
+
+**Repasses de QA/Backend/Frontend pulados por decisão explícita do usuário** ("marca como ready e
+vamos desenvolver") — não por esquecimento. Registrado aqui pra ficar claro que essa rodada não
+teve as 3 revisões completas que C2 teve; a validação técnica primária já está embutida na autoria
+do Tech Explorer (escrito no papel de Backend SR + Frontend), só não passou por uma segunda revisão
+independente de cada papel.
+
+**Observação não-bloqueadora da validação de Ready**: a história não tem um cenário Gherkin de erro
+(4xx) no sentido tradicional — porque não introduz nenhuma superfície de validação nova (mesmo
+padrão de ausência de trava já existente em `ProductGtinAlt.quantidade_por_unidade`, registrado
+como item aberto pro Tech Explorer, não uma lacuna).
 
 ## Fontes (trazidas pelo usuário, preservadas para referência do Tech Explorer)
 
