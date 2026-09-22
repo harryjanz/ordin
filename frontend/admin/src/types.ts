@@ -639,20 +639,82 @@ export interface SupplierInvoiceListItem {
 
 // ORD-195 (C1) — vínculo automático, resolvido na confirmação da nota
 // (não existe na prévia, só no detalhe pós-import). link_source é o nível
-// que casou (ean/gtin_alt/supplier_code); pendente_motivo só é preenchido
-// quando link_source é null.
+// que casou (ean/gtin_alt/supplier_code) ou como foi resolvido manualmente
+// (manual/ignorado, ORD-196/C2); pendente_motivo só é preenchido quando
+// link_source é null.
+export type LinkSource = "ean" | "gtin_alt" | "supplier_code" | "manual" | "ignorado";
+export type PendenteMotivo = "guarda_chuva" | "sem_estoque_iniciado" | "conflito_concorrencia";
+
 export interface SupplierInvoiceDetailItem extends SupplierInvoicePreviewItem {
+  id: number;
   product_id: number | null;
   option_id: number | null;
-  link_source: "ean" | "gtin_alt" | "supplier_code" | null;
+  link_source: LinkSource | null;
   link_label: string | null;
-  pendente_motivo: "guarda_chuva" | "sem_estoque_iniciado" | "conflito_concorrencia" | null;
+  pendente_motivo: PendenteMotivo | null;
 }
 
 export interface SupplierInvoiceDetail extends SupplierInvoiceListItem {
   chave_acesso: string;
   imported_by: number;
   itens: SupplierInvoiceDetailItem[];
+}
+
+// ORD-196 (C2) — fila de pendência com resolução manual.
+export interface PendingItem {
+  id: number;
+  supplier_invoice_id: number;
+  numero: string | null;
+  serie: string | null;
+  fornecedor_nome: string;
+  n_item: number;
+  c_prod: string | null;
+  c_ean: string | null;
+  x_prod: string;
+  unidade: string | null;
+  quantidade: number;
+  valor_unitario: number;
+  valor_total: number;
+  pendente_motivo: PendenteMotivo | null;
+}
+
+export interface RetroactiveCandidate {
+  id: number;
+  supplier_invoice_id: number;
+  numero: string | null;
+  serie: string | null;
+  fornecedor_nome: string;
+  quantidade: number;
+}
+
+export interface LinkItemIn {
+  product_id?: number | null;
+  option_id?: number | null;
+  quantidade: number;
+  unidade?: string | null;
+  quantidade_por_unidade?: number | null;
+}
+
+export interface LinkItemOut {
+  item: PendingItem;
+  retroactive_candidates: RetroactiveCandidate[];
+}
+
+export interface CreateProductFromItemOut {
+  product: Product;
+  item: PendingItem;
+  retroactive_candidates: RetroactiveCandidate[];
+}
+
+// resultado unificado de busca produto+opção no painel de resolução —
+// "type" não vem da API, é atribuído pelo frontend ao mesclar as duas
+// respostas (GET /catalog/products?q= e GET /catalog/options/search?q=).
+export interface ResolveSearchResult {
+  type: "product" | "option";
+  id: number;
+  label: string;
+  sku: string | null;
+  ean: string | null;
 }
 
 // ORD-170 — corpo de erro repassado 1:1 da Focus NFe (erros[] pode vir vazio).

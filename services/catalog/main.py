@@ -2329,6 +2329,7 @@ async def list_products(
     category_id: int | None = None,
     include_inactive: bool = False,
     stock_filter: Literal["com_estoque", "baixo", "esgotado", "indefinido"] | None = None,
+    q: str | None = None,
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id),
 ):
@@ -2338,14 +2339,18 @@ async def list_products(
     desativados (usado pela gestão de catálogo no admin). Produtos excluídos
     definitivamente (`deleted=True`) nunca aparecem, nem com include_inactive.
     `stock_filter` (A8, ORD-192) é o filtro de estado de estoque da listagem
-    do admin — independente de `include_inactive`."""
-    q = select(Product).filter_by(company_id=company_id, deleted=False)
+    do admin — independente de `include_inactive`. `q` (C2, ORD-196) filtra
+    por nome/SKU/EAN contendo o texto — usado pelo autocomplete de vínculo
+    manual de item pendente, além do próprio Catálogo."""
+    query = select(Product).filter_by(company_id=company_id, deleted=False)
     if not include_inactive:
-        q = q.filter_by(active=True)
+        query = query.filter_by(active=True)
     if category_id:
-        q = q.filter_by(category_id=category_id)
-    q = q.order_by(Product.sort_order.asc(), Product.id.asc())
-    result = await db.execute(q)
+        query = query.filter_by(category_id=category_id)
+    if q:
+        query = query.filter(or_(Product.name.ilike(f"%{q}%"), Product.sku.ilike(f"%{q}%"), Product.ean.ilike(f"%{q}%")))
+    query = query.order_by(Product.sort_order.asc(), Product.id.asc())
+    result = await db.execute(query)
     products = result.scalars().all()
 
     # A8 (ORD-192) — um único batch fetch, reaproveitado pelos dois filtros que
@@ -2601,19 +2606,12 @@ async def delete_category(
         cat.active = False
     await db.commit()
 
-@app.post(
-    "/catalog/products",
-    status_code=201,
-    response_model=ProductOut,
-    tags=["Catálogo"],
-    summary="Criar produto",
-    responses={400: {"description": "category_id não pertence à empresa"}},
-)
-async def create_product(
-    body: ProductIn,
-    db: AsyncSession = Depends(get_db),
-    company_id: int = Depends(resolve_company_id_write),
-):
+async def _create_product_row(db: AsyncSession, company_id: int, body: "ProductIn") -> "Product":
+    """Validação + criação do Product, extraído de create_product (C2, ORD-196)
+    pra ser reaproveitado por POST /catalog/products E pelo endpoint de criar
+    produto novo a partir de um item pendente de nota de compra
+    (POST /catalog/supplier-invoices/items/{item_id}/create-product). Puro
+    reaproveitamento de código já testado — nenhum comportamento mudou."""
     if body.category_id is not None:
         cat = (await db.execute(
             select(Category).filter_by(id=body.category_id, company_id=company_id, active=True, deleted=False)
@@ -2670,6 +2668,23 @@ async def create_product(
     if body.allergen_ids is not None:
         await _set_product_allergens(db, p.id, body.allergen_ids)
         await db.commit()
+    return p
+
+
+@app.post(
+    "/catalog/products",
+    status_code=201,
+    response_model=ProductOut,
+    tags=["Catálogo"],
+    summary="Criar produto",
+    responses={400: {"description": "category_id não pertence à empresa"}},
+)
+async def create_product(
+    body: ProductIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    p = await _create_product_row(db, company_id, body)
     return await _serialize_product(db, p)
 
 @app.put(
@@ -4557,9 +4572,12 @@ class SupplierInvoiceListOut(BaseModel):
 class SupplierInvoiceDetailItemOut(SupplierInvoicePreviewItemOut):
     # C1 (ORD-195) — estado do vínculo automático, só existe pós-persistência
     # (a prévia de B1 nunca teve isso, não faz sentido lá).
+    # "id" (C2, ORD-196) — id real do SupplierInvoiceItem, necessário pro
+    # painel de resolução inline chamar POST .../items/{item_id}/link etc.
+    id: int
     product_id: int | None
     option_id: int | None
-    link_source: str | None  # "ean" | "gtin_alt" | "supplier_code" | None
+    link_source: str | None  # "ean" | "gtin_alt" | "supplier_code" | "manual" | "ignorado" | None
     link_label: str | None  # nome do produto/opção vinculado, resolvido no backend
     pendente_motivo: str | None  # None | "guarda_chuva" | "sem_estoque_iniciado" | "conflito_concorrencia"
 
@@ -4577,6 +4595,95 @@ class SupplierInvoiceDetailOut(BaseModel):
     imported_at: datetime | None
     imported_by: int
     itens: list[SupplierInvoiceDetailItemOut]
+
+
+# ── Fila de pendência com resolução manual (C2, ORD-196) ────────────────────
+
+class PendingItemOut(BaseModel):
+    id: int
+    supplier_invoice_id: int
+    numero: str | None
+    serie: str | None
+    fornecedor_nome: str
+    n_item: int
+    c_prod: str | None
+    c_ean: str | None
+    x_prod: str
+    unidade: str | None
+    quantidade: float
+    valor_unitario: float
+    valor_total: float
+    pendente_motivo: str | None
+
+
+class PendingItemsOut(BaseModel):
+    items: list[PendingItemOut]
+    total: int
+
+
+class RetroactiveCandidateOut(BaseModel):
+    id: int
+    supplier_invoice_id: int
+    numero: str | None
+    serie: str | None
+    fornecedor_nome: str
+    quantidade: float
+
+
+class LinkItemIn(BaseModel):
+    product_id: int | None = None
+    option_id: int | None = None
+    quantidade: Decimal
+    unidade: str | None = None
+    quantidade_por_unidade: Decimal | None = None
+
+    @field_validator("option_id")
+    @classmethod
+    def product_xor_option(cls, v: int | None, info) -> int | None:
+        product_id = info.data.get("product_id")
+        if (product_id is None) == (v is None):
+            raise ValueError("informe exatamente um entre product_id e option_id")
+        return v
+
+
+class LinkItemOut(BaseModel):
+    item: PendingItemOut
+    retroactive_candidates: list[RetroactiveCandidateOut]
+
+
+class CreateProductFromItemIn(ProductIn):
+    quantidade: Decimal
+    unidade: str | None = None
+    quantidade_por_unidade: Decimal | None = None
+
+
+class CreateProductFromItemOut(BaseModel):
+    product: ProductOut
+    item: PendingItemOut
+    retroactive_candidates: list[RetroactiveCandidateOut]
+
+
+class IgnoreItemOut(BaseModel):
+    item: PendingItemOut
+    retroactive_candidates: list[RetroactiveCandidateOut]
+
+
+class ApplyRetroactiveIn(BaseModel):
+    source_item_id: int
+    item_ids: list[int]
+    action: Literal["link", "ignore"]
+
+
+class ApplyRetroactiveOut(BaseModel):
+    aplicados: int
+    falhas: int
+
+
+class OptionSearchOut(BaseModel):
+    id: int
+    label: str
+    sku: str | None
+    ean: str | None
 
 
 @app.post(
@@ -4798,6 +4905,50 @@ async def _get_owned_invoice(db: AsyncSession, invoice_id: int, company_id: int)
 
 
 @app.get(
+    "/catalog/supplier-invoices/pending-items",
+    response_model=PendingItemsOut,
+    tags=["Fornecedores"],
+    summary="Listar itens de nota de compra pendentes (fila de pendência, C2)",
+)
+async def list_pending_items(
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+    fornecedor: str | None = None,
+    motivo: Literal["sem_correspondencia", "guarda_chuva", "sem_estoque_iniciado", "conflito_concorrencia"] | None = None,
+    skip: int = 0,
+    limit: int = 50,
+):
+    """Registrada ANTES de /catalog/supplier-invoices/{invoice_id} de
+    propósito — mesmo motivo de reorder_products (main.py, ~linha 2687):
+    caso contrário o path param capturaria "pending-items" como invoice_id
+    (achado rodando os testes: 422 "não é um inteiro válido", não 404)."""
+    base_query = (
+        select(SupplierInvoiceItem, SupplierInvoice.numero, SupplierInvoice.serie, Supplier.nome)
+        .join(SupplierInvoice, SupplierInvoice.id == SupplierInvoiceItem.supplier_invoice_id)
+        .join(Supplier, Supplier.id == SupplierInvoice.supplier_id)
+        .filter(SupplierInvoice.company_id == company_id, SupplierInvoiceItem.link_source.is_(None))
+    )
+    if fornecedor:
+        base_query = base_query.filter(Supplier.nome.ilike(f"%{fornecedor}%"))
+    if motivo == "sem_correspondencia":
+        base_query = base_query.filter(SupplierInvoiceItem.pendente_motivo.is_(None))
+    elif motivo is not None:
+        base_query = base_query.filter(SupplierInvoiceItem.pendente_motivo == motivo)
+
+    total = (await db.execute(
+        select(func.count()).select_from(base_query.with_only_columns(SupplierInvoiceItem.id).subquery())
+    )).scalar_one()
+
+    result = await db.execute(
+        base_query.order_by(SupplierInvoiceItem.id.asc()).offset(skip).limit(limit)
+    )
+    return {
+        "items": [_serialize_pending_item(it, numero, serie, nome) for it, numero, serie, nome in result.all()],
+        "total": total,
+    }
+
+
+@app.get(
     "/catalog/supplier-invoices/{invoice_id}",
     response_model=SupplierInvoiceDetailOut,
     tags=["Fornecedores"],
@@ -4835,6 +4986,10 @@ async def get_supplier_invoice(
         "imported_by": invoice.imported_by,
         "itens": [
             {
+                # "id" (C2, ORD-196) — achado implementando o painel de resolução
+                # inline: sem o id do SupplierInvoiceItem não tem como chamar
+                # POST .../items/{item_id}/link a partir do detalhe da nota.
+                "id": it.id,
                 "n_item": it.n_item, "c_prod": it.c_prod, "c_ean": it.c_ean, "x_prod": it.x_prod,
                 "ncm": it.ncm, "cfop": it.cfop, "unidade": it.unidade,
                 "quantidade": float(it.quantidade), "valor_unitario": float(it.valor_unitario),
@@ -4878,6 +5033,386 @@ async def delete_supplier_invoice(
     await db.execute(delete(SupplierInvoiceItem).where(SupplierInvoiceItem.supplier_invoice_id == invoice.id))
     await db.delete(invoice)
     await db.commit()
+
+
+# ── Fila de pendência com resolução manual (C2, ORD-196) ────────────────────
+
+async def _get_pending_item_scoped(db: AsyncSession, item_id: int, company_id: int) -> SupplierInvoiceItem:
+    item = (await db.execute(
+        select(SupplierInvoiceItem)
+        .join(SupplierInvoice, SupplierInvoice.id == SupplierInvoiceItem.supplier_invoice_id)
+        .filter(SupplierInvoiceItem.id == item_id, SupplierInvoice.company_id == company_id)
+    )).scalars().first()
+    if not item:
+        raise HTTPException(404)
+    return item
+
+
+def _serialize_pending_item(it: SupplierInvoiceItem, numero: str | None, serie: str | None, fornecedor_nome: str) -> dict:
+    return {
+        "id": it.id, "supplier_invoice_id": it.supplier_invoice_id,
+        "numero": numero, "serie": serie, "fornecedor_nome": fornecedor_nome,
+        "n_item": it.n_item, "c_prod": it.c_prod, "c_ean": it.c_ean, "x_prod": it.x_prod,
+        "unidade": it.unidade, "quantidade": float(it.quantidade),
+        "valor_unitario": float(it.valor_unitario), "valor_total": float(it.valor_total),
+        "pendente_motivo": it.pendente_motivo,
+    }
+
+
+async def _upsert_product_gtin_alt(
+    db: AsyncSession, company_id: int, gtin: str, product_id: int | None, option_id: int | None,
+    quantidade_por_unidade: Decimal, created_by: int,
+) -> None:
+    db.add(ProductGtinAlt(
+        company_id=company_id, gtin=gtin, product_id=product_id, option_id=option_id,
+        quantidade_por_unidade=quantidade_por_unidade, created_by=created_by,
+    ))
+    try:
+        await db.commit()
+    except IntegrityError:
+        # já existe — outra resolução ganhou a corrida, a associação já está lá,
+        # que é exatamente o que este INSERT tentaria criar.
+        await db.rollback()
+
+
+async def _upsert_supplier_product_code(
+    db: AsyncSession, company_id: int, supplier_id: int, c_prod: str,
+    product_id: int | None, option_id: int | None, created_by: int,
+) -> None:
+    db.add(SupplierProductCode(
+        company_id=company_id, supplier_id=supplier_id, c_prod=c_prod,
+        product_id=product_id, option_id=option_id, created_by=created_by,
+    ))
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+
+
+async def _find_retroactive_candidates_by_ean(
+    db: AsyncSession, company_id: int, c_ean: str, *, exclude_item_id: int,
+) -> list[dict]:
+    # GTIN de embalagem é global entre fornecedores (nível 2) — sem filtro de
+    # supplier_id aqui, de propósito, mesma regra de C1.
+    rows = (await db.execute(
+        select(SupplierInvoiceItem, SupplierInvoice.numero, SupplierInvoice.serie, Supplier.nome)
+        .join(SupplierInvoice, SupplierInvoice.id == SupplierInvoiceItem.supplier_invoice_id)
+        .join(Supplier, Supplier.id == SupplierInvoice.supplier_id)
+        .filter(
+            SupplierInvoice.company_id == company_id,
+            SupplierInvoiceItem.link_source.is_(None),
+            SupplierInvoiceItem.c_ean == c_ean,
+            SupplierInvoiceItem.id != exclude_item_id,
+        )
+    )).all()
+    return [
+        {"id": it.id, "supplier_invoice_id": it.supplier_invoice_id, "numero": numero, "serie": serie,
+         "fornecedor_nome": nome, "quantidade": float(it.quantidade)}
+        for it, numero, serie, nome in rows
+    ]
+
+
+async def _find_retroactive_candidates_by_supplier_code(
+    db: AsyncSession, company_id: int, supplier_id: int, c_prod: str, *, exclude_item_id: int,
+) -> list[dict]:
+    # Código do fornecedor é escopado POR fornecedor (nível 3) — supplier_id
+    # aqui é sempre o do item de ORIGEM: um candidato só entra se pertencer a
+    # uma nota do MESMO fornecedor, porque é exatamente esse o critério que
+    # faz supplier_product_code (chave (company_id, supplier_id, c_prod))
+    # casar automaticamente depois — candidato de outro fornecedor nunca
+    # bateria mesmo que o cProd seja igual por coincidência.
+    rows = (await db.execute(
+        select(SupplierInvoiceItem, SupplierInvoice.numero, SupplierInvoice.serie, Supplier.nome)
+        .join(SupplierInvoice, SupplierInvoice.id == SupplierInvoiceItem.supplier_invoice_id)
+        .join(Supplier, Supplier.id == SupplierInvoice.supplier_id)
+        .filter(
+            SupplierInvoice.company_id == company_id,
+            SupplierInvoice.supplier_id == supplier_id,
+            SupplierInvoiceItem.link_source.is_(None),
+            SupplierInvoiceItem.c_prod == c_prod,
+            SupplierInvoiceItem.id != exclude_item_id,
+        )
+    )).all()
+    return [
+        {"id": it.id, "supplier_invoice_id": it.supplier_invoice_id, "numero": numero, "serie": serie,
+         "fornecedor_nome": nome, "quantidade": float(it.quantidade)}
+        for it, numero, serie, nome in rows
+    ]
+
+
+async def _retroactive_candidates_for(db: AsyncSession, company_id: int, item: SupplierInvoiceItem) -> list[dict]:
+    """Mesma regra binária usada na hora de gravar a associação (ver Tech
+    Explorer de ORD-196): item com c_ean é candidato a nível 2 (busca global),
+    item sem c_ean mas com c_prod é candidato a nível 3 (busca por fornecedor),
+    item sem nenhum dos dois não tem candidato possível."""
+    if item.c_ean:
+        return await _find_retroactive_candidates_by_ean(db, company_id, item.c_ean, exclude_item_id=item.id)
+    if item.c_prod:
+        invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+        return await _find_retroactive_candidates_by_supplier_code(
+            db, company_id, invoice.supplier_id, item.c_prod, exclude_item_id=item.id,
+        )
+    return []
+
+
+@app.get(
+    "/catalog/options/search",
+    response_model=list[OptionSearchOut],
+    tags=["Catálogo"],
+    summary="Buscar opções por nome/SKU/EAN (autocomplete de vínculo manual, C2)",
+)
+async def search_options(
+    q: str,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    """Primeira vez que se lista opções fora do contexto de um grupo específico
+    — não existia nenhuma forma de fazer isso antes desta história. Isolamento
+    multi-tenant via join com OptionGroup.company_id, mesmo padrão de
+    _resolve_stock_owner (Option não tem company_id direto)."""
+    result = await db.execute(
+        select(Option, OptionGroup.name)
+        .join(OptionGroup, OptionGroup.id == Option.option_group_id)
+        .filter(
+            OptionGroup.company_id == company_id,
+            or_(Option.label.ilike(f"%{q}%"), Option.sku.ilike(f"%{q}%"), Option.ean.ilike(f"%{q}%")),
+        )
+        .limit(20)
+    )
+    return [
+        {"id": o.id, "label": f"{o.label} — grupo {group_name}", "sku": o.sku, "ean": o.ean}
+        for o, group_name in result.all()
+    ]
+
+
+@app.post(
+    "/catalog/supplier-invoices/items/{item_id}/link",
+    response_model=LinkItemOut,
+    tags=["Fornecedores"],
+    summary="Vincular item pendente a um produto/opção existente (C2)",
+    responses={
+        400: {"description": "produto/opção não encontrado, guarda-chuva, unidade obrigatória ausente ou item já resolvido"},
+        404: {"description": "item não existe ou é de outra empresa"},
+    },
+)
+async def link_pending_item(
+    item_id: int,
+    body: LinkItemIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    item = await _get_pending_item_scoped(db, item_id, company_id)
+    if item.link_source is not None:
+        raise HTTPException(400, detail="item já resolvido")
+    if item.c_ean and body.quantidade_por_unidade is None:
+        raise HTTPException(400, detail="quantidade_por_unidade é obrigatória pra item com GTIN de embalagem")
+
+    await _create_stock_movement(
+        db, company_id,
+        StockMovementIn(
+            tipo="entrada", quantidade=body.quantidade, unidade=body.unidade,
+            motivo=f"Resolução manual — nota de compra #{item.supplier_invoice_id}",
+        ),
+        current_user, product_id=body.product_id, option_id=body.option_id,
+    )
+
+    item.product_id, item.option_id = body.product_id, body.option_id
+    item.link_source = "manual"
+    item.pendente_motivo = None
+    await db.commit()
+
+    retroactive_candidates: list[dict] = []
+    created_by = int(current_user.sub)
+    if item.c_ean:
+        await _upsert_product_gtin_alt(
+            db, company_id, item.c_ean, body.product_id, body.option_id,
+            body.quantidade_por_unidade, created_by,
+        )
+        retroactive_candidates = await _find_retroactive_candidates_by_ean(
+            db, company_id, item.c_ean, exclude_item_id=item.id,
+        )
+    elif item.c_prod:
+        invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+        await _upsert_supplier_product_code(
+            db, company_id, invoice.supplier_id, item.c_prod, body.product_id, body.option_id, created_by,
+        )
+        retroactive_candidates = await _find_retroactive_candidates_by_supplier_code(
+            db, company_id, invoice.supplier_id, item.c_prod, exclude_item_id=item.id,
+        )
+
+    invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+    supplier = await db.get(Supplier, invoice.supplier_id)
+    return {
+        "item": _serialize_pending_item(item, invoice.numero, invoice.serie, supplier.nome),
+        "retroactive_candidates": retroactive_candidates,
+    }
+
+
+@app.post(
+    "/catalog/supplier-invoices/items/{item_id}/create-product",
+    response_model=CreateProductFromItemOut,
+    status_code=201,
+    tags=["Fornecedores"],
+    summary="Criar produto novo a partir de um item pendente e vincular (C2)",
+)
+async def create_product_from_pending_item(
+    item_id: int,
+    body: CreateProductFromItemIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    item = await _get_pending_item_scoped(db, item_id, company_id)
+    if item.link_source is not None:
+        raise HTTPException(400, detail="item já resolvido")
+    if item.c_ean and body.quantidade_por_unidade is None:
+        raise HTTPException(400, detail="quantidade_por_unidade é obrigatória pra item com GTIN de embalagem")
+
+    product = await _create_product_row(db, company_id, body)
+
+    await _create_stock_movement(
+        db, company_id,
+        StockMovementIn(
+            tipo="entrada", quantidade=body.quantidade, unidade=body.unidade,
+            motivo=f"Resolução manual (produto novo) — nota de compra #{item.supplier_invoice_id}",
+        ),
+        current_user, product_id=product.id, option_id=None,
+    )
+
+    item.product_id, item.option_id = product.id, None
+    item.link_source = "manual"
+    item.pendente_motivo = None
+    await db.commit()
+
+    retroactive_candidates: list[dict] = []
+    created_by = int(current_user.sub)
+    if item.c_ean:
+        await _upsert_product_gtin_alt(
+            db, company_id, item.c_ean, product.id, None, body.quantidade_por_unidade, created_by,
+        )
+        retroactive_candidates = await _find_retroactive_candidates_by_ean(
+            db, company_id, item.c_ean, exclude_item_id=item.id,
+        )
+    elif item.c_prod:
+        invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+        await _upsert_supplier_product_code(
+            db, company_id, invoice.supplier_id, item.c_prod, product.id, None, created_by,
+        )
+        retroactive_candidates = await _find_retroactive_candidates_by_supplier_code(
+            db, company_id, invoice.supplier_id, item.c_prod, exclude_item_id=item.id,
+        )
+
+    invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+    supplier = await db.get(Supplier, invoice.supplier_id)
+    return {
+        "product": await _serialize_product(db, product),
+        "item": _serialize_pending_item(item, invoice.numero, invoice.serie, supplier.nome),
+        "retroactive_candidates": retroactive_candidates,
+    }
+
+
+@app.post(
+    "/catalog/supplier-invoices/items/{item_id}/ignore",
+    response_model=IgnoreItemOut,
+    tags=["Fornecedores"],
+    summary="Marcar item pendente como 'não controla estoque' (C2)",
+)
+async def ignore_pending_item(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    item = await _get_pending_item_scoped(db, item_id, company_id)
+    if item.link_source is not None:
+        raise HTTPException(400, detail="item já resolvido")
+
+    item.link_source = "ignorado"
+    item.pendente_motivo = None
+    await db.commit()
+
+    retroactive_candidates = await _retroactive_candidates_for(db, company_id, item)
+
+    invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+    supplier = await db.get(Supplier, invoice.supplier_id)
+    return {
+        "item": _serialize_pending_item(item, invoice.numero, invoice.serie, supplier.nome),
+        "retroactive_candidates": retroactive_candidates,
+    }
+
+
+@app.post(
+    "/catalog/supplier-invoices/items/retroactive/apply",
+    response_model=ApplyRetroactiveOut,
+    tags=["Fornecedores"],
+    summary="Aplicar a mesma resolução a outros itens pendentes com o mesmo critério (C2)",
+)
+async def apply_retroactive(
+    body: ApplyRetroactiveIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    source = await _get_pending_item_scoped(db, body.source_item_id, company_id)
+    aplicados, falhas = 0, 0
+    for target_id in body.item_ids:
+        target = await _get_pending_item_scoped(db, target_id, company_id)
+        if target.link_source is not None:
+            continue  # já resolvido nesse meio-tempo, não é erro, só pula
+
+        # Validação servidor-side do critério — nunca confia cegamente no que o
+        # client mandou em item_ids (defesa contra bug de frontend ou
+        # manipulação direta da API). Também é o que garante isolamento
+        # multi-tenant: _get_pending_item_scoped já filtra por company_id.
+        if source.c_ean:
+            if target.c_ean != source.c_ean:
+                raise HTTPException(400, detail="item candidato não bate no critério de GTIN de embalagem")
+        else:
+            source_invoice = await db.get(SupplierInvoice, source.supplier_invoice_id)
+            target_invoice = await db.get(SupplierInvoice, target.supplier_invoice_id)
+            if target.c_prod != source.c_prod or target_invoice.supplier_id != source_invoice.supplier_id:
+                raise HTTPException(400, detail="item candidato não bate no critério de código do fornecedor")
+
+        if body.action == "ignore":
+            target.link_source = "ignorado"
+            aplicados += 1
+        else:
+            # nível 2 (GTIN de embalagem) precisa multiplicar pela conversão
+            # já gravada pra ESTE gtin — mesma regra usada pro item de origem
+            # (achado escrevendo os testes: usar target.quantidade puro
+            # subestimaria o estoque de todo candidato retroativo com fardo).
+            quantidade_lancar = target.quantidade
+            if target.c_ean:
+                alt = (await db.execute(
+                    select(ProductGtinAlt).filter_by(company_id=company_id, gtin=target.c_ean)
+                )).scalars().first()
+                if alt:
+                    quantidade_lancar = target.quantidade * alt.quantidade_por_unidade
+            try:
+                await _create_stock_movement(
+                    db, company_id,
+                    StockMovementIn(
+                        tipo="entrada", quantidade=quantidade_lancar,
+                        motivo=f"Aplicação retroativa — nota de compra #{target.supplier_invoice_id}",
+                    ),
+                    current_user, product_id=source.product_id, option_id=source.option_id,
+                )
+                target.product_id, target.option_id = source.product_id, source.option_id
+                target.link_source = "manual"
+                aplicados += 1
+            except (HTTPException, IntegrityError):
+                # este candidato específico falha (ex: guarda-chuva, corrida) —
+                # não derruba os outros, mesmo espírito do loop de C1.
+                await db.rollback()
+                falhas += 1
+                continue
+        target.pendente_motivo = None
+        # commit por item, não um só no final — mesmo motivo do loop de C1: um
+        # rollback (acima) expira a sessão inteira, então cada item precisa
+        # estar persistido antes do próximo ser processado.
+        await db.commit()
+
+    return {"aplicados": aplicados, "falhas": falhas}
 
 
 @app.get("/health", response_model=HealthOut, tags=["Catálogo"], summary="Healthcheck")

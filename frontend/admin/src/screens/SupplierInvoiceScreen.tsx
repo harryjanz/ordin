@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, DateInput, InputBase, Pagination, Tag, Upload, UploadListFiles, makeToast, type UploadFile } from "design-system";
+import { Alert, Button, DateInput, InputBase, Modal, Pagination, Tag, Upload, UploadListFiles, makeToast, type UploadFile } from "design-system";
 import api from "../api";
 import { listUsers } from "../api/companies";
 import ConfirmDialog from "../components/ConfirmDialog";
+import ResolvePendingItemPanel from "../components/ResolvePendingItemPanel";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { useStore } from "../store";
-import type { SupplierInvoiceDetail, SupplierInvoiceDetailItem, SupplierInvoiceListItem, SupplierInvoicePreview, SupplierInvoicePreviewItem, User } from "../types";
+import type { PendingItem, SupplierInvoiceDetail, SupplierInvoiceDetailItem, SupplierInvoiceListItem, SupplierInvoicePreview, SupplierInvoicePreviewItem, User } from "../types";
 import styles from "./SupplierInvoiceScreen.module.scss";
 
 const XML_TYPES = ["text/xml", "application/xml"];
@@ -48,11 +49,14 @@ const itemColumns: TableColumn<SupplierInvoicePreviewItem>[] = [
 // 3 pendente_motivo (null, guarda_chuva, sem_estoque_iniciado) resolvem
 // sozinhos com uma ação manual esperada (cadastrar produto, corrigir
 // guarda-chuva, fazer a 1ª entrada de estoque), não indicam nada quebrado.
-function linkStatusTag(item: SupplierInvoiceDetailItem): { variant: "success" | "warning" | "error"; label: string } {
+function linkStatusTag(item: SupplierInvoiceDetailItem): { variant: "success" | "warning" | "error" | "neutral"; label: string } {
   switch (item.link_source) {
     case "ean": return { variant: "success", label: "Vinculado (EAN)" };
     case "gtin_alt": return { variant: "success", label: "Vinculado (embalagem)" };
     case "supplier_code": return { variant: "success", label: "Vinculado (fornecedor)" };
+    // C2 (ORD-196) — resolução manual, distinta dos 3 valores automáticos de C1.
+    case "manual": return { variant: "success", label: "Vinculado (manual)" };
+    case "ignorado": return { variant: "neutral", label: "Ignorado" };
   }
   switch (item.pendente_motivo) {
     case "guarda_chuva": return { variant: "warning", label: "Pendente — produto guarda-chuva" };
@@ -124,6 +128,10 @@ export default function SupplierInvoiceScreen() {
 
   const [detailTarget, setDetailTarget] = useState<SupplierInvoiceDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // C2 (ORD-196) — resolução via Modal, mesmo padrão da tela "Pendências"
+  // (achado do usuário testando ao vivo: consistência visual entre as duas
+  // telas vale mais que reaproveitar Table.renderExpanded).
+  const [resolveItemTarget, setResolveItemTarget] = useState<SupplierInvoiceDetailItem | null>(null);
   const [removeTarget, setRemoveTarget] = useState<SupplierInvoiceListItem | null>(null);
 
   // Resolve imported_by (id de usuário) pro nome real — mesmo padrão de
@@ -278,6 +286,26 @@ export default function SupplierInvoiceScreen() {
     }
   }
 
+  // Converte o item da nota (formato de SupplierInvoiceDetailItem) pro
+  // formato PendingItem que ResolvePendingItemPanel espera — os dois vêm de
+  // endpoints diferentes (detalhe da nota vs. fila de pendências), mas o
+  // painel de resolução é o mesmo componente nos dois lugares.
+  function toPendingItem(item: SupplierInvoiceDetailItem, invoice: SupplierInvoiceDetail): PendingItem {
+    return {
+      id: item.id, supplier_invoice_id: invoice.id, numero: invoice.numero, serie: invoice.serie,
+      fornecedor_nome: invoice.fornecedor_nome, n_item: item.n_item, c_prod: item.c_prod, c_ean: item.c_ean,
+      x_prod: item.x_prod, unidade: item.unidade, quantidade: item.quantidade, valor_unitario: item.valor_unitario,
+      valor_total: item.valor_total, pendente_motivo: item.pendente_motivo,
+    };
+  }
+
+  async function handleItemResolved() {
+    setResolveItemTarget(null);
+    if (!detailTarget) return;
+    const r = await api.get<SupplierInvoiceDetail>(`/catalog/supplier-invoices/${detailTarget.id}`, catalogParams());
+    setDetailTarget(r.data);
+  }
+
   async function confirmRemove() {
     if (!removeTarget) return;
     try {
@@ -341,11 +369,18 @@ export default function SupplierInvoiceScreen() {
               rows={detailTarget.itens}
               rowKey={(i) => i.n_item}
               emptyMessage="Nenhum item nesta nota."
+              onRowClick={(i) => { if (i.link_source === null) setResolveItemTarget(i); }}
             />
 
             <div className={styles.previewTotal}>Total: {fmtBRL(detailTarget.valor_total)}</div>
           </>
         )}
+
+        <Modal open={resolveItemTarget !== null} onClose={() => setResolveItemTarget(null)} size="large" width={720}>
+          {resolveItemTarget && detailTarget && (
+            <ResolvePendingItemPanel item={toPendingItem(resolveItemTarget, detailTarget)} onResolved={handleItemResolved} />
+          )}
+        </Modal>
       </>
     );
   }
