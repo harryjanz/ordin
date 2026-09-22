@@ -203,6 +203,28 @@ class Product(Base):
 STOCK_UNITS = ("un", "kg", "g", "L", "ml")  # mesmo racional já usado pra CFOP (linha 155):
                                              # texto simples, validado na aplicação, sem tabela
 
+# ORD-197 — uCom/uTrib da NF-e é texto livre, sem enum fechado do SEFAZ pra
+# operação nacional (a única tabela oficial é pra comércio exterior). Tabela
+# curada e pequena, só sinônimos sem ambiguidade real — decisão explícita de
+# excluir "LT" (litro OU lata, dependendo do fornecedor) mesmo sendo sinônimo
+# óbvio de litro, porque a pesquisa que embasou a decisão usa exatamente esse
+# caso pra ilustrar o risco de custo 12x errado se resolvido errado sozinho.
+UNIT_SYNONYMS: dict[str, str] = {
+    "UN": "un", "UND": "un", "UNI": "un", "UNID": "un", "UNIT": "un", "UNIDAD": "un",
+    "KG": "kg", "KGS": "kg", "KILO": "kg", "QUILO": "kg", "QUILOG": "kg",
+    "G": "g", "GR": "g", "GRS": "g", "GRAMA": "g", "GRAMAS": "g",
+    "L": "L", "LTS": "L", "LITRO": "L", "LITROS": "L",
+    "ML": "ml", "MILILITRO": "ml", "MILILITROS": "ml",
+}
+
+def normalize_unit(raw: str | None) -> str | None:
+    """Sinônimo conhecido pra uma STOCK_UNIT, ou None se não reconhecido —
+    nunca lança exceção, nunca adivinha. Sigla ambígua (ex: "LT" sozinha)
+    cai aqui como None de propósito, não por lacuna na tabela."""
+    if raw is None:
+        return None
+    return UNIT_SYNONYMS.get(raw.strip().upper())
+
 # Achado do usuário (feedback em browser): sem limite, o histórico de
 # movimentações cresce sem fim — produto de giro alto acumula centenas de
 # linhas ao longo de meses. 20 mais recentes cobre o caso de uso real (ver
@@ -386,6 +408,10 @@ class SupplierProductCode(Base):
     c_prod      = Column(String(60), nullable=False)
     product_id  = Column(Integer, ForeignKey("products.id"), nullable=True)
     option_id   = Column(Integer, ForeignKey("options.id"), nullable=True)
+    # ORD-197 — nullable (diferente de ProductGtinAlt.quantidade_por_unidade,
+    # NOT NULL): a maioria das linhas de nível 3 nunca tem fator, é opcional
+    # de verdade, não "sempre preenchido menos em caso raro".
+    quantidade_por_unidade = Column(Numeric(12, 3), nullable=True)
     created_by  = Column(Integer, nullable=False)
     created_at  = Column(DateTime, default=datetime.utcnow)
 
@@ -4382,7 +4408,7 @@ def _parse_nfe(raw: bytes) -> _ParsedInvoice:
             x_prod=d.prod.xProd,
             ncm=d.prod.NCM,
             cfop=d.prod.CFOP,
-            unidade=d.prod.uCom,
+            unidade=normalize_unit(d.prod.uCom) or d.prod.uCom,  # ORD-197 — fallback preserva o texto cru quando não reconhecido
             quantidade=Decimal(d.prod.qCom),
             valor_unitario=Decimal(d.prod.vUnCom),
             valor_total=Decimal(d.prod.vProd),
@@ -4485,7 +4511,10 @@ async def _match_supplier_invoice_item(
             )
         )).scalars().first()
         if spc:
-            return ("supplier_code", spc.product_id, spc.option_id, item.quantidade)
+            # ORD-197 — fator implícito 1 quando a linha não tem conversão
+            # gravada (comportamento idêntico ao anterior a esta história).
+            fator = spc.quantidade_por_unidade or Decimal(1)
+            return ("supplier_code", spc.product_id, spc.option_id, item.quantidade * fator)
 
     return (None, None, None, item.quantidade)
 
@@ -5098,11 +5127,13 @@ async def _upsert_product_gtin_alt(
 
 async def _upsert_supplier_product_code(
     db: AsyncSession, company_id: int, supplier_id: int, c_prod: str,
-    product_id: int | None, option_id: int | None, created_by: int,
+    product_id: int | None, option_id: int | None,
+    quantidade_por_unidade: Decimal | None, created_by: int,
 ) -> None:
     db.add(SupplierProductCode(
         company_id=company_id, supplier_id=supplier_id, c_prod=c_prod,
-        product_id=product_id, option_id=option_id, created_by=created_by,
+        product_id=product_id, option_id=option_id,
+        quantidade_por_unidade=quantidade_por_unidade, created_by=created_by,
     ))
     try:
         await db.commit()
@@ -5297,7 +5328,8 @@ async def link_pending_item(
     elif item.c_prod:
         invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
         await _upsert_supplier_product_code(
-            db, company_id, invoice.supplier_id, item.c_prod, body.product_id, body.option_id, created_by,
+            db, company_id, invoice.supplier_id, item.c_prod, body.product_id, body.option_id,
+            body.quantidade_por_unidade, created_by,
         )
         retroactive_candidates = await _find_retroactive_candidates_by_supplier_code(
             db, company_id, invoice.supplier_id, item.c_prod, exclude_item_id=item.id,
@@ -5359,7 +5391,8 @@ async def create_product_from_pending_item(
     elif item.c_prod:
         invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
         await _upsert_supplier_product_code(
-            db, company_id, invoice.supplier_id, item.c_prod, product.id, None, created_by,
+            db, company_id, invoice.supplier_id, item.c_prod, product.id, None,
+            body.quantidade_por_unidade, created_by,
         )
         retroactive_candidates = await _find_retroactive_candidates_by_supplier_code(
             db, company_id, invoice.supplier_id, item.c_prod, exclude_item_id=item.id,
@@ -5423,7 +5456,8 @@ async def create_option_from_pending_item(
     elif item.c_prod:
         invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
         await _upsert_supplier_product_code(
-            db, company_id, invoice.supplier_id, item.c_prod, None, option.id, created_by,
+            db, company_id, invoice.supplier_id, item.c_prod, None, option.id,
+            body.quantidade_por_unidade, created_by,
         )
         retroactive_candidates = await _find_retroactive_candidates_by_supplier_code(
             db, company_id, invoice.supplier_id, item.c_prod, exclude_item_id=item.id,
@@ -5516,6 +5550,18 @@ async def apply_retroactive(
                 )).scalars().first()
                 if alt:
                     quantidade_lancar = target.quantidade * alt.quantidade_por_unidade
+            elif target.c_prod:
+                # ORD-197 — mesma regra do nível 2 acima, agora pro nível 3.
+                # target_invoice já foi buscado no bloco de validação do
+                # critério (só roda quando source.c_ean é falsy, que é
+                # exatamente o caso em que target.c_prod está setado aqui).
+                spc = (await db.execute(
+                    select(SupplierProductCode).filter_by(
+                        company_id=company_id, supplier_id=target_invoice.supplier_id, c_prod=target.c_prod,
+                    )
+                )).scalars().first()
+                if spc and spc.quantidade_por_unidade:
+                    quantidade_lancar = target.quantidade * spc.quantidade_por_unidade
             try:
                 await _create_stock_movement(
                     db, company_id,

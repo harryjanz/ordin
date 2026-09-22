@@ -144,7 +144,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
         [selected.type === "product" ? "product_id" : "option_id"]: selected.id,
         quantidade: quantidadeFinal,
         unidade: showUnidade ? (unidade || undefined) : undefined,
-        quantidade_por_unidade: item.c_ean ? quantidadePorUnidade : undefined,
+        quantidade_por_unidade: showQuantidadePorUnidade ? (quantidadePorUnidade ?? undefined) : undefined,
       };
       const r = await api.post<LinkItemOut>(
         `/catalog/supplier-invoices/items/${item.id}/link`, body, catalogParams(),
@@ -166,7 +166,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
         name: novoNome, price: novoPreco,
         category_id: novoCategoriaId ? Number(novoCategoriaId) : undefined,
         quantidade: quantidadeFinal, unidade: showUnidade ? (unidade || undefined) : undefined,
-        quantidade_por_unidade: item.c_ean ? quantidadePorUnidade : undefined,
+        quantidade_por_unidade: showQuantidadePorUnidade ? (quantidadePorUnidade ?? undefined) : undefined,
       };
       const r = await api.post<CreateProductFromItemOut>(
         `/catalog/supplier-invoices/items/${item.id}/create-product`, body, catalogParams(),
@@ -187,7 +187,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
       const body = {
         option_group_id: Number(novoOptionGroupId), label: novoNome,
         quantidade: quantidadeFinal, unidade: showUnidade ? (unidade || undefined) : undefined,
-        quantidade_por_unidade: item.c_ean ? quantidadePorUnidade : undefined,
+        quantidade_por_unidade: showQuantidadePorUnidade ? (quantidadePorUnidade ?? undefined) : undefined,
       };
       const r = await api.post<CreateOptionFromItemOut>(
         `/catalog/supplier-invoices/items/${item.id}/create-option`, body, catalogParams(),
@@ -247,7 +247,11 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
   // nascer) — sempre precisa de unidade. "Vincular a existente" depende do
   // destino escolhido (ver useEffect acima), não do item pendente original.
   const showUnidade = mode === "criar" || destinationNeedsUnidade;
-  const showQuantidadePorUnidade = Boolean(item.c_ean);
+  // ORD-197 — item com c_prod (nível 3, código do fornecedor) também pode
+  // ter fator de conversão, mas é OPCIONAL (diferente de c_ean/nível 2, que
+  // é obrigatório): backend não trava a resolução se vier vazio.
+  const showQuantidadePorUnidade = Boolean(item.c_ean || item.c_prod);
+  const requireQuantidadePorUnidade = Boolean(item.c_ean);
   // Achado testando ao vivo (fardo de 5 x 12 lançou 5, não 60): "Quantidade"
   // é o que veio na NOTA (embalagens recebidas — ex: 5 fardos), nunca o que
   // deve entrar no estoque quando há conversão. O valor de fato lançado
@@ -311,7 +315,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
           />
           {showQuantidadePorUnidade && (
             <NumberInput
-              label="Quantidade por unidade (ex: latas por fardo)"
+              label={requireQuantidadePorUnidade ? "Quantidade por unidade (ex: latas por fardo)" : "Quantidade por unidade (opcional — ex: latas por fardo)"}
               value={quantidadePorUnidade}
               onChange={(v: number) => setQuantidadePorUnidade(v)}
             />
@@ -333,7 +337,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
           )}
           <Button
             onClick={confirmVincular}
-            disabled={saving || checkingDestination || !selected || quantidadeFinal == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
+            disabled={saving || checkingDestination || !selected || quantidadeFinal == null || (requireQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
             loading={saving}
           >
             Vincular
@@ -380,7 +384,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
           />
           {showQuantidadePorUnidade && (
             <NumberInput
-              label="Quantidade por unidade (ex: latas por fardo)"
+              label={requireQuantidadePorUnidade ? "Quantidade por unidade (ex: latas por fardo)" : "Quantidade por unidade (opcional — ex: latas por fardo)"}
               value={quantidadePorUnidade}
               onChange={(v: number) => setQuantidadePorUnidade(v)}
             />
@@ -402,7 +406,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
           {criarTipo === "produto" ? (
             <Button
               onClick={confirmCriarProduto}
-              disabled={saving || !novoNome.trim() || novoPreco == null || quantidadeFinal == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
+              disabled={saving || !novoNome.trim() || novoPreco == null || quantidadeFinal == null || (requireQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
               loading={saving}
             >
               Criar produto e vincular
@@ -410,7 +414,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
           ) : (
             <Button
               onClick={confirmCriarOpcao}
-              disabled={saving || !novoOptionGroupId || !novoNome.trim() || quantidadeFinal == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
+              disabled={saving || !novoOptionGroupId || !novoNome.trim() || quantidadeFinal == null || (requireQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
               loading={saving}
             >
               Criar opção e vincular
