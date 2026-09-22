@@ -3,6 +3,7 @@ import { Alert, Button, Dropdown, InputBase, NumberInput, Tabs, Tab, Tag, makeTo
 import api from "../api";
 import { useCatalogParams } from "../lib/catalogParams";
 import { parseApiError } from "../lib/apiErrors";
+import { STOCK_UNIT_OPTIONS } from "../lib/stockUnits";
 import type { Category, CreateProductFromItemOut, LinkItemOut, PendingItem, ResolveSearchResult, RetroactiveCandidate } from "../types";
 import ConfirmDialog from "./ConfirmDialog";
 import styles from "./ResolvePendingItemPanel.module.scss";
@@ -41,9 +42,42 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<ResolveSearchResult | null>(null);
   const [quantidade, setQuantidade] = useState<number | null>(item.quantidade);
-  const [unidade, setUnidade] = useState<string | null>(item.unidade);
+  // Achado testando ao vivo: item.unidade vem da NOTA ("UN", maiúsculo,
+  // texto livre do XML) — o backend só aceita o conjunto fechado de
+  // STOCK_UNITS ("un" minúsculo etc.), rejeitava com "unidade inválida".
+  // Normaliza case-insensitive contra as opções válidas; sem match, começa
+  // vazio e força o usuário a escolher no Dropdown (evita digitação livre).
+  const [unidade, setUnidade] = useState<string | null>(
+    STOCK_UNIT_OPTIONS.find((o) => o.value.toLowerCase() === item.unidade?.toLowerCase())?.value ?? null,
+  );
   const [quantidadePorUnidade, setQuantidadePorUnidade] = useState<number | null>(null);
+  // Achado testando ao vivo (guaraná vinculado a uma opção sem estoque
+  // ainda): `pendente_motivo === "sem_estoque_iniciado"` descreve por que o
+  // casamento AUTOMÁTICO do item original falhou — não diz nada sobre se o
+  // DESTINO escolhido manualmente aqui já tem estoque. São coisas
+  // independentes: uma opção nova, nunca usada antes, pode receber um
+  // vínculo manual de um item que ficou pendente por outro motivo qualquer
+  // (ex: "sem correspondência"), e ainda assim ser a primeira movimentação
+  // dela. Só dá pra saber checando o destino de verdade.
+  const [destinationNeedsUnidade, setDestinationNeedsUnidade] = useState(false);
+  const [checkingDestination, setCheckingDestination] = useState(false);
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    if (!selected) {
+      setDestinationNeedsUnidade(false);
+      return;
+    }
+    setCheckingDestination(true);
+    const path = selected.type === "product"
+      ? `/catalog/products/${selected.id}/stock`
+      : `/catalog/options/${selected.id}/stock`;
+    api.get(path, catalogParams())
+      .then((r) => setDestinationNeedsUnidade(!r.data.has_stock_item))
+      .catch(() => setDestinationNeedsUnidade(false))
+      .finally(() => setCheckingDestination(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   useEffect(() => {
     clearTimeout(debounceTimer.current);
@@ -174,7 +208,10 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
     onResolved();
   }
 
-  const showUnidade = item.pendente_motivo === "sem_estoque_iniciado";
+  // "Criar produto novo" é sempre primeira movimentação (produto acabou de
+  // nascer) — sempre precisa de unidade. "Vincular a existente" depende do
+  // destino escolhido (ver useEffect acima), não do item pendente original.
+  const showUnidade = mode === "criar" || destinationNeedsUnidade;
   const showQuantidadePorUnidade = Boolean(item.c_ean);
 
   return (
@@ -232,12 +269,18 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
               onChange={(v: number) => setQuantidadePorUnidade(v)}
             />
           )}
-          {showUnidade && (
-            <InputBase label="Unidade de estoque (ex: un, kg)" value={unidade ?? ""} onChange={(e) => setUnidade(e.target.value)} />
+          {checkingDestination && <div className={styles.hint}>Verificando estoque do destino…</div>}
+          {showUnidade && !checkingDestination && (
+            <Dropdown
+              label="Unidade de estoque — primeira movimentação deste item"
+              value={STOCK_UNIT_OPTIONS.find((o) => o.value === unidade) ?? null}
+              onValueSelected={(opt) => setUnidade(opt.value)}
+              options={STOCK_UNIT_OPTIONS}
+            />
           )}
           <Button
             onClick={confirmVincular}
-            disabled={saving || !selected || quantidade == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
+            disabled={saving || checkingDestination || !selected || quantidade == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
             loading={saving}
           >
             Vincular
@@ -264,7 +307,12 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
             />
           )}
           {showUnidade && (
-            <InputBase label="Unidade de estoque (ex: un, kg)" value={unidade ?? ""} onChange={(e) => setUnidade(e.target.value)} />
+            <Dropdown
+              label="Unidade de estoque — primeira movimentação deste item"
+              value={STOCK_UNIT_OPTIONS.find((o) => o.value === unidade) ?? null}
+              onValueSelected={(opt) => setUnidade(opt.value)}
+              options={STOCK_UNIT_OPTIONS}
+            />
           )}
           <Button
             onClick={confirmCriarProduto}
