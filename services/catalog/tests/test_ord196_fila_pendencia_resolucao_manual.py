@@ -552,3 +552,76 @@ async def test_busca_opcoes_isolamento_multitenant(client, token_owner, token_co
     r = await client.get("/catalog/options/search", params={"q": "Coca-Cola"}, headers=auth(token_company_b))
     assert r.status_code == 200, r.text
     assert r.json() == []
+
+
+# ── Criar opção nova em grupo existente ─────────────────────────────────────
+# Achado do usuário revisando C2 já implementado: "Vincular a existente" já
+# busca produto OU opção, mas "Criar produto novo" só cobria produto — item
+# pendente pode ser um sabor novo de um grupo já existente, não um produto.
+
+async def test_criar_opcao_nova_em_grupo_existente_sucesso(client, token_owner):
+    group_id, existing_option_id = await _create_option(client, token_owner, label="Coca-Cola", group_name="Refrigerantes")
+    item_id, _, _ = await _seed_pending_item(x_prod="Guaraná Antarctica")
+
+    r = await client.post(
+        f"/catalog/supplier-invoices/items/{item_id}/create-option",
+        json={"option_group_id": group_id, "label": "Guaraná Antarctica", "quantidade": 10, "unidade": "un"},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["option_label"] == "Guaraná Antarctica"
+    assert r.json()["option_group_id"] == group_id
+    new_option_id = r.json()["option_id"]
+    assert new_option_id != existing_option_id
+
+    # a opção existente do grupo não foi apagada nem alterada (_set_option_group_options é replace completo)
+    r_group = await client.get("/catalog/option-groups", headers=auth(token_owner))
+    group = next(g for g in r_group.json()["option_groups"] if g["id"] == group_id)
+    labels = {o["label"] for o in group["options"]}
+    assert labels == {"Coca-Cola", "Guaraná Antarctica"}
+
+    state = await client.get(f"/catalog/options/{new_option_id}/stock", headers=auth(token_owner))
+    assert state.json()["quantidade_atual"] == 10
+
+
+async def test_criar_opcao_grava_gtin_de_embalagem(client, token_owner):
+    import main as svc
+    group_id, _ = await _create_option(client, token_owner, label="Coca-Cola", group_name="Refrigerantes")
+    gtin = _gtin13("789490003300")
+    item_id, _, _ = await _seed_pending_item(c_ean=gtin, x_prod="Guaraná Fardo C/12")
+
+    r = await client.post(
+        f"/catalog/supplier-invoices/items/{item_id}/create-option",
+        json={
+            # backend não multiplica sozinho — quantidade já vem calculada pelo
+            # frontend (2 fardos x 12), mesmo contrato de /link e /create-product.
+            "option_group_id": group_id, "label": "Guaraná Antarctica", "quantidade": 24,
+            "unidade": "un", "quantidade_por_unidade": 12,
+        },
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 201, r.text
+    option_id = r.json()["option_id"]
+
+    async with svc.AsyncSessionLocal() as db:
+        alt = (await db.execute(
+            svc.select(svc.ProductGtinAlt).filter_by(company_id=1, gtin=gtin)
+        )).scalars().first()
+        assert alt is not None
+        assert alt.option_id == option_id
+        assert alt.product_id is None
+
+    state = await client.get(f"/catalog/options/{option_id}/stock", headers=auth(token_owner))
+    assert state.json()["quantidade_atual"] == 24  # 2 x 12
+
+
+async def test_criar_opcao_em_grupo_de_outra_empresa_erro(client, token_owner, token_company_b):
+    group_id, _ = await _create_option(client, token_company_b, label="Opção da empresa B", group_name="Grupo B")
+    item_id, _, _ = await _seed_pending_item(company_id=1)
+
+    r = await client.post(
+        f"/catalog/supplier-invoices/items/{item_id}/create-option",
+        json={"option_group_id": group_id, "label": "Tentativa", "quantidade": 1, "unidade": "un"},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 404, r.text

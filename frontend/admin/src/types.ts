@@ -706,6 +706,17 @@ export interface CreateProductFromItemOut {
   retroactive_candidates: RetroactiveCandidate[];
 }
 
+// item pendente pode ser um sabor novo de um grupo já existente, não um
+// produto novo — "Criar produto novo" também cobre esse caminho.
+export interface CreateOptionFromItemOut {
+  option_id: number;
+  option_label: string;
+  option_group_id: number;
+  option_group_name: string;
+  item: PendingItem;
+  retroactive_candidates: RetroactiveCandidate[];
+}
+
 // resultado unificado de busca produto+opção no painel de resolução —
 // "type" não vem da API, é atribuído pelo frontend ao mesclar as duas
 // respostas (GET /catalog/products?q= e GET /catalog/options/search?q=).

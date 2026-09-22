@@ -4663,6 +4663,27 @@ class CreateProductFromItemOut(BaseModel):
     retroactive_candidates: list[RetroactiveCandidateOut]
 
 
+# Achado do usuário revisando C2 já implementado: "Vincular a existente" busca
+# produto OU opção, mas "Criar produto novo" só cobria produto — item pendente
+# pode muito bem ser um sabor novo dentro de um grupo de opções já existente,
+# não um produto novo. option_group_id é obrigatório porque opção nunca existe
+# sem grupo (schema, não regra de aplicação).
+class CreateOptionFromItemIn(OptionIn):
+    option_group_id: int
+    quantidade: Decimal
+    unidade: str | None = None
+    quantidade_por_unidade: Decimal | None = None
+
+
+class CreateOptionFromItemOut(BaseModel):
+    option_id: int
+    option_label: str
+    option_group_id: int
+    option_group_name: str
+    item: PendingItemOut
+    retroactive_candidates: list[RetroactiveCandidateOut]
+
+
 class IgnoreItemOut(BaseModel):
     item: PendingItemOut
     retroactive_candidates: list[RetroactiveCandidateOut]
@@ -5089,6 +5110,47 @@ async def _upsert_supplier_product_code(
         await db.rollback()
 
 
+async def _add_option_to_group(
+    db: AsyncSession, option_group_id: int, company_id: int, new_option: "OptionIn",
+) -> "Option":
+    """Adiciona UMA opção nova a um grupo já existente, sem apagar as que já
+    estão lá. `_set_option_group_options` é replace COMPLETO do conteúdo do
+    grupo (ORD-146) — a lista enviada é sempre a verdade final — então aqui a
+    gente relê o estado atual do grupo primeiro e reenvia junto com a opção
+    nova; senão apagaria todas as outras opções do grupo."""
+    group = (await db.execute(
+        select(OptionGroup).filter_by(id=option_group_id, company_id=company_id)
+    )).scalars().first()
+    if not group:
+        raise HTTPException(404, detail="grupo de opções não encontrado")
+
+    existing = (await db.execute(
+        select(Option).filter_by(option_group_id=option_group_id).order_by(Option.sort_order)
+    )).scalars().all()
+    existing_ids = {o.id for o in existing}
+
+    existing_as_in = []
+    for o in existing:
+        allergen_ids = (await db.execute(
+            select(OptionAllergen.allergen_id).filter_by(option_id=o.id)
+        )).scalars().all()
+        existing_as_in.append(OptionIn(
+            id=o.id, label=o.label, price_delta=float(o.price_delta), active=o.active,
+            description=o.description, sku=o.sku, ean=o.ean, cfop=o.cfop, cest=o.cest,
+            estoque_minimo=float(o.estoque_minimo), unidade_compra=o.unidade_compra,
+            fator_conversao=float(o.fator_conversao) if o.fator_conversao is not None else None,
+            allergen_ids=list(allergen_ids),
+        ))
+
+    await _set_option_group_options(db, option_group_id, company_id, existing_as_in + [new_option])
+    await db.commit()
+
+    created = (await db.execute(
+        select(Option).filter(Option.option_group_id == option_group_id, Option.id.notin_(existing_ids))
+    )).scalars().first()
+    return created
+
+
 async def _find_retroactive_candidates_by_ean(
     db: AsyncSession, company_id: int, c_ean: str, *, exclude_item_id: int,
 ) -> list[dict]:
@@ -5307,6 +5369,72 @@ async def create_product_from_pending_item(
     supplier = await db.get(Supplier, invoice.supplier_id)
     return {
         "product": await _serialize_product(db, product),
+        "item": _serialize_pending_item(item, invoice.numero, invoice.serie, supplier.nome),
+        "retroactive_candidates": retroactive_candidates,
+    }
+
+
+@app.post(
+    "/catalog/supplier-invoices/items/{item_id}/create-option",
+    response_model=CreateOptionFromItemOut,
+    status_code=201,
+    tags=["Fornecedores"],
+    summary="Criar opção nova em grupo existente a partir de um item pendente e vincular (C2)",
+    responses={404: {"description": "item ou option_group_id não encontrado / de outra empresa"}},
+)
+async def create_option_from_pending_item(
+    item_id: int,
+    body: CreateOptionFromItemIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    item = await _get_pending_item_scoped(db, item_id, company_id)
+    if item.link_source is not None:
+        raise HTTPException(400, detail="item já resolvido")
+    if item.c_ean and body.quantidade_por_unidade is None:
+        raise HTTPException(400, detail="quantidade_por_unidade é obrigatória pra item com GTIN de embalagem")
+
+    option = await _add_option_to_group(db, body.option_group_id, company_id, body)
+
+    await _create_stock_movement(
+        db, company_id,
+        StockMovementIn(
+            tipo="entrada", quantidade=body.quantidade, unidade=body.unidade,
+            motivo=f"Resolução manual (opção nova) — nota de compra #{item.supplier_invoice_id}",
+        ),
+        current_user, product_id=None, option_id=option.id,
+    )
+
+    item.product_id, item.option_id = None, option.id
+    item.link_source = "manual"
+    item.pendente_motivo = None
+    await db.commit()
+
+    retroactive_candidates: list[dict] = []
+    created_by = int(current_user.sub)
+    if item.c_ean:
+        await _upsert_product_gtin_alt(
+            db, company_id, item.c_ean, None, option.id, body.quantidade_por_unidade, created_by,
+        )
+        retroactive_candidates = await _find_retroactive_candidates_by_ean(
+            db, company_id, item.c_ean, exclude_item_id=item.id,
+        )
+    elif item.c_prod:
+        invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+        await _upsert_supplier_product_code(
+            db, company_id, invoice.supplier_id, item.c_prod, None, option.id, created_by,
+        )
+        retroactive_candidates = await _find_retroactive_candidates_by_supplier_code(
+            db, company_id, invoice.supplier_id, item.c_prod, exclude_item_id=item.id,
+        )
+
+    invoice = await db.get(SupplierInvoice, item.supplier_invoice_id)
+    supplier = await db.get(Supplier, invoice.supplier_id)
+    group = await db.get(OptionGroup, body.option_group_id)
+    return {
+        "option_id": option.id, "option_label": option.label,
+        "option_group_id": group.id, "option_group_name": group.name,
         "item": _serialize_pending_item(item, invoice.numero, invoice.serie, supplier.nome),
         "retroactive_candidates": retroactive_candidates,
     }

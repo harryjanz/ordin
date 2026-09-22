@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Dropdown, InputBase, NumberInput, Tabs, Tab, Tag, makeToast, type DropdownOptions } from "design-system";
+import { Alert, Button, Dropdown, InputBase, NumberInput, RadioButton, RadioGroup, Tabs, Tab, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
 import { useCatalogParams } from "../lib/catalogParams";
 import { parseApiError } from "../lib/apiErrors";
 import { STOCK_UNIT_OPTIONS } from "../lib/stockUnits";
-import type { Category, CreateProductFromItemOut, LinkItemOut, PendingItem, ResolveSearchResult, RetroactiveCandidate } from "../types";
+import type { Category, CreateOptionFromItemOut, CreateProductFromItemOut, LinkItemOut, OptionGroup, PendingItem, ResolveSearchResult, RetroactiveCandidate } from "../types";
 import ConfirmDialog from "./ConfirmDialog";
 import styles from "./ResolvePendingItemPanel.module.scss";
 
@@ -107,11 +107,18 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  // ── Criar produto novo ────────────────────────────────────────────────
+  // ── Criar produto novo (ou opção em grupo existente) ────────────────────
+  // Achado do usuário revisando C2 já implementado: item pendente pode ser
+  // um sabor novo de um grupo já existente (ex: novo refrigerante), não
+  // necessariamente um produto novo — "Criar produto novo" agora também
+  // cobre "Criar opção nova", escolhido via RadioGroup.
+  const [criarTipo, setCriarTipo] = useState<"produto" | "opcao">("produto");
   const [novoNome, setNovoNome] = useState(item.x_prod);
   const [novoPreco, setNovoPreco] = useState<number | null>(null);
   const [novoCategoriaId, setNovoCategoriaId] = useState<string | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [optionGroups, setOptionGroups] = useState<OptionGroup[]>([]);
+  const [novoOptionGroupId, setNovoOptionGroupId] = useState<string | null>(null);
 
   useEffect(() => {
     if (mode !== "criar" || categories.length > 0) return;
@@ -119,7 +126,14 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
+  useEffect(() => {
+    if (mode !== "criar" || criarTipo !== "opcao" || optionGroups.length > 0) return;
+    api.get("/catalog/option-groups", catalogParams()).then((r) => setOptionGroups(r.data.option_groups ?? [])).catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, criarTipo]);
+
   const categoryOptions: DropdownOptions[] = categories.map((c) => ({ label: c.name, value: String(c.id) }));
+  const optionGroupOptions: DropdownOptions[] = optionGroups.map((g) => ({ label: g.name, value: String(g.id) }));
 
   async function confirmVincular() {
     if (!selected || quantidadeFinal == null) return;
@@ -160,6 +174,27 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
       afterResolve(item.id, r.data.retroactive_candidates);
     } catch (err) {
       setError(parseApiError(err).message || "Erro ao criar o produto.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function confirmCriarOpcao() {
+    if (!novoOptionGroupId || !novoNome.trim() || quantidadeFinal == null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const body = {
+        option_group_id: Number(novoOptionGroupId), label: novoNome,
+        quantidade: quantidadeFinal, unidade: showUnidade ? (unidade || undefined) : undefined,
+        quantidade_por_unidade: item.c_ean ? quantidadePorUnidade : undefined,
+      };
+      const r = await api.post<CreateOptionFromItemOut>(
+        `/catalog/supplier-invoices/items/${item.id}/create-option`, body, catalogParams(),
+      );
+      afterResolve(item.id, r.data.retroactive_candidates);
+    } catch (err) {
+      setError(parseApiError(err).message || "Erro ao criar a opção.");
     } finally {
       setSaving(false);
     }
@@ -308,14 +343,36 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
 
       {mode === "criar" && (
         <div className={styles.section}>
-          <InputBase label="Nome do produto" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
-          <NumberInput label="Preço" value={novoPreco} onChange={(v: number) => setNovoPreco(v)} />
-          <Dropdown
-            label="Categoria (opcional)"
-            value={categoryOptions.find((o) => o.value === novoCategoriaId) ?? null}
-            onValueSelected={(opt) => setNovoCategoriaId(opt.value)}
-            options={categoryOptions}
-          />
+          <RadioGroup name="criarTipo" value={criarTipo} onChange={(v) => setCriarTipo(v as "produto" | "opcao")}>
+            <RadioButton value="produto" label="Produto novo" />
+            <RadioButton value="opcao" label="Opção em grupo existente (ex: novo sabor)" />
+          </RadioGroup>
+
+          {criarTipo === "produto" && (
+            <>
+              <InputBase label="Nome do produto" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
+              <NumberInput label="Preço" value={novoPreco} onChange={(v: number) => setNovoPreco(v)} />
+              <Dropdown
+                label="Categoria (opcional)"
+                value={categoryOptions.find((o) => o.value === novoCategoriaId) ?? null}
+                onValueSelected={(opt) => setNovoCategoriaId(opt.value)}
+                options={categoryOptions}
+              />
+            </>
+          )}
+
+          {criarTipo === "opcao" && (
+            <>
+              <InputBase label="Nome da opção" value={novoNome} onChange={(e) => setNovoNome(e.target.value)} />
+              <Dropdown
+                label="Grupo de opção"
+                value={optionGroupOptions.find((o) => o.value === novoOptionGroupId) ?? null}
+                onValueSelected={(opt) => setNovoOptionGroupId(opt.value)}
+                options={optionGroupOptions}
+              />
+            </>
+          )}
+
           <NumberInput
             label={showQuantidadePorUnidade ? "Quantidade recebida (conforme a nota)" : "Quantidade"}
             value={quantidade}
@@ -342,13 +399,23 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
               options={STOCK_UNIT_OPTIONS}
             />
           )}
-          <Button
-            onClick={confirmCriarProduto}
-            disabled={saving || !novoNome.trim() || novoPreco == null || quantidadeFinal == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
-            loading={saving}
-          >
-            Criar produto e vincular
-          </Button>
+          {criarTipo === "produto" ? (
+            <Button
+              onClick={confirmCriarProduto}
+              disabled={saving || !novoNome.trim() || novoPreco == null || quantidadeFinal == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
+              loading={saving}
+            >
+              Criar produto e vincular
+            </Button>
+          ) : (
+            <Button
+              onClick={confirmCriarOpcao}
+              disabled={saving || !novoOptionGroupId || !novoNome.trim() || quantidadeFinal == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
+              loading={saving}
+            >
+              Criar opção e vincular
+            </Button>
+          )}
         </div>
       )}
 
