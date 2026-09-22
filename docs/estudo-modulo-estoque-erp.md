@@ -780,12 +780,33 @@ opção escolhida do totem até o `payment-service`, via `OrderItemOption`
 Isso muda o total do épico pra **25 histórias, 120 pontos** (Blocos A-G), mais a pendência fiscal
 separada (sem numeração própria, dependente de G1).
 
-### Pendência formal adicional (achado da revisão de PM na G1): EAN duplicado entre `Option` e `Product`
+### ✅ Pendência formal adicional (achado da revisão de PM na G1): EAN duplicado entre `Option` e `Product` — FECHADA (2026-09-22)
 
-Sem decisão ainda — não é escopo de G1 (nenhum consumidor de EAN existe ainda pra guiar a escolha
-certa), mas precisa ser resolvida quando **C1** (vínculo automático por EAN/`cProd`) for desenhada,
-já que C1 vai precisar buscar por EAN nos dois universos (`Product` e `Option`) ao mesmo tempo.
-Pergunta a responder lá: colidir é erro, aviso, ou permitido de propósito?
+Pergunta em aberto desde a revisão de PM do G1: "colidir é erro, aviso, ou permitido de
+propósito?" — sem decisão porque nenhum consumidor real de EAN existia ainda pra guiar a escolha.
+C1 (vínculo automático) é exatamente esse consumidor — a pendência foi fechada ao desenhar C1,
+usando como gatilho uma simulação de nota fiscal fictícia que expôs o cenário na prática (ver
+`docs/exemples/FN/nfe_fake_bebidas_c1_demo.xml`).
+
+**Decisão do usuário: colidir é erro — EAN não pode ser duplicado entre produtos, entre opções,
+nem entre produto e opção, dentro da mesma empresa.**
+
+**Já implementado, não é trabalho novo pra C1**: `_check_active_code_conflict`
+(`services/catalog/main.py`, decisão de 2026-09-18, mesmo mecanismo do SKU) já impõe exatamente
+essa regra — cross-tabela (`Product` + `Option`), por empresa, bloqueando com 400 antes de salvar.
+**Confirmado explicitamente nesta revisão: continua valendo só pra itens ATIVOS** — inativo nunca
+colide (nem com outro inativo, nem com um ativo). Não houve pedido de endurecer pra sempre (mesmo
+inativo); a race condition entre saves simultâneos permanece um risco consciente e aceito, mesmo
+trade-off já documentado na função.
+
+**Implicação pra C1**: a busca por EAN pode confiar que nunca vai achar dois itens **ativos** com
+o mesmo código — no máximo um `Product` ativo OU uma `Option` ativa, nunca os dois. Mas pode achar
+um ativo e um inativo com o mesmo EAN (inativo não é bloqueado) — Tech Explorer de C1 precisa
+decidir isso explicitamente: a busca considera só itens ativos (mais simples, mais seguro) ou
+precisa de uma regra de desempate entre ativo/inativo? Recomendação: **restringir a busca de C1 a
+itens ativos** — combina com o próprio motivo da unicidade existir (evitar ambiguidade em leitura
+de código de barras), e um item inativo não faz sentido receber entrada de estoque automática
+mesmo se o EAN baixar por acidente.
 
 ### Regra de negócio fechada com o usuário (2026-09-21): nota importada não pode ser excluída
 depois que o estoque que ela gerou for movimentado como venda
