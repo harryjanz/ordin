@@ -51,29 +51,57 @@ lata" vs. "um fardo fechado" — se fossem o mesmo código, PDV nenhum conseguir
 `fator_conversao`/`unidade_compra`, G3/A5) — o problema real não é "que fator aplicar a um código
 que bate", é "eu reconheço esse código de barras específico".
 
-1. **EAN da unidade de venda** (`cEAN` do item ↔ `Product.ean`/`Option.ean`) — casamento direto, 1
-   pra 1, sem multiplicador (a quantidade da nota já está na mesma unidade do produto cadastrado).
-   Seguro por construção — nunca ambíguo, ver regra de EAN único já fechada.
+1. **EAN da unidade de venda, com refinamento por `qTrib`/`uTrib`** (`cEAN` do item ↔
+   `Product.ean`/`Option.ean`) — casamento direto, 1 pra 1. A quantidade lançada é `qTrib` (não
+   `qCom`) sempre que a nota declarar `uTrib`/`qTrib` **diferentes** de `uCom`/`qCom` **e** a
+   consistência bater (`qTrib × vUnTrib ≈ vProd`, dentro de uma tolerância de arredondamento) —
+   esse é o mecanismo oficial da própria NF-e pra declarar "vendido em fardo, mas controlado por
+   unidade" (achado do usuário, pesquisa de padrão de mercado pra itens com substituição
+   tributária). **Achado técnico, verificação empírica**: rodei contra os 41 XMLs reais
+   vendorizados pela `nfelib` (não só os 7 já usados nos testes de B1) — em **nenhum** `qTrib`
+   diverge de `qCom`. O mecanismo é real e vale a pena aproveitar quando aparece (é de graça,
+   verificável, e tem peso fiscal por trás pra ser confiável), mas **não pode ser o mecanismo
+   principal** — na prática observada até agora, nunca é populado diferente. Quando `qTrib` não
+   diverge (o caso comum), o casamento é simplesmente 1:1 com `qCom`, sem multiplicador, e nunca é
+   ambíguo — ver regra de EAN único já fechada.
 2. **GTIN alternativo de embalagem já conhecido** (`cEAN` do item ↔ tabela nova `product_gtin_alt`)
-   — GTIN de pacote é do **fabricante**, não do distribuidor: o mesmo fardo de 12 latas tem o mesmo
-   código não importa qual fornecedor vendeu. Quando esse GTIN já foi cadastrado antes (aponta pra
-   um `Product`/`Option` + quantidade por unidade, ex: "esse código = 12× este produto"), o
+   — pro caso, mais comum na prática que o `qTrib` divergente, em que o pacote/fardo tem um EAN
+   **genuinamente diferente** do EAN da unidade de venda, atribuído pelo fabricante (ex: lata
+   `7894900010015`, fardo de 12 `7894900011340`). GTIN de pacote é do **fabricante**, não do
+   distribuidor — o mesmo fardo tem o mesmo código não importa qual fornecedor vendeu. Quando esse
+   GTIN já foi cadastrado antes (aponta pra um `Product`/`Option` + quantidade por unidade), o
    casamento é automático e a quantidade multiplicada é **fato de catálogo**, não estimativa.
 3. **Código do fornecedor** (`cProd` do item ↔ tabela nova `supplier_product_code`, chave fornecedor
    + código) — mesmo mecanismo já descrito: só funciona se alguém já resolveu manualmente um item
    com esse `cProd` daquele fornecedor antes.
 
 Os níveis 2 e 3 são **lidos** por C1, mas **escritos** por C2 (é lá que a Empresa resolve uma
-pendência manualmente pela primeira vez). Na primeira nota que traz um GTIN de pacote nunca visto,
-só o nível 1 funciona de cara — depois da primeira resolução manual, esse GTIN específico passa a
-casar sozinho em **qualquer** nota futura, de **qualquer** fornecedor (é do fabricante, não do
-distribuidor — diferença importante em relação ao nível 3, que é preso a um fornecedor específico).
+pendência manualmente pela primeira vez). Na primeira nota que traz um GTIN de pacote nunca visto
+(e sem `qTrib` divergente pra salvar o casamento), só o nível 1 funciona de cara — depois da
+primeira resolução manual, esse GTIN específico passa a casar sozinho em **qualquer** nota futura,
+de **qualquer** fornecedor (é do fabricante, não do distribuidor — diferença importante em relação
+ao nível 3, que é preso a um fornecedor específico).
 
 Item cujo `cEAN`/`cProd` não bate em nenhum dos três níveis fica **pendente** (sem vínculo,
 sinalizado, mas sem travar a importação) — resolução manual é escopo de **C2**, não desta história.
 `fator_conversao`/`unidade_compra` (G3/A5) continuam existindo pra entrada manual (A2), sem mudança
-— só deixam de ser usados **por esta história**, que resolve o problema de um jeito mais seguro
-(GTIN real e verificável em vez de fator genérico assumido).
+— só deixam de ser usados **por esta história**, que resolve o problema com sinais verificáveis da
+própria nota (`qTrib`) ou de catálogo (`product_gtin_alt`) em vez de um fator genérico assumido.
+
+### Achado do usuário — venda simultânea do pacote inteiro E decomposto: fora de escopo de C1
+Cenário real trazido pelo usuário: uma distribuidora de bebidas pode querer vender **tanto** o
+fardo fechado **quanto** a lata avulsa como produtos separados do próprio catálogo — e uma única
+entrega pode precisar ser **dividida** entre os dois (ex: dos 100 fardos recebidos, manter 60 como
+fardo e decompor 40 em 480 latas avulsas). Essa divisão é uma decisão de negócio tomada a cada
+entrega, não uma regra fixa do GTIN — por definição, não dá pra automatizar (não existe "regra" pra
+aprender quando a proporção muda a cada nota).
+
+**Decisão de escopo**: se a Empresa vende o fardo como produto próprio, basta cadastrar esse
+`Product`/`Option` com o EAN do fardo — cai direto no nível 1, sem nada especial. Uma entrega que
+precisa ser **dividida** entre dois produtos de destino nunca casa automaticamente (nenhum dos três
+níveis resolve "uma parte aqui, outra parte ali") — sempre vira pendência, e a resolução (**C2**)
+precisa suportar dividir a quantidade de um item entre **múltiplos** produtos de destino, não só
+escolher um. Isso é um requisito novo pro Explorer de C2, registrado aqui pra não se perder.
 
 ### Decisão de escopo — vínculo acontece na confirmação da nota, não é um passo separado
 Diferente da prévia de B1 (que exige um clique explícito de "Confirmar importação"), o vínculo
@@ -95,13 +123,15 @@ não dá pra lançar estoque nele").
 ### Fluxo principal
 1. Empresa confirma a importação de uma nota de compra (fluxo de B1, sem mudança visível nesse passo).
 2. Pra cada item da nota, o sistema tenta casar o `cEAN` contra `Product.ean`/`Option.ean` (EAN da
-   unidade de venda) — nível 1.
+   unidade de venda) — nível 1. Se casar, a quantidade lançada é `qTrib` quando a nota declarar
+   `qTrib`/`uTrib` diferentes de `qCom`/`uCom` de forma consistente (`qTrib × vUnTrib ≈ vProd`) —
+   senão, `qCom` direto.
 3. Sem casar no nível 1, tenta casar o `cEAN` contra `product_gtin_alt` (GTIN de embalagem/pacote
    já conhecido) — nível 2. Se achar, aplica a quantidade por unidade já cadastrada pra esse GTIN.
 4. Sem casar nos níveis 1 e 2, tenta casar o `cProd` contra `supplier_product_code` (fornecedor +
    código) — nível 3.
 5. Item que casou em qualquer um dos três níveis recebe entrada de estoque automática com a
-   quantidade correta (multiplicada quando veio do nível 2) — vinculado, sem toque humano.
+   quantidade correta — vinculado, sem toque humano.
 6. Item que não casou em nenhum dos três níveis fica marcado como pendente — sem vínculo, sem
    entrada de estoque, disponível pra resolução manual (C2, história seguinte).
 7. Empresa vê, na tela de detalhe da nota (B1), o estado de cada item: vinculado automaticamente
@@ -111,10 +141,13 @@ não dá pra lançar estoque nele").
 - **Item casa com um `Product` guarda-chuva**: sem lugar pra lançar estoque — tratado como limitação
   conhecida acima, comportamento exato a fechar no Tech Explorer.
 - **`cEAN` da nota é um GTIN de embalagem nunca visto** (fardo/caixa sem cadastro em
-  `product_gtin_alt` ainda): não casa em nenhum nível, vira pendência igual a qualquer outra — a
-  diferença é que, quando a Empresa resolve manualmente (C2), ela não está só escolhendo um produto,
-  está **ensinando um GTIN novo** (esse código = N unidades desse produto), que passa a valer pra
-  qualquer fornecedor dali em diante.
+  `product_gtin_alt` ainda, e sem `qTrib` divergente pra salvar): não casa em nenhum nível, vira
+  pendência igual a qualquer outra — a diferença é que, quando a Empresa resolve manualmente (C2),
+  ela não está só escolhendo um produto, está **ensinando um GTIN novo** (esse código = N unidades
+  desse produto), que passa a valer pra qualquer fornecedor dali em diante.
+- **Entrega precisa ser dividida entre dois produtos de destino** (ex: fardo vendido em parte
+  inteiro, em parte decomposto — achado do usuário, ver seção acima): nunca casa automaticamente,
+  sempre pendência — C2 precisa suportar dividir a quantidade entre múltiplos produtos.
 - **Nota já confirmada antes de C1 existir** (toda nota importada via B1 até aqui): não é
   revinculada retroativamente por esta história — aplicação retroativa é explicitamente escopo de
   **C2** ("fila de pendência... e aplicação retroativa de estoque").
@@ -127,16 +160,24 @@ não dá pra lançar estoque nele").
 - **Depende de A1** (`ORD-180`, EAN em Product — mergeada), **A6** (`ORD-182`, fornecedor —
   mergeada), **B1** (`ORD-194`, upload de XML — mergeada).
 - **Reaproveita**: A2 (`ORD-181`, mecanismo de entrada de estoque/`StockMovement` polimórfico).
-  **Não reaproveita** G3/A5 (`fator_conversao`/`unidade_compra`) — resolvido por GTIN real
-  (nível 2) em vez de fator numérico assumido; G3/A5 continuam intactos pra entrada manual (A2).
+  **Não reaproveita** G3/A5 (`fator_conversao`/`unidade_compra`) — resolvido por sinais verificáveis
+  (`qTrib` da própria nota, GTIN de catálogo) em vez de fator numérico assumido; G3/A5 continuam
+  intactos pra entrada manual (A2).
+- **Requer um pequeno complemento em B1** (`ORD-194`, já mergeada): `_parse_nfe` e
+  `SupplierInvoiceItem` não capturam `qTrib`/`uTrib`/`vUnTrib` hoje (só `qCom`/`uCom`/`vUnCom`) —
+  são campos novos (nullable), migration aditiva, sem quebrar nada do que já existe. Necessário
+  pro nível 1 conseguir usar o refinamento por `qTrib`.
 - **Histórias futuras que consomem esta**: C2 (fila de pendência com resolução inline — escreve em
-  `product_gtin_alt` e em `supplier_product_code`, resolvendo os itens que C1 deixou pendentes);
-  E4 (CMV automático, também listada como dependente de B1, mas se beneficia de C1 pra custo por
-  lote real em vez de manual).
+  `product_gtin_alt` e em `supplier_product_code`, resolve os itens que C1 deixou pendentes, e
+  precisa suportar dividir a quantidade de um item entre múltiplos produtos de destino); E4 (CMV
+  automático, também listada como dependente de B1, mas se beneficia de C1 pra custo por lote real
+  em vez de manual).
 
 ### Critérios de aceite funcionais
 - [ ] Item de nota confirmada com EAN idêntico ao EAN de venda de um `Product`/`Option` ativo da
-      empresa recebe entrada de estoque automática 1:1, sem intervenção humana
+      empresa recebe entrada de estoque automática 1:1 (usando `qCom`), sem intervenção humana
+- [ ] Quando a nota declara `qTrib`/`uTrib` diferentes de `qCom`/`uCom` de forma consistente com o
+      valor total do item, o item casado por EAN de venda recebe entrada usando `qTrib`, não `qCom`
 - [ ] Item de nota confirmada com `cEAN` batendo num GTIN de embalagem já cadastrado em
       `product_gtin_alt` recebe entrada de estoque automática, com a quantidade multiplicada pela
       quantidade por unidade cadastrada pra esse GTIN
@@ -188,6 +229,7 @@ de implementação que o Tech Explorer resolve normalmente. Pode avançar pro QA
 | Critério de aceite (Explorer) | Cenário(s) Gherkin |
 |---|---|
 | EAN de venda idêntico (nível 1) → entrada automática 1:1 | `Vínculo por EAN de venda (nível 1)` |
+| `qTrib`/`uTrib` divergente e consistente → usa qTrib, não qCom | `Nota declara qTrib divergente e consistente`, `qTrib inconsistente com o total cai pra qCom` |
 | GTIN de embalagem conhecido (nível 2) → entrada automática multiplicada | `Vínculo por GTIN de embalagem conhecido (nível 2)`, `GTIN de embalagem vale pra qualquer fornecedor` |
 | `cProd` mapeado (nível 3) → entrada automática mesmo sem EAN | `Vínculo por código do fornecedor já mapeado (nível 3)`, `Mapeamento de cProd é isolado por fornecedor` |
 | Sem correspondência nos três níveis → pendente, sem travar confirmação | `Item sem qualquer correspondência fica pendente`, `GTIN de embalagem nunca visto vira pendência` |
@@ -224,6 +266,23 @@ Feature: Vínculo automático de itens de nota de compra por EAN/GTIN de embalag
     Quando a nota é confirmada
     Então o item NÃO é vinculado a esse produto inativo
     E o item fica marcado como pendente
+
+  Scenario: Nota declara qTrib divergente e consistente
+    Dado um item da nota com cEAN "7894900010015" (mesmo EAN da lata)
+    E uCom "FD", qCom "1", vUnCom "42.00"
+    E uTrib "UN", qTrib "12", vUnTrib "3.50" (12 × 3.50 = 42.00, bate com o total do item)
+    Quando a nota é confirmada
+    Então o item fica vinculado ao Product "Coca-Cola Lata 350ml" via EAN de venda
+    E a entrada de estoque lançada é de 12 unidades (qTrib, não qCom)
+
+  Scenario: qTrib inconsistente com o total cai pra qCom
+    Dado um item da nota com cEAN "7894900010015"
+    E uCom "FD", qCom "1", vUnCom "42.00"
+    E uTrib "UN", qTrib "12", vUnTrib "1.00" (12 × 1.00 = 12.00, NÃO bate com vProd "42.00")
+    Quando a nota é confirmada
+    Então o item ainda fica vinculado ao Product "Coca-Cola Lata 350ml" via EAN de venda
+    E a entrada de estoque lançada usa qCom (1), não o qTrib inconsistente
+    E não trava a confirmação da nota nem gera erro — só ignora um sinal que não bateu
 
   # ── Nível 2: GTIN de embalagem (achado do usuário — cada nível de pacote tem GTIN próprio) ──
 
@@ -277,6 +336,15 @@ Feature: Vínculo automático de itens de nota de compra por EAN/GTIN de embalag
     E o item fica marcado como pendente, sem entrada de estoque
     E os outros itens da mesma nota que casaram (por qualquer um dos três níveis) continuam
       vinculados normalmente
+
+  Scenario: Fardo com uso misto (vender inteiro e decompor) nunca casa sozinho
+    Dado um GTIN de fardo cadastrado em product_gtin_alt apontando SÓ pro Product "Coca-Cola Lata
+      350ml" (decomposição), sem entrada equivalente pro Product "Fardo Coca-Cola 350ml"
+    E um item da nota com esse mesmo cEAN de fardo
+    Quando a nota é confirmada
+    Então o item casa no nível 2 e vincula à Lata (comportamento determinístico, um destino só)
+    E não existe nenhum mecanismo pra "dividir" automaticamente entre Lata e Fardo — se a Empresa
+      quisesse os dois, precisaria resolver manualmente via C2 nota a nota (fora do escopo de C1)
 
   # ── Limitação guarda-chuva ─────────────────────────────────────────────
 
@@ -343,9 +411,17 @@ Feature: Vínculo automático de itens de nota de compra por EAN/GTIN de embalag
   `qCom` decimal), o resultado multiplicado também é fracionário. Não é um bloqueador — mesma
   situação que já existe hoje em qualquer conversão de unidade — mas vale um cenário de teste
   explícito no Tech Explorer pra confirmar que não há arredondamento silencioso incorreto.
+- **`qTrib` divergente é raro na prática observada, mas real**: verificação empírica contra os 41
+  XMLs reais vendorizados pela `nfelib` (16 deles cópias diretas em `docs/exemples/FN/`, trazidas
+  nesta revisão) não achou nenhum caso de `qTrib` diferente de `qCom` — o mecanismo é
+  espec-compliant e faz sentido fiscal (ICMS-ST), mas a amostra disponível não confirma que
+  emissores populam isso corretamente na prática. Tech Explorer deve implementar o refinamento por
+  `qTrib` como **oportunista** (usa quando aparece e bate a conta), nunca como premissa — o
+  casamento por `product_gtin_alt` continua sendo o caminho confiável pra pacotes com GTIN próprio.
 
 ### O que ainda impede o avanço pro Tech Explorer
-Nada bloqueia. Cenários revisados e alinhados com os 9 critérios de aceite do Explorer, com 1:1
-confirmado na tabela de rastreabilidade acima — incluindo os dois cenários de regressão que
-formalizam as garantias de unicidade (EAN de venda e GTIN de embalagem) que o casamento automático
-depende pra nunca ser ambíguo.
+Nada bloqueia. Cenários revisados e alinhados com os 10 critérios de aceite do Explorer, com 1:1
+confirmado na tabela de rastreabilidade acima — incluindo os cenários de regressão que formalizam
+as garantias de unicidade (EAN de venda e GTIN de embalagem) que o casamento automático depende
+pra nunca ser ambíguo, e o cenário que documenta o limite deliberado da história (fardo de uso
+misto não é dividido automaticamente — sempre pendência, resolução fica pra C2).
