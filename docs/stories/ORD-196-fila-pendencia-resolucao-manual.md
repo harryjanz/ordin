@@ -1005,3 +1005,42 @@ Evidência de teste manual: `docs/stories/ORD-196/evidencias/manual/` (detalhe d
 estados de vínculo + tela "Pendências" com a fila agregada, ambos testados ao vivo contra dados
 reais do ambiente de dev).
 
+## Implementação — achados adicionais (2026-09-22, pós-merge, testando fardo de verdade)
+
+Dois achados a mais, testando ao vivo o cenário que faltava cobrir: vincular um fardo/embalagem
+(GTIN de nível 2) com fator de conversão ≠ 1 pela primeira vez de forma genuína (os testes
+anteriores com esse campo usavam fator 1, que mascarava os dois problemas abaixo):
+
+6. **Unidade obrigatória decidida pelo item errado**: `showUnidade` checava
+   `item.pendente_motivo === "sem_estoque_iniciado"` — mas isso descreve por que o casamento
+   AUTOMÁTICO do item original falhou, não se o DESTINO escolhido manualmente já tem estoque. Uma
+   opção nunca usada antes pode receber um vínculo de um item pendente por qualquer outro motivo
+   (ex: "sem correspondência") e ainda ser a primeira movimentação dela — são coisas independentes.
+   Corrigido: ao selecionar um destino, o painel consulta `GET /catalog/{products,options}/{id}/
+   stock` e decide com base em `has_stock_item` de verdade, não no motivo do item pendente.
+7. **Unidade inválida mesmo depois de aparecer**: uma vez exibido, o campo vinha pré-preenchido com
+   `item.unidade` — texto livre vindo do XML (`"UN"`, sem padrão fixo do SEFAZ para `uCom`/`uTrib`,
+   confirmado lendo `_parse_nfe`) — mas o backend só aceita o conjunto fechado `STOCK_UNITS` ("un"
+   minúsculo etc.), rejeitando com "unidade inválida". Trocado o `InputBase` livre por `Dropdown`
+   (reaproveita `STOCK_UNIT_OPTIONS`, já usado em `ProductEditScreen`/`OptionGroupFormScreen`), com
+   normalização case-insensitive do valor da nota como sugestão inicial — nunca aplicado às cegas.
+8. **Bug crítico de quantidade (achado ao testar o fardo pela primeira vez com fator real)**: o
+   painel enviava o campo "Quantidade" (bruto, ex: 5 fardos) direto pro backend, sem NUNCA
+   multiplicar por "Quantidade por unidade" (12) — um vínculo de fardo lançava 5 unidades de estoque
+   em vez de 60. Corrigido: os dois campos continuam editáveis separadamente, mas o valor
+   efetivamente enviado (`quantidadeFinal`) é sempre o produto dos dois; a UI mostra o cálculo
+   explícito ("Total a lançar no estoque: 60 (5 × 12)") antes de confirmar.
+
+Achado 8 é o mais sério dos três — teria subestimado silenciosamente todo vínculo manual de item
+com conversão de embalagem em produção. Reforça o valor de testar com dados reais e fatores ≠ 1
+antes de considerar uma feature pronta, não só com a suíte automatizada (que também não cobria esse
+caminho específico — nenhum teste unitário do backend passa pela camada de frontend que fazia essa
+conta errada, já que os testes de API chamam o endpoint direto com o `quantidade` já correto).
+
+Pendência aberta, levantada pelo usuário nesta mesma sessão: a unidade da NF-e (`uCom`/`uTrib`) é
+texto livre, sem enum fechado do SEFAZ — hoje só normalizamos por igualdade exata (case-insensitive)
+contra os 5 valores de `STOCK_UNITS`. Uma tabela pequena de sinônimos (`"LT"→"L"`, `"GR"→"g"`,
+`"UND"/"PC"→"un"` etc.) ampliaria o pré-preenchimento automático sem mudar o comportamento (o
+Dropdown continua sendo a decisão final do usuário). Não implementado ainda — registrado aqui pra
+não se perder, decisão de fazer ou não fica pro usuário.
+
