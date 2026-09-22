@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Alert, Button, Tag, Upload, UploadListFiles, makeToast, type UploadFile } from "design-system";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Button, DateInput, InputBase, Pagination, Tag, Upload, UploadListFiles, makeToast, type UploadFile } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
@@ -10,10 +10,23 @@ import styles from "./SupplierInvoiceScreen.module.scss";
 
 const XML_TYPES = ["text/xml", "application/xml"];
 const XML_MAX_SIZE_MB = 5; // XMLs de NF-e reais são pequenos (5-70 KB), 5 MB já é folga generosa
+const LIMIT = 50;
 
 const fmtBRL = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 const fmtQty = (v: number) => v.toLocaleString("pt-BR", { maximumFractionDigits: 4 });
 const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleString("pt-BR") : "—");
+
+// Mesmo padrão de OrdersScreen/PaymentsScreen — "DD/MM/AAAA" (DateInput) <-> "AAAA-MM-DD" (backend).
+function toIsoDate(brDate: string): string | undefined {
+  const m = brDate.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return undefined;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+function toDate(brDate: string): Date | undefined {
+  const iso = toIsoDate(brDate);
+  return iso ? new Date(`${iso}T00:00:00`) : undefined;
+}
 
 const itemColumns: TableColumn<SupplierInvoicePreviewItem>[] = [
   { key: "c_prod", header: "Código", mono: true, render: (i) => i.c_prod ?? "—" },
@@ -28,11 +41,12 @@ const itemColumns: TableColumn<SupplierInvoicePreviewItem>[] = [
 type View = "list" | "upload" | "detail";
 
 // ORD-194 (B1) — upload de XML de NF de compra com prévia + histórico das
-// notas já importadas (listagem/detalhe/exclusão). O Explorer original já
-// prometia "aparece na listagem de notas importadas" no Fluxo Principal, mas
-// isso nunca virou critério de aceite nem endpoint — gap fechado depois de
-// teste manual do usuário, ver docs/stories/ORD-194 e docs/WORKFLOW.md
-// (gate de rastreabilidade adicionado por causa deste achado).
+// notas já importadas (listagem/detalhe/exclusão, paginação e filtros).
+//
+// Listagem paginada + filtrada no servidor desde o início (achado do
+// usuário: sem isso a tela fica impraticável com volume real) — mesmo
+// padrão de OrdersScreen/PaymentsScreen (skip/limit, debounce 500ms nos
+// campos de texto livre, Pagination do design-system).
 //
 // Detalhe da nota é página inteira, não Modal — achado ao vivo: com 7
 // colunas a tabela de itens fica apertada demais dentro de um Modal
@@ -44,8 +58,26 @@ export default function SupplierInvoiceScreen() {
   const [view, setView] = useState<View>("list");
 
   const [invoices, setInvoices] = useState<SupplierInvoiceListItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+
+  const [fornecedorFilter, setFornecedorFilter] = useState("");
+  const [numeroFilter, setNumeroFilter] = useState("");
+  const [serieFilter, setSerieFilter] = useState("");
+  const [dataEmissaoFrom, setDataEmissaoFrom] = useState("");
+  const [dataEmissaoTo, setDataEmissaoTo] = useState("");
+  const [dataImportacaoFrom, setDataImportacaoFrom] = useState("");
+  const [dataImportacaoTo, setDataImportacaoTo] = useState("");
+  const [skip, setSkip] = useState(0);
+
+  // Texto livre (fornecedor/número/série) precisa de debounce pra não
+  // disparar uma requisição por tecla — mesmo padrão de OrdersScreen/
+  // CompanyListScreen. Datas e paginação disparam na hora (são cliques, não
+  // digitação contínua).
+  const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const isFirstRender = useRef(true);
+  const requestId = useRef(0);
 
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
   const [pickedFile, setPickedFile] = useState<File | null>(null);
@@ -59,23 +91,66 @@ export default function SupplierInvoiceScreen() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<SupplierInvoiceListItem | null>(null);
 
-  async function loadInvoices() {
+  function fetchInvoices(skipOverride?: number) {
+    const thisRequest = ++requestId.current;
     setListLoading(true);
     setListError(null);
-    try {
-      const r = await api.get<{ invoices: SupplierInvoiceListItem[] }>("/catalog/supplier-invoices", catalogParams());
-      setInvoices(r.data.invoices ?? []);
-    } catch (err) {
-      setListError(parseApiError(err).message);
-    } finally {
-      setListLoading(false);
-    }
+    const params = {
+      fornecedor: fornecedorFilter || undefined,
+      numero: numeroFilter || undefined,
+      serie: serieFilter || undefined,
+      data_emissao_from: toIsoDate(dataEmissaoFrom),
+      data_emissao_to: toIsoDate(dataEmissaoTo),
+      data_importacao_from: toIsoDate(dataImportacaoFrom),
+      data_importacao_to: toIsoDate(dataImportacaoTo),
+      // setSkip() não atualiza o valor sincronamente — quem acabou de mudar
+      // de página (ex: confirmImport voltando pra página 1) precisa passar
+      // o valor novo explícito, senão este fetch usa o skip antigo da
+      // closure antes do useEffect corrigir num segundo render.
+      skip: skipOverride ?? skip,
+      limit: LIMIT,
+    };
+    return api.get<{ invoices: SupplierInvoiceListItem[]; total: number }>(
+      "/catalog/supplier-invoices", catalogParams(params),
+    )
+      .then((r) => {
+        if (thisRequest !== requestId.current) return; // resposta obsoleta, ignorar
+        setInvoices(r.data.invoices ?? []);
+        setTotal(r.data.total ?? 0);
+      })
+      .catch((err) => { if (thisRequest === requestId.current) setListError(parseApiError(err).message); })
+      .finally(() => { if (thisRequest === requestId.current) setListLoading(false); });
   }
 
   useEffect(() => {
-    loadInvoices();
+    fetchInvoices();
+    isFirstRender.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [dataEmissaoFrom, dataEmissaoTo, dataImportacaoFrom, dataImportacaoTo, skip]);
+
+  useEffect(() => {
+    if (isFirstRender.current) return;
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => { setSkip(0); fetchInvoices(); }, 500);
+    return () => clearTimeout(debounceTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fornecedorFilter, numeroFilter, serieFilter]);
+
+  const hasFilter = Boolean(
+    fornecedorFilter || numeroFilter || serieFilter
+    || dataEmissaoFrom || dataEmissaoTo || dataImportacaoFrom || dataImportacaoTo,
+  );
+
+  function clearFilters() {
+    setFornecedorFilter("");
+    setNumeroFilter("");
+    setSerieFilter("");
+    setDataEmissaoFrom("");
+    setDataEmissaoTo("");
+    setDataImportacaoFrom("");
+    setDataImportacaoTo("");
+    setSkip(0);
+  }
 
   function backToList() {
     setUploadFiles([]);
@@ -130,7 +205,8 @@ export default function SupplierInvoiceScreen() {
       await api.post("/catalog/supplier-invoices", formData, catalogParams());
       makeToast("success", "Nota importada com sucesso");
       backToList();
-      loadInvoices();
+      setSkip(0);
+      fetchInvoices(0);
     } catch (err) {
       setConfirmError(parseApiError(err).message || "Erro ao confirmar a importação.");
     } finally {
@@ -158,7 +234,7 @@ export default function SupplierInvoiceScreen() {
       await api.delete(`/catalog/supplier-invoices/${removeTarget.id}`, catalogParams());
       makeToast("success", "Nota excluída");
       setRemoveTarget(null);
-      loadInvoices();
+      fetchInvoices();
     } catch (err) {
       makeToast("error", parseApiError(err).message);
     }
@@ -297,23 +373,115 @@ export default function SupplierInvoiceScreen() {
     );
   }
 
+  const page = Math.floor(skip / LIMIT) + 1;
+
   return (
     <>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
         <Button onClick={openUpload}>+ Importar nota</Button>
       </div>
 
+      <div className={styles.filterBar}>
+        <div className={styles.field}>
+          <InputBase
+            label="Fornecedor"
+            placeholder="Buscar por nome…"
+            value={fornecedorFilter}
+            onChange={(e) => setFornecedorFilter(e.target.value)}
+          />
+        </div>
+        <div className={styles.field}>
+          <InputBase
+            label="Número"
+            placeholder="Ex: 47686"
+            value={numeroFilter}
+            onChange={(e) => setNumeroFilter(e.target.value)}
+          />
+        </div>
+        <div className={styles.field}>
+          <InputBase
+            label="Série"
+            placeholder="Ex: 1"
+            value={serieFilter}
+            onChange={(e) => setSerieFilter(e.target.value)}
+          />
+        </div>
+        <div className={styles.field}>
+          <DateInput
+            label="Emissão de"
+            value={dataEmissaoFrom}
+            onChange={(value, valid) => {
+              if (!valid && value) return;
+              setDataEmissaoFrom(value);
+              const from = toDate(value);
+              const to = toDate(dataEmissaoTo);
+              if (from && to && to < from) setDataEmissaoTo("");
+            }}
+          />
+        </div>
+        <div className={styles.field}>
+          <DateInput
+            label="Emissão até"
+            value={dataEmissaoTo}
+            disabled={!dataEmissaoFrom}
+            minDate={toDate(dataEmissaoFrom)}
+            invalidMinDateMessage="A data final deve ser igual ou posterior à data inicial."
+            onChange={(value, valid) => { if (valid || !value) setDataEmissaoTo(value); }}
+          />
+        </div>
+        <div className={styles.field}>
+          <DateInput
+            label="Importação de"
+            value={dataImportacaoFrom}
+            onChange={(value, valid) => {
+              if (!valid && value) return;
+              setDataImportacaoFrom(value);
+              const from = toDate(value);
+              const to = toDate(dataImportacaoTo);
+              if (from && to && to < from) setDataImportacaoTo("");
+            }}
+          />
+        </div>
+        <div className={styles.field}>
+          <DateInput
+            label="Importação até"
+            value={dataImportacaoTo}
+            disabled={!dataImportacaoFrom}
+            minDate={toDate(dataImportacaoFrom)}
+            invalidMinDateMessage="A data final deve ser igual ou posterior à data inicial."
+            onChange={(value, valid) => { if (valid || !value) setDataImportacaoTo(value); }}
+          />
+        </div>
+        <Button variant="secondary" onClick={clearFilters} disabled={!hasFilter}>Limpar</Button>
+      </div>
+
       {listError && <Alert variant="error" text={listError} fullWidth />}
 
       {!listError && (
-        <Table
-          variant="compact"
-          columns={listColumns}
-          rows={invoices}
-          rowKey={(i) => i.id}
-          onRowClick={openDetail}
-          emptyMessage={listLoading ? "Carregando…" : "Nenhuma nota importada ainda."}
-        />
+        <>
+          <div className={styles.count}>
+            <b>{total}</b> nota{total === 1 ? "" : "s"} encontrada{total === 1 ? "" : "s"}
+          </div>
+          <Table
+            variant="compact"
+            columns={listColumns}
+            rows={invoices}
+            rowKey={(i) => i.id}
+            onRowClick={openDetail}
+            emptyMessage={listLoading ? "Carregando…" : `Nenhuma nota importada${hasFilter ? " para os filtros aplicados" : " ainda"}.`}
+          />
+          {total > 0 && (
+            <div className={styles.pager}>
+              <span className={styles.pagerCount}>Mostrando {skip + 1}–{Math.min(skip + LIMIT, total)} de {total}</span>
+              <Pagination
+                activePage={page}
+                itemsPerPage={LIMIT}
+                totalItemsCount={total}
+                onChange={(newPage) => setSkip((newPage - 1) * LIMIT)}
+              />
+            </div>
+          )}
+        </>
       )}
 
       <ConfirmDialog

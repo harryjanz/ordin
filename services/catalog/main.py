@@ -4389,6 +4389,7 @@ class SupplierInvoiceListItemOut(BaseModel):
 
 class SupplierInvoiceListOut(BaseModel):
     invoices: list[SupplierInvoiceListItemOut]
+    total: int
 
 
 class SupplierInvoiceDetailOut(BaseModel):
@@ -4472,6 +4473,17 @@ async def create_supplier_invoice(
 # nunca operacionalizou isso num endpoint, e passou batido na revisão por
 # papel. List/detail/delete fecham essa lacuna.
 
+def _exclusive_end_of_day(date_str: str, field_label: str) -> datetime:
+    # Mesmo padrão de list_payments (services/payment/main.py) — "AAAA-MM-DD"
+    # como filtro <= viraria < meia-noite daquele dia, escondendo qualquer
+    # registro do próprio dia final criado depois das 00:00. Vira limite
+    # exclusivo no dia seguinte.
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d") + timedelta(days=1)
+    except ValueError as e:
+        raise HTTPException(400, detail=f"{field_label} deve estar no formato AAAA-MM-DD") from e
+
+
 @app.get(
     "/catalog/supplier-invoices",
     response_model=SupplierInvoiceListOut,
@@ -4481,12 +4493,48 @@ async def create_supplier_invoice(
 async def list_supplier_invoices(
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id_write),
+    fornecedor: str | None = None,
+    numero: str | None = None,
+    serie: str | None = None,
+    data_emissao_from: str | None = None,
+    data_emissao_to: str | None = None,
+    data_importacao_from: str | None = None,
+    data_importacao_to: str | None = None,
+    skip: int = 0,
+    limit: int = 50,
 ):
+    # Lista pode crescer sem limite prático (uma nota por compra recebida) —
+    # paginação + filtros server-side desde o início, mesmo padrão já usado
+    # em list_payments/list_orders/list_companies. Sem isso a tela fica
+    # impraticável com volume real (achado do usuário, ORD-194).
+    filters = [SupplierInvoice.company_id == company_id]
+    if numero:
+        filters.append(SupplierInvoice.numero.ilike(f"%{numero}%"))
+    if serie:
+        filters.append(SupplierInvoice.serie.ilike(f"%{serie}%"))
+    if data_emissao_from:
+        filters.append(SupplierInvoice.data_emissao >= data_emissao_from)
+    if data_emissao_to:
+        filters.append(SupplierInvoice.data_emissao < _exclusive_end_of_day(data_emissao_to, "data_emissao_to"))
+    if data_importacao_from:
+        filters.append(SupplierInvoice.imported_at >= data_importacao_from)
+    if data_importacao_to:
+        filters.append(
+            SupplierInvoice.imported_at < _exclusive_end_of_day(data_importacao_to, "data_importacao_to")
+        )
+
+    base_query = select(SupplierInvoice, Supplier.nome, Supplier.cnpj).join(
+        Supplier, Supplier.id == SupplierInvoice.supplier_id
+    ).filter(*filters)
+    if fornecedor:
+        base_query = base_query.filter(Supplier.nome.ilike(f"%{fornecedor}%"))
+
+    total = (await db.execute(
+        select(func.count()).select_from(base_query.with_only_columns(SupplierInvoice.id).subquery())
+    )).scalar_one()
+
     result = await db.execute(
-        select(SupplierInvoice, Supplier.nome, Supplier.cnpj)
-        .join(Supplier, Supplier.id == SupplierInvoice.supplier_id)
-        .filter(SupplierInvoice.company_id == company_id)
-        .order_by(SupplierInvoice.imported_at.desc())
+        base_query.order_by(SupplierInvoice.imported_at.desc()).offset(skip).limit(limit)
     )
     return {
         "invoices": [
@@ -4498,6 +4546,7 @@ async def list_supplier_invoices(
             }
             for inv, nome, cnpj in result.all()
         ],
+        "total": total,
     }
 
 

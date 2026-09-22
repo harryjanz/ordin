@@ -167,6 +167,20 @@ Achados adicionais de uma nota real inspecionada durante a pesquisa (grounding r
 - [ ] XML com `mod` diferente de "55" (ex: NFC-e, modelo 65) é rejeitado com mensagem específica
 - [ ] XML com `finNFe` diferente de "1" (complementar/ajuste/devolução) é rejeitado com mensagem específica
 
+**Adicionados após o Ready original (achados em teste manual do usuário — ver "Regra de
+rastreabilidade" em `docs/WORKFLOW.md`, criada por causa exatamente desta lacuna):**
+- [x] Nota confirmada aparece na listagem de notas importadas (prometido no Fluxo Principal, nunca
+      tinha virado critério nem endpoint — implementado)
+- [x] Empresa consegue ver o detalhe completo de uma nota já importada, com todos os itens
+- [x] Empresa consegue excluir uma nota importada (exclusão normal, libera a chave de acesso —
+      decisão explícita do usuário; regra futura de bloqueio pós-venda registrada em
+      `docs/estudo-modulo-estoque-erp.md`, depende de C1)
+- [x] Listagem é paginada no servidor (não carrega tudo de uma vez) — achado do usuário: sem isso
+      a tela fica impraticável com volume real
+- [x] Listagem tem filtro por fornecedor (texto parcial), número (texto parcial), série (texto
+      parcial), intervalo de data de emissão e intervalo de data de importação — mesmo padrão de
+      filtro/paginação já usado em Transações (`PaymentsScreen`) e Pedidos (`OrdersScreen`)
+
 ## QA Explorer
 
 ### Cenários Gherkin
@@ -448,6 +462,27 @@ async def create_supplier_invoice(
 
 `_parse_nfe(raw: bytes)` centraliza as 4 validações da seção acima (estrutura → dígito verificador
 → `mod` → `finNFe`) — usada pelos dois endpoints, nunca duplicada.
+
+**Endpoints adicionados após o Ready original** (achados em teste manual do usuário — listagem
+prometida no Fluxo Principal mas nunca operacionalizada; paginação/filtro por causa de volume):
+
+- `GET /catalog/supplier-invoices` — lista paginada (`skip`/`limit`, default `limit=50`), mais
+  recente primeiro (`imported_at desc`). Filtros opcionais via query param, todos `ilike` parcial
+  exceto as datas: `fornecedor` (nome do `Supplier`, via join), `numero`, `serie`,
+  `data_emissao_from`/`data_emissao_to`, `data_importacao_from`/`data_importacao_to` (formato
+  `AAAA-MM-DD`, `_to` é limite exclusivo no dia seguinte — mesmo padrão de `list_payments` em
+  `services/payment/main.py`). Resposta inclui `total` (contagem com os mesmos filtros, sem
+  paginação) pra UI montar "Mostrando X–Y de Z" e o componente `Pagination`.
+- `GET /catalog/supplier-invoices/{id}` — detalhe com todos os itens (reaproveita o mesmo shape de
+  item da prévia).
+- `DELETE /catalog/supplier-invoices/{id}` — exclusão normal (204), libera a `chave_acesso` pra
+  reimportar. Não apaga o `Supplier` vinculado. Ver regra futura de bloqueio pós-C1 em
+  `docs/estudo-modulo-estoque-erp.md`.
+
+Frontend: `SupplierInvoiceScreen.tsx` ganhou uma barra de filtro (`InputBase` x3 + `DateInput` x4)
+e paginação (`Pagination` do design-system) — mesmo padrão de `PaymentsScreen`/`OrdersScreen`
+(debounce de 500ms nos campos de texto livre, `requestId` guardando contra resposta obsoleta fora
+de ordem). Grid `auto-fit` (não a grade fixa de 6 colunas do `PaymentsScreen`) porque são 7 campos.
 
 `resolve_company_id_write`/`_WRITE_ROLES` — mesmo padrão já usado em A6 (`ORD-182`): cashier/kiosk
 bloqueados a nível de API.

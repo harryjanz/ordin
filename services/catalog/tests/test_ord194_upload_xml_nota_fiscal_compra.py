@@ -1,5 +1,6 @@
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -290,6 +291,7 @@ async def test_listagem_mostra_notas_confirmadas_mais_recente_primeiro(client, t
     assert r.status_code == 200, r.text
     invoices = r.json()["invoices"]
     assert len(invoices) == 2
+    assert r.json()["total"] == 2
     # nfe_procnfe.xml (nNF=46320) confirmada depois de nfe_pequena.xml (nNF=1) — aparece primeiro
     assert invoices[0]["numero"] == "46320"
     assert invoices[1]["numero"] == "1"
@@ -300,6 +302,133 @@ async def test_previa_sozinha_nao_aparece_na_listagem(client, token_owner):
     await _preview(client, token_owner, "nfe_pequena.xml")
     r = await client.get("/catalog/supplier-invoices", headers=auth(token_owner))
     assert r.json()["invoices"] == []
+
+
+# ── Paginação e filtros (achado do usuário: lista fica impraticável com
+# volume real sem isso) ────────────────────────────────────────────────
+
+async def _confirm_three(client, token):
+    # nfe_pequena (nNF=1, "TESTE - Simples Nacional", emissão 2020),
+    # nfe_procnfe (nNF=46320, "UNIMAKE...", emissão 2017),
+    # nfe_grande (nNF=47686, "Alimentos Ltda.", emissão 2018) — únicas 3
+    # fixtures reais com chave de acesso distinta disponíveis pra dedup.
+    await _confirm(client, token, "nfe_pequena.xml")
+    await _confirm(client, token, "nfe_procnfe.xml")
+    await _confirm(client, token, "nfe_grande.xml")
+
+
+async def test_paginacao_limit_e_skip_respeitados(client, token_owner):
+    await _confirm_three(client, token_owner)
+
+    r = await client.get("/catalog/supplier-invoices", params={"limit": 1}, headers=auth(token_owner))
+    assert r.status_code == 200, r.text
+    assert len(r.json()["invoices"]) == 1
+    assert r.json()["total"] == 3
+
+    r_skip = await client.get(
+        "/catalog/supplier-invoices", params={"limit": 1, "skip": 2}, headers=auth(token_owner),
+    )
+    assert len(r_skip.json()["invoices"]) == 1
+    assert r_skip.json()["total"] == 3
+    # página 1 (skip=0) e página 3 (skip=2) trazem notas diferentes
+    assert r.json()["invoices"][0]["id"] != r_skip.json()["invoices"][0]["id"]
+
+
+async def test_filtro_por_numero_parcial(client, token_owner):
+    await _confirm_three(client, token_owner)
+
+    r = await client.get("/catalog/supplier-invoices", params={"numero": "463"}, headers=auth(token_owner))
+    assert r.status_code == 200, r.text
+    assert [i["numero"] for i in r.json()["invoices"]] == ["46320"]
+    assert r.json()["total"] == 1
+
+
+async def test_filtro_por_serie(client, token_owner):
+    await _confirm_three(client, token_owner)
+
+    r_match = await client.get("/catalog/supplier-invoices", params={"serie": "1"}, headers=auth(token_owner))
+    assert r_match.json()["total"] == 3
+
+    r_no_match = await client.get("/catalog/supplier-invoices", params={"serie": "9"}, headers=auth(token_owner))
+    assert r_no_match.json()["total"] == 0
+
+
+async def test_filtro_por_fornecedor_parcial_case_insensitive(client, token_owner):
+    await _confirm_three(client, token_owner)
+
+    r = await client.get(
+        "/catalog/supplier-invoices", params={"fornecedor": "alimentos"}, headers=auth(token_owner),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 1
+    assert r.json()["invoices"][0]["fornecedor_nome"] == "Alimentos Ltda."
+
+
+async def test_filtro_por_data_emissao_intervalo(client, token_owner):
+    await _confirm_three(client, token_owner)
+
+    # só nfe_grande.xml (emissão 2018-08-17) cai neste intervalo
+    r = await client.get(
+        "/catalog/supplier-invoices",
+        params={"data_emissao_from": "2018-01-01", "data_emissao_to": "2018-12-31"},
+        headers=auth(token_owner),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 1
+    assert r.json()["invoices"][0]["numero"] == "47686"
+
+
+async def test_filtro_por_data_emissao_to_inclui_o_proprio_dia(client, token_owner):
+    await _confirm(client, token_owner, "nfe_grande.xml")  # emissão 2018-08-17T15:28:31-03:00
+
+    r = await client.get(
+        "/catalog/supplier-invoices",
+        params={"data_emissao_from": "2018-08-17", "data_emissao_to": "2018-08-17"},
+        headers=auth(token_owner),
+    )
+    assert r.json()["total"] == 1
+
+
+async def test_filtro_por_data_importacao_intervalo(client, token_owner):
+    await _confirm(client, token_owner, "nfe_pequena.xml")
+    hoje = datetime.utcnow().strftime("%Y-%m-%d")
+
+    r_hoje = await client.get(
+        "/catalog/supplier-invoices",
+        params={"data_importacao_from": hoje, "data_importacao_to": hoje},
+        headers=auth(token_owner),
+    )
+    assert r_hoje.json()["total"] == 1
+
+    r_futuro = await client.get(
+        "/catalog/supplier-invoices", params={"data_importacao_from": "2099-01-01"}, headers=auth(token_owner),
+    )
+    assert r_futuro.json()["total"] == 0
+
+
+async def test_filtro_com_formato_de_data_invalido_e_rejeitado(client, token_owner):
+    r = await client.get(
+        "/catalog/supplier-invoices", params={"data_emissao_to": "17/08/2018"}, headers=auth(token_owner),
+    )
+    assert r.status_code == 400
+
+
+async def test_filtro_isolado_por_empresa_mesmo_com_numero_repetido(client, token_owner, token_company_b):
+    # nNF="1" (nfe_pequena.xml) só existe uma vez entre "1"/"46320"/"47686" —
+    # nenhum dos outros dois contém o dígito "1".
+    await _confirm_three(client, token_owner)
+    await _confirm(client, token_company_b, "nfe_pequena.xml")
+
+    r = await client.get(
+        "/catalog/supplier-invoices", params={"numero": "1"}, headers=auth(token_owner),
+    )
+    assert r.json()["total"] == 1
+    assert r.json()["invoices"][0]["numero"] == "1"
+
+    # empresa B tem sua própria nota (mesmo XML, chave de acesso igual, mas
+    # dedup é por empresa) — isolamento não depende do filtro estar ativo
+    r_b = await client.get("/catalog/supplier-invoices", headers=auth(token_company_b))
+    assert r_b.json()["total"] == 1
 
 
 async def test_detalhe_de_nota_confirmada_traz_todos_os_itens(client, token_owner):
