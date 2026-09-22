@@ -967,3 +967,41 @@ tela alterada (Tag/coluna) e nenhuma tela nova.
 | Frontend | Confirmação de aplicação retroativa parecia precisar de componente novo | Verificado: `ConfirmDialog` já aceita `children`, serve sem mudança |
 | Frontend | Painel reaproveitado como modal E inline não tinha precedente nem mecanismo definido | `Table.tsx` já suporta `renderExpanded` (ORD-080) — reaproveitado em vez de criar padrão novo |
 
+## Implementação — achados reais (2026-09-22)
+
+Pontos que só apareceram escrevendo o código e testando ao vivo, sem cenário Gherkin ou pseudocódigo
+anterior que os previsse:
+
+1. **Bug de ordem de rota**: `GET /catalog/supplier-invoices/pending-items` foi inicialmente
+   registrada DEPOIS de `GET /catalog/supplier-invoices/{invoice_id}` — o path param capturava
+   `"pending-items"` como `invoice_id` (422 "não é um inteiro válido", não 404). Mesmo motivo já
+   documentado em `reorder_products` (`main.py`, comentário original), mas escapou aqui porque os
+   dois endpoints foram escritos em momentos diferentes da implementação. Corrigido movendo a rota
+   pra antes; ruff/mypy não pegam esse tipo de erro, só apareceu rodando os testes.
+2. **Bug de quantidade em `apply_retroactive`**: a primeira versão usava `target.quantidade` puro
+   no lançamento de estoque de cada candidato — correto pra nível 3 (código do fornecedor), mas
+   ERRADO pra nível 2 (GTIN de embalagem): um candidato "2 fardos" precisa multiplicar pela
+   `quantidade_por_unidade` já gravada pro GTIN, senão o estoque fica subestimado. Achado
+   escrevendo o teste `test_aceitar_aplicacao_retroativa` com fator ≠ 1 — a primeira versão do
+   teste usava fator 1 (não pegava o bug por coincidência). Corrigido buscando `ProductGtinAlt` pra
+   cada candidato antes de decidir a quantidade a lançar.
+3. **Campo `id` faltando na resposta de `GET /catalog/supplier-invoices/{invoice_id}`**: o painel de
+   resolução manual precisa do `id` real do `SupplierInvoiceItem` pra chamar os endpoints de C2 —
+   campo nunca tinha sido exposto (C1 não precisava dele). Adicionado em
+   `SupplierInvoiceDetailItemOut` e no dict de resposta.
+4. **Frontend enviava `unidade` sempre, não só na 1ª movimentação**: o painel pré-preenchia
+   `unidade` com a unidade do item da NOTA (`"UN"`) e mandava isso em toda chamada de vínculo —
+   quando o produto já tinha `StockItem` com unidade diferente na grafia (`"un"`), o backend
+   rejeitava (`"unidade já definida como un, não pode ser alterada"`). Achado testando ao vivo no
+   navegador. Corrigido: só envia `unidade` quando `pendente_motivo === "sem_estoque_iniciado"`
+   (primeira movimentação de verdade).
+5. **Decisão de UX revertida ao vivo pelo usuário**: o painel no detalhe da nota
+   (`SupplierInvoiceScreen.tsx`) usava `Table.renderExpanded` (inline), conforme decidido no repasse
+   de Frontend. Testando ao vivo, o usuário pediu Modal nos dois lugares, pra manter consistência
+   visual com a tela "Pendências" — decisão tomada na prática, não um bug. Implementado: os dois
+   lugares agora abrem `ResolvePendingItemPanel` dentro de um `Modal` (`size="large"`, `width={720}`).
+
+Evidência de teste manual: `docs/stories/ORD-196/evidencias/manual/` (detalhe de nota com os 3
+estados de vínculo + tela "Pendências" com a fila agregada, ambos testados ao vivo contra dados
+reais do ambiente de dev).
+
