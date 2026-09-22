@@ -122,13 +122,13 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
   const categoryOptions: DropdownOptions[] = categories.map((c) => ({ label: c.name, value: String(c.id) }));
 
   async function confirmVincular() {
-    if (!selected || quantidade == null) return;
+    if (!selected || quantidadeFinal == null) return;
     setSaving(true);
     setError(null);
     try {
       const body = {
         [selected.type === "product" ? "product_id" : "option_id"]: selected.id,
-        quantidade,
+        quantidade: quantidadeFinal,
         unidade: showUnidade ? (unidade || undefined) : undefined,
         quantidade_por_unidade: item.c_ean ? quantidadePorUnidade : undefined,
       };
@@ -144,14 +144,14 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
   }
 
   async function confirmCriarProduto() {
-    if (!novoNome.trim() || novoPreco == null || quantidade == null) return;
+    if (!novoNome.trim() || novoPreco == null || quantidadeFinal == null) return;
     setSaving(true);
     setError(null);
     try {
       const body = {
         name: novoNome, price: novoPreco,
         category_id: novoCategoriaId ? Number(novoCategoriaId) : undefined,
-        quantidade, unidade: showUnidade ? (unidade || undefined) : undefined,
+        quantidade: quantidadeFinal, unidade: showUnidade ? (unidade || undefined) : undefined,
         quantidade_por_unidade: item.c_ean ? quantidadePorUnidade : undefined,
       };
       const r = await api.post<CreateProductFromItemOut>(
@@ -213,6 +213,14 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
   // destino escolhido (ver useEffect acima), não do item pendente original.
   const showUnidade = mode === "criar" || destinationNeedsUnidade;
   const showQuantidadePorUnidade = Boolean(item.c_ean);
+  // Achado testando ao vivo (fardo de 5 x 12 lançou 5, não 60): "Quantidade"
+  // é o que veio na NOTA (embalagens recebidas — ex: 5 fardos), nunca o que
+  // deve entrar no estoque quando há conversão. O valor de fato lançado
+  // precisa ser sempre esse produto, calculado aqui — nunca o campo bruto
+  // enviado direto pro backend.
+  const quantidadeFinal = showQuantidadePorUnidade && quantidadePorUnidade != null && quantidade != null
+    ? quantidade * quantidadePorUnidade
+    : quantidade;
 
   return (
     <div className={styles.panel}>
@@ -261,13 +269,23 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
               <Button size="small" variant="secondary" onClick={() => setSelected(null)}>Trocar</Button>
             </div>
           )}
-          <NumberInput label="Quantidade" value={quantidade} onChange={(v: number) => setQuantidade(v)} />
+          <NumberInput
+            label={showQuantidadePorUnidade ? "Quantidade recebida (conforme a nota)" : "Quantidade"}
+            value={quantidade}
+            onChange={(v: number) => setQuantidade(v)}
+          />
           {showQuantidadePorUnidade && (
             <NumberInput
               label="Quantidade por unidade (ex: latas por fardo)"
               value={quantidadePorUnidade}
               onChange={(v: number) => setQuantidadePorUnidade(v)}
             />
+          )}
+          {showQuantidadePorUnidade && quantidadePorUnidade != null && (
+            <div className={styles.hint}>
+              Total a lançar no estoque: <strong>{quantidadeFinal}</strong>
+              {" "}({quantidade} × {quantidadePorUnidade})
+            </div>
           )}
           {checkingDestination && <div className={styles.hint}>Verificando estoque do destino…</div>}
           {showUnidade && !checkingDestination && (
@@ -280,7 +298,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
           )}
           <Button
             onClick={confirmVincular}
-            disabled={saving || checkingDestination || !selected || quantidade == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
+            disabled={saving || checkingDestination || !selected || quantidadeFinal == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
             loading={saving}
           >
             Vincular
@@ -298,13 +316,23 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
             onValueSelected={(opt) => setNovoCategoriaId(opt.value)}
             options={categoryOptions}
           />
-          <NumberInput label="Quantidade" value={quantidade} onChange={(v: number) => setQuantidade(v)} />
+          <NumberInput
+            label={showQuantidadePorUnidade ? "Quantidade recebida (conforme a nota)" : "Quantidade"}
+            value={quantidade}
+            onChange={(v: number) => setQuantidade(v)}
+          />
           {showQuantidadePorUnidade && (
             <NumberInput
               label="Quantidade por unidade (ex: latas por fardo)"
               value={quantidadePorUnidade}
               onChange={(v: number) => setQuantidadePorUnidade(v)}
             />
+          )}
+          {showQuantidadePorUnidade && quantidadePorUnidade != null && (
+            <div className={styles.hint}>
+              Total a lançar no estoque: <strong>{quantidadeFinal}</strong>
+              {" "}({quantidade} × {quantidadePorUnidade})
+            </div>
           )}
           {showUnidade && (
             <Dropdown
@@ -316,7 +344,7 @@ export default function ResolvePendingItemPanel({ item, onResolved }: ResolvePen
           )}
           <Button
             onClick={confirmCriarProduto}
-            disabled={saving || !novoNome.trim() || novoPreco == null || quantidade == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
+            disabled={saving || !novoNome.trim() || novoPreco == null || quantidadeFinal == null || (showQuantidadePorUnidade && quantidadePorUnidade == null) || (showUnidade && !unidade)}
             loading={saving}
           >
             Criar produto e vincular
