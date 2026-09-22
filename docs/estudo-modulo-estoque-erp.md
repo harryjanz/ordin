@@ -563,7 +563,7 @@ coleta de ticket (`services/order/tests/`, ORD-017) — reduz risco de D1, não 
 
 | ID | História (resumo) | Pontos | Depende de |
 |---|---|---|---|
-| C1 | Vínculo automático por EAN/`cProd` + tabela `supplier_product_code` (fornecedor + código → produto) | 5 | A1, A6, B1 |
+| C1 | Vínculo automático por EAN de venda / GTIN de embalagem (`product_gtin_alt`) / `cProd` (`supplier_product_code`, fornecedor + código → produto) — 3 níveis, ver `ORD-195` | 5 | A1, A6, B1 |
 | C2 | Fila de pendência com resolução inline + aplicação retroativa de estoque | 8 | C1 |
 
 ### Bloco D — Baixa automática (8 pontos, maior risco técnico)
