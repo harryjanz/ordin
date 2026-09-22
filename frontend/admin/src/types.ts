@@ -639,6 +639,7 @@ export interface SupplierInvoiceListItem {
 
 export interface SupplierInvoiceDetail extends SupplierInvoiceListItem {
   chave_acesso: string;
+  imported_by: number;
   itens: SupplierInvoicePreviewItem[];
 }
 

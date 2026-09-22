@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, DateInput, InputBase, Pagination, Tag, Upload, UploadListFiles, makeToast, type UploadFile } from "design-system";
 import api from "../api";
+import { listUsers } from "../api/companies";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
-import type { SupplierInvoiceDetail, SupplierInvoiceListItem, SupplierInvoicePreview, SupplierInvoicePreviewItem } from "../types";
+import { useStore } from "../store";
+import type { SupplierInvoiceDetail, SupplierInvoiceListItem, SupplierInvoicePreview, SupplierInvoicePreviewItem, User } from "../types";
 import styles from "./SupplierInvoiceScreen.module.scss";
 
 const XML_TYPES = ["text/xml", "application/xml"];
@@ -90,6 +92,21 @@ export default function SupplierInvoiceScreen() {
   const [detailTarget, setDetailTarget] = useState<SupplierInvoiceDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<SupplierInvoiceListItem | null>(null);
+
+  // Resolve imported_by (id de usuário) pro nome real — mesmo padrão de
+  // collected_by em OrdersScreen (listUsers da empresa em contexto,
+  // fallback "Usuário #N" se não achar, ex: usuário removido depois).
+  const companyId = useStore((s) => s.selectedCompanyId);
+  const [users, setUsers] = useState<User[]>([]);
+  useEffect(() => {
+    if (!companyId) return;
+    listUsers(companyId).then(setUsers).catch(() => null);
+  }, [companyId]);
+
+  function importedByLabel(userId: number): string {
+    const user = users.find((u) => u.id === userId);
+    return user?.name ?? `Usuário #${userId}`;
+  }
 
   function fetchInvoices(skipOverride?: number) {
     const thisRequest = ++requestId.current;
@@ -280,7 +297,7 @@ export default function SupplierInvoiceScreen() {
               {detailTarget.numero && (
                 <span>Nota nº {detailTarget.numero}{detailTarget.serie ? ` / série ${detailTarget.serie}` : ""}</span>
               )}
-              <span>Importado em {fmtDate(detailTarget.imported_at)}</span>
+              <span>Importado em {fmtDate(detailTarget.imported_at)} por {importedByLabel(detailTarget.imported_by)}</span>
             </div>
 
             <div className={styles.previewTotal}>Total: {fmtBRL(detailTarget.valor_total)}</div>

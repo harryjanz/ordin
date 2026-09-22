@@ -4403,6 +4403,7 @@ class SupplierInvoiceDetailOut(BaseModel):
     data_emissao: datetime | None
     valor_total: float
     imported_at: datetime | None
+    imported_by: int
     itens: list[SupplierInvoicePreviewItemOut]
 
 
@@ -4580,6 +4581,7 @@ async def get_supplier_invoice(
         "fornecedor_nome": supplier.nome, "fornecedor_cnpj": supplier.cnpj,
         "numero": invoice.numero, "serie": invoice.serie, "data_emissao": invoice.data_emissao,
         "valor_total": float(invoice.valor_total), "imported_at": invoice.imported_at,
+        "imported_by": invoice.imported_by,
         "itens": [
             {
                 "n_item": it.n_item, "c_prod": it.c_prod, "c_ean": it.c_ean, "x_prod": it.x_prod,

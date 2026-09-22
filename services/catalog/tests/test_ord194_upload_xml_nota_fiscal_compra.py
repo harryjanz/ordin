@@ -441,6 +441,8 @@ async def test_detalhe_de_nota_confirmada_traz_todos_os_itens(client, token_owne
     assert len(body["itens"]) == 41
     assert body["fornecedor_nome"] == "Alimentos Ltda."
     assert body["valor_total"] > 0
+    # make_jwt (conftest) sempre usa sub="1" — quem confirmou a importação
+    assert body["imported_by"] == 1
 
 
 async def test_detalhe_de_nota_inexistente_retorna_404(client, token_owner):
