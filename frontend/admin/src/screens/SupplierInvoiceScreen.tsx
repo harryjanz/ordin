@@ -7,7 +7,7 @@ import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { useStore } from "../store";
-import type { SupplierInvoiceDetail, SupplierInvoiceListItem, SupplierInvoicePreview, SupplierInvoicePreviewItem, User } from "../types";
+import type { SupplierInvoiceDetail, SupplierInvoiceDetailItem, SupplierInvoiceListItem, SupplierInvoicePreview, SupplierInvoicePreviewItem, User } from "../types";
 import styles from "./SupplierInvoiceScreen.module.scss";
 
 const XML_TYPES = ["text/xml", "application/xml"];
@@ -38,6 +38,39 @@ const itemColumns: TableColumn<SupplierInvoicePreviewItem>[] = [
   { key: "quantidade", header: "Quantidade", mono: true, render: (i) => fmtQty(i.quantidade) },
   { key: "valor_unitario", header: "Valor unit.", mono: true, render: (i) => fmtBRL(i.valor_unitario) },
   { key: "valor_total", header: "Valor total", mono: true, render: (i) => fmtBRL(i.valor_total) },
+];
+
+// ORD-195 (C1) — vínculo automático só existe no detalhe (pós-confirmação),
+// nunca na prévia — por isso é uma coluna à parte, não em itemColumns.
+// "conflito_concorrencia" é o único pendente com variant="error": é a
+// exceção rara (corrida entre duas notas confirmadas quase ao mesmo tempo)
+// que vale mais atenção do que um "sem correspondência" comum — os outros
+// 3 pendente_motivo (null, guarda_chuva, sem_estoque_iniciado) resolvem
+// sozinhos com uma ação manual esperada (cadastrar produto, corrigir
+// guarda-chuva, fazer a 1ª entrada de estoque), não indicam nada quebrado.
+function linkStatusTag(item: SupplierInvoiceDetailItem): { variant: "success" | "warning" | "error"; label: string } {
+  switch (item.link_source) {
+    case "ean": return { variant: "success", label: "Vinculado (EAN)" };
+    case "gtin_alt": return { variant: "success", label: "Vinculado (embalagem)" };
+    case "supplier_code": return { variant: "success", label: "Vinculado (fornecedor)" };
+  }
+  switch (item.pendente_motivo) {
+    case "guarda_chuva": return { variant: "warning", label: "Pendente — produto guarda-chuva" };
+    case "sem_estoque_iniciado": return { variant: "warning", label: "Pendente — sem estoque iniciado" };
+    case "conflito_concorrencia": return { variant: "error", label: "Pendente — conflito de concorrência" };
+    default: return { variant: "warning", label: "Pendente — sem correspondência" };
+  }
+}
+
+const detailItemColumns: TableColumn<SupplierInvoiceDetailItem>[] = [
+  ...itemColumns,
+  {
+    key: "vinculo", header: "Vínculo", render: (i) => {
+      const { variant, label } = linkStatusTag(i);
+      return <Tag variant={variant}>{label}</Tag>;
+    },
+  },
+  { key: "link_label", header: "Produto/opção vinculado", render: (i) => i.link_label ?? "—" },
 ];
 
 type View = "list" | "upload" | "detail";
@@ -304,7 +337,7 @@ export default function SupplierInvoiceScreen() {
 
             <Table
               variant="compact"
-              columns={itemColumns}
+              columns={detailItemColumns}
               rows={detailTarget.itens}
               rowKey={(i) => i.n_item}
               emptyMessage="Nenhum item nesta nota."

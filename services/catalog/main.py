@@ -34,6 +34,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     Numeric,
@@ -49,6 +50,7 @@ from sqlalchemy import (
     update,
 )
 from sqlalchemy.dialects.mysql import MEDIUMBLOB
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -152,6 +154,12 @@ class Product(Base):
             "(unidade_compra IS NULL) = (fator_conversao IS NULL)",
             name="ck_products_conversao_junta",
         ),
+        # C1 (ORD-195) — sem índice, cada casamento automático de nota de
+        # compra (nível 1) fazia table scan em ean; achado no repasse
+        # backend, torna a busca quente o suficiente pra justificar agora
+        # (antes só custava caro na escrita ocasional de
+        # _check_active_code_conflict).
+        Index("ix_products_company_ean", "company_id", "ean"),
     )
     id          = Column(Integer, primary_key=True)
     company_id  = Column(Integer, nullable=False, index=True)
@@ -297,7 +305,13 @@ class SupplierInvoice(Base):
 
 class SupplierInvoiceItem(Base):
     """B1 (ORD-194) — item bruto da nota importada, como veio no XML (cProd/cEAN
-    originais preservados). Sem FK pra Product/Option de propósito — vínculo é C1."""
+    originais preservados). C1 (ORD-195) — vínculo automático: product_id/option_id
+    (nullable, XOR só quando preenchidos) + link_source dizem como o item foi
+    casado; pendente_motivo explica por que não casou (ou por que a entrada de
+    estoque não pôde ser lançada mesmo tendo casado). unidade_tributavel/
+    quantidade_tributavel/valor_unitario_tributavel vêm de uTrib/qTrib/vUnTrib
+    do XML — descartados por B1 originalmente, capturados agora pro
+    refinamento oportunista de C1 (ver _resolve_qtrib_quantity)."""
     __tablename__ = "supplier_invoice_items"
 
     id                  = Column(Integer, primary_key=True)
@@ -312,6 +326,69 @@ class SupplierInvoiceItem(Base):
     quantidade          = Column(Numeric(15, 4), nullable=False)
     valor_unitario      = Column(Numeric(15, 4), nullable=False)
     valor_total         = Column(Numeric(15, 2), nullable=False)
+
+    # C1 (ORD-195) — vínculo
+    product_id          = Column(Integer, ForeignKey("products.id"), nullable=True)
+    option_id           = Column(Integer, ForeignKey("options.id"), nullable=True)
+    link_source          = Column(String(20), nullable=True)  # "ean" | "gtin_alt" | "supplier_code" | None
+    # None (sem correspondência) | "guarda_chuva" | "sem_estoque_iniciado" | "conflito_concorrencia"
+    pendente_motivo      = Column(String(30), nullable=True)
+
+    # C1 (ORD-195) — dados tributáveis do XML, achado da revisão: refinamento
+    # oportunista de quantidade quando a nota declara qTrib/uTrib divergentes
+    # de qCom/uCom (ver docs/stories/ORD-195, 0/41 XMLs reais vendorizados
+    # têm essa divergência — real, mas raro, nunca é premissa).
+    unidade_tributavel        = Column(String(10), nullable=True)
+    quantidade_tributavel     = Column(Numeric(15, 4), nullable=True)
+    valor_unitario_tributavel = Column(Numeric(15, 4), nullable=True)
+
+
+class ProductGtinAlt(Base):
+    """C1 (ORD-195) — GTIN de embalagem/pacote (fardo, caixa, DUN-14) diferente
+    do EAN da unidade de venda, atribuído pelo fabricante — não do fornecedor.
+    Aponta pra um único Product OU Option (XOR, mesmo padrão de StockItem) +
+    quantidade por unidade. Escrito por C2 (resolução de pendência), lido por
+    C1 (casamento automático nível 2)."""
+    __tablename__ = "product_gtin_alt"
+    __table_args__ = (
+        UniqueConstraint("company_id", "gtin", name="uq_product_gtin_alt_company_gtin"),
+        CheckConstraint(
+            "(product_id IS NOT NULL AND option_id IS NULL) OR (product_id IS NULL AND option_id IS NOT NULL)",
+            name="ck_product_gtin_alt_owner_xor",
+        ),
+    )
+    id                     = Column(Integer, primary_key=True)
+    company_id             = Column(Integer, nullable=False, index=True)
+    gtin                   = Column(String(14), nullable=False)
+    product_id             = Column(Integer, ForeignKey("products.id"), nullable=True)
+    option_id              = Column(Integer, ForeignKey("options.id"), nullable=True)
+    quantidade_por_unidade = Column(Numeric(12, 3), nullable=False)
+    created_by             = Column(Integer, nullable=False)
+    created_at             = Column(DateTime, default=datetime.utcnow)
+
+
+class SupplierProductCode(Base):
+    """C1 (ORD-195) — código do fornecedor (cProd) → produto, aprendido na
+    primeira resolução manual (C2). Preso a um fornecedor específico
+    (diferente de ProductGtinAlt, que é global de fabricante) — mesmo código
+    de fornecedores diferentes não colide."""
+    __tablename__ = "supplier_product_code"
+    __table_args__ = (
+        UniqueConstraint("company_id", "supplier_id", "c_prod", name="uq_supplier_product_code"),
+        CheckConstraint(
+            "(product_id IS NOT NULL AND option_id IS NULL) OR (product_id IS NULL AND option_id IS NOT NULL)",
+            name="ck_supplier_product_code_owner_xor",
+        ),
+    )
+    id          = Column(Integer, primary_key=True)
+    company_id  = Column(Integer, nullable=False, index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
+    c_prod      = Column(String(60), nullable=False)
+    product_id  = Column(Integer, ForeignKey("products.id"), nullable=True)
+    option_id   = Column(Integer, ForeignKey("options.id"), nullable=True)
+    created_by  = Column(Integer, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
 
 class Allergen(Base):
     """Master data, não por empresa — lista oficial (RDC 727/2022, Lei
@@ -369,6 +446,10 @@ class Option(Base):
             "(unidade_compra IS NULL) = (fator_conversao IS NULL)",
             name="ck_options_conversao_junta",
         ),
+        # C1 (ORD-195) — mesmo racional do índice em Product.ean acima;
+        # Option não tem company_id direto (isolamento é via join com
+        # OptionGroup), então o índice é só em ean, não composto.
+        Index("ix_options_ean", "ean"),
     )
     id              = Column(Integer, primary_key=True)
     option_group_id = Column(Integer, ForeignKey("option_groups.id"), nullable=False)
@@ -4231,6 +4312,10 @@ class _ParsedInvoiceItem:
     quantidade: Decimal
     valor_unitario: Decimal
     valor_total: Decimal
+    # C1 (ORD-195) — capturados agora, descartados por B1 originalmente.
+    unidade_tributavel: str | None
+    quantidade_tributavel: Decimal | None
+    valor_unitario_tributavel: Decimal | None
 
 
 @dataclass
@@ -4286,6 +4371,9 @@ def _parse_nfe(raw: bytes) -> _ParsedInvoice:
             quantidade=Decimal(d.prod.qCom),
             valor_unitario=Decimal(d.prod.vUnCom),
             valor_total=Decimal(d.prod.vProd),
+            unidade_tributavel=d.prod.uTrib,
+            quantidade_tributavel=Decimal(d.prod.qTrib) if d.prod.qTrib is not None else None,
+            valor_unitario_tributavel=Decimal(d.prod.vUnTrib) if d.prod.vUnTrib is not None else None,
         )
         for d in inf.det
     ]
@@ -4313,6 +4401,78 @@ async def _invoice_already_imported(db: AsyncSession, company_id: int, chave_ace
         select(SupplierInvoice.id).filter_by(company_id=company_id, chave_acesso=chave_acesso)
     )
     return result.scalars().first() is not None
+
+
+# ── Vínculo automático de item de nota de compra (C1, ORD-195) ──────────────
+
+def _resolve_qtrib_quantity(item: "_ParsedInvoiceItem") -> Decimal:
+    """qTrib só é usado quando diverge de qCom E a conta bate com o total do
+    item (tolerância de R$0,05 pra arredondamento) — achado da revisão: 0/41
+    XMLs reais vendorizados pela nfelib têm essa divergência, mecanismo real
+    mas nunca é premissa, só sinal oportunista quando aparece e é consistente."""
+    if (
+        item.quantidade_tributavel is not None
+        and item.valor_unitario_tributavel is not None
+        and item.quantidade_tributavel != item.quantidade
+    ):
+        total_tributavel = (item.quantidade_tributavel * item.valor_unitario_tributavel).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        if abs(total_tributavel - item.valor_total) <= Decimal("0.05"):
+            return item.quantidade_tributavel
+    return item.quantidade
+
+
+async def _match_supplier_invoice_item(
+    db: AsyncSession, company_id: int, supplier_id: int, item: "_ParsedInvoiceItem",
+) -> tuple[str | None, int | None, int | None, Decimal]:
+    """Retorna (link_source, product_id, option_id, quantidade_a_lancar).
+    link_source None = sem correspondência em nenhum dos 3 níveis (pendente).
+
+    Recebe o _ParsedInvoiceItem (não o SupplierInvoiceItem já persistido) —
+    achado ao testar C1: um rollback no meio do loop de create_supplier_invoice
+    (corrida em IntegrityError) expira TODOS os objetos rastreados pela sessão,
+    inclusive db_items ainda não processados; ler um atributo expirado fora de
+    um await específico do SQLAlchemy estoura MissingGreenlet. O dataclass
+    parseado nunca é rastreado pela sessão, então é imune a essa expiração."""
+
+    # Nível 1 — EAN da unidade de venda (mesma query de _check_active_code_conflict,
+    # só leitura). Nunca ambíguo — regra de EAN único garante no máximo um
+    # Product OU Option ativo com o mesmo EAN na empresa.
+    if item.c_ean:
+        p = (await db.execute(
+            select(Product).filter_by(company_id=company_id, ean=item.c_ean, active=True, deleted=False)
+        )).scalars().first()
+        if p:
+            return ("ean", p.id, None, _resolve_qtrib_quantity(item))
+        o = (await db.execute(
+            select(Option).join(OptionGroup, OptionGroup.id == Option.option_group_id)
+            .filter(OptionGroup.company_id == company_id, Option.ean == item.c_ean, Option.active == True)
+        )).scalars().first()
+        if o:
+            return ("ean", None, o.id, _resolve_qtrib_quantity(item))
+
+        # Nível 2 — GTIN de embalagem/pacote já conhecido (achado do usuário:
+        # fardo/caixa tem GTIN próprio do fabricante, não é o mesmo EAN da
+        # unidade com uma "quantidade diferente"). Global entre fornecedores
+        # — diferente do nível 3, abaixo.
+        alt = (await db.execute(
+            select(ProductGtinAlt).filter_by(company_id=company_id, gtin=item.c_ean)
+        )).scalars().first()
+        if alt:
+            return ("gtin_alt", alt.product_id, alt.option_id, item.quantidade * alt.quantidade_por_unidade)
+
+    # Nível 3 — código do fornecedor (aprendido na primeira resolução manual, C2)
+    if item.c_prod:
+        spc = (await db.execute(
+            select(SupplierProductCode).filter_by(
+                company_id=company_id, supplier_id=supplier_id, c_prod=item.c_prod,
+            )
+        )).scalars().first()
+        if spc:
+            return ("supplier_code", spc.product_id, spc.option_id, item.quantidade)
+
+    return (None, None, None, item.quantidade)
 
 
 class SupplierInvoicePreviewItemOut(BaseModel):
@@ -4373,6 +4533,8 @@ def _preview_payload(parsed: _ParsedInvoice, existing_supplier: Supplier | None,
 class SupplierInvoiceCreateOut(BaseModel):
     id: int
     supplier_id: int
+    itens_vinculados: int
+    itens_pendentes: int
 
 
 class SupplierInvoiceListItemOut(BaseModel):
@@ -4392,6 +4554,16 @@ class SupplierInvoiceListOut(BaseModel):
     total: int
 
 
+class SupplierInvoiceDetailItemOut(SupplierInvoicePreviewItemOut):
+    # C1 (ORD-195) — estado do vínculo automático, só existe pós-persistência
+    # (a prévia de B1 nunca teve isso, não faz sentido lá).
+    product_id: int | None
+    option_id: int | None
+    link_source: str | None  # "ean" | "gtin_alt" | "supplier_code" | None
+    link_label: str | None  # nome do produto/opção vinculado, resolvido no backend
+    pendente_motivo: str | None  # None | "guarda_chuva" | "sem_estoque_iniciado" | "conflito_concorrencia"
+
+
 class SupplierInvoiceDetailOut(BaseModel):
     id: int
     chave_acesso: str
@@ -4404,7 +4576,7 @@ class SupplierInvoiceDetailOut(BaseModel):
     valor_total: float
     imported_at: datetime | None
     imported_by: int
-    itens: list[SupplierInvoicePreviewItemOut]
+    itens: list[SupplierInvoiceDetailItemOut]
 
 
 @app.post(
@@ -4456,16 +4628,81 @@ async def create_supplier_invoice(
     )
     db.add(invoice)
     await db.flush()  # garante invoice.id antes dos itens
-    db.add_all([
+    db_items = [
         SupplierInvoiceItem(
             supplier_invoice_id=invoice.id, n_item=item.n_item, c_prod=item.c_prod, c_ean=item.c_ean,
             x_prod=item.x_prod, ncm=item.ncm, cfop=item.cfop, unidade=item.unidade,
             quantidade=item.quantidade, valor_unitario=item.valor_unitario, valor_total=item.valor_total,
+            unidade_tributavel=item.unidade_tributavel, quantidade_tributavel=item.quantidade_tributavel,
+            valor_unitario_tributavel=item.valor_unitario_tributavel,
         )
         for item in parsed.itens
-    ])
+    ]
+    db.add_all(db_items)
     await db.commit()
-    return {"id": invoice.id, "supplier_id": supplier.id}
+    # capturados como valores simples ANTES do loop: um rollback (abaixo)
+    # expira TODO objeto rastreado pela sessão, inclusive invoice/supplier —
+    # ler invoice.id depois disso fora de um await específico do SQLAlchemy
+    # estoura MissingGreenlet (achado testando C1). int puro nunca expira.
+    invoice_id, supplier_id_val = invoice.id, supplier.id
+
+    # C1 (ORD-195) — vínculo automático. A nota e os itens já estão
+    # commitados ANTES daqui (garantia de B1, sem mudança): se o vínculo
+    # falhar em algum item, a nota nunca fica inconsistente, só o item fica
+    # pendente (resolvido depois por C2).
+    vinculados, pendentes = 0, 0
+    for db_item, parsed_item in zip(db_items, parsed.itens):
+        # usa o dataclass parseado (imune à expiração de sessão), não o
+        # db_item ORM — mesmo motivo da captura de invoice_id acima.
+        link_source, product_id, option_id, qtd = await _match_supplier_invoice_item(
+            db, company_id, supplier_id_val, parsed_item,
+        )
+        pendente_motivo = None
+        if link_source:
+            try:
+                await _create_stock_movement(
+                    db, company_id,
+                    StockMovementIn(
+                        tipo="entrada", quantidade=qtd,
+                        motivo=f"Vínculo automático — nota de compra #{invoice_id}",
+                    ),
+                    current_user, product_id=product_id, option_id=option_id,
+                )
+            except (HTTPException, IntegrityError) as e:
+                # IntegrityError (achado no repasse backend): duas notas diferentes
+                # com item do mesmo EAN confirmadas quase ao mesmo tempo podem
+                # colidir no INSERT do StockItem novo — só uma sobrevive à
+                # UniqueConstraint. A sessão fica com um flush pendente com falha,
+                # só ESSE caso exige rollback pra voltar a ser utilizável.
+                # HTTPException (guarda-chuva / StockItem inexistente ainda): não
+                # houve add/flush algum antes de levantar — rollback aqui não
+                # desfaz nada, só teria o efeito colateral de expirar a sessão
+                # à toa (motivo pelo qual esse ramo não chama db.rollback()).
+                if isinstance(e, IntegrityError):
+                    await db.rollback()
+                link_source, product_id, option_id = None, None, None
+                if isinstance(e, IntegrityError):
+                    pendente_motivo = "conflito_concorrencia"
+                elif "guarda-chuva" in e.detail:
+                    pendente_motivo = "guarda_chuva"
+                else:
+                    pendente_motivo = "sem_estoque_iniciado"
+        db_item.product_id, db_item.option_id = product_id, option_id
+        db_item.link_source, db_item.pendente_motivo = link_source, pendente_motivo
+        # commit por item, não um só no final: um rollback (acima) expira a
+        # sessão inteira — se o commit fosse só no final, o rollback de um
+        # item no meio do loop apagaria as atribuições já feitas nos itens
+        # anteriores, que ainda não tinham sido persistidas (achado ao
+        # escrever o código, corrigido antes do primeiro teste).
+        await db.commit()
+        if link_source:
+            vinculados += 1
+        else:
+            pendentes += 1
+    return {
+        "id": invoice_id, "supplier_id": supplier_id_val,
+        "itens_vinculados": vinculados, "itens_pendentes": pendentes,
+    }
 
 
 # Achado em teste manual do usuário (ORD-194): o Explorer prometia "aparece na
@@ -4576,6 +4813,20 @@ async def get_supplier_invoice(
     items = (await db.execute(
         select(SupplierInvoiceItem).filter_by(supplier_invoice_id=invoice.id).order_by(SupplierInvoiceItem.n_item)
     )).scalars().all()
+
+    # C1 (ORD-195) — resolve o nome do produto/opção vinculado em 2 queries em
+    # lote (não N+1 por item) pra montar link_label direto na resposta.
+    product_ids = {it.product_id for it in items if it.product_id}
+    option_ids = {it.option_id for it in items if it.option_id}
+    product_names = {}
+    if product_ids:
+        rows = (await db.execute(select(Product.id, Product.name).filter(Product.id.in_(product_ids)))).all()
+        product_names = dict(rows)
+    option_names = {}
+    if option_ids:
+        rows = (await db.execute(select(Option.id, Option.label).filter(Option.id.in_(option_ids)))).all()
+        option_names = dict(rows)
+
     return {
         "id": invoice.id, "chave_acesso": invoice.chave_acesso, "supplier_id": invoice.supplier_id,
         "fornecedor_nome": supplier.nome, "fornecedor_cnpj": supplier.cnpj,
@@ -4588,6 +4839,13 @@ async def get_supplier_invoice(
                 "ncm": it.ncm, "cfop": it.cfop, "unidade": it.unidade,
                 "quantidade": float(it.quantidade), "valor_unitario": float(it.valor_unitario),
                 "valor_total": float(it.valor_total),
+                "product_id": it.product_id, "option_id": it.option_id, "link_source": it.link_source,
+                "link_label": (
+                    product_names.get(it.product_id) if it.product_id
+                    else option_names.get(it.option_id) if it.option_id
+                    else None
+                ),
+                "pendente_motivo": it.pendente_motivo,
             }
             for it in items
         ],
