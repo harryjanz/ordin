@@ -1,6 +1,6 @@
 ---
 id: ORD-196
-status: Explorer
+status: QA Explorer
 estimativa: 8 pontos (herdado de docs/estudo-modulo-estoque-erp.md, a confirmar no Tech Explorer)
 ---
 
@@ -219,3 +219,245 @@ resolvidos antes de `Ready`:
    (mesmo padrão já usado em `SupplierInvoiceScreen`), ou o volume típico é baixo o bastante pra uma
    lista simples? Recomendo seguir o padrão já estabelecido (server-side) por consistência, mas é
    uma confirmação técnica, não uma decisão de produto nova.
+
+## QA Explorer
+
+### Rastreabilidade — Critério (Explorer) → Cenário
+
+| # | Critério | Cenário(s) que cobrem |
+|---|---|---|
+| 1 | Tela "Pendências" lista itens de todas as notas, filtro por fornecedor/motivo | *Listagem agregada de pendências*, *Filtro por fornecedor*, *Filtro por motivo de pendência*, *Sem itens pendentes* |
+| 2 | Detalhe da nota também resolve, sem precisar ir pra Pendências | *Resolver item pendente a partir do detalhe da nota* |
+| 3 | Vincular a existente por nome/SKU/EAN | *Vincular por nome*, *Vincular por SKU*, *Vincular por EAN*, *Vincular a produto de outra empresa — isolamento* |
+| 4 | Entrada de estoque na quantidade correta (qCom/qTrib) | *Entrada de estoque respeita qTrib divergente e consistente* |
+| 5 | Criar produto novo pré-preenchido a partir do item | *Criar produto novo — dados válidos*, *Criar produto novo — categoria obrigatória ausente* |
+| 6 | Ignorar remove da fila sem gerar entrada | *Ignorar item pendente*, *Item ignorado não gera movimentação de estoque* |
+| 7 | Grava associação (GTIN de embalagem ou código do fornecedor) pra casamento futuro | *Vincular grava GTIN de embalagem*, *Vincular grava código do fornecedor*, *Criar produto novo também grava associação* |
+| 8 | Identifica candidatos retroativos e oferece aplicar, mostrando a quantidade | *Candidatos retroativos por GTIN de embalagem*, *Candidatos retroativos por fornecedor+código*, *Nenhum candidato retroativo encontrado* |
+| 9 | Retroativo nunca é automático/silencioso | *Aplicação retroativa exige confirmação explícita* |
+| 10 | Recusar retroativo resolve só o item atual | *Empresa recusa aplicação retroativa* |
+| 11 | `guarda_chuva` só vincula a opção, nunca ao produto guarda-chuva | *Vincular item guarda-chuva a uma opção — sucesso*, *Vincular item guarda-chuva ao produto — erro* |
+| 12 | `sem_estoque_iniciado` exige `unidade` | *Vincular informando unidade — sucesso*, *Vincular sem informar unidade — erro* |
+| 13 | Item resolvido sai da fila permanentemente | *Item vinculado some da fila*, *Item ignorado some da fila*, *Item de produto novo some da fila* |
+| 14 | Cadastro de vínculo em lote fora de escopo | Critério negativo (exclusão de escopo) — não gera cenário Gherkin, mesma convenção usada em C1 pra critérios de fronteira; verificado no Tech Explorer por ausência de endpoint/tela, não por comportamento em runtime |
+
+Cenários adicionais sem numeração 1:1 direta, cobrindo exceções herdadas de C1 e isolamento
+multi-tenant explícito (fora do escopo de um único critério, atravessam vários):
+*Vincular item com conflito de concorrência — sucesso ao tentar de novo*, *Vincular item com
+conflito de concorrência — colide de novo*, *Isolamento multi-tenant na listagem de Pendências*,
+*Isolamento multi-tenant na aplicação retroativa*, *Ignorar item de outra empresa — erro*.
+
+### Cenários Gherkin
+
+```gherkin
+Feature: Fila de pendência com resolução manual (C2)
+  Como Admin da empresa
+  Quero resolver manualmente os itens de nota de compra que o vínculo automático não conseguiu casar
+  Para que nenhum item comprado fique fora do controle de estoque indefinidamente
+
+  Background:
+    Dado que estou autenticado como Admin da empresa "Burger House"
+    E existe uma nota de compra confirmada com um item pendente, sem produto/opção vinculado
+
+  # ── Listagem (Critério 1, 13) ──────────────────────────────────────────
+
+  Scenario: Listagem agregada de pendências
+    Dado que existem itens pendentes em 3 notas de compra diferentes da minha empresa
+    Quando acesso a tela "Pendências"
+    Então vejo os itens pendentes das 3 notas juntos, numa única lista
+    E cada linha mostra nota, fornecedor, código/EAN, descrição, quantidade e motivo da pendência
+
+  Scenario: Filtro por fornecedor
+    Dado que existem itens pendentes de 2 fornecedores diferentes
+    Quando filtro a tela "Pendências" pelo fornecedor "Distribuidora de Bebidas Sul Ltda"
+    Então vejo só os itens pendentes desse fornecedor
+
+  Scenario: Filtro por motivo de pendência
+    Dado que existem itens pendentes sem correspondência e itens pendentes por "guarda-chuva"
+    Quando filtro a tela "Pendências" pelo motivo "guarda-chuva"
+    Então vejo só os itens pendentes por esse motivo
+
+  Scenario: Sem itens pendentes
+    Dado que não existe nenhum item pendente na minha empresa
+    Quando acesso a tela "Pendências"
+    Então vejo uma mensagem de lista vazia, sem erro
+
+  Scenario: Resolver item pendente a partir do detalhe da nota
+    Dado que estou vendo o detalhe de uma nota específica com um item pendente
+    Quando resolvo esse item ali mesmo, sem navegar pra tela "Pendências"
+    Então o item é resolvido normalmente, com o mesmo resultado de resolver pela tela "Pendências"
+
+  # ── Vincular a existente (Critério 3, 4, 7) ────────────────────────────
+
+  Scenario: Vincular por nome
+    Dado um item pendente sem EAN nem código do fornecedor reconhecido
+    E um produto "Coca-Cola Lata 350ml" já cadastrado na minha empresa
+    Quando busco por "Coca-Cola" no painel de resolução e seleciono esse produto
+    Então o item é vinculado a esse produto
+    E uma entrada de estoque é registrada na quantidade do item
+
+  Scenario: Vincular por SKU
+    Dado um produto cadastrado com SKU "COCA-350"
+    Quando busco por "COCA-350" no painel de resolução
+    Então encontro e consigo selecionar esse produto
+
+  Scenario: Vincular por EAN
+    Dado um produto cadastrado com EAN "7894900010015"
+    Quando busco por "7894900010015" no painel de resolução
+    Então encontro e consigo selecionar esse produto
+
+  Scenario: Vincular a produto de outra empresa — isolamento
+    Dado um produto com o mesmo nome cadastrado numa empresa diferente da minha
+    Quando busco esse nome no painel de resolução
+    Então esse produto de outra empresa não aparece nos resultados da busca
+
+  Scenario: Entrada de estoque respeita qTrib divergente e consistente
+    Dado um item pendente cujo qTrib diverge de qCom e cuja conta bate com o valor total do item
+      (mesma regra de tolerância já usada em C1)
+    Quando vinculo esse item a um produto existente
+    Então a entrada de estoque usa a quantidade de qTrib, não a de qCom
+
+  Scenario: Vincular grava GTIN de embalagem
+    Dado um item pendente cujo código de barras é um GTIN de embalagem (fardo/caixa), não o EAN de
+      venda de nenhum produto cadastrado
+    Quando vinculo esse item a um produto existente, informando quantas unidades cada embalagem
+      contém
+    Então o sistema guarda essa associação (GTIN de embalagem → produto)
+    E uma nota de compra futura com o mesmo GTIN casa automaticamente nesse produto, sem passar
+      pela fila de pendência de novo
+
+  Scenario: Vincular grava código do fornecedor
+    Dado um item pendente cujo código do fornecedor (`cProd`) não está associado a nenhum produto
+    Quando vinculo esse item a um produto existente
+    Então o sistema guarda essa associação (fornecedor + código → produto)
+    E uma nota futura do mesmo fornecedor com o mesmo código casa automaticamente nesse produto
+
+  # ── Criar produto novo (Critério 5, 7) ─────────────────────────────────
+
+  Scenario: Criar produto novo — dados válidos
+    Dado um item pendente sem nenhum produto correspondente no catálogo
+    Quando escolho "Criar produto novo" e completo os campos pré-preenchidos (nome, unidade, valor)
+      mais a categoria
+    Então um novo produto é criado no catálogo
+    E o item é imediatamente vinculado a esse produto, com entrada de estoque na quantidade do item
+
+  Scenario: Criar produto novo — categoria obrigatória ausente
+    Dado que estou no formulário de "Criar produto novo" a partir de um item pendente
+    Quando tento salvar sem escolher uma categoria
+    Então recebo um erro de validação e o produto não é criado
+
+  Scenario: Criar produto novo também grava associação
+    Dado um item pendente com GTIN de embalagem reconhecível
+    Quando crio um produto novo a partir desse item
+    Então a associação de GTIN de embalagem também é gravada pro produto recém-criado, igual
+      aconteceria se eu tivesse vinculado a um produto já existente
+
+  # ── Ignorar (Critério 6) ────────────────────────────────────────────────
+
+  Scenario: Ignorar item pendente
+    Dado um item pendente sem relevância pro controle de estoque (ex: copo descartável)
+    Quando marco esse item como "não controla estoque"
+    Então o item sai da fila de pendências permanentemente
+
+  Scenario: Item ignorado não gera movimentação de estoque
+    Dado um item pendente que acabei de marcar como "não controla estoque"
+    Então nenhuma entrada de estoque foi registrada por causa desse item
+
+  Scenario: Ignorar item de outra empresa — erro
+    Dado um item pendente que pertence a uma nota de compra de outra empresa
+    Quando tento marcá-lo como "não controla estoque" usando meu próprio usuário
+    Então recebo um erro e nada é alterado
+
+  # ── Aplicação retroativa (Critério 8, 9, 10) ────────────────────────────
+
+  Scenario: Candidatos retroativos por GTIN de embalagem
+    Dado 2 notas já importadas, cada uma com um item pendente com o mesmo GTIN de embalagem
+    Quando vinculo o item pendente da segunda nota a um produto, informando a conversão da embalagem
+    Então o sistema me avisa que existe 1 outro item pendente com o mesmo GTIN, na primeira nota
+    E mostra a quantidade que seria afetada antes de eu decidir
+
+  Scenario: Candidatos retroativos por fornecedor+código
+    Dado 2 notas já importadas do mesmo fornecedor, cada uma com um item pendente com o mesmo
+      código do fornecedor (`cProd`)
+    Quando vinculo o item pendente de uma delas a um produto
+    Então o sistema me avisa que existe 1 outro item pendente com o mesmo fornecedor+código
+
+  Scenario: Nenhum candidato retroativo encontrado
+    Dado um item pendente cujo código não aparece em nenhum outro item pendente de nenhuma outra
+      nota já importada
+    Quando vinculo esse item a um produto
+    Então o sistema não exibe nenhuma pergunta de aplicação retroativa — só resolve o item atual
+
+  Scenario: Aplicação retroativa exige confirmação explícita
+    Dado que o sistema encontrou candidatos retroativos ao vincular um item
+    Quando eu NÃO confirmo explicitamente a aplicação retroativa (ex: fecho o aviso, ou não marco a
+      opção)
+    Então os itens candidatos continuam pendentes, sem nenhuma entrada de estoque gerada neles
+
+  Scenario: Empresa aceita aplicação retroativa
+    Dado que o sistema encontrou 2 outros itens pendentes candidatos ao vincular o item atual
+    Quando confirmo explicitamente a aplicação retroativa
+    Então os 2 itens candidatos recebem entrada de estoque e saem da fila de pendência
+    E o item original também é resolvido normalmente
+
+  Scenario: Empresa recusa aplicação retroativa
+    Dado que o sistema encontrou candidatos retroativos ao vincular o item atual
+    Quando recuso explicitamente aplicar a resolução aos outros itens
+    Então só o item atual é resolvido
+    E os itens candidatos continuam pendentes, sem nenhuma alteração
+
+  Scenario: Isolamento multi-tenant na aplicação retroativa
+    Dado um item pendente de outra empresa com o mesmo GTIN de embalagem do item que estou resolvendo
+    Quando vinculo o meu item e o sistema procura candidatos retroativos
+    Então o item da outra empresa NUNCA aparece como candidato, mesmo com o código idêntico
+
+  # ── Casos herdados de C1 (Critério 11, 12) ─────────────────────────────
+
+  Scenario: Vincular item guarda-chuva a uma opção — sucesso
+    Dado um item pendente por "guarda-chuva" (o EAN pertence a um produto guarda-chuva)
+    Quando vinculo esse item a uma opção do grupo de opções desse produto, não ao produto em si
+    Então o vínculo é aceito e a entrada de estoque é registrada na opção
+
+  Scenario: Vincular item guarda-chuva ao produto — erro
+    Dado um item pendente por "guarda-chuva"
+    Quando tento vincular esse item diretamente ao produto guarda-chuva (não a uma opção)
+    Então recebo um erro e o item continua pendente
+
+  Scenario: Vincular informando unidade — sucesso
+    Dado um item pendente por "sem estoque iniciado" (produto ainda nunca recebeu nenhuma
+      movimentação)
+    Quando vinculo esse item informando a unidade de estoque (ex: "un")
+    Então a primeira movimentação de estoque é criada com essa unidade
+    E o item sai da fila de pendência
+
+  Scenario: Vincular sem informar unidade — erro
+    Dado um item pendente por "sem estoque iniciado"
+    Quando tento vincular esse item sem informar a unidade
+    Então recebo um erro de validação e o item continua pendente
+
+  Scenario: Vincular item com conflito de concorrência — sucesso ao tentar de novo
+    Dado um item pendente por "conflito de concorrência" (corrida rara entre duas notas)
+    Quando tento vincular esse item de novo, e dessa vez não há nenhuma corrida concorrente
+    Então o vínculo é aceito normalmente
+
+  Scenario: Vincular item com conflito de concorrência — colide de novo
+    Dado um item pendente por "conflito de concorrência"
+    Quando tento vincular esse item de novo e ocorre uma nova colisão simultânea
+    Então o item continua pendente pelo mesmo motivo, e vejo uma mensagem de erro clara
+
+  # ── Fila e isolamento (Critério 1, 13) ──────────────────────────────────
+
+  Scenario: Item vinculado some da fila
+    Dado um item pendente que acabei de vincular a um produto existente
+    Então esse item não aparece mais na tela "Pendências" nem no detalhe da nota como pendente
+
+  Scenario: Item de produto novo some da fila
+    Dado um item pendente pro qual acabei de criar um produto novo
+    Então esse item não aparece mais como pendente
+
+  Scenario: Isolamento multi-tenant na listagem de Pendências
+    Dado que existe um item pendente pertencente a uma empresa diferente da minha
+    Quando acesso a tela "Pendências" com meu usuário
+    Então esse item de outra empresa não aparece na minha lista
+```
+
