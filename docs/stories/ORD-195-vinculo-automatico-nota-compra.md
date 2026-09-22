@@ -1,6 +1,6 @@
 ---
 id: ORD-195
-status: Explorer
+status: QA Explorer
 estimativa: null
 fase: null
 sprint: null
@@ -146,3 +146,142 @@ Tech Explorer de frontend.
 
 Nenhum desses três pontos é uma lacuna de escopo (todos têm um cenário de negócio claro) — são
 detalhes de implementação que o Tech Explorer resolve normalmente. Pode avançar pro QA Explorer.
+
+## QA Explorer
+
+### Rastreabilidade — Critério de aceite → Cenário
+
+| Critério de aceite (Explorer) | Cenário(s) Gherkin |
+|---|---|
+| EAN idêntico → entrada automática com conversão de unidade | `Vínculo automático por EAN idêntico`, `Conversão de unidade aplicada no lançamento automático` |
+| `cProd` com mapeamento salvo → entrada automática mesmo sem EAN | `Vínculo automático por código do fornecedor já mapeado` |
+| Sem correspondência → pendente, sem travar confirmação | `Item sem qualquer correspondência fica pendente` |
+| Detalhe da nota mostra vinculado/pendente por item | (mesmo cenário dos dois itens acima — verifica o retorno da tela de detalhe) |
+| Guarda-chuva não recebe entrada direta | `Item casa com produto guarda-chuva` |
+| `DELETE` bloqueado se item já vendido | `Exclusão bloqueada após venda do estoque vinculado`, `Exclusão ainda permitida sem venda` |
+| Casamento por EAN nunca ambíguo | `Regressão — dois itens ativos não podem ter o mesmo EAN` (cenário de garantia, não de comportamento novo) |
+
+### Cenários Gherkin
+
+```gherkin
+Feature: Vínculo automático de itens de nota de compra por EAN/cProd
+  Como Empresa
+  Quero que os itens de uma nota de compra sejam conectados automaticamente ao catálogo
+  Para que o estoque suba sozinho sem eu precisar lançar cada entrada na mão
+
+  Background:
+    Dado uma empresa com um produto "Refrigerante Lata 350ml" ativo, EAN "7891000100103"
+    E uma nota de compra confirmada via B1 trazendo itens dessa mesma empresa
+
+  # ── Vínculo por EAN (Critério 1) ──────────────────────────────────────
+
+  Scenario: Vínculo automático por EAN idêntico
+    Dado um item da nota com cEAN "7891000100103" e quantidade 24
+    Quando a nota é confirmada
+    Então o item fica vinculado ao Product "Refrigerante Lata 350ml"
+    E uma entrada de estoque de 24 unidades é lançada nesse produto
+    E o detalhe da nota mostra esse item como "vinculado automaticamente"
+
+  Scenario: Conversão de unidade aplicada no lançamento automático
+    Dado um produto com unidade_compra "CX" e fator_conversao 24 (1 caixa = 24 unidades)
+    E um item da nota com cEAN desse produto, uCom "CX" e quantidade 2
+    Quando a nota é confirmada
+    Então a entrada de estoque lançada é de 48 unidades (2 caixas × 24)
+
+  Scenario: EAN corresponde só a um produto/opção inativo — tratado como sem correspondência
+    Dado um Product inativo com EAN "9990000000001"
+    E um item da nota com cEAN "9990000000001"
+    Quando a nota é confirmada
+    Então o item NÃO é vinculado a esse produto inativo
+    E o item fica marcado como pendente
+
+  # ── Vínculo por código do fornecedor (Critério 2) ─────────────────────
+
+  Scenario: Vínculo automático por código do fornecedor já mapeado
+    Dado um mapeamento salvo em supplier_product_code pro fornecedor X, código "REF-X-350" → Product "Refrigerante Lata 350ml"
+    E um item da nota do fornecedor X com cProd "REF-X-350" e cEAN vazio
+    Quando a nota é confirmada
+    Então o item fica vinculado ao Product "Refrigerante Lata 350ml"
+    E uma entrada de estoque é lançada
+
+  Scenario: Código do fornecedor sem mapeamento prévio não vincula sozinho
+    Dado nenhum mapeamento salvo em supplier_product_code pro fornecedor X, código "NOVO-COD"
+    E um item da nota do fornecedor X com cProd "NOVO-COD" e cEAN vazio
+    Quando a nota é confirmada
+    Então o item fica pendente
+    E nenhuma entrada de estoque é lançada pra esse item
+
+  Scenario: Mapeamento de cProd é isolado por fornecedor
+    Dado um mapeamento salvo em supplier_product_code pro fornecedor X, código "COD-01" → Product A
+    E um item de uma nota do fornecedor Y (diferente) com o mesmo cProd "COD-01"
+    Quando a nota é confirmada
+    Então o item do fornecedor Y NÃO é vinculado ao Product A
+    E fica pendente (o mapeamento de X não vale pra Y)
+
+  # ── Pendência (Critério 3) ────────────────────────────────────────────
+
+  Scenario: Item sem qualquer correspondência fica pendente
+    Dado um item da nota com cEAN vazio e cProd sem mapeamento salvo
+    Quando a nota é confirmada
+    Então a confirmação da nota continua tendo sucesso (status 201)
+    E o item fica marcado como pendente, sem entrada de estoque
+    E os outros itens da mesma nota que casaram continuam vinculados normalmente
+
+  # ── Limitação guarda-chuva (Critério 5) ───────────────────────────────
+
+  Scenario: Item casa com produto guarda-chuva
+    Dado um Product guarda-chuva (is_umbrella=true) ativo com EAN "5550000000001"
+    E um item da nota com cEAN "5550000000001"
+    Quando a nota é confirmada
+    Então nenhuma entrada de estoque é lançada diretamente no produto guarda-chuva
+    E o item fica sinalizado como não resolvido automaticamente (mecanismo exato — mesma
+      fila de "pendente" ou um estado distinto — decidido no Tech Explorer)
+
+  # ── Bloqueio de exclusão pós-venda (Critério 6) ───────────────────────
+
+  Scenario: Exclusão bloqueada após venda do estoque vinculado
+    Dado uma nota confirmada com um item vinculado que gerou entrada de estoque
+    E esse estoque já foi baixado por uma venda
+    Quando a Empresa tenta excluir a nota
+    Então a exclusão é rejeitada com uma mensagem explicando o motivo
+    E a nota continua existindo
+
+  Scenario: Exclusão ainda permitida sem venda
+    Dado uma nota confirmada com itens vinculados, mas nenhum estoque gerado por ela foi vendido ainda
+    Quando a Empresa exclui a nota
+    Então a exclusão funciona normalmente (mesmo comportamento já existente desde B1)
+
+  # ── Isolamento multi-tenant ────────────────────────────────────────────
+
+  Scenario: Vínculo nunca atravessa empresas
+    Dado um Product da empresa A com EAN "1112223334445"
+    E uma nota confirmada pela empresa B com um item usando o mesmo EAN "1112223334445"
+    Quando a nota da empresa B é confirmada
+    Então o item NÃO é vinculado ao Product da empresa A
+    E fica pendente (correspondência só é buscada dentro da própria empresa)
+
+  # ── Regressão — garantia herdada da regra de EAN único ────────────────
+
+  Scenario: Regressão — dois itens ativos não podem ter o mesmo EAN
+    Dado um Product ativo com EAN "7891000100103"
+    Quando alguém tenta ativar uma Option com o mesmo EAN "7891000100103" na mesma empresa
+    Então a ativação é rejeitada (regra já existente, _check_active_code_conflict)
+    E isso garante que o casamento por EAN em C1 nunca encontra dois itens ativos ao mesmo tempo
+```
+
+### Lacunas encontradas
+- **Fator de conversão ausente**: se um item da nota tem `uCom` diferente da `unidade_compra` do
+  produto casado, mas o produto não tem `fator_conversao` cadastrado (campo nullable, G3/A5), o
+  Explorer não define o que acontece — vincula sem converter (quantidade errada), vincula mas com
+  aviso, ou vira pendência por falta de dado suficiente? **Bloqueador pro Tech Explorer decidir**,
+  não é um "detalhe de implementação" — muda o resultado que a Empresa vê no estoque.
+- **`supplier_product_code` sem fornecedor ainda cadastrado**: não deveria acontecer na prática
+  (B1 sempre cria o `Supplier` antes de gravar `supplier_invoice_item`), mas vale um teste de
+  sanidade garantindo que o lookup por `(fornecedor_id, cProd)` nunca levanta erro se não achar
+  nada — só retorna "sem mapeamento", tratado como pendência.
+
+### O que ainda impede o avanço pro Tech Explorer
+Nada bloqueia — a lacuna do fator de conversão é uma pergunta a **responder no** Tech Explorer, não
+uma pendência que impede ele de começar (o cenário de teste já existe, só falta a resposta certa).
+Cenários revisados e alinhados com os 7 critérios de aceite do Explorer, com 1:1 confirmado na
+tabela de rastreabilidade acima.
