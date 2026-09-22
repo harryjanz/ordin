@@ -591,6 +591,58 @@ export interface Supplier {
   created_at: string;
 }
 
+// ORD-194 (B1) — prévia de importação de XML de NF de compra, devolvida sem
+// nada persistido (POST /catalog/supplier-invoices/preview).
+export interface SupplierInvoicePreviewItem {
+  n_item: number;
+  c_prod: string | null;
+  c_ean: string | null;
+  x_prod: string;
+  ncm: string | null;
+  cfop: string | null;
+  unidade: string | null;
+  quantidade: number;
+  valor_unitario: number;
+  valor_total: number;
+}
+
+export interface SupplierInvoicePreview {
+  chave_acesso: string;
+  already_imported: boolean;
+  fornecedor: {
+    existing_supplier_id: number | null;
+    cnpj: string;
+    nome: string;
+    sera_criado: boolean;
+  };
+  numero: string | null;
+  serie: string | null;
+  data_emissao: string | null;
+  valor_total: number;
+  itens: SupplierInvoicePreviewItem[];
+}
+
+// Gap fechado após teste manual do usuário: o Explorer prometia "aparece na
+// listagem de notas importadas" mas o Tech Explorer original nunca
+// operacionalizou isso num endpoint — ver docs/stories/ORD-194.
+export interface SupplierInvoiceListItem {
+  id: number;
+  supplier_id: number;
+  fornecedor_nome: string;
+  fornecedor_cnpj: string;
+  numero: string | null;
+  serie: string | null;
+  data_emissao: string | null;
+  valor_total: number;
+  imported_at: string | null;
+}
+
+export interface SupplierInvoiceDetail extends SupplierInvoiceListItem {
+  chave_acesso: string;
+  imported_by: number;
+  itens: SupplierInvoicePreviewItem[];
+}
+
 // ORD-170 — corpo de erro repassado 1:1 da Focus NFe (erros[] pode vir vazio).
 export interface FocusNfeErrorDetail {
   codigo: string;

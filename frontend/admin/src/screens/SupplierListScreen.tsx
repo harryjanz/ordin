@@ -7,12 +7,12 @@ import Table, { type TableColumn } from "../components/Table";
 import { formatCnpj } from "../lib/masks";
 import { parseApiError } from "../lib/apiErrors";
 import type { Supplier } from "../types";
-import styles from "./SupplierListScreen.module.scss";
 
 // ORD-182 (A6) — CRUD de fornecedores por empresa (superadmin/admin/owner/
-// manager). Mesmo padrão de FiscalAddonPlanListScreen — lista/formulário
-// dedicados, sem aba de tela existente pra consolidar (única tela do domínio
-// "Estoque" por enquanto).
+// manager). ORD-194 (B1, revisão de frontend): página/título compartilhados
+// com EstoqueScreen (aba "Notas de compra" ao lado) — este componente
+// renderiza só o conteúdo da aba, mesmo padrão de FiscalAddonPlanListScreen
+// dentro de CommercialScreen (ORD-174).
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString("pt-BR");
@@ -63,7 +63,7 @@ export default function SupplierListScreen() {
     {
       key: "action", header: "", render: (s) => (
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center" }}>
-          <Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); navigate(`/suppliers/${s.id}/edit`); }}>
+          <Button size="small" variant="secondary" onClick={(e) => { e.stopPropagation(); navigate(`/stock/suppliers/${s.id}/edit`); }}>
             Editar
           </Button>
           <Button size="small" variant="secondary" style={{ color: "var(--error-base)" }} onClick={(e) => { e.stopPropagation(); setRemoveTarget(s); }}>
@@ -75,10 +75,9 @@ export default function SupplierListScreen() {
   ];
 
   return (
-    <div className={styles.page}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h1 className={styles.title}>Fornecedores</h1>
-        <Button onClick={() => navigate("/suppliers/new")}>+ Novo fornecedor</Button>
+    <>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+        <Button onClick={() => navigate("/stock/suppliers/new")}>+ Novo fornecedor</Button>
       </div>
 
       {error && <Alert variant="error" text={error} fullWidth />}
@@ -99,6 +98,6 @@ export default function SupplierListScreen() {
         onConfirm={confirmRemove}
         onCancel={() => setRemoveTarget(null)}
       />
-    </div>
+    </>
   );
 }

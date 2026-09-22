@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, InputBase } from "design-system";
 import api from "../api";
 import Breadcrumb from "../components/Breadcrumb";
-import { formatCnpj } from "../lib/masks";
+import { formatCnpj, formatPhone } from "../lib/masks";
 import { isValidCnpj, normalizeCnpj } from "../lib/validators";
 import { parseApiError } from "../lib/apiErrors";
 import type { Supplier } from "../types";
@@ -63,7 +63,7 @@ export default function SupplierFormScreen() {
       const body = {
         nome: nome.trim(),
         cnpj: normalizeCnpj(cnpj),
-        telefone: telefone.trim() || null,
+        telefone: formatPhone(telefone) || null,
         email: email.trim() || null,
       };
       if (editingId === null) {
@@ -71,7 +71,7 @@ export default function SupplierFormScreen() {
       } else {
         await api.put(`/catalog/suppliers/${editingId}`, body);
       }
-      navigate("/suppliers");
+      navigate("/stock/suppliers");
     } catch (err) {
       setFormError(parseApiError(err).message || "Erro ao salvar fornecedor.");
     } finally {
@@ -92,14 +92,14 @@ export default function SupplierFormScreen() {
     <div className={styles.page}>
       <Breadcrumb
         items={[
-          { label: "Fornecedores", href: "/suppliers" },
+          { label: "Fornecedores", href: "/stock/suppliers" },
           { label: editingId === null ? "Novo fornecedor" : "Editar fornecedor" },
         ]}
       />
       <div className={styles.header}>
         <h1 className={styles.h1}>{editingId === null ? "Novo fornecedor" : "Editar fornecedor"}</h1>
         <div className={styles.headerActions}>
-          <Button variant="secondary" onClick={() => navigate("/suppliers")}>Voltar</Button>
+          <Button variant="secondary" onClick={() => navigate("/stock/suppliers")}>Voltar</Button>
           <Button onClick={save} disabled={!canSave} loading={saving}>Salvar fornecedor</Button>
         </div>
       </div>
@@ -130,7 +130,7 @@ export default function SupplierFormScreen() {
             <InputBase
               label="Telefone"
               placeholder="(11) 99999-9999"
-              value={telefone}
+              value={formatPhone(telefone)}
               onChange={(e) => setTelefone(e.target.value)}
             />
           </div>

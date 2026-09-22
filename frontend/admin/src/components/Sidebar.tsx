@@ -13,7 +13,11 @@ const MENU = [
   { to: "/companies/new", label: "Novo cliente", icon: "user-plus",   roles: ["superadmin", "admin"] },
   { to: "/catalog",       label: "Catálogo",     icon: "package",     roles: ["superadmin", "admin", "owner", "manager"] },
   // ORD-182 (A6) — ícone "box", não "truck" (não existe no icon-font real).
-  { to: "/suppliers",     label: "Fornecedores", icon: "box",         roles: ["superadmin", "admin", "owner", "manager"] },
+  // ORD-194 (B1, revisão de PM): "Fornecedores" solo virou "Estoque" com
+  // abas (Fornecedores + Notas de compra) — mesmo padrão de "Comercial"
+  // (ORD-174) — segunda tela do domínio justifica a consolidação.
+  // activePrefix: acende também em "/stock/invoices" (aba irmã).
+  { to: "/stock/suppliers", label: "Estoque",    icon: "box",         roles: ["superadmin", "admin", "owner", "manager"], activePrefix: "/stock" },
   { to: "/orders",        label: "Pedidos",      icon: "shopping-cart", roles: ["superadmin", "admin", "owner", "manager"] },
   // ORD-119 — fila de preparo/pronto do modelo de retirada única; cashier
   // também tem acesso (é quem já opera coleta hoje via balcão).
