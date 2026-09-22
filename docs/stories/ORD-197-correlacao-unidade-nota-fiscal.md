@@ -1,6 +1,6 @@
 ---
 id: ORD-197
-status: Explorer
+status: QA Explorer
 estimativa: 8 pontos (a confirmar no Tech Explorer)
 ---
 
@@ -201,6 +201,144 @@ Sem mudança visual nova além do que C2 já tem — o Dropdown de unidade em `R
 passa a vir pré-selecionado com mais frequência; o campo "Quantidade por unidade" (já existente,
 usado hoje só quando o item tem `c_ean`) passa a também aparecer quando o vínculo é por `c_prod`
 (nível 3), com o mesmo comportamento.
+
+## QA Explorer
+
+### Rastreabilidade — Critério (Explorer) → Cenário
+
+| # | Critério | Cenário(s) que cobrem |
+|---|---|---|
+| 1 | Tabela de sinônimos (backend) cobre os 5 grupos sem ambiguidade | *Tabela de sinônimos reconhece variações comuns sem ambiguidade* (Scenario Outline, 5 exemplos) |
+| 2 | C1 usa a unidade normalizada ao gravar `SupplierInvoiceItem.unidade` | *Casamento automático grava a unidade normalizada quando a nota usa um sinônimo reconhecido* |
+| 3 | C2 pré-seleciona a unidade no Dropdown quando bate um sinônimo | *Dropdown de unidade vem pré-selecionado quando a unidade da nota bate um sinônimo conhecido* |
+| 4 | Sigla ambígua (`LT` sozinho) nunca resolve automaticamente — sempre fallback manual | *Casamento automático preserva a unidade crua quando a nota usa a sigla ambígua "LT"*, *Dropdown de unidade não pré-seleciona quando a unidade da nota é a sigla ambígua "LT"* |
+| 5 | `SupplierProductCode` ganha `quantidade_por_unidade` opcional | *Vincular manualmente por código do fornecedor informando o fator de conversão*, *Vincular manualmente por código do fornecedor sem informar o fator* |
+| 6 | Vincular por código do fornecedor informando o fator grava e aplica na entrada atual | *Vincular manualmente por código do fornecedor informando o fator de conversão* |
+| 7 | Nota futura do mesmo fornecedor+código aplica o fator automaticamente via C1, sem cair na fila | *Nota futura do mesmo fornecedor e código já aplica o fator automaticamente* |
+| 8 | Nenhuma sigla ambígua entra na tabela de sinônimos (`LT` isolado excluído) | *Sigla ambígua "LT" isolada não está na tabela de sinônimos* |
+
+Cenários adicionais sem numeração 1:1 direta, cobrindo robustez e isolamento multi-tenant (mesmo
+padrão já obrigatório em C1/C2, `docs/ARQUITETURA.md` §6):
+*Dropdown de unidade não pré-seleciona quando a unidade da nota é desconhecida (não cadastrada)*,
+*Isolamento multi-tenant do fator de conversão por fornecedor*, *Item sem GTIN de embalagem nem
+código do fornecedor — unidade normaliza, fator de conversão por fornecedor não se aplica*.
+
+**Critério de fronteira, sem cenário Gherkin** (mesma convenção do critério 14 de C2): o fluxo
+alternativo "fornecedor muda a unidade usada pro mesmo código" (`CX12` → `CX24`), citado no Explorer
+como fora de escopo detectar automaticamente — não gera cenário porque a história explicitamente não
+promete nenhum comportamento aqui; fica registrado como observação pro Tech Explorer avaliar se vale
+um alerta simples, não uma trava.
+
+**Aberto pro Tech Explorer** (não é critério de aceite declarado, mas apareceu revisando os cenários
+abaixo): o Explorer não define se `quantidade_por_unidade` em `SupplierProductCode` tem alguma
+validação de valor (ex: rejeitar zero ou negativo) — `ProductGtinAlt.quantidade_por_unidade`
+equivalente não parece ter essa trava hoje (`services/catalog/main.py:365`). Não vira cenário aqui
+por não haver critério que o peça; sinalizado pro Tech Explorer decidir se replica a mesma ausência
+de validação (consistência) ou introduz uma (correção de lacuna pré-existente, fora do escopo desta
+história a rigor).
+
+### Cenários Gherkin
+
+```gherkin
+Feature: Correlação entre unidade livre da NF-e e as unidades de estoque do Ordin
+  Como Admin da empresa
+  Quero que o sistema reconheça variações comuns de escrita de unidade e lembre o fator de conversão
+  por fornecedor
+  Para precisar escolher manualmente cada vez menos vezes ao resolver um item pendente
+
+  Background:
+    Dado que estou autenticado como Admin da empresa "Burger House"
+    E existe o fornecedor "Alimentos Ltda." cadastrado na minha empresa
+
+  # ── Tabela de sinônimos (Critério 1, 8) ──────────────────────────────────
+
+  Scenario Outline: Tabela de sinônimos reconhece variações comuns sem ambiguidade
+    Dado que a nota de compra traz uma unidade cujo texto é "<unidade_da_nota>"
+    Quando o sistema normaliza essa unidade contra a tabela de sinônimos
+    Então a unidade normalizada resultante é "<unidade_normalizada>"
+
+    Examples:
+      | unidade_da_nota | unidade_normalizada |
+      | UND             | un                   |
+      | KG              | kg                   |
+      | GR              | g                    |
+      | LITROS          | L                    |
+      | ML              | ml                   |
+
+  Scenario: Sigla ambígua "LT" isolada não está na tabela de sinônimos
+    Dado que a nota de compra traz uma unidade cujo texto é "LT"
+    Quando o sistema normaliza essa unidade contra a tabela de sinônimos
+    Então a unidade não é reconhecida (nenhum sinônimo corresponde)
+    E o texto original "LT" é preservado sem alteração
+
+  # ── C1 — casamento automático (Critério 2, 4) ────────────────────────────
+
+  Scenario: Casamento automático grava a unidade normalizada quando a nota usa um sinônimo reconhecido
+    Dado que a nota de compra traz um item com unidade "UND" e EAN de venda já cadastrado no catálogo
+    Quando C1 processa a nota e casa o item automaticamente
+    Então o `SupplierInvoiceItem.unidade` gravado é "un", não o texto cru "UND"
+
+  Scenario: Casamento automático preserva a unidade crua quando a nota usa a sigla ambígua "LT"
+    Dado que a nota de compra traz um item com unidade "LT" e EAN de venda já cadastrado no catálogo
+    Quando C1 processa a nota e casa o item automaticamente
+    Então o `SupplierInvoiceItem.unidade` gravado é "LT", sem normalização
+
+  # ── C2 — resolução manual (Critério 3, 4) ────────────────────────────────
+
+  Scenario: Dropdown de unidade vem pré-selecionado quando a unidade da nota bate um sinônimo conhecido
+    Dado que existe um item pendente cuja unidade na nota é "GR"
+    Quando abro o painel de resolução manual desse item
+    Então o campo "Unidade de estoque" já vem pré-selecionado com "g"
+
+  Scenario: Dropdown de unidade não pré-seleciona quando a unidade da nota é a sigla ambígua "LT"
+    Dado que existe um item pendente cuja unidade na nota é "LT"
+    Quando abro o painel de resolução manual desse item
+    Então o campo "Unidade de estoque" vem vazio, exigindo escolha manual
+
+  Scenario: Dropdown de unidade não pré-seleciona quando a unidade da nota é desconhecida (não cadastrada)
+    Dado que existe um item pendente cuja unidade na nota é um texto fora da tabela, por exemplo "SC"
+    Quando abro o painel de resolução manual desse item
+    Então o campo "Unidade de estoque" vem vazio, exigindo escolha manual
+    E o comportamento é idêntico ao já existente antes desta história (sem regressão)
+
+  # ── Fator de conversão por fornecedor (Critério 5, 6, 7) ─────────────────
+
+  Scenario: Vincular manualmente por código do fornecedor informando o fator de conversão
+    Dado que existe um item pendente identificado só por código do fornecedor "CX12", sem GTIN de embalagem
+    Quando vinculo esse item a um produto existente informando quantidade_por_unidade igual a 12
+    Então a associação é gravada em `SupplierProductCode` com quantidade_por_unidade igual a 12
+    E a entrada de estoque do item atual é lançada multiplicando a quantidade recebida pelo fator (12)
+
+  Scenario: Vincular manualmente por código do fornecedor sem informar o fator
+    Dado que existe um item pendente identificado só por código do fornecedor "COD-99"
+    Quando vinculo esse item a um produto existente sem informar quantidade_por_unidade
+    Então a associação é gravada em `SupplierProductCode` com quantidade_por_unidade nula
+    E a entrada de estoque do item atual é lançada na quantidade recebida, sem multiplicação (fator implícito 1)
+
+  Scenario: Nota futura do mesmo fornecedor e código já aplica o fator automaticamente
+    Dado que o fornecedor "Alimentos Ltda." e o código "CX12" já têm quantidade_por_unidade igual a 12
+    gravado em `SupplierProductCode`
+    Quando uma nova nota de compra do mesmo fornecedor chega com um item de código "CX12" e quantidade recebida 3
+    Então C1 casa o item automaticamente (nível 3), sem cair na fila de pendência
+    E a entrada de estoque é lançada com quantidade 36 (3 × 12)
+
+  Scenario: Isolamento multi-tenant do fator de conversão por fornecedor
+    Dado que a empresa "Burger House" gravou quantidade_por_unidade igual a 12 para o fornecedor
+    "Alimentos Ltda." (CNPJ X) e código "CX12"
+    E a empresa "Pasta & Co" tem seu próprio cadastro do mesmo fornecedor (mesmo CNPJ X) e também
+    recebe notas com o código "CX12"
+    Quando uma nota de compra da empresa "Pasta & Co" chega com um item de código "CX12"
+    Então o item NÃO casa automaticamente pelo fator gravado pela "Burger House"
+    E fica pendente, aguardando resolução manual própria da "Pasta & Co"
+
+  # ── Borda: item sem nível 2 nem nível 3 possível ──────────────────────────
+
+  Scenario: Item sem GTIN de embalagem nem código do fornecedor — unidade normaliza, fator de conversão por fornecedor não se aplica
+    Dado que existe um item pendente sem c_ean e sem c_prod, com unidade na nota "KG"
+    Quando abro o painel de resolução manual desse item
+    Então o campo "Unidade de estoque" vem pré-selecionado com "kg" (normalização independe do nível de casamento)
+    E não há campo de fator de conversão por fornecedor disponível, já que não existe candidato de nível 2 nem 3 possível
+```
 
 ## Fontes (trazidas pelo usuário, preservadas para referência do Tech Explorer)
 
