@@ -1,7 +1,7 @@
 ---
 id: ORD-195
-status: QA Explorer
-estimativa: null
+status: Tech Explorer
+estimativa: 8 pontos (revisado de 5, Tech Explorer)
 fase: null
 sprint: null
 responsavel: PM + Produto
@@ -425,3 +425,248 @@ confirmado na tabela de rastreabilidade acima — incluindo os cenários de regr
 as garantias de unicidade (EAN de venda e GTIN de embalagem) que o casamento automático depende
 pra nunca ser ambíguo, e o cenário que documenta o limite deliberado da história (fardo de uso
 misto não é dividido automaticamente — sempre pendência, resolução fica pra C2).
+
+## Tech Explorer
+
+### Serviços impactados
+- **catalog-service**: único serviço tocado. `services/catalog/main.py` ganha 2 tabelas novas, 3
+  colunas novas em `supplier_invoice_items` (2 conjuntos: link de vínculo + `qTrib`/`uTrib`/`vUnTrib`
+  capturados do XML), a lógica de casamento em 3 níveis, e reaproveita `_create_stock_movement` e
+  `_resolve_stock_owner` já existentes (A2/G3, `ORD-181`/`ORD-190`) sem alterá-los.
+- **Nenhum outro serviço**. Vínculo é 100% interno ao catalog-service — não chama nenhum outro
+  serviço, não publica evento de fila.
+
+### Modelos e migrations
+
+```python
+class ProductGtinAlt(Base):
+    """C1 (ORD-195) — GTIN de embalagem/pacote (fardo, caixa, DUN-14) diferente do EAN da unidade
+    de venda, atribuído pelo fabricante — não do fornecedor. Um GTIN aponta pra um único
+    Product OU Option (XOR, mesmo padrão de StockItem) + quantidade por unidade. Escrito por C2
+    (resolução de pendência), lido por C1 (casamento automático nível 2)."""
+    __tablename__ = "product_gtin_alt"
+    __table_args__ = (
+        UniqueConstraint("company_id", "gtin", name="uq_product_gtin_alt_company_gtin"),
+        CheckConstraint(
+            "(product_id IS NOT NULL AND option_id IS NULL) OR (product_id IS NULL AND option_id IS NOT NULL)",
+            name="ck_product_gtin_alt_owner_xor",
+        ),
+    )
+    id                      = Column(Integer, primary_key=True)
+    company_id              = Column(Integer, nullable=False, index=True)
+    gtin                    = Column(String(14), nullable=False)
+    product_id              = Column(Integer, ForeignKey("products.id"), nullable=True)
+    option_id               = Column(Integer, ForeignKey("options.id"), nullable=True)
+    quantidade_por_unidade  = Column(Numeric(12, 3), nullable=False)
+    created_by              = Column(Integer, nullable=False)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+
+
+class SupplierProductCode(Base):
+    """C1 (ORD-195) — código do fornecedor (cProd) → produto, aprendido na primeira resolução
+    manual (C2). Preso a um fornecedor específico (diferente de ProductGtinAlt, que é global de
+    fabricante) — mesmo código de fornecedores diferentes não colide."""
+    __tablename__ = "supplier_product_code"
+    __table_args__ = (
+        UniqueConstraint("company_id", "supplier_id", "c_prod", name="uq_supplier_product_code"),
+        CheckConstraint(
+            "(product_id IS NOT NULL AND option_id IS NULL) OR (product_id IS NULL AND option_id IS NOT NULL)",
+            name="ck_supplier_product_code_owner_xor",
+        ),
+    )
+    id          = Column(Integer, primary_key=True)
+    company_id  = Column(Integer, nullable=False, index=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id"), nullable=False)
+    c_prod      = Column(String(60), nullable=False)
+    product_id  = Column(Integer, ForeignKey("products.id"), nullable=True)
+    option_id   = Column(Integer, ForeignKey("options.id"), nullable=True)
+    created_by  = Column(Integer, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+```
+
+`SupplierInvoiceItem` (B1, já existe) ganha colunas novas — migration aditiva, nenhuma quebra:
+
+```python
+# Vínculo (C1)
+product_id           = Column(Integer, ForeignKey("products.id"), nullable=True)
+option_id            = Column(Integer, ForeignKey("options.id"), nullable=True)
+link_source          = Column(String(20), nullable=True)  # "ean" | "gtin_alt" | "supplier_code" | None
+pendente_motivo      = Column(String(30), nullable=True)  # só quando link_source é None; ex: "guarda_chuva"
+
+# Dados brutos da nota que B1 descartava (achado desta revisão — necessário pro refinamento por qTrib)
+unidade_tributavel          = Column(String(10), nullable=True)
+quantidade_tributavel       = Column(Numeric(15, 4), nullable=True)
+valor_unitario_tributavel   = Column(Numeric(15, 4), nullable=True)
+```
+
+`_ParsedInvoiceItem`/`_parse_nfe` (B1) ganham os 3 campos tributáveis, direto do XML:
+```python
+unidade_tributavel=d.prod.uTrib,
+quantidade_tributavel=Decimal(d.prod.qTrib) if d.prod.qTrib is not None else None,
+valor_unitario_tributavel=Decimal(d.prod.vUnTrib) if d.prod.vUnTrib is not None else None,
+```
+
+### Algoritmo de casamento
+
+```python
+async def _match_supplier_invoice_item(
+    db: AsyncSession, company_id: int, supplier_id: int, item: SupplierInvoiceItem,
+) -> tuple[str | None, int | None, int | None, Decimal]:
+    """Retorna (link_source, product_id, option_id, quantidade_a_lancar).
+    link_source None = sem correspondência (pendente)."""
+
+    # Nível 1 — EAN de venda (mesma query de _check_active_code_conflict, só leitura)
+    if item.c_ean:
+        p = (await db.execute(
+            select(Product).filter_by(company_id=company_id, ean=item.c_ean, active=True, deleted=False)
+        )).scalars().first()
+        owner_id, is_option = (p.id, False) if p else (None, False)
+        if not p:
+            o = (await db.execute(
+                select(Option).join(OptionGroup, OptionGroup.id == Option.option_group_id)
+                .filter(OptionGroup.company_id == company_id, Option.ean == item.c_ean, Option.active == True)
+            )).scalars().first()
+            owner_id, is_option = (o.id, True) if o else (None, False)
+        if owner_id:
+            qtd = _resolve_qtrib_quantity(item)  # ver função abaixo
+            return ("ean", None if is_option else owner_id, owner_id if is_option else None, qtd)
+
+    # Nível 2 — GTIN de embalagem conhecido
+    if item.c_ean:
+        alt = (await db.execute(
+            select(ProductGtinAlt).filter_by(company_id=company_id, gtin=item.c_ean)
+        )).scalars().first()
+        if alt:
+            qtd = item.quantidade * alt.quantidade_por_unidade
+            return ("gtin_alt", alt.product_id, alt.option_id, qtd)
+
+    # Nível 3 — código do fornecedor
+    if item.c_prod:
+        spc = (await db.execute(
+            select(SupplierProductCode).filter_by(
+                company_id=company_id, supplier_id=supplier_id, c_prod=item.c_prod
+            )
+        )).scalars().first()
+        if spc:
+            return ("supplier_code", spc.product_id, spc.option_id, item.quantidade)
+
+    return (None, None, None, item.quantidade)
+
+
+def _resolve_qtrib_quantity(item: SupplierInvoiceItem) -> Decimal:
+    """qTrib só é usado quando diverge de qCom E a conta bate com o total do item
+    (tolerância de R$0,05 pra arredondamento) — ver achado da revisão (verificação
+    empírica: 0/41 XMLs reais da nfelib têm essa divergência, mas o mecanismo é
+    real e vale aproveitar quando aparece)."""
+    if (
+        item.quantidade_tributavel is not None
+        and item.valor_unitario_tributavel is not None
+        and item.quantidade_tributavel != item.quantidade
+    ):
+        total_tributavel = (item.quantidade_tributavel * item.valor_unitario_tributavel).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        if abs(total_tributavel - item.valor_total) <= Decimal("0.05"):
+            return item.quantidade_tributavel
+    return item.quantidade
+```
+
+### Endpoints — nenhum endpoint novo, dois já existentes ganham comportamento
+
+**`POST /catalog/supplier-invoices`** (confirmar importação, B1) — depois do `db.add_all` dos itens
+e antes do `return`, pra cada item já persistido (tem `.id`):
+
+```python
+vinculados, pendentes = 0, 0
+for db_item, parsed_item in zip(persisted_items, parsed.itens):
+    link_source, product_id, option_id, qtd = await _match_supplier_invoice_item(
+        db, company_id, supplier.id, db_item,
+    )
+    pendente_motivo = None
+    if link_source:
+        try:
+            await _create_stock_movement(
+                db, company_id,
+                StockMovementIn(tipo="entrada", quantidade=qtd, motivo=f"Vínculo automático — nota #{invoice.id}"),
+                current_user, product_id=product_id, option_id=option_id,
+            )
+        except HTTPException as e:
+            # guarda-chuva (_resolve_stock_owner) ou StockItem inexistente ainda —
+            # nunca deixa a confirmação da nota falhar por causa do vínculo
+            link_source, product_id, option_id = None, None, None
+            pendente_motivo = "guarda_chuva" if "guarda-chuva" in e.detail else "sem_estoque_iniciado"
+    db_item.product_id, db_item.option_id = product_id, option_id
+    db_item.link_source, db_item.pendente_motivo = link_source, pendente_motivo
+    if link_source: vinculados += 1
+    else: pendentes += 1
+await db.commit()
+return {"id": invoice.id, "supplier_id": supplier.id, "itens_vinculados": vinculados, "itens_pendentes": pendentes}
+```
+
+**Nota importante sobre transação**: `_create_stock_movement` já faz seu próprio `commit()`
+internamente (função pensada pra ser chamada isolada, via A2) — numa nota com N itens, isso
+significa até N commits independentes dentro da mesma requisição. Cada entrada de estoque é
+atômica em si mesma; a nota e seus itens **já estão commitados antes** desse loop começar (mesma
+garantia de B1, sem mudança) — se o vínculo falhar no meio, a nota importada nunca fica em estado
+inconsistente, só alguns itens ficam sem vínculo (viram pendência, resolvidos depois por C2).
+
+**`GET /catalog/supplier-invoices/{id}`** (detalhe, B1) — response de cada item ganha:
+```python
+"product_id": it.product_id, "option_id": it.option_id, "link_source": it.link_source,
+"link_label": <nome do produto/opção vinculado, resolvido via join>,
+"pendente_motivo": it.pendente_motivo,
+```
+
+### Migration
+- `supplier_invoice_items`: 6 colunas novas, todas nullable (`product_id`, `option_id`,
+  `link_source`, `pendente_motivo`, `unidade_tributavel`, `quantidade_tributavel`,
+  `valor_unitario_tributavel`) + 2 FKs.
+- `product_gtin_alt`: tabela nova (schema acima).
+- `supplier_product_code`: tabela nova (schema acima).
+- **`product_gtin_alt`/`supplier_product_code` ficam vazias até C2 existir** — nada de errado
+  nisso (mesmo padrão de B1 criando `supplier_invoice_item` antes de C1 existir pra consumir),
+  mas vale avisar no rollout: logo após o deploy de C1, só o nível 1 (EAN de venda) vai
+  efetivamente vincular algo — a maioria dos itens sem EAN cadastrado vai ficar pendente até
+  alguém resolver manualmente pela primeira vez (C2).
+
+### Impacto em outros serviços
+Nenhum. Toda a lógica é interna ao catalog-service, sobre tabelas que já pertencem a ele.
+
+### Riscos
+- **Primeira movimentação de um produto sem estoque iniciado**: `_create_stock_movement` exige
+  `unidade` (uma das `STOCK_UNITS`) na primeira movimentação de um `StockItem` — não existe humano
+  pra informar isso no fluxo automático. **Decisão**: se o `StockItem` ainda não existe pro
+  produto/opção casado, C1 **não tenta criar** — vira pendência (`pendente_motivo=
+  "sem_estoque_iniciado"`), resolvida quando a Empresa lançar a primeira entrada manual (A2) uma
+  vez — depois disso, vínculos futuros pro mesmo produto funcionam normalmente. Evita o risco de
+  adivinhar errado a unidade e travar o `StockItem` nela pra sempre (não dá pra mudar depois).
+- **N commits por nota** (um por item vinculado) — ver nota na seção de Endpoints. Sem problema de
+  atomicidade (cada entrada já é uma unidade independente por natureza, mesmo no fluxo manual A2),
+  mas é uma característica a documentar, não um bug.
+- **`qTrib` como sinal oportunista, não confiável isoladamente** — mitigado pela checagem de
+  consistência (`qTrib × vUnTrib ≈ vProd`) antes de confiar nele; sem essa checagem, um XML mal
+  formado poderia gerar uma entrada de estoque com quantidade completamente errada.
+- **Volume de itens por nota**: `nfe_grande.xml` (fixture real já usada em B1) tem 41 itens — o
+  loop de casamento faz até 3 queries de leitura + 1 `_create_stock_movement` por item; pra uma
+  nota grande isso é ~164 queries + commits. Aceitável pro volume esperado (compra de food
+  service, não centenas de itens por nota), sem necessidade de otimização agora.
+
+### Estimativa
+**8 pontos** (revisado pra cima do estimado original de 5 no levantamento do épico — a
+investigação desta revisão, com GTIN de embalagem e refinamento por `qTrib`, é
+significativamente mais rica que "vínculo por EAN + tabela de código de fornecedor" original).
+- Backend: 2 tabelas novas + migration de `supplier_invoice_items` + algoritmo de casamento (3
+  níveis) + integração com `_create_stock_movement`/`_resolve_stock_owner` + resposta enriquecida
+  em 2 endpoints já existentes + testes (pelo menos os 21 cenários do QA Explorer).
+- Frontend: indicador de vínculo por item na tela de detalhe (B1) — pequeno, reaproveita a
+  tabela/Table.tsx já existente, só uma coluna/tag nova.
+
+### O que ainda impede o avanço pro Ready
+Nada bloqueia. Todos os pontos que ficaram "vagos" no Explorer foram resolvidos com evidência do
+código existente, não suposição:
+- Comportamento guarda-chuva → resolvido, `_resolve_stock_owner` já bloqueia isso, C1 só precisa
+  capturar a exceção.
+- Schema `product_id`/`option_id` nullable com XOR → mesmo padrão exato de `StockItem` (A2),
+  reaproveitado sem inventar nada novo.
+- Cadastro proativo de GTIN fora do fluxo de pendência → confirmado que fica fora do escopo de
+  C1, é uma pergunta pra quando C2 for desenhada (não bloqueia C1 sozinha).
