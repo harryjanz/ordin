@@ -637,10 +637,22 @@ export interface SupplierInvoiceListItem {
   imported_at: string | null;
 }
 
+// ORD-195 (C1) — vínculo automático, resolvido na confirmação da nota
+// (não existe na prévia, só no detalhe pós-import). link_source é o nível
+// que casou (ean/gtin_alt/supplier_code); pendente_motivo só é preenchido
+// quando link_source é null.
+export interface SupplierInvoiceDetailItem extends SupplierInvoicePreviewItem {
+  product_id: number | null;
+  option_id: number | null;
+  link_source: "ean" | "gtin_alt" | "supplier_code" | null;
+  link_label: string | null;
+  pendente_motivo: "guarda_chuva" | "sem_estoque_iniciado" | "conflito_concorrencia" | null;
+}
+
 export interface SupplierInvoiceDetail extends SupplierInvoiceListItem {
   chave_acesso: string;
   imported_by: number;
-  itens: SupplierInvoicePreviewItem[];
+  itens: SupplierInvoiceDetailItem[];
 }
 
 // ORD-170 — corpo de erro repassado 1:1 da Focus NFe (erros[] pode vir vazio).
