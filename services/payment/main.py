@@ -297,6 +297,49 @@ async def _save_fiscal_document(order_ref: str, company_id: int, ambiente: str, 
         await db.commit()
 
 
+async def _decrementar_estoque_venda(order_ref: str) -> None:
+    """ORD-198 (D1) — chamado depois de toda aprovação de pagamento. Decrementa
+    só itens CFOP 5102 (revenda pura — 5101/produção própria fica pro Bloco E,
+    ficha técnica). Itens vindos de uma opção de grupo (produto guarda-chuva)
+    nunca chegam a este filtro: order["items"] hoje só tem product_id, sem
+    option_id (OrderItemOption é denormalizado, sem FK real pro catalog-
+    service) — fora de escopo desta história, dependência não-numerada do
+    épico, ver docs/stories/ORD-198.
+
+    Nunca deixa o pagamento falhar por causa disso — a cobrança já aconteceu
+    fisicamente na maquininha, não existe "desfazer" nesse ponto do fluxo.
+    Falha real (indisponibilidade, timeout, erro 5xx do catalog-service) só
+    é logada — gap conhecido e aceito até D2 (estorno automático, história
+    separada) existir."""
+    try:
+        order = await _get_order_with_items(order_ref)
+        if not order:
+            return
+        products_fiscal = await _get_products_fiscal([it["product_id"] for it in order["items"]])
+        items = [
+            {"product_id": it["product_id"], "quantity": it["quantity"]}
+            for it in order["items"]
+            if products_fiscal.get(it["product_id"], {}).get("cfop") == "5102"
+        ]
+        if not items:
+            return
+        async with httpx.AsyncClient(timeout=5) as c:
+            resp = await c.post(
+                f"{CATALOG_SVC}/internal/stock/decrement",
+                json={"order_ref": order_ref, "items": items},
+                headers=INTERNAL_HEADERS,
+            )
+            resp.raise_for_status()
+    # Mesmo motivo de emit_nfce_if_active (ORD-171): captura ampla intencional
+    # — qualquer falha em qualquer etapa (order-service fora do ar, JSON
+    # inesperado, catalog-service indisponível) só loga, nunca derruba
+    # POST /payments. Um except restrito a httpx.HTTPError deixaria passar
+    # erro não-HTTP (ex: KeyError num payload malformado) e quebraria a
+    # promessa desta função de nunca falhar o pagamento.
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Decremento de estoque falhou pra order_ref=%s: %s", order_ref, exc)
+
+
 async def emit_nfce_if_active(company_id: int, order_ref: str, method: str, amount: float) -> None:
     """Chamado depois de toda aprovação de pagamento (ORD-171). Nunca propaga
     exceção — qualquer falha em qualquer etapa (credenciais indisponíveis,
@@ -879,6 +922,7 @@ async def create_payment(
     if result.status == TransactionStatus.approved:
         await _notify_order(body.order_ref, "paid")
         await emit_nfce_if_active(current_user.company_id, body.order_ref, body.method, body.amount)
+        await _decrementar_estoque_venda(body.order_ref)
         await _publish(
             "payment.approved",
             PaymentApprovedEvent(
@@ -1547,6 +1591,7 @@ async def get_payment_status(
                         await db.commit()
                         await _notify_order(tx.order_ref, "paid")
                         await emit_nfce_if_active(tx.company_id, tx.order_ref, tx.method, float(tx.amount))
+                        await _decrementar_estoque_venda(tx.order_ref)
                         await _publish(
                             "payment.approved",
                             PaymentApprovedEvent(
@@ -1660,6 +1705,7 @@ async def _mp_fetch_and_update(tx: Transaction, payment_id: str, db: AsyncSessio
                 await db.commit()
                 await _notify_order(tx.order_ref, "paid")
                 await emit_nfce_if_active(tx.company_id, tx.order_ref, tx.method, float(tx.amount))
+                await _decrementar_estoque_venda(tx.order_ref)
                 await _publish(
                     "payment.approved",
                     PaymentApprovedEvent(
@@ -1714,6 +1760,7 @@ async def _mp_order_fetch_and_update(tx: Transaction, order_id: str, db: AsyncSe
                 await db.commit()
                 await _notify_order(tx.order_ref, "paid")
                 await emit_nfce_if_active(tx.company_id, tx.order_ref, tx.method, float(tx.amount))
+                await _decrementar_estoque_venda(tx.order_ref)
                 await _publish(
                     "payment.approved",
                     PaymentApprovedEvent(

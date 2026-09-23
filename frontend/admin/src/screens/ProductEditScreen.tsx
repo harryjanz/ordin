@@ -936,7 +936,7 @@ export default function ProductEditScreen() {
                   <Table
                     columns={[
                       { key: "criado_em", header: "Data", render: (m) => new Date(m.criado_em).toLocaleString("pt-BR") },
-                      { key: "tipo", header: "Tipo", render: (m) => (m.tipo === "entrada" ? "Entrada" : "Ajuste") },
+                      { key: "tipo", header: "Tipo", render: (m) => ({ entrada: "Entrada", ajuste: "Ajuste", saida: "Saída (venda)" })[m.tipo] },
                       {
                         key: "quantidade", header: "Quantidade",
                         render: (m) => {
@@ -949,7 +949,7 @@ export default function ProductEditScreen() {
                         },
                       },
                       { key: "motivo", header: "Motivo", render: (m) => m.motivo ?? "—" },
-                      { key: "criado_por", header: "Registrado por", render: (m) => `Usuário #${m.criado_por}` },
+                      { key: "criado_por", header: "Registrado por", render: (m) => (m.criado_por != null ? `Usuário #${m.criado_por}` : "Sistema (venda)") },
                     ]}
                     rows={stock.movements}
                     rowKey={(m) => m.id}

@@ -214,14 +214,16 @@ export interface StockHistoryPoint {
 // GET /catalog/options/{id}/stock retornam exatamente isso.
 export interface StockMovement {
   id: number;
-  tipo: "entrada" | "ajuste";
+  tipo: "entrada" | "ajuste" | "saida";
   quantidade: number;
   // ORD-190 (G3) — só preenchidos quando a movimentação foi registrada na
   // unidade de compra do dono (conversão aplicada); null no caminho de hoje.
   quantidade_original: number | null;
   unidade_original: string | null;
   motivo: string | null;
-  criado_por: number;
+  // ORD-198 (D1) — null só em "saida" gerada pelo sistema (venda), sem
+  // usuário humano no JWT.
+  criado_por: number | null;
   criado_em: string;
 }
 

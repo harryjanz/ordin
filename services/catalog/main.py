@@ -26,7 +26,7 @@ from nfelib import XmlParser
 from nfelib.nfe.bindings.v4_0.nfe_v4_00 import Nfe
 from nfelib.nfe.bindings.v4_0.proc_nfe_v4_00 import NfeProc
 from PIL import Image
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -261,10 +261,18 @@ class StockItem(Base):
 
 class StockMovement(Base):
     __tablename__ = "stock_movements"
+    __table_args__ = (
+        # ORD-198 (D1) — idempotência do decremento por venda: MySQL trata
+        # múltiplos NULL como não-colidentes, então "entrada"/"ajuste"
+        # (sempre order_ref=NULL) nunca colidem entre si; só duas "saida"
+        # pro mesmo stock_item_id+order_ref colidiriam, que é exatamente a
+        # idempotência desejada (reenvio por retry não duplica).
+        UniqueConstraint("stock_item_id", "order_ref", name="uq_stock_movement_item_order"),
+    )
 
     id             = Column(Integer, primary_key=True)
     stock_item_id  = Column(Integer, ForeignKey("stock_items.id"), nullable=False, index=True)
-    tipo           = Column(String(10), nullable=False)  # "entrada" | "ajuste"
+    tipo           = Column(String(10), nullable=False)  # "entrada" | "ajuste" | "saida"
     quantidade     = Column(Numeric(12, 3), nullable=False)  # já com sinal aplicado
     # G3 (ORD-190) — só preenchidos quando a movimentação foi registrada na
     # unidade de compra do dono (em_unidade_compra=True); nulos no caminho
@@ -273,8 +281,13 @@ class StockMovement(Base):
     quantidade_original = Column(Numeric(12, 3), nullable=True)
     unidade_original    = Column(String(30), nullable=True)
     motivo         = Column(String(255), nullable=True)
-    criado_por     = Column(Integer, nullable=False)  # user_id do JWT
+    # ORD-198 (D1) — NULL só pra "saida" gerada pelo sistema (venda), sem
+    # usuário humano no JWT (chamada via X-Internal-Secret). Nunca usado
+    # por endpoint manual (admin sempre grava um user_id real).
+    criado_por     = Column(Integer, nullable=True)  # user_id do JWT, ou NULL = sistema
     criado_em      = Column(DateTime, default=datetime.utcnow)
+    # ORD-198 (D1) — só preenchido em "saida" (venda), idempotência por pedido.
+    order_ref      = Column(String(64), nullable=True)
 
 class Supplier(Base):
     """ORD-182 (A6) — cadastro simples de fornecedor: nome, CNPJ (obrigatório,
@@ -4177,6 +4190,89 @@ async def internal_product_fiscal(
     if not p:
         raise HTTPException(404)
     return {"ncm": p.ncm, "cfop": p.cfop, "cest": p.cest}
+
+
+# ── Baixa automática de estoque na venda (ORD-198, D1) ───────────────────────
+# tipo="saida" NÃO entra no Literal público de StockMovementIn (ajuste manual
+# do admin) — é exclusivamente gerado pelo sistema a partir de uma venda,
+# nunca escolhível por um humano. Schema e função internos, separados de
+# _create_stock_movement.
+
+class InternalStockDecrementItem(BaseModel):
+    product_id: int
+    quantity: int = Field(gt=0)  # sinal é aplicado internamente
+
+
+class InternalStockDecrementIn(BaseModel):
+    order_ref: str = Field(min_length=1)
+    items: list[InternalStockDecrementItem]
+
+
+class InternalStockDecrementOut(BaseModel):
+    processed: int
+    skipped: int
+
+
+async def _decrement_stock_for_sale(
+    db: AsyncSession, order_ref: str, items: list[InternalStockDecrementItem],
+) -> dict:
+    """Função isolada do transporte HTTP de propósito — se um dia a baixa
+    virar consumidor de fila, essa função é reaproveitada sem mudança, só
+    troca quem a chama (endpoint vs. handler de mensagem).
+
+    Commit único no final, não por item dentro do loop: diferente de
+    apply_retroactive (ORD-196, onde falha parcial entre candidatos
+    INDEPENDENTES é feature desejada), aqui os itens vêm de UM pedido só —
+    um commit por item deixaria decremento parcial possível se um item no
+    meio do loop falhasse de verdade. Também simplifica retry: se nada
+    persistiu, um reenvio idempotente reprocessa tudo do zero sem precisar
+    rastrear onde parou."""
+    processed = skipped = 0
+    for it in items:
+        stock_item = (await db.execute(
+            select(StockItem).filter_by(product_id=it.product_id, option_id=None)
+        )).scalars().first()
+        if stock_item is None:
+            skipped += 1
+            continue  # nunca controlado (sem 1ª entrada) — não é erro
+
+        existing = (await db.execute(
+            select(StockMovement).filter_by(stock_item_id=stock_item.id, order_ref=order_ref)
+        )).scalars().first()
+        if existing:
+            skipped += 1
+            continue  # já processado — idempotência
+
+        await db.execute(
+            update(StockItem).where(StockItem.id == stock_item.id)
+            .values(quantidade_atual=StockItem.quantidade_atual - it.quantity)
+        )
+        db.add(StockMovement(
+            stock_item_id=stock_item.id, tipo="saida", quantidade=-it.quantity,
+            order_ref=order_ref, motivo=f"Venda — pedido {order_ref}", criado_por=None,
+        ))
+        processed += 1
+    await db.commit()  # commit único, no final — não dentro do loop
+    return {"processed": processed, "skipped": skipped}
+
+
+@app.post(
+    "/internal/stock/decrement",
+    response_model=InternalStockDecrementOut,
+    include_in_schema=False,
+)
+async def internal_decrement_stock(
+    body: InternalStockDecrementIn,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_internal),
+):
+    """payment-service chama isso na aprovação do pagamento (CFOP 5102 só,
+    filtrado do lado de quem chama). Sem isolamento explícito por
+    company_id, de propósito — mesmo padrão de /internal/products/{id}/
+    fiscal: product_id é PK global, nunca reaproveitada entre empresas, a
+    garantia é estrutural."""
+    return await _decrement_stock_for_sale(db, body.order_ref, body.items)
+
 
 # ── Fornecedores (ORD-182, A6) ────────────────────────────────────────────
 
