@@ -95,3 +95,16 @@ item de outra empresa — mesma garantia de todo endpoint de C2, sem checagem no
 - [ ] Item já resolvido nesse meio-tempo (outra aba, outro operador) é pulado sem erro — contabilizado
       separado (`ja_resolvidos`), não quebra o lote inteiro.
 - [ ] Depois de confirmar, lista atualiza e reflete os itens removidos da fila.
+
+## Adendo — painel de upload da importação de nota (achado do usuário testando ao vivo)
+
+Junto com o teste ao vivo desta história, o usuário identificou que o componente de upload de XML
+(`SupplierInvoiceScreen.tsx`, view "upload", B1/`ORD-194`) ficava visualmente "solto" na página —
+sem o fundo branco/borda (`.panel`) que todo outro formulário do admin já usa (`ProductEditScreen`,
+`NewCompanyScreen`, etc.), e sem nenhuma orientação de como o fluxo de importação funciona.
+
+Corrigido no mesmo branch: `.panel`/`.panelHead`/`.h2`/`.hint` (mesmo padrão exato de
+`NewCompanyScreen.module.scss`) envolvendo o `Upload`, com título "Importar nota de compra",
+subtítulo, e uma lista de 3 passos (baixar o XML com o fornecedor → enviar o arquivo → revisar a
+prévia antes de confirmar). Ajuste de UI pura, sem mudança de comportamento — apenas frontend,
+sem endpoint novo.
