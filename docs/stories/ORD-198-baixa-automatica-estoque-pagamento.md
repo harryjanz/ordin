@@ -1,6 +1,6 @@
 ---
 id: ORD-198
-status: Tech Explorer
+status: Ready
 estimativa: 5 pontos (confirma a estimativa original do épico — ver seção Estimativa)
 ---
 
@@ -418,7 +418,14 @@ async def _decrement_stock_for_sale(
 ) -> dict:
     """Função isolada do transporte HTTP de propósito — se um dia a baixa
     virar consumidor de fila, essa função é reaproveitada sem mudança,
-    só troca quem a chama (endpoint vs. handler de mensagem)."""
+    só troca quem a chama (endpoint vs. handler de mensagem).
+
+    Achado do repasse de Backend: diferente de apply_retroactive (ORD-196,
+    onde falha parcial entre candidatos INDEPENDENTES é feature desejada),
+    aqui os itens vêm de UM pedido só — um commit por item deixaria decremento
+    parcial possível se um item no meio do loop falhasse de verdade. Um único
+    commit no final também simplifica retry: se nada persistiu, um reenvio
+    idempotente reprocessa tudo do zero sem precisar rastrear onde parou."""
     processed = skipped = 0
     for it in items:
         stock_item = (await db.execute(
@@ -443,8 +450,8 @@ async def _decrement_stock_for_sale(
             stock_item_id=stock_item.id, tipo="saida", quantidade=-it.quantity,
             order_ref=order_ref, motivo=f"Venda — pedido {order_ref}", criado_por=None,
         ))
-        await db.commit()
         processed += 1
+    await db.commit()  # commit único, no final — não dentro do loop
     return {"processed": processed, "skipped": skipped}
 
 
@@ -539,3 +546,17 @@ Nenhum — decisão desta rodada foi manter síncrono (ver seção "Decisão de 
 - **Migration em tabela já usada em produção por A9 (gráfico)** — `ADD COLUMN` nullable + índice,
   sem backfill, baixo risco. Convenção de sinal (`quantidade` negativa em "saida") preserva
   `_get_stock_history` funcionando sem tocar o código dela.
+
+## Repasse por papel (antes de Ready)
+
+| Papel | Achado | Ação |
+|---|---|---|
+| PM | Seção "Decisão de arquitetura" (síncrono vs. assíncrono) não deixava claro que a decisão foi confirmada pelo usuário, lia como nota técnica solta | Frase de proveniência adicionada |
+| PM | Critério 8 ("falha sinalizada") soava mais robusto do que a implementação real (hoje só log, sem retry/alerta) | Parêntese honesto adicionado ao critério |
+| QA | Cenários "criar pedido"/"coletar ticket não decrementam" implicavam teste ponta a ponta cross-service desproporcional | "Criar pedido" reformulado como teste de transação pending dentro do payment-service; "coletar ticket" removido (garantia estrutural de fronteira de serviço, não introduzida por esta história) |
+| QA | Cenário de concorrência não roda de verdade contra SQLite in-memory (suíte padrão do catalog-service) | Nota de execução registrada — precisa rodar contra MySQL real de CI |
+| QA | Faltava cenário de leitura do dado persistido (CRUD) e de validação de payload malformado | 3 cenários novos + `Field(gt=0)`/`min_length=1` no schema |
+| Backend | `_get_order_with_items` chamado 2x (por `emit_nfce_if_active` e pelo hook novo) | Avaliado e aceito — refatorar tocaria função em produção (`ORD-171`) por ganho de milissegundos; registrado como otimização futura, não bloqueador |
+| Backend | Commit por item dentro do loop copiava o padrão de `apply_retroactive`, mas a razão original (falha parcial entre candidatos independentes) não se aplica a um pedido só | Corrigido: commit único no final da função, simplifica idempotência em caso de falha total |
+| Backend | `require_internal` sem JWT — checado se faltava proteção de rede | Confirmado: `nginx.conf:19-22` já bloqueia `/internal/*` publicamente (403), mesma camada que protege os outros endpoints internos |
+| Backend | `criado_por` nullable — checado se quebra alguma query existente | `grep` confirma só 3 usos no código, nenhum assume não-nulo |
