@@ -399,6 +399,18 @@ export default function SupplierInvoiceScreen() {
               <li>Envie o arquivo abaixo — só XML, até {XML_MAX_SIZE_MB} MB.</li>
               <li>Revise a prévia antes de confirmar — nada é gravado até você confirmar a importação.</li>
             </ol>
+
+            <div className={styles.rulesBox}>
+              <p className={styles.rulesTitle}>Como a entrada automática de estoque funciona</p>
+              <ol className={styles.rulesList}>
+                <li>Depois de confirmada, cada item da nota tenta se vincular a um produto do seu catálogo sozinho, nesta ordem: primeiro pelo <strong>código de barras (EAN)</strong>; se não bater, pelo <strong>código de embalagem</strong> (fardo/caixa) que você já tenha ensinado antes; se ainda assim não bater, pelo <strong>código deste fornecedor</strong> pra esse produto, também já ensinado antes.</li>
+                <li>Se nenhum dos três bater, o item fica <strong>pendente</strong> — o sistema nunca adivinha um vínculo novo sozinho. Você resolve uma vez, na tela de Pendências, e ele aprende: as próximas notas do mesmo fornecedor para o mesmo item já entram sozinhas.</li>
+              </ol>
+              <p className={styles.rulesNote}>
+                <strong>Atenção:</strong> mesmo com o vínculo certo, um produto só recebe entrada automática depois de já ter passado por uma <strong>1ª entrada de estoque manual</strong> — é o que ensina ao sistema em que unidade ele é controlado. Sem isso, o item fica pendente por "estoque não iniciado", mesmo com o vínculo correto.
+              </p>
+            </div>
+
             <Upload
               fullWidth
               maxFileSize={XML_MAX_SIZE_MB}
