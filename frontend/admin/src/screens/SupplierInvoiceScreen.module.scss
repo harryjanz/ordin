@@ -35,6 +35,49 @@
   }
 }
 
+// Explica o vínculo automático (EAN → embalagem → fornecedor) antes do
+// usuário enviar o XML — separado visualmente de .uploadSteps (que é
+// "como usar a tela") porque aqui é "o que o sistema decide sozinho",
+// um assunto à parte que merece sua própria moldura.
+.rulesBox {
+  border-top: 1px solid var(--a-border);
+  padding-top: 16px;
+  margin-bottom: 20px;
+}
+
+.rulesTitle {
+  @include font('sm-emphasys');
+  margin-bottom: 8px;
+}
+
+.rulesList {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.7);
+  margin: 0 0 12px;
+  padding-left: 20px;
+
+  li {
+    margin-bottom: 4px;
+  }
+
+  strong {
+    color: var(--a-text);
+  }
+}
+
+.rulesNote {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.7);
+  background: var(--a-surface);
+  border-left: 3px solid var(--a-border);
+  border-radius: 4px;
+  padding: 10px 12px;
+
+  strong {
+    color: var(--a-text);
+  }
+}
+
 .previewHeader {
   display: flex;
   flex-direction: column;
