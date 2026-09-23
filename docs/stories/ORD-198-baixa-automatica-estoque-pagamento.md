@@ -138,7 +138,9 @@ decisões que ficaram em aberto e formaliza a solução em cima do código real 
 - [ ] Reenviar a mesma chamada de decremento pro mesmo `order_ref`+`stock_item` não decrementa duas
       vezes (idempotência).
 - [ ] Falha real na chamada (indisponibilidade, timeout, erro 5xx do catalog-service) é sinalizada
-      de volta pro chamador em `payment-service` — nunca engolida silenciosamente.
+      de volta pro chamador em `payment-service` — nunca engolida silenciosamente (hoje: log
+      estruturado com `order_ref`, sem retry nem alerta automático; D2, história separada, trata
+      isso quando existir).
 - [ ] Isolamento multi-tenant: `product_id`/`option_id` são PKs globais nunca reaproveitadas entre
       empresas — garantia estrutural, verificada por teste, não checagem explícita de `company_id`
       no endpoint interno (ver Tech Explorer, achado 3).
@@ -155,7 +157,7 @@ chamada já existente). Nenhuma tela nova, nenhum componente novo.
 | # | Critério | Cenário(s) que cobrem |
 |---|---|---|
 | 1 | Pagamento aprovado (CFOP 5102, `estoque_controlado`, sem opção) gera `StockMovement` `saida` correto | *Pagamento aprovado decrementa o estoque do produto vendido* |
-| 2 | Decremento só na aprovação, nunca na criação do pedido nem na coleta do ticket | *Criar pedido não decrementa estoque*, *Coletar ticket não decrementa estoque* |
+| 2 | Decremento só na aprovação, nunca na criação do pedido nem na coleta do ticket | *Transação pending nunca decrementa estoque* — coleta de ticket não tem cenário próprio (achado do repasse de QA: `order-service` nunca chama `payment`/`catalog` na coleta, garantia estrutural de fronteira de serviço, não algo que esta história introduz ou precisa testar) |
 | 3 | CFOP 5101 nunca decrementado | *Produto CFOP 5101 nunca é decrementado por esta história* |
 | 4 | Produto sem `estoque_controlado` vendido → sem erro, sem decremento | *Produto nunca controlado (sem 1ª entrada) vendido não gera decremento nem erro* |
 | 5 | Item com opção selecionada nunca decrementado, não é erro | *Item vendido com opção selecionada não decrementa, pagamento segue normal* |
@@ -188,15 +190,10 @@ Feature: Baixa automática de estoque na aprovação do pagamento (D1)
     Então é gravado um StockMovement do tipo "saida" pro produto, com a quantidade vendida
     E o saldo do produto cai de 10 para 9
 
-  Scenario: Criar pedido não decrementa estoque
-    Dado que o pedido acabou de ser criado no totem
-    Quando consulto o saldo de estoque do produto
-    Então o saldo continua 10, sem nenhuma movimentação de saída registrada
-
-  Scenario: Coletar ticket não decrementa estoque
-    Dado que o pagamento já foi aprovado e o estoque já decrementou pra 9
-    Quando o operador de balcão coleta o ticket desse pedido
-    Então o saldo continua 9 — a coleta não gera nenhuma movimentação de estoque adicional
+  Scenario: Transação pending nunca decrementa estoque
+    Dado que uma transação de pagamento foi criada com status "pending" (provider ainda não respondeu)
+    Quando a resposta do provider chega com status "processing" (não "approved")
+    Então a chamada POST /internal/stock/decrement nunca é feita (verificado via mock/spy no payment-service)
 
   # ── Escopo CFOP (Critério 3) ────────────────────────────────────────────
 
@@ -266,7 +263,35 @@ Feature: Baixa automática de estoque na aprovação do pagamento (D1)
     Quando um pagamento da empresa "Burger House" é aprovado
     Então só o stock_item da empresa "Burger House" é decrementado
     E o stock_item do produto da empresa "Pasta & Co" permanece inalterado
+
+  # ── Leitura do dado persistido — CRUD (achado do repasse de QA) ───────────
+
+  Scenario: Histórico de movimentações mostra a saída gerada pela venda
+    Dado que um pagamento foi aprovado e decrementou o estoque em 1 unidade
+    Quando consulto GET /catalog/products/{id}/stock/history
+    Então a movimentação aparece com tipo "saida" e quantidade -1 (sinal negativo, mesma convenção de "ajuste")
+    E o gráfico de nível de 7 dias (A9) reflete a queda corretamente, sem precisar de nenhuma mudança em _get_stock_history
+
+  # ── Validação de payload (achado do repasse de QA) ─────────────────────────
+
+  Scenario: quantity zero ou negativa é rejeitada, sem gravar movimentação
+    Dado uma chamada POST /internal/stock/decrement com quantity=0 pra um item
+    Quando o catalog-service processa a chamada
+    Então retorna 400 (erro de validação)
+    E nenhum StockMovement é gravado pra esse item
+
+  Scenario: order_ref vazio é rejeitado
+    Dado uma chamada POST /internal/stock/decrement com order_ref=""
+    Quando o catalog-service processa a chamada
+    Então retorna 400 (erro de validação)
 ```
+
+**Nota de execução de teste (achado do repasse de QA)**: `services/catalog/conftest.py` força SQLite
+in-memory pra toda a suíte — SQLite não reproduz o mesmo modelo de lock de linha do InnoDB, então o
+cenário de concorrência ("dois pagamentos simultâneos") não é exercitável como corrida real nessa
+suíte rápida. Precisa rodar como teste separado, contra o MySQL real que o workflow de CI já sobe
+(`mysql+aiomysql://root:test_root@localhost:3306/fk_test`) — não é infraestrutura nova, é reaproveitar
+o que a CI já tem, só não a suíte SQLite padrão usada no resto do serviço.
 
 ## Decisão de arquitetura — síncrono vs. assíncrono (discussão com o usuário)
 
@@ -287,6 +312,45 @@ consumidor de fila, a função é reaproveitada sem mudança, só troca quem a i
 infraestrutura de consumo (interface + implementação RabbitMQ real + SQS real + processo de
 background em `catalog-service`, hoje inexistentes) fica registrado como possível história de
 plataforma futura, não como pré-requisito de D1.
+
+Decisão confirmada pelo próprio usuário depois de entender o custo real da infraestrutura de fila
+(não existe hoje) — ele havia sugerido assíncrono pensando em volume futuro, mas concordou em
+manter síncrono agora dado que os casos de falha na baixa devem ser esporádicos, especialmente com
+a fila (quando existir) saudável.
+
+## Decisão de produto — momento da baixa: venda (payment) vs. retirada (coleta de ticket)
+
+O usuário levantou uma dúvida legítima antes de fechar D1 como Ready: o Ordin tem dois modelos de
+operação de retirada — **retirada única** (modelo fast food: balcão entrega tudo de uma vez) e
+**retirada por item** (modelo bar: cliente retira um item de cada vez, via QR próprio de cada
+unidade — granularidade que já existe hoje, `Ticket` é gerado 1 por `OrderItem`, não 1 por pedido,
+`services/order/main.py:412`). A preocupação: baixar estoque na aprovação do pagamento (como D1 já
+desenha) não garante que o item saiu fisicamente — um cliente pode pagar e nunca retirar, ou a
+Empresa pode nem operar a coleta por QR item a item.
+
+**Pesquisa de mercado feita antes de decidir** (3 buscas web, sem viés de confirmação — buscando
+inclusive contra-exemplos): sistemas de comanda pra bar (Saipos, SisFood, Consumer,
+ControleNaMão) fazem baixa automática **na venda**, nenhum oferece adiar pra retirada. Em totens de
+autoatendimento — nosso modelo mais próximo — a pesquisa aponta o oposto da preocupação original:
+**não** baixar estoque na venda é tratado como *bug* operacional real ("um problema comum é quando
+a venda do totem não baixa insumo do estoque, fazendo com que no fim do mês o que está no sistema
+não corresponda ao que está na prateleira"), não como boa prática de cautela. Em bar tabs
+internacionais (Toast, Square) — o cenário mais parecido com "cliente pode não retirar tudo que
+pagou" — a baixa acontece quando o item é lançado na conta (rung up), não quando é efetivamente
+servido/retirado.
+
+**Conclusão fechada**: cliente pagar e não retirar é um problema de *fulfillment* (perda
+operacional — item foi preparado e ninguém buscou), categoria separada de *contabilidade de
+estoque* — o insumo já foi consumido no preparo assim que a venda foi confirmada, quer o cliente
+busque ou não. Amarrar a baixa à retirada tentaria resolver um problema de não-comparecimento
+usando o mecanismo errado (inventário), e nenhum sistema de mercado pesquisado faz isso.
+"Retirada única vs. por item" continua sendo uma escolha operacional legítima da Empresa, mas é
+independente de quando o estoque desce — é configuração de UX de coleta (já parcialmente suportada
+pela granularidade de ticket por unidade), não de inventário.
+
+**Decisão**: D1 mantém o desenho original — baixa na aprovação do pagamento, sem depender de
+retirada. Nenhuma mudança de escopo. Configurabilidade de retirada única vs. por item, se um dia
+for priorizada, vira história própria de UX de coleta, sem relação com D1/estoque.
 
 ## Tech Explorer
 
@@ -342,10 +406,10 @@ que não existe como conceito de erro aqui.
 ```python
 class InternalStockDecrementItem(BaseModel):
     product_id: int
-    quantity: int  # sempre positivo — sinal é aplicado internamente
+    quantity: int = Field(gt=0)  # achado do repasse de QA — sinal aplicado internamente
 
 class InternalStockDecrementIn(BaseModel):
-    order_ref: str
+    order_ref: str = Field(min_length=1)  # achado do repasse de QA
     items: list[InternalStockDecrementItem]
 
 
