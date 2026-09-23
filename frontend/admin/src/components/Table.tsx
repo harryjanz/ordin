@@ -6,7 +6,10 @@ import styles from "./Table.module.scss";
 // formulário/feedback) — grid genérico construído com os tokens/mixins dele.
 export interface TableColumn<T> {
   key: string;
-  header: string;
+  // ORD-199 — ReactNode (não só string) pra permitir header interativo,
+  // ex: checkbox de "selecionar todos". String continua válida (é um
+  // ReactNode), nenhum uso existente quebra.
+  header: ReactNode;
   render: (row: T) => ReactNode;
   mono?: boolean;
 }

@@ -389,7 +389,16 @@ export default function SupplierInvoiceScreen() {
     return (
       <>
         {!preview && (
-          <>
+          <div className={styles.panel}>
+            <div className={styles.panelHead}>
+              <h2 className={styles.h2}>Importar nota de compra</h2>
+              <p className={styles.hint}>Envie o XML da NF-e recebida do fornecedor — os itens são lidos automaticamente.</p>
+            </div>
+            <ol className={styles.uploadSteps}>
+              <li>Baixe o XML da NF-e com o fornecedor (geralmente enviado por e-mail ou disponível no portal dele).</li>
+              <li>Envie o arquivo abaixo — só XML, até {XML_MAX_SIZE_MB} MB.</li>
+              <li>Revise a prévia antes de confirmar — nada é gravado até você confirmar a importação.</li>
+            </ol>
             <Upload
               fullWidth
               maxFileSize={XML_MAX_SIZE_MB}
@@ -404,7 +413,7 @@ export default function SupplierInvoiceScreen() {
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
               <Button variant="secondary" onClick={backToList}>Voltar</Button>
             </div>
-          </>
+          </div>
         )}
 
         {previewLoading && <Alert variant="info" text="Lendo o XML…" fullWidth />}
