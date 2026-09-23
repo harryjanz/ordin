@@ -4718,6 +4718,19 @@ class IgnoreItemOut(BaseModel):
     retroactive_candidates: list[RetroactiveCandidateOut]
 
 
+# ORD-199 — seleção livre na tela "Pendências" (sem critério em comum entre
+# os itens, diferente de ApplyRetroactiveIn que exige mesmo c_ean/c_prod de
+# um item de origem). Cada item é independente — falha/já-resolvido de um
+# não afeta os outros, mesmo racional de apply_retroactive.
+class BulkIgnoreIn(BaseModel):
+    item_ids: list[int]
+
+
+class BulkIgnoreOut(BaseModel):
+    ignorados: int
+    ja_resolvidos: int  # já tinham link_source — pulados, não é erro
+
+
 class ApplyRetroactiveIn(BaseModel):
     source_item_id: int
     item_ids: list[int]
@@ -5501,6 +5514,30 @@ async def ignore_pending_item(
         "item": _serialize_pending_item(item, invoice.numero, invoice.serie, supplier.nome),
         "retroactive_candidates": retroactive_candidates,
     }
+
+
+@app.post(
+    "/catalog/supplier-invoices/items/bulk-ignore",
+    response_model=BulkIgnoreOut,
+    tags=["Fornecedores"],
+    summary="Ignorar múltiplos itens pendentes de uma vez — seleção livre, sem critério em comum (ORD-199)",
+)
+async def bulk_ignore_pending_items(
+    body: BulkIgnoreIn,
+    db: AsyncSession = Depends(get_db),
+    company_id: int = Depends(resolve_company_id_write),
+):
+    ignorados = ja_resolvidos = 0
+    for item_id in body.item_ids:
+        item = await _get_pending_item_scoped(db, item_id, company_id)  # 404 se de outra empresa
+        if item.link_source is not None:
+            ja_resolvidos += 1
+            continue
+        item.link_source = "ignorado"
+        item.pendente_motivo = None
+        ignorados += 1
+    await db.commit()
+    return {"ignorados": ignorados, "ja_resolvidos": ja_resolvidos}
 
 
 @app.post(

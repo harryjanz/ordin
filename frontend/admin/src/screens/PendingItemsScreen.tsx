@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, Button, Dropdown, InputBase, Modal, Pagination, Tag, type DropdownOptions } from "design-system";
+import { Alert, Button, Checkbox, Dropdown, InputBase, Modal, Pagination, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
+import ConfirmDialog from "../components/ConfirmDialog";
 import ResolvePendingItemPanel from "../components/ResolvePendingItemPanel";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
-import type { PendenteMotivo, PendingItem } from "../types";
+import type { BulkIgnoreOut, PendenteMotivo, PendingItem } from "../types";
 import styles from "./SupplierInvoiceScreen.module.scss";
 
 const LIMIT = 50;
@@ -44,6 +45,11 @@ export default function PendingItemsScreen() {
   const [skip, setSkip] = useState(0);
 
   const [resolveTarget, setResolveTarget] = useState<PendingItem | null>(null);
+
+  // ORD-199 — seleção só da página atual, mesmo padrão simples de UI sem
+  // estado global; reseta ao trocar página/filtro (ver useEffect abaixo).
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
   const isFirstRender = useRef(true);
@@ -85,12 +91,64 @@ export default function PendingItemsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fornecedorFilter]);
 
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [items]);
+
   function handleResolved() {
     setResolveTarget(null);
     fetchItems();
   }
 
+  function toggleSelect(id: number, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setSelectedIds(checked ? new Set(items.map((i) => i.id)) : new Set());
+  }
+
+  async function confirmBulkIgnore() {
+    try {
+      const r = await api.post<BulkIgnoreOut>(
+        "/catalog/supplier-invoices/items/bulk-ignore",
+        { item_ids: Array.from(selectedIds) },
+        catalogParams(),
+      );
+      makeToast("success", `${r.data.ignorados} ${r.data.ignorados === 1 ? "item ignorado" : "itens ignorados"}`);
+      setBulkConfirmOpen(false);
+      fetchItems();
+    } catch (err) {
+      makeToast("error", parseApiError(err).message || "Erro ao ignorar os itens selecionados.");
+    }
+  }
+
   const columns: TableColumn<PendingItem>[] = [
+    {
+      key: "select",
+      header: (
+        <span className={styles.selectCell}>
+          <Checkbox
+            id="select-all-pending"
+            checked={items.length > 0 && items.every((i) => selectedIds.has(i.id))}
+            onChange={toggleSelectAll}
+          />
+        </span>
+      ),
+      render: (i) => (
+        <span className={styles.selectCell}>
+          <Checkbox
+            id={`select-pending-${i.id}`}
+            checked={selectedIds.has(i.id)}
+            onChange={(checked) => toggleSelect(i.id, checked)}
+          />
+        </span>
+      ),
+    },
     {
       key: "nota", header: "Nota", render: (i) => (i.numero ? `${i.numero}${i.serie ? ` / ${i.serie}` : ""}` : "—"),
     },
@@ -143,6 +201,19 @@ export default function PendingItemsScreen() {
         <>
           <div className={styles.count}>
             <b>{total}</b> item{total === 1 ? "" : "ns"} pendente{total === 1 ? "" : "s"}
+            {selectedIds.size > 0 && (
+              <span className={styles.bulkBar}>
+                {" — "}{selectedIds.size} selecionado{selectedIds.size === 1 ? "" : "s"}
+                {" "}
+                <Button size="small" variant="secondary" onClick={() => setBulkConfirmOpen(true)}>
+                  Ignorar selecionados
+                </Button>
+                {" "}
+                <Button size="small" variant="secondary" onClick={() => setSelectedIds(new Set())}>
+                  Limpar seleção
+                </Button>
+              </span>
+            )}
           </div>
           <Table
             variant="compact"
@@ -168,6 +239,16 @@ export default function PendingItemsScreen() {
       <Modal open={resolveTarget !== null} onClose={() => setResolveTarget(null)} size="large" width={720}>
         {resolveTarget && <ResolvePendingItemPanel item={resolveTarget} onResolved={handleResolved} />}
       </Modal>
+
+      <ConfirmDialog
+        open={bulkConfirmOpen}
+        title="Ignorar itens selecionados?"
+        message={`Os ${selectedIds.size} itens selecionados deixam de aparecer na fila de pendências e não geram nenhuma entrada de estoque.`}
+        confirmLabel="Ignorar selecionados"
+        cancelLabel="Cancelar"
+        onConfirm={confirmBulkIgnore}
+        onCancel={() => setBulkConfirmOpen(false)}
+      />
     </>
   );
 }

@@ -1,5 +1,40 @@
 @import 'design-system/dist/core/scss/styles';
 
+// ORD-199 — componente de upload ficava "solto" na página, sem fundo, sem
+// orientação — mesmo padrão de .panel/.panelHead/.h2/.hint já usado em
+// NewCompanyScreen.tsx pra dar contexto antes de um formulário.
+.panel {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+  @include padding('l', 'xl', 'xl', 'xl');
+}
+
+.panelHead {
+  margin-bottom: 20px;
+}
+
+.h2 {
+  @include font('l-emphasys');
+}
+
+.hint {
+  color: rgba(var(--a-text-rgb), 0.5);
+  @include font('sm');
+  margin-top: 4px;
+}
+
+.uploadSteps {
+  @include font('sm');
+  color: rgba(var(--a-text-rgb), 0.7);
+  margin: 0 0 20px;
+  padding-left: 20px;
+
+  li {
+    margin-bottom: 4px;
+  }
+}
+
 .previewHeader {
   display: flex;
   flex-direction: column;
@@ -47,6 +82,21 @@
   b {
     color: var(--a-text);
   }
+}
+
+// ORD-199 — barra de ação em lote (seleção múltipla na tela Pendências)
+.bulkBar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 4px;
+}
+
+// Checkbox de seleção fica visualmente colado na borda da tabela com só o
+// padding padrão da célula — folga extra pra não ficar rente à margem.
+.selectCell {
+  display: inline-block;
+  padding-left: 6px;
 }
 
 .pager {

@@ -700,6 +700,12 @@ export interface LinkItemOut {
   retroactive_candidates: RetroactiveCandidate[];
 }
 
+// ORD-199 — ignorar em lote, seleção livre (sem critério em comum entre os itens)
+export interface BulkIgnoreOut {
+  ignorados: number;
+  ja_resolvidos: number;
+}
+
 export interface CreateProductFromItemOut {
   product: Product;
   item: PendingItem;
