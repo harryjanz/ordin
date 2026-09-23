@@ -891,3 +891,21 @@ em Mogo, CardápioWeb, Nola e Genesis PRO (confirmados como "têm estoque" pelo 
 existente, mas não aprofundados aqui); qualquer número de preço específico pra "importação de
 XML" como line item separado (nenhum concorrente ou ERP pesquisado publica isso destacado do resto
 do módulo de estoque).
+
+---
+
+## Status final do épico (2026-09-23)
+
+**Encerrado.** Blocos A, B, C, D, F e G — 20 histórias, 96 pontos — todas mergeadas em `main`
+(`ORD-180` a `ORD-201`, confirmado via `git log`, não só `status: Ready`).
+
+**B2** (conta a pagar a partir da NF, 5 pontos) e **Bloco E** (ficha técnica pra CFOP 5101, 24
+pontos) foram **descartados por decisão de produto**, não implementados por falta de tempo:
+- B2 — o ganho real da oportunidade (estoque atualizado via NF) já foi entregue pelo resto do
+  épico; virar ERP financeiro completo não é o que o Ordin deve ser agora.
+- Bloco E — complexidade desproporcional ao estágio de MVP; o módulo de estoque, mesmo sem cobrir
+  CFOP 5101 (produção própria), já entrega mais do que o necessário pro momento.
+
+Motivo maior por trás dos dois: o Ordin ainda não rodou em nenhum cliente real — validar o MVP na
+prática, sobretudo meios de pagamento, importa mais agora do que aprofundar módulos internos. Foco
+do projeto virou implementar novos integradores de pagamento (Adyen, Stone, outros).
