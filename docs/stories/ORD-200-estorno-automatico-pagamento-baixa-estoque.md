@@ -575,3 +575,41 @@ cenário e função correspondente.
 - [x] Repasse de Backend — 5 achados aplicados (`tx.company_id`, tipo de `actor_user_id`, ordem de definição confirmada, `except Exception` no dispatcher, bug latente de tenant corrigido de brinde)
 - [x] Rastreabilidade ponta a ponta — tabela acima, sem célula vazia
 - [x] Sem bloqueios não resolvidos
+
+## Implementação — achados reais (2026-09-23)
+
+1. **`_cancel_transaction_core` inicial hardcodeava `"cancelled_by": None`** — copiado direto do
+   pseudocódigo do Tech Explorer sem reparar que isso regrediria `cancel_payment` (endpoint manual),
+   que grava `current_user.sub`. Achado na hora de ligar o endpoint na função extraída, antes de
+   rodar qualquer teste. Corrigido: `_cancel_transaction_core` ganhou o mesmo parâmetro
+   `actor_user_id: str | None = None` que `_refund_transaction_core` já tinha — `cancel_payment`
+   passa `current_user.sub`, o dispatcher automático passa `None`.
+2. **Checagem de prazo de reembolso (422) virou 502 genérico na extração** — o pseudocódigo do Tech
+   Explorer tinha `_refund_transaction_core` retornando `(False, mensagem)` pra prazo expirado, igual
+   qualquer outra falha — mas o endpoint manual precisa devolver `422` (não `502`) nesse caso
+   especificamente, pra não regredir `refund_payment`. Achado ao comparar a extração linha a linha
+   com o código original antes de rodar a suíte. Corrigido: a checagem de prazo levanta
+   `HTTPException(422, ...)` direto de dentro do core (em vez de `return False`) — o endpoint manual
+   deixa propagar normalmente (mesmo comportamento de sempre); o dispatcher automático já cobre isso
+   com o `except Exception` que também precisa capturar `HTTPException` de `_get_terminal_config`
+   (achado do próprio repasse de Backend).
+
+Estratégia de regressão (repasse de QA): suíte completa de `test_payment.py` rodada como baseline
+**antes** da extração (157 passed, 1 failed — falha pré-existente e não relacionada,
+`test_factory_returns_rabbitmq_broker`, ambiente sem `RABBITMQ_URL` no container de teste) e de novo
+**depois** (mesmo resultado: 157 passed, mesma 1 falha pré-existente) — zero regressão real nos dois
+endpoints extraídos.
+
+Suíte nova (`test_ord200_estorno_automatico_pagamento.py`, 12 testes): cobre os dois branches do
+dispatcher (PayGo/mock best-effort, Mercado Pago condicional), `_notify_order` chamado em ambos no
+sucesso (fecha a assimetria do repasse de PM), `cancelled_by`/`refunded_by` como `None` no caminho
+automático, falha dupla via `_cancel_transaction_core`/`_refund_transaction_core` mockados pra
+levantar exceção (incluindo `HTTPException` real de terminal não encontrado, achado do repasse de
+Backend), guarda de idempotência do dispatcher (transação não mais `approved`), os 4 valores de
+retorno de `_decrementar_estoque_venda` (pedido não encontrado, sem CFOP 5102, saldo negativo,
+falha real), e 2 testes de integração ponta a ponta via `POST /payments` (com e sem falha de
+decremento).
+
+Suíte completa: 169 testes em `payment-service` (12 novos), 1 falha pré-existente sem relação com
+esta história. `ruff check services/payment/` limpo. Container reconstruído e verificado com
+`GET /health` respondendo normalmente com o código novo.
