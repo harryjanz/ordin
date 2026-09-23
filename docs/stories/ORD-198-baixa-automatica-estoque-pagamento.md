@@ -560,3 +560,33 @@ Nenhum — decisão desta rodada foi manter síncrono (ver seção "Decisão de 
 | Backend | Commit por item dentro do loop copiava o padrão de `apply_retroactive`, mas a razão original (falha parcial entre candidatos independentes) não se aplica a um pedido só | Corrigido: commit único no final da função, simplifica idempotência em caso de falha total |
 | Backend | `require_internal` sem JWT — checado se faltava proteção de rede | Confirmado: `nginx.conf:19-22` já bloqueia `/internal/*` publicamente (403), mesma camada que protege os outros endpoints internos |
 | Backend | `criado_por` nullable — checado se quebra alguma query existente | `grep` confirma só 3 usos no código, nenhum assume não-nulo |
+
+## Implementação — achados reais (2026-09-23)
+
+1. **`emit_nfce_if_active` é chamado em 4 pontos, não só no caminho síncrono** — achado
+   escrevendo o hook, não previsto no Tech Explorer. Além de `create_payment` (`POST /payments`,
+   caminho síncrono via PayGo/mock), existem 3 caminhos assíncronos de confirmação via Mercado
+   Pago (webhook, polling de status, reconciliação) que também marcam `tx.status = "approved"` e
+   chamam `emit_nfce_if_active` de forma independente. Se `_decrementar_estoque_venda` só fosse
+   chamada no primeiro ponto, pagamentos confirmados via MP assíncrono nunca decrementariam
+   estoque — lacuna silenciosa e séria. Corrigido: hook adicionado nos mesmos 4 pontos, sempre ao
+   lado da chamada existente de `emit_nfce_if_active`.
+2. **`except` restrito a `httpx.HTTPError`/`TimeoutException` contradizia o próprio docstring da
+   função** — achado rodando a suíte de regressão de `payment-service` (3 testes pré-existentes de
+   `test_payment.py` começaram a falhar, todos no caminho "approved"). Causa raiz: qualquer exceção
+   não-HTTP (e mais especificamente, no teste, a checagem estrita do `respx` sobre rota não
+   mockada) propagaria e derrubaria `POST /payments` inteiro — quebrando a promessa documentada de
+   "nunca deixa o pagamento falhar por causa disso". Corrigido pra `except Exception`, mesmo padrão
+   já usado (e já comentado como intencional, `# noqa: BLE001`) em `emit_nfce_if_active` — não foi
+   um hack pra passar teste, é o comportamento correto que o docstring já prometia.
+
+Verificado ao vivo contra MySQL real de dev (não só a suíte SQLite in-memory dos testes):
+`POST /internal/stock/decrement` direto no `catalog-service` rodando, produto real (Coca-Cola Lata
+350ml, CFOP 5102, saldo 391) — decremento de 5 aplicado corretamente (391→386), `StockMovement`
+gravado com `tipo="saida"`, `quantidade=-5`, `order_ref` preenchido, `criado_por=NULL`; reenvio do
+mesmo `order_ref` confirmado idempotente (386 inalterado, `skipped: 1`) — a `UniqueConstraint`
+composta funciona contra o MySQL real, não só a simulação do SQLite de teste. Dados de teste
+revertidos depois da verificação.
+
+Suíte completa: 514 testes em `catalog-service` (8 novos), 158 em `payment-service` (5 novos), sem
+regressão. `ruff check services/` e `tsc --noEmit` (frontend/admin) limpos.
