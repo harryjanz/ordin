@@ -297,7 +297,7 @@ async def _save_fiscal_document(order_ref: str, company_id: int, ambiente: str, 
         await db.commit()
 
 
-async def _decrementar_estoque_venda(order_ref: str) -> None:
+async def _decrementar_estoque_venda(order_ref: str) -> bool:
     """ORD-198 (D1) — chamado depois de toda aprovação de pagamento. Decrementa
     só itens CFOP 5102 (revenda pura — 5101/produção própria fica pro Bloco E,
     ficha técnica). Itens vindos de uma opção de grupo (produto guarda-chuva)
@@ -308,13 +308,17 @@ async def _decrementar_estoque_venda(order_ref: str) -> None:
 
     Nunca deixa o pagamento falhar por causa disso — a cobrança já aconteceu
     fisicamente na maquininha, não existe "desfazer" nesse ponto do fluxo.
-    Falha real (indisponibilidade, timeout, erro 5xx do catalog-service) só
-    é logada — gap conhecido e aceito até D2 (estorno automático, história
-    separada) existir."""
+
+    ORD-200 (D2) — assinatura mudou de -> None pra -> bool: True cobre tanto
+    sucesso real quanto os casos de "nada a decrementar" (pedido não
+    encontrado, sem item CFOP 5102 — nunca aciona estorno automático). Só
+    retorna False quando a chamada de decremento em si falha de verdade
+    (indisponibilidade, timeout, erro 5xx do catalog-service) — aí sim quem
+    chamou aciona _estornar_pagamento_automatico."""
     try:
         order = await _get_order_with_items(order_ref)
         if not order:
-            return
+            return True
         products_fiscal = await _get_products_fiscal([it["product_id"] for it in order["items"]])
         items = [
             {"product_id": it["product_id"], "quantity": it["quantity"]}
@@ -322,7 +326,7 @@ async def _decrementar_estoque_venda(order_ref: str) -> None:
             if products_fiscal.get(it["product_id"], {}).get("cfop") == "5102"
         ]
         if not items:
-            return
+            return True
         async with httpx.AsyncClient(timeout=5) as c:
             resp = await c.post(
                 f"{CATALOG_SVC}/internal/stock/decrement",
@@ -330,6 +334,7 @@ async def _decrementar_estoque_venda(order_ref: str) -> None:
                 headers=INTERNAL_HEADERS,
             )
             resp.raise_for_status()
+        return True
     # Mesmo motivo de emit_nfce_if_active (ORD-171): captura ampla intencional
     # — qualquer falha em qualquer etapa (order-service fora do ar, JSON
     # inesperado, catalog-service indisponível) só loga, nunca derruba
@@ -338,6 +343,7 @@ async def _decrementar_estoque_venda(order_ref: str) -> None:
     # promessa desta função de nunca falhar o pagamento.
     except Exception as exc:  # noqa: BLE001
         logger.error("Decremento de estoque falhou pra order_ref=%s: %s", order_ref, exc)
+        return False
 
 
 async def emit_nfce_if_active(company_id: int, order_ref: str, method: str, amount: float) -> None:
@@ -922,7 +928,9 @@ async def create_payment(
     if result.status == TransactionStatus.approved:
         await _notify_order(body.order_ref, "paid")
         await emit_nfce_if_active(current_user.company_id, body.order_ref, body.method, body.amount)
-        await _decrementar_estoque_venda(body.order_ref)
+        estoque_ok = await _decrementar_estoque_venda(body.order_ref)
+        if not estoque_ok:
+            await _estornar_pagamento_automatico(tx.id, "Falha ao decrementar estoque na venda")
         await _publish(
             "payment.approved",
             PaymentApprovedEvent(
@@ -1279,6 +1287,195 @@ async def payments_analytics(
     }
 
 
+async def _cancel_transaction_core(
+    db: AsyncSession, tx: "Transaction", reason: str | None, *, actor_user_id: str | None = None,
+) -> bool:
+    """ORD-200 (D2) — extraída de cancel_payment (PayGo/mock, best-effort:
+    tx.status vira "cancelled" independente do resultado do provider). Usa
+    tx.company_id, não current_user.company_id (não existe no caminho
+    automático) — mais correto até no caminho manual, já que cancel_payment
+    isenta superadmin/admin do filtro de tenant, então current_user.company_id
+    pode divergir de tx.company_id nesse caso (achado do repasse de Backend).
+    actor_user_id é str (TokenPayload.sub, sem conversão) — None no caminho
+    automático, mesmo padrão de _refund_transaction_core."""
+    tx.status = "cancelled"
+    tx.cancelled_at = datetime.utcnow()
+    tx.cancel_reason = reason
+    await db.commit()
+
+    if tx.provider == "paygo" and tx.provider_transaction_id:
+        try:
+            terminal_cfg = await _get_terminal_config(tx.terminal_id)
+            raw_config = terminal_cfg.get("config") or {}
+            config = ProviderConfig(
+                provider="paygo",
+                environment=tx.environment or "sandbox",
+                api_key=raw_config.get("api_key"),
+                api_secret=raw_config.get("api_secret"),
+                extra_config=raw_config.get("extra_config") or {},
+            )
+            provider = get_provider(config)
+            await provider.cancel_transaction(
+                provider_transaction_id=tx.provider_transaction_id,
+                terminal_ref=tx.paygo_terminal_id or "",
+            )
+        except HTTPException:
+            pass
+        # Mesmo racional de ORD-156 (cancel_payment): cancelamento no provider
+        # é best-effort, transação já está sendo cancelada do nosso lado
+        # independente do resultado.
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PayGo cancel error (estorno automático): %s", exc)
+
+    await _try_cancel_fiscal_document(tx.order_ref, reason)
+    await _publish(
+        "payment.cancelled",
+        PaymentCancelledEvent(
+            company_id=tx.company_id,
+            order_ref=tx.order_ref,
+            transaction_id=tx.id,
+            amount=str(tx.amount),
+            cancel_reason=reason or "",
+            provider=tx.provider or "mock",
+        ).to_dict(),
+    )
+    await save_audit({
+        "transaction_id":          tx.id,
+        "company_id":              tx.company_id,
+        "order_ref":               tx.order_ref,
+        "provider":                tx.provider,
+        "environment":             tx.environment,
+        "provider_transaction_id": tx.provider_transaction_id,
+        "cancelled_by":            actor_user_id,
+        "events":                  [{"event": "cancelled", "ts": datetime.utcnow().isoformat(),
+                                     "reason": reason}],
+        "final_status":            "cancelled",
+    })
+    return True
+
+
+async def _refund_transaction_core(
+    db: AsyncSession, tx: "Transaction", reason: str | None, *, actor_user_id: str | None = None,
+) -> tuple[bool, str | None]:
+    """ORD-200 (D2) — extraída de refund_payment (só Mercado Pago, só marca
+    "refunded" se o provider confirmar de verdade). actor_user_id é str, não
+    int — TokenPayload.sub é str e é usado sem conversão hoje (achado do
+    repasse de Backend); None no caminho automático.
+
+    HTTPException de _get_terminal_config NÃO é engolida aqui (mesmo
+    comportamento de refund_payment hoje) — quem chama no caminho automático
+    (_estornar_pagamento_automatico) precisa cobrir isso com except Exception."""
+    if tx.provider != "mercadopago" or not tx.provider_transaction_id:
+        return False, "Transação não é Mercado Pago ou sem provider_transaction_id"
+
+    terminal_cfg = await _get_terminal_config(tx.terminal_id)
+    raw_config = terminal_cfg.get("config") or {}
+    config = ProviderConfig(
+        provider="mercadopago",
+        environment=tx.environment or "sandbox",
+        api_key=raw_config.get("api_key"),
+        api_secret=raw_config.get("api_secret"),
+        extra_config=raw_config.get("extra_config") or {},
+    )
+    provider = get_provider(config)
+
+    # Levanta HTTPException(422) direto, não `return False` — precisa preservar
+    # o status code distinto do endpoint manual (não é um 502 genérico de
+    # provider). No caminho automático, o dispatcher (_estornar_pagamento_
+    # automatico) já cobre isso com seu próprio except Exception.
+    limit_days = provider.refund_window_days(tx.method)
+    if limit_days is not None and tx.created_at and (datetime.utcnow() - tx.created_at).days > limit_days:
+        raise HTTPException(422, f"Prazo de reembolso expirado — {tx.provider} aceita até {limit_days} dias da aprovação")
+
+    refund_result = await provider.refund_transaction(provider_transaction_id=tx.provider_transaction_id)
+
+    await save_audit({
+        "transaction_id":          tx.id,
+        "company_id":              tx.company_id,
+        "order_ref":               tx.order_ref,
+        "provider":                tx.provider,
+        "environment":             tx.environment,
+        "provider_transaction_id": tx.provider_transaction_id,
+        "refunded_by":             actor_user_id,
+        "events":                  [{
+            "event": "refund_attempt",
+            "ts": datetime.utcnow().isoformat(),
+            "reason": reason,
+            "success": refund_result.success,
+            "error_message": refund_result.error_message,
+            "raw_response": refund_result.raw_response,
+        }],
+        "final_status": "refunded" if refund_result.success else tx.status,
+    })
+
+    if not refund_result.success:
+        return False, refund_result.error_message or "Mercado Pago recusou o reembolso"
+
+    tx.status = "refunded"
+    tx.refunded_at = datetime.utcnow()
+    tx.refund_reason = reason
+    await db.commit()
+
+    await _try_cancel_fiscal_document(tx.order_ref, reason)
+    await _publish(
+        "payment.refunded",
+        PaymentRefundedEvent(
+            company_id=tx.company_id,
+            order_ref=tx.order_ref,
+            transaction_id=tx.id,
+            amount=str(tx.amount),
+            refund_reason=reason or "",
+            provider=tx.provider or "mock",
+        ).to_dict(),
+    )
+    return True, None
+
+
+async def _estornar_pagamento_automatico(tx_id: int, motivo: str) -> None:
+    """ORD-200 (D2) — dispatcher chamado quando _decrementar_estoque_venda
+    retorna False (falha real na baixa de estoque). Abre sua própria sessão
+    (mesmo padrão de _try_cancel_fiscal_document) — roda de dentro do fluxo
+    de aprovação de pagamento, sem current_user, sem HTTP.
+
+    Nunca propaga exceção — falha dupla (decremento falhou e o estorno
+    também falha) vira só save_audit com evento próprio, nunca derruba o
+    pagamento (que já aconteceu fisicamente na maquininha)."""
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(Transaction).where(Transaction.id == tx_id))
+            tx = result.scalars().first()
+            if not tx or tx.status != "approved":
+                return
+
+            if tx.provider == "mercadopago":
+                ok, error = await _refund_transaction_core(db, tx, motivo, actor_user_id=None)
+            else:
+                ok = await _cancel_transaction_core(db, tx, motivo)
+                error = None
+
+            if ok:
+                # Achado do repasse de PM: refund_payment manual não chama
+                # _notify_order (assimetria pré-existente, não corrigida lá —
+                # um humano já está ciente nesse caminho). No automático,
+                # ninguém mais fica sabendo se isso não for chamado aqui.
+                await _notify_order(tx.order_ref, "cancelled")
+            else:
+                raise RuntimeError(error or "estorno automático falhou")
+    # Captura ampla intencional (mesmo racional de _decrementar_estoque_venda):
+    # cobre inclusive HTTPException de _get_terminal_config dentro de
+    # _refund_transaction_core, que não tem proteção própria porque hoje só
+    # roda dentro de um request HTTP real (achado do repasse de Backend).
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Estorno automático falhou pra tx_id=%s: %s", tx_id, exc)
+        await save_audit({
+            "transaction_id":     tx_id,
+            "event":              "estorno_automatico_falhou",
+            "motivo_decremento":  motivo,
+            "erro":               str(exc),
+            "ts":                 datetime.utcnow().isoformat(),
+        })
+
+
 @app.post(
     "/payments/{tx_id}/cancel",
     response_model=CancelOut,
@@ -1322,64 +1519,8 @@ async def cancel_payment(
     if tx.provider == "paygo" and tx.created_at and tx.created_at.date() != datetime.utcnow().date():
         raise HTTPException(422, "Cancelamento PayGo permitido apenas no mesmo dia")
 
-    tx.status = "cancelled"
-    tx.cancelled_at = datetime.utcnow()
-    tx.cancel_reason = body.reason
-    await db.commit()
-
-    # Chamar cancel no provider se PayGo
-    if tx.provider == "paygo" and tx.provider_transaction_id:
-        try:
-            terminal_cfg = await _get_terminal_config(tx.terminal_id)
-            raw_config   = terminal_cfg.get("config") or {}
-            config = ProviderConfig(
-                provider="paygo",
-                environment=tx.environment or "sandbox",
-                api_key=raw_config.get("api_key"),
-                api_secret=raw_config.get("api_secret"),
-                extra_config=raw_config.get("extra_config") or {},
-            )
-            provider = get_provider(config)
-            await provider.cancel_transaction(
-                provider_transaction_id=tx.provider_transaction_id,
-                terminal_ref=tx.paygo_terminal_id or "",
-            )
-        except HTTPException:
-            pass
-        # ORD-156 — captura ampla intencional: cancelamento no provider é
-        # best-effort aqui (a transação já está sendo cancelada do nosso
-        # lado independente do resultado) — qualquer falha do provider não
-        # pode impedir o cancelamento local.
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("PayGo cancel error: %s", exc)
-
-    await _try_cancel_fiscal_document(tx.order_ref, body.reason)
-
+    await _cancel_transaction_core(db, tx, body.reason, actor_user_id=current_user.sub)
     await _notify_order(tx.order_ref, "cancelled")
-    await _publish(
-        "payment.cancelled",
-        PaymentCancelledEvent(
-            company_id=current_user.company_id,
-            order_ref=tx.order_ref,
-            transaction_id=tx.id,
-            amount=str(tx.amount),
-            cancel_reason=body.reason or "",
-            provider=tx.provider or "mock",
-        ).to_dict(),
-    )
-
-    await save_audit({
-        "transaction_id":          tx.id,
-        "company_id":              current_user.company_id,
-        "order_ref":               tx.order_ref,
-        "provider":                tx.provider,
-        "environment":             tx.environment,
-        "provider_transaction_id": tx.provider_transaction_id,
-        "cancelled_by":            current_user.sub,
-        "events":                  [{"event": "cancelled", "ts": datetime.utcnow().isoformat(),
-                                     "reason": body.reason}],
-        "final_status":            "cancelled",
-    })
 
     return {"ok": True, "detail": "Transação cancelada"}
 
@@ -1422,70 +1563,12 @@ async def refund_payment(
     if not tx.provider_transaction_id:
         raise HTTPException(400, "Transação sem provider_transaction_id — não é possível reembolsar")
 
-    terminal_cfg = await _get_terminal_config(tx.terminal_id)
-    raw_config = terminal_cfg.get("config") or {}
-    config = ProviderConfig(
-        provider="mercadopago",
-        environment=tx.environment or "sandbox",
-        api_key=raw_config.get("api_key"),
-        api_secret=raw_config.get("api_secret"),
-        extra_config=raw_config.get("extra_config") or {},
-    )
-    provider = get_provider(config)
-
-    # Checagem de prazo — pergunta ao próprio provider (capacidade dele, não
-    # uma tabela genérica aqui), evita chamada desnecessária ao Mercado Pago
-    # quando já sabemos que vai ser recusado. Ver ORD-147.
-    limit_days = provider.refund_window_days(tx.method)
-    if limit_days is not None and tx.created_at and (datetime.utcnow() - tx.created_at).days > limit_days:
-        raise HTTPException(422, f"Prazo de reembolso expirado — {tx.provider} aceita até {limit_days} dias da aprovação")
-
-    refund_result = await provider.refund_transaction(provider_transaction_id=tx.provider_transaction_id)
-
-    # Auditoria mesmo em caso de falha (rastro forense, mesmo padrão do ORD-132).
-    await save_audit({
-        "transaction_id":          tx.id,
-        "company_id":              current_user.company_id,
-        "order_ref":               tx.order_ref,
-        "provider":                tx.provider,
-        "environment":             tx.environment,
-        "provider_transaction_id": tx.provider_transaction_id,
-        "refunded_by":             current_user.sub,
-        "events":                  [{
-            "event": "refund_attempt",
-            "ts": datetime.utcnow().isoformat(),
-            "reason": body.reason,
-            "success": refund_result.success,
-            "error_message": refund_result.error_message,
-            "raw_response": refund_result.raw_response,
-        }],
-        "final_status": "refunded" if refund_result.success else tx.status,
-    })
-
-    if not refund_result.success:
+    ok, error = await _refund_transaction_core(db, tx, body.reason, actor_user_id=current_user.sub)
+    if not ok:
         # Transação NÃO muda de status local — diferente do cancelamento
         # PayGo (best-effort), reembolso só é confirmado quando o Mercado
         # Pago confirma de verdade.
-        raise HTTPException(502, refund_result.error_message or "Mercado Pago recusou o reembolso")
-
-    tx.status = "refunded"
-    tx.refunded_at = datetime.utcnow()
-    tx.refund_reason = body.reason
-    await db.commit()
-
-    await _try_cancel_fiscal_document(tx.order_ref, body.reason)
-
-    await _publish(
-        "payment.refunded",
-        PaymentRefundedEvent(
-            company_id=current_user.company_id,
-            order_ref=tx.order_ref,
-            transaction_id=tx.id,
-            amount=str(tx.amount),
-            refund_reason=body.reason or "",
-            provider=tx.provider or "mock",
-        ).to_dict(),
-    )
+        raise HTTPException(502, error or "Mercado Pago recusou o reembolso")
 
     return {"ok": True, "transaction_id": tx.id, "status": "refunded"}
 
@@ -1591,7 +1674,9 @@ async def get_payment_status(
                         await db.commit()
                         await _notify_order(tx.order_ref, "paid")
                         await emit_nfce_if_active(tx.company_id, tx.order_ref, tx.method, float(tx.amount))
-                        await _decrementar_estoque_venda(tx.order_ref)
+                        estoque_ok = await _decrementar_estoque_venda(tx.order_ref)
+                        if not estoque_ok:
+                            await _estornar_pagamento_automatico(tx.id, "Falha ao decrementar estoque na venda")
                         await _publish(
                             "payment.approved",
                             PaymentApprovedEvent(
@@ -1705,7 +1790,9 @@ async def _mp_fetch_and_update(tx: Transaction, payment_id: str, db: AsyncSessio
                 await db.commit()
                 await _notify_order(tx.order_ref, "paid")
                 await emit_nfce_if_active(tx.company_id, tx.order_ref, tx.method, float(tx.amount))
-                await _decrementar_estoque_venda(tx.order_ref)
+                estoque_ok = await _decrementar_estoque_venda(tx.order_ref)
+                if not estoque_ok:
+                    await _estornar_pagamento_automatico(tx.id, "Falha ao decrementar estoque na venda")
                 await _publish(
                     "payment.approved",
                     PaymentApprovedEvent(
@@ -1760,7 +1847,9 @@ async def _mp_order_fetch_and_update(tx: Transaction, order_id: str, db: AsyncSe
                 await db.commit()
                 await _notify_order(tx.order_ref, "paid")
                 await emit_nfce_if_active(tx.company_id, tx.order_ref, tx.method, float(tx.amount))
-                await _decrementar_estoque_venda(tx.order_ref)
+                estoque_ok = await _decrementar_estoque_venda(tx.order_ref)
+                if not estoque_ok:
+                    await _estornar_pagamento_automatico(tx.id, "Falha ao decrementar estoque na venda")
                 await _publish(
                     "payment.approved",
                     PaymentApprovedEvent(
