@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, makeToast, Tag } from "design-system";
+import { Alert, Button, Dropdown, InputBase, makeToast, Tag, type DropdownOptions } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
@@ -9,6 +9,7 @@ import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
 import { useStore } from "../store";
 import type { Supplier } from "../types";
+import styles from "./SupplierInvoiceScreen.module.scss";
 
 // ORD-182 (A6) — CRUD de fornecedores por empresa (superadmin/admin/owner/
 // manager). ORD-194 (B1, revisão de frontend): página/título compartilhados
@@ -19,6 +20,16 @@ import type { Supplier } from "../types";
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString("pt-BR");
 }
+
+// Filtros de listagem — mesmo padrão de debounce 500ms (texto) + refetch
+// imediato (dropdown) já usado em PendingItemsScreen.tsx/
+// SupplierInvoiceScreen.tsx, reaproveitando o mesmo stylesheet
+// (.filterBar/.field).
+const CADASTRO_PENDENTE_OPTIONS: DropdownOptions[] = [
+  { value: "", label: "Todos os fornecedores" },
+  { value: "true", label: "Cadastro pendente" },
+  { value: "false", label: "Cadastro completo" },
+];
 
 export default function SupplierListScreen() {
   const navigate = useNavigate();
@@ -36,11 +47,22 @@ export default function SupplierListScreen() {
   const [error, setError] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<Supplier | null>(null);
 
+  const [nomeFilter, setNomeFilter] = useState("");
+  const [cnpjFilter, setCnpjFilter] = useState("");
+  const [cadastroPendenteFilter, setCadastroPendenteFilter] = useState("");
+
+  const debounceTimer = useRef<ReturnType<typeof setTimeout>>();
+  const isFirstRender = useRef(true);
+
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const r = await api.get("/catalog/suppliers", catalogParams());
+      const r = await api.get("/catalog/suppliers", catalogParams({
+        nome: nomeFilter || undefined,
+        cnpj: cnpjFilter || undefined,
+        cadastro_pendente: cadastroPendenteFilter || undefined,
+      }));
       setSuppliers(r.data.suppliers ?? []);
     } catch (err) {
       setError(parseApiError(err).message);
@@ -51,8 +73,17 @@ export default function SupplierListScreen() {
 
   useEffect(() => {
     load();
+    isFirstRender.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCompanyId]);
+  }, [selectedCompanyId, cadastroPendenteFilter]);
+
+  useEffect(() => {
+    if (isFirstRender.current) return;
+    clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(load, 500);
+    return () => clearTimeout(debounceTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nomeFilter, cnpjFilter]);
 
   async function confirmRemove() {
     if (!removeTarget) return;
@@ -67,20 +98,22 @@ export default function SupplierListScreen() {
   }
 
   const columns: TableColumn<Supplier>[] = [
-    // ORD-204 — fornecedor criado automaticamente na importação de NF (só
-    // nome+cnpj, sem contato) ganha Tag até alguém revisar e salvar.
-    { key: "nome", header: "Nome", render: (s) => (
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {s.nome}
-        {s.cadastro_pendente && <Tag variant="warning">Cadastro pendente</Tag>}
-      </div>
-    ) },
+    { key: "nome", header: "Nome", render: (s) => s.nome },
     { key: "cnpj", header: "CNPJ", mono: true, render: (s) => formatCnpj(s.cnpj) },
     // ORD-202 — contato comercial substitui os campos legados telefone/
     // email como fonte principal; fallback pros legados só pra fornecedor
     // cadastrado antes desta história (nunca editado, sem contato ainda).
     { key: "telefone", header: "Telefone", render: (s) => s.contato?.telefone ?? s.telefone ?? "—" },
-    { key: "email", header: "E-mail", render: (s) => s.contato?.email ?? s.email ?? "—" },
+    // Pedido do usuário: coluna dedicada de status de cadastro no lugar do
+    // e-mail — antes era uma Tag inline colada no nome (ORD-204), agora tem
+    // coluna própria (mesmo agrupamento do filtro "Cadastro" acima).
+    {
+      key: "cadastro_status", header: "Cadastro", render: (s) => (
+        s.cadastro_pendente
+          ? <Tag variant="warning">Pendente</Tag>
+          : <Tag variant="success">Completo</Tag>
+      ),
+    },
     { key: "created_at", header: "Criado em", mono: true, render: (s) => fmtDate(s.created_at) },
     {
       key: "action", header: "", render: (s) => (
@@ -100,6 +133,33 @@ export default function SupplierListScreen() {
     <>
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
         <Button onClick={() => navigate("/stock/suppliers/new")}>+ Novo fornecedor</Button>
+      </div>
+
+      <div className={styles.filterBar}>
+        <div className={styles.field}>
+          <InputBase
+            label="Nome"
+            placeholder="Buscar por nome…"
+            value={nomeFilter}
+            onChange={(e) => setNomeFilter(e.target.value)}
+          />
+        </div>
+        <div className={styles.field}>
+          <InputBase
+            label="CNPJ"
+            placeholder="Buscar por CNPJ…"
+            value={formatCnpj(cnpjFilter)}
+            onChange={(e) => setCnpjFilter(e.target.value)}
+          />
+        </div>
+        <div className={styles.field}>
+          <Dropdown
+            label="Cadastro"
+            value={CADASTRO_PENDENTE_OPTIONS.find((o) => o.value === cadastroPendenteFilter) ?? CADASTRO_PENDENTE_OPTIONS[0]}
+            onValueSelected={(opt) => setCadastroPendenteFilter(opt.value)}
+            options={CADASTRO_PENDENTE_OPTIONS}
+          />
+        </div>
       </div>
 
       {error && <Alert variant="error" text={error} fullWidth />}
