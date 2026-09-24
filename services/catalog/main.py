@@ -325,6 +325,11 @@ class Supplier(Base):
     neighborhood           = Column(String(100), nullable=True)
     city                   = Column(String(100), nullable=True)
     state                   = Column(String(2), nullable=True)
+    # ORD-204 — True só quando criado automaticamente via importação de NF
+    # (create_supplier_invoice), sem passar pelo schema SupplierIn (que
+    # exige contato). Nunca inferido a partir de campo vazio — fornecedor
+    # legado/manual com campos opcionais em branco não é "pendente".
+    cadastro_pendente = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -4434,6 +4439,7 @@ class SupplierOut(BaseModel):
     neighborhood: str | None
     city: str | None
     state: str | None
+    cadastro_pendente: bool
     created_at: datetime
     contato: SupplierContactOut | None
     responsavel_legal: SupplierLegalRepresentativeOut | None
@@ -4610,6 +4616,10 @@ async def update_supplier(
     s.cadastral_status = body.cadastral_status
     s.zip_code, s.street, s.address_number = body.zip_code, body.street, body.address_number
     s.complement, s.neighborhood, s.city, s.state = body.complement, body.neighborhood, body.city, body.state
+    # ORD-204 — qualquer salvamento bem-sucedido zera a pendência, mesmo
+    # que nem todo campo opcional tenha sido preenchido (só contato é
+    # obrigatório pelo schema SupplierIn já hoje).
+    s.cadastro_pendente = False
     await _upsert_contact(db, supplier_id, company_id, body.contato)
     await _upsert_or_clear_legal_rep(db, supplier_id, company_id, body.responsavel_legal)
     await db.commit()
@@ -5148,7 +5158,10 @@ async def create_supplier_invoice(
         raise HTTPException(409, detail="Nota já importada anteriormente")
     supplier = await _find_supplier_by_cnpj(db, company_id, parsed.emit_cnpj)
     if supplier is None:
-        supplier = Supplier(company_id=company_id, nome=parsed.emit_nome, cnpj=parsed.emit_cnpj)
+        supplier = Supplier(
+            company_id=company_id, nome=parsed.emit_nome, cnpj=parsed.emit_cnpj,
+            cadastro_pendente=True,
+        )
         db.add(supplier)
         await db.flush()  # garante supplier.id antes do SupplierInvoice
     invoice = SupplierInvoice(
