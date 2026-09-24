@@ -59,6 +59,12 @@
   margin-bottom: 16px;
 }
 
+.h4 {
+  @include font('sm-emphasys');
+  color: rgba(var(--a-text-rgb), 0.7);
+  margin-bottom: 12px;
+}
+
 .note {
   @include font('xs');
   color: rgba(var(--a-text-rgb), 0.5);
@@ -218,10 +224,11 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(29, 20, 52, 0.95);
-  border-top: 1px solid var(--a-border);
-  padding: 16px 4px;
-  margin-top: -4px;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+  @include padding('l', 'xl', 'l', 'xl');
+  margin-bottom: 20px;
 }
 
 .dirtyNote {

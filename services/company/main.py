@@ -3935,9 +3935,8 @@ def _require_owner_or_superadmin(u: TokenPayload, company_id: int) -> None:
 @app.post(
     "/companies/{company_id}/contacts",
     response_model=ContactOut,
-    status_code=201,
     tags=["Empresas"],
-    summary="Criar contato da empresa (comercial/financeiro/tecnico)",
+    summary="Criar ou atualizar contato da empresa (comercial/financeiro/tecnico)",
 )
 async def create_contact(
     company_id: int,
@@ -3945,19 +3944,28 @@ async def create_contact(
     db: AsyncSession = Depends(get_db),
     current_user: TokenPayload = Depends(get_current_user),
 ):
+    # Achado ao vivo (revisão de urgência, 2026-09-24): antes só criava —
+    # chamar de novo pro mesmo contact_type duplicava a linha em vez de
+    # editar. Mesmo padrão de upsert-por-tipo já usado em
+    # upsert_legal_representative logo abaixo; único outro chamador
+    # (NewCompanyScreen.tsx, wizard de criação) nunca tem contato prévio
+    # pra essa empresa, então sempre cai no ramo de criação — sem mudança
+    # de comportamento pra ele.
     _require_company_admin(current_user, company_id)
     co = await db.get(Company, company_id)
     if not co or not co.active:
         raise HTTPException(404, "Empresa não encontrada")
-    contact = CompanyContact(
-        company_id=company_id,
-        contact_type=body.contact_type,
-        name_enc=encrypt_field(body.name),
-        role_title=body.role_title,
-        email_enc=encrypt_field(body.email),
-        phone_enc=encrypt_field(body.phone) if body.phone else None,
+    result = await db.execute(
+        select(CompanyContact).filter_by(company_id=company_id, contact_type=body.contact_type)
     )
-    db.add(contact)
+    contact = result.scalars().first()
+    if contact is None:
+        contact = CompanyContact(company_id=company_id, contact_type=body.contact_type)
+        db.add(contact)
+    contact.name_enc = encrypt_field(body.name)
+    contact.role_title = body.role_title
+    contact.email_enc = encrypt_field(body.email)
+    contact.phone_enc = encrypt_field(body.phone) if body.phone else None
     await db.commit()
     await db.refresh(contact)
     return ContactOut(

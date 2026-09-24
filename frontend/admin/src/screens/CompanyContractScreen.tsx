@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Alert, Button, Dropdown, InputBase, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
-import { applyCompanyPlanTable, getCompany, getCompanyPlan, getCompanyPlanHistory, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus } from "../api/companies";
+import { applyCompanyPlanTable, createContact, getCompany, getCompanyPlan, getCompanyPlanHistory, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus, upsertLegalRepresentative } from "../api/companies";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
-import { isValidCep, normalizeCep, UF_VALUES } from "../lib/validators";
+import { isValidCep, isValidCpf, normalizeCep, UF_VALUES } from "../lib/validators";
 import { companyToEditForm, diffFields, type CompanyEditForm } from "../lib/companyEdit";
 import { useStore } from "../store";
 import type { CepLookupResult, Company, CompanyPlan, CompanyPlanHistoryEntry, Contact, LegalRepresentative, PriceTableSummary } from "../types";
@@ -35,6 +35,15 @@ export const TAX_REGIME_OPTIONS: DropdownOptions[] = [
 ];
 
 const UF_OPTIONS: DropdownOptions[] = UF_VALUES.map((uf) => ({ value: uf, label: uf }));
+
+// Achado ao vivo (revisão de urgência, 2026-09-24): mesmo shape de
+// ContactForm/campos já usado no passo 3/4 do wizard (NewCompanyScreen.tsx)
+// — duplicado aqui de propósito (tela pequena, mesmo padrão de
+// UF_OPTIONS/TAX_REGIME_OPTIONS já duplicados entre as duas telas).
+interface ContactFormValue { name: string; roleTitle: string; email: string; phone: string; }
+const emptyContactForm: ContactFormValue = { name: "", roleTitle: "", email: "", phone: "" };
+interface LegalRepFormValue { name: string; cpf: string; roleTitle: string; email: string; phone: string; }
+const emptyLegalRepForm: LegalRepFormValue = { name: "", cpf: "", roleTitle: "", email: "", phone: "" };
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -81,26 +90,55 @@ export default function CompanyContractScreen() {
   const [cepLookupResult, setCepLookupResult] = useState<CepLookupResult | null>(null);
   const cepLookupTimer = useRef<ReturnType<typeof setTimeout>>();
 
+  // Achado ao vivo (revisão de urgência, 2026-09-24): comercial/financeiro/
+  // responsável legal não fazem parte de CompanyEditForm (são entidades
+  // próprias, com endpoints próprios — createContact/upsertLegalRepresentative
+  // — não o PUT /companies/{id}) — por isso ficam fora do dirtyFields de
+  // Company e têm seu próprio rastreamento de "sujo" abaixo.
+  const [comercialDraft, setComercialDraft] = useState<ContactFormValue>(emptyContactForm);
+  const [financeiroDraft, setFinanceiroDraft] = useState<ContactFormValue>(emptyContactForm);
+  const [repDraft, setRepDraft] = useState<LegalRepFormValue>(emptyLegalRepForm);
+  const [contactFieldErrors, setContactFieldErrors] = useState<Record<string, string>>({});
+
   const originalForm = company ? companyToEditForm(company) : null;
   const dirtyFields = draft && originalForm ? diffFields(originalForm, draft) : {};
   const dirtyCount = Object.keys(dirtyFields).length;
+
+  function contactToForm(c: Contact | undefined): ContactFormValue {
+    return c ? { name: c.name, roleTitle: c.role_title ?? "", email: c.email, phone: c.phone ?? "" } : emptyContactForm;
+  }
+  function legalRepToForm(r: LegalRepresentative | null): LegalRepFormValue {
+    return r ? { name: r.name, cpf: r.cpf, roleTitle: r.role_title ?? "", email: r.email, phone: r.phone ?? "" } : emptyLegalRepForm;
+  }
+  function contactFormEquals(a: ContactFormValue, b: ContactFormValue): boolean {
+    return a.name === b.name && a.roleTitle === b.roleTitle && a.email === b.email && a.phone === b.phone;
+  }
+  const originalComercial = contactToForm(contacts.find((c) => c.contact_type === "comercial"));
+  const originalFinanceiro = contactToForm(contacts.find((c) => c.contact_type === "financeiro"));
+  const originalRep = legalRepToForm(legalRep);
+  const contactsDirty = editing && (
+    !contactFormEquals(comercialDraft, originalComercial)
+    || !contactFormEquals(financeiroDraft, originalFinanceiro)
+    || repDraft.name !== originalRep.name || repDraft.cpf !== originalRep.cpf
+    || repDraft.roleTitle !== originalRep.roleTitle || repDraft.email !== originalRep.email || repDraft.phone !== originalRep.phone
+  );
 
   // useBlocker do React Router só funciona sob um data router — este app usa
   // <BrowserRouter> puro (main.tsx), então o bloqueio de navegação vive num
   // flag global (store.unsavedChanges) que o Sidebar consulta antes de
   // navegar. Cobre fechar aba/reload via beforeunload abaixo.
   useEffect(() => {
-    useStore.getState().setUnsavedChanges(dirtyCount > 0);
+    useStore.getState().setUnsavedChanges(dirtyCount > 0 || contactsDirty);
     return () => useStore.getState().setUnsavedChanges(false);
-  }, [dirtyCount]);
+  }, [dirtyCount, contactsDirty]);
 
   useEffect(() => {
     function handleBeforeUnload(e: BeforeUnloadEvent) {
-      if (dirtyCount > 0) { e.preventDefault(); e.returnValue = ""; }
+      if (dirtyCount > 0 || contactsDirty) { e.preventDefault(); e.returnValue = ""; }
     }
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [dirtyCount]);
+  }, [dirtyCount, contactsDirty]);
 
   useEffect(() => {
     if (!editing || !draft) return;
@@ -275,7 +313,11 @@ export default function CompanyContractScreen() {
   function startEditing() {
     if (!company) return;
     setDraft(companyToEditForm(company));
+    setComercialDraft(contactToForm(contacts.find((c) => c.contact_type === "comercial")));
+    setFinanceiroDraft(contactToForm(contacts.find((c) => c.contact_type === "financeiro")));
+    setRepDraft(legalRepToForm(legalRep));
     setFieldErrors({});
+    setContactFieldErrors({});
     setError(null);
     setEditing(true);
   }
@@ -283,6 +325,7 @@ export default function CompanyContractScreen() {
   function discardEdit() {
     setDraft(null);
     setFieldErrors({});
+    setContactFieldErrors({});
     setEditing(false);
   }
 
@@ -303,11 +346,53 @@ export default function CompanyContractScreen() {
     if (!draft.legal_name.trim()) errs.legal_name = "Razão social é obrigatória";
     if (Object.keys(errs).length) { setFieldErrors(errs); return; }
 
+    // Mesma validação já usada no passo 3/4 do wizard (NewCompanyScreen.tsx):
+    // comercial e responsável legal são obrigatórios; financeiro só valida
+    // se algum campo foi preenchido (senão fica de fora do save, igual à
+    // criação).
+    const financeiroTocado = !!(financeiroDraft.name || financeiroDraft.roleTitle || financeiroDraft.email || financeiroDraft.phone);
+    const cErrs: Record<string, string> = {};
+    if (!comercialDraft.name.trim()) cErrs.comercial_name = "Nome do contato comercial é obrigatório";
+    if (!comercialDraft.email.trim()) cErrs.comercial_email = "E-mail do contato comercial é obrigatório";
+    if (financeiroTocado && !financeiroDraft.name.trim()) cErrs.financeiro_name = "Nome do contato financeiro é obrigatório";
+    if (financeiroTocado && !financeiroDraft.email.trim()) cErrs.financeiro_email = "E-mail do contato financeiro é obrigatório";
+    if (!repDraft.name.trim()) cErrs.rep_name = "Nome do responsável legal é obrigatório";
+    if (!isValidCpf(repDraft.cpf)) cErrs.rep_cpf = "CPF inválido (formato ou dígito verificador)";
+    if (!repDraft.email.trim()) cErrs.rep_email = "E-mail do responsável legal é obrigatório";
+    if (Object.keys(cErrs).length) { setContactFieldErrors(cErrs); return; }
+
     setSaving(true);
     setFieldErrors({});
+    setContactFieldErrors({});
     setError(null);
     try {
-      const updated = await updateCompany(companyId, dirtyFields);
+      let updated = company as Company;
+      if (dirtyCount > 0) {
+        updated = await updateCompany(companyId, dirtyFields);
+      }
+      if (!contactFormEquals(comercialDraft, originalComercial)) {
+        await createContact(companyId, {
+          contact_type: "comercial", name: comercialDraft.name, role_title: comercialDraft.roleTitle || undefined,
+          email: comercialDraft.email, phone: comercialDraft.phone || undefined,
+        });
+      }
+      if (financeiroTocado && !contactFormEquals(financeiroDraft, originalFinanceiro)) {
+        await createContact(companyId, {
+          contact_type: "financeiro", name: financeiroDraft.name, role_title: financeiroDraft.roleTitle || undefined,
+          email: financeiroDraft.email, phone: financeiroDraft.phone || undefined,
+        });
+      }
+      const repChanged = repDraft.name !== originalRep.name || repDraft.cpf !== originalRep.cpf
+        || repDraft.roleTitle !== originalRep.roleTitle || repDraft.email !== originalRep.email || repDraft.phone !== originalRep.phone;
+      if (repChanged) {
+        await upsertLegalRepresentative(companyId, {
+          name: repDraft.name, cpf: repDraft.cpf, role_title: repDraft.roleTitle || undefined,
+          email: repDraft.email, phone: repDraft.phone || undefined,
+        });
+      }
+      const [cs, rep] = await Promise.all([listContacts(companyId), getLegalRepresentative(companyId)]);
+      setContacts(cs);
+      setLegalRep(rep);
       setCompany(updated);
       setDraft(null);
       setEditing(false);
@@ -467,15 +552,76 @@ export default function CompanyContractScreen() {
             </div>
           </div>
 
+          <div className={styles.panel}>
+            <h3 className={`${styles.h3} ${styles.h3Mb}`}>Contatos e responsável legal</h3>
+
+            <h4 className={styles.h4}>Contato comercial</h4>
+            <div className={styles.grid2}>
+              <div className={styles.field}>
+                <InputBase label="Nome*" value={comercialDraft.name} onChange={(e) => setComercialDraft((v) => ({ ...v, name: e.target.value }))} errorMessage={contactFieldErrors.comercial_name} />
+              </div>
+              <div className={styles.field}>
+                <InputBase label="Cargo" value={comercialDraft.roleTitle} onChange={(e) => setComercialDraft((v) => ({ ...v, roleTitle: e.target.value }))} />
+              </div>
+            </div>
+            <div className={`${styles.grid2} ${styles.mt14}`}>
+              <div className={styles.field}>
+                <InputBase label="E-mail*" value={comercialDraft.email} onChange={(e) => setComercialDraft((v) => ({ ...v, email: e.target.value }))} errorMessage={contactFieldErrors.comercial_email} />
+              </div>
+              <div className={styles.field}>
+                <InputBase label="Telefone" value={comercialDraft.phone} onChange={(e) => setComercialDraft((v) => ({ ...v, phone: e.target.value }))} />
+              </div>
+            </div>
+
+            <h4 className={`${styles.h4} ${styles.mt14}`}>Contato financeiro (opcional)</h4>
+            <div className={styles.grid2}>
+              <div className={styles.field}>
+                <InputBase label="Nome" value={financeiroDraft.name} onChange={(e) => setFinanceiroDraft((v) => ({ ...v, name: e.target.value }))} errorMessage={contactFieldErrors.financeiro_name} />
+              </div>
+              <div className={styles.field}>
+                <InputBase label="Cargo" value={financeiroDraft.roleTitle} onChange={(e) => setFinanceiroDraft((v) => ({ ...v, roleTitle: e.target.value }))} />
+              </div>
+            </div>
+            <div className={`${styles.grid2} ${styles.mt14}`}>
+              <div className={styles.field}>
+                <InputBase label="E-mail" value={financeiroDraft.email} onChange={(e) => setFinanceiroDraft((v) => ({ ...v, email: e.target.value }))} errorMessage={contactFieldErrors.financeiro_email} />
+              </div>
+              <div className={styles.field}>
+                <InputBase label="Telefone" value={financeiroDraft.phone} onChange={(e) => setFinanceiroDraft((v) => ({ ...v, phone: e.target.value }))} />
+              </div>
+            </div>
+
+            <h4 className={`${styles.h4} ${styles.mt14}`}>Responsável legal</h4>
+            <div className={styles.grid2}>
+              <div className={styles.field}>
+                <InputBase label="Nome*" value={repDraft.name} onChange={(e) => setRepDraft((v) => ({ ...v, name: e.target.value }))} errorMessage={contactFieldErrors.rep_name} />
+              </div>
+              <div className={styles.field}>
+                <InputBase label="CPF*" value={formatCpf(repDraft.cpf)} onChange={(e) => setRepDraft((v) => ({ ...v, cpf: e.target.value }))} errorMessage={contactFieldErrors.rep_cpf} />
+              </div>
+            </div>
+            <div className={`${styles.grid3} ${styles.mt14}`}>
+              <div className={styles.field}>
+                <InputBase label="Cargo" value={repDraft.roleTitle} onChange={(e) => setRepDraft((v) => ({ ...v, roleTitle: e.target.value }))} />
+              </div>
+              <div className={styles.field}>
+                <InputBase label="E-mail*" value={repDraft.email} onChange={(e) => setRepDraft((v) => ({ ...v, email: e.target.value }))} errorMessage={contactFieldErrors.rep_email} />
+              </div>
+              <div className={styles.field}>
+                <InputBase label="Telefone" value={repDraft.phone} onChange={(e) => setRepDraft((v) => ({ ...v, phone: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+
           <div className={styles.savebar}>
-            {dirtyCount > 0 ? (
+            {dirtyCount > 0 || contactsDirty ? (
               <span className={styles.dirtyNote} data-testid="dirty-count">
-                <span className={styles.dirtyDot} /> {dirtyCount} campo{dirtyCount === 1 ? "" : "s"} alterado{dirtyCount === 1 ? "" : "s"}
+                <span className={styles.dirtyDot} /> {dirtyCount > 0 ? `${dirtyCount} campo${dirtyCount === 1 ? "" : "s"} alterado${dirtyCount === 1 ? "" : "s"}` : "Contatos alterados"}
               </span>
             ) : <span />}
             <div className={styles.savebarActions}>
               <Button variant="secondary" onClick={discardEdit} disabled={saving} data-testid="btn-descartar-edicao">Descartar</Button>
-              <Button onClick={saveEdit} disabled={dirtyCount === 0} loading={saving} data-testid="btn-salvar-edicao">Salvar alterações</Button>
+              <Button onClick={saveEdit} disabled={dirtyCount === 0 && !contactsDirty} loading={saving} data-testid="btn-salvar-edicao">Salvar alterações</Button>
             </div>
           </div>
         </>
