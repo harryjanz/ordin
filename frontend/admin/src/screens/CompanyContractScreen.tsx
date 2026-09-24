@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Alert, Button, Dropdown, InputBase, Tag, Upload, UploadListFiles, makeToast, type DropdownOptions, type UploadFile } from "design-system";
 import api from "../api";
 import { applyCompanyPlanTable, createContact, getCompany, getCompanyPlan, getCompanyPlanHistory, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus, upsertLegalRepresentative } from "../api/companies";
@@ -77,6 +77,7 @@ const HISTORY_ACTION_LABEL: Record<CompanyPlanHistoryEntry["action"], string> = 
 };
 
 export default function CompanyContractScreen() {
+  const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const companyId = Number(id);
 
@@ -458,6 +459,7 @@ export default function CompanyContractScreen() {
           <div className={styles.addr}>{formatCompanyAddress(company)}</div>
         </div>
         <div className={styles.headerActions}>
+          <Button variant="secondary" onClick={() => navigate("/companies")} data-testid="btn-voltar">Voltar</Button>
           <Tag variant={company.cadastral_status === "ATIVA" ? "success" : "warning"}>
             <i className={`icon icon-${company.cadastral_status === "ATIVA" ? "check-circle" : "alert-triangle"} ${styles.statusIcon}`} />
             {company.cadastral_status === "ATIVA" ? "Ativa na Receita" : company.cadastral_status ?? "Não verificada"}

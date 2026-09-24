@@ -36,11 +36,19 @@
   margin-top: 6px;
 }
 
+// Achado ao vivo (revisão de urgência, 2026-09-24, pedido do usuário):
+// .header já tem justify-content:space-between, mas com flex-wrap:wrap
+// isso só empurra pra direita quando os dois filhos cabem na mesma linha
+// — quando headerActions quebra pra linha própria (nome+endereço mais
+// compridos), ela vira o único item da linha e space-between não tem
+// mais efeito, ficando encostada à esquerda. margin-left:auto garante o
+// alinhamento à direita nos dois casos.
 .headerActions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+  margin-left: auto;
 }
 
 .panel {
