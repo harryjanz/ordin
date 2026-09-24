@@ -682,27 +682,29 @@ export default function CompanyContractScreen() {
               })}
             </div>
 
-            <div className={styles.actionsRow}>
+            {status !== "assinado" && (
+              <div className={styles.uploadField} data-testid="input-signed-document">
+                <Upload
+                  fullWidth
+                  maxFileSize={CONTRATO_ASSINADO_MAX_SIZE_MB}
+                  multipleFiles={false}
+                  types={CONTRATO_ASSINADO_TYPES}
+                  helperMessage="PDF, até 10 MB"
+                  errorMessage="Envie um arquivo PDF de até 10 MB"
+                  onCallbackUpload={handleContractUpload}
+                />
+                <UploadListFiles items={uploadFiles} removable={false} />
+              </div>
+            )}
+
+            <div className={status !== "assinado" ? styles.actionsRowSplit : styles.actionsRow}>
               {status === "pendente" && (
                 <Button onClick={markSent} loading={updating} data-testid="btn-marcar-enviado">Marcar como enviado</Button>
               )}
               {status !== "assinado" && (
-                <>
-                  <div className={styles.uploadField} data-testid="input-signed-document">
-                    <Upload
-                      maxFileSize={CONTRATO_ASSINADO_MAX_SIZE_MB}
-                      multipleFiles={false}
-                      types={CONTRATO_ASSINADO_TYPES}
-                      helperMessage="PDF, até 10 MB"
-                      errorMessage="Envie um arquivo PDF de até 10 MB"
-                      onCallbackUpload={handleContractUpload}
-                    />
-                    <UploadListFiles items={uploadFiles} removable={false} />
-                  </div>
-                  <Button onClick={markSigned} disabled={!selectedFile} loading={updating} data-testid="btn-marcar-assinado">
-                    Anexar e marcar como assinado
-                  </Button>
-                </>
+                <Button onClick={markSigned} disabled={!selectedFile} loading={updating} data-testid="btn-marcar-assinado">
+                  Anexar e marcar como assinado
+                </Button>
               )}
               {status === "assinado" && (
                 <>

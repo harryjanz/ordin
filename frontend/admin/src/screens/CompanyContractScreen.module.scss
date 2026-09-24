@@ -128,13 +128,27 @@
   align-items: center;
 }
 
-// Upload é um bloco mais alto que um Button sozinho (dropzone + lista de
-// arquivos) — alinha pelo topo dentro do .actionsRow em vez de centralizar,
-// senão o botão "Anexar e marcar como assinado" fica flutuando no meio do
-// dropzone quando ele cresce (ex: depois de escolher um arquivo).
+// Achado ao vivo (revisão de urgência, 2026-09-24, print do usuário):
+// Upload ao lado dos botões no mesmo .actionsRow ficava desalinhado
+// (dropzone mais alto que os botões, quebra de linha no meio do fluxo) —
+// vira sua própria linha em largura total, com os botões de ação numa
+// linha separada logo abaixo.
 .uploadField {
-  align-self: flex-start;
-  width: 320px;
+  margin-top: 26px;
+}
+
+// Linha de botões abaixo do Upload — 50%/50% quando os dois aparecem
+// juntos (status "pendente": Marcar como enviado + Anexar e marcar como
+// assinado); com um botão só (status "enviado"), o único filho ocupa a
+// largura toda naturalmente.
+.actionsRowSplit {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+
+  > * {
+    flex: 1 1 0;
+  }
 }
 
 .signedNote {
