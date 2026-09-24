@@ -6,6 +6,7 @@ import ResolvePendingItemPanel from "../components/ResolvePendingItemPanel";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { useCatalogParams } from "../lib/catalogParams";
+import { useStore } from "../store";
 import type { BulkIgnoreOut, PendenteMotivo, PendingItem } from "../types";
 import styles from "./SupplierInvoiceScreen.module.scss";
 
@@ -34,6 +35,13 @@ const motivoOptions: DropdownOptions[] = [
 // Table + Pagination).
 export default function PendingItemsScreen() {
   const catalogParams = useCatalogParams();
+  // Achado ao vivo (revisão de urgência, 2026-09-24): esta tela fica
+  // montada persistentemente dentro das abas de EstoqueScreen — trocar ou
+  // limpar a empresa selecionada (superadmin/admin) nunca disparava um
+  // refetch, deixando a tela "presa" nos dados da empresa anterior. Mesmo
+  // padrão de correção já usado em CatalogScreen.tsx (ORD-136): incluir
+  // selectedCompanyId nas dependências do efeito de carregamento.
+  const selectedCompanyId = useStore((s) => s.selectedCompanyId);
 
   const [items, setItems] = useState<PendingItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -81,7 +89,7 @@ export default function PendingItemsScreen() {
     fetchItems();
     isFirstRender.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [motivoFilter, skip]);
+  }, [motivoFilter, skip, selectedCompanyId]);
 
   useEffect(() => {
     if (isFirstRender.current) return;
