@@ -620,6 +620,9 @@ export interface Supplier {
   neighborhood: string | null;
   city: string | null;
   state: string | null;
+  // ORD-204 — true só quando criado automaticamente via importação de NF,
+  // até alguém revisar e salvar pela tela de edição.
+  cadastro_pendente: boolean;
   created_at: string;
   contato: SupplierContact | null;
   responsavel_legal: SupplierLegalRepresentative | null;

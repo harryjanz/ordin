@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, makeToast } from "design-system";
+import { Alert, Button, makeToast, Tag } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
@@ -55,7 +55,14 @@ export default function SupplierListScreen() {
   }
 
   const columns: TableColumn<Supplier>[] = [
-    { key: "nome", header: "Nome", render: (s) => s.nome },
+    // ORD-204 — fornecedor criado automaticamente na importação de NF (só
+    // nome+cnpj, sem contato) ganha Tag até alguém revisar e salvar.
+    { key: "nome", header: "Nome", render: (s) => (
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {s.nome}
+        {s.cadastro_pendente && <Tag variant="warning">Cadastro pendente</Tag>}
+      </div>
+    ) },
     { key: "cnpj", header: "CNPJ", mono: true, render: (s) => formatCnpj(s.cnpj) },
     // ORD-202 — contato comercial substitui os campos legados telefone/
     // email como fonte principal; fallback pros legados só pra fornecedor
