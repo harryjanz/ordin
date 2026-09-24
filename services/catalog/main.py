@@ -4621,6 +4621,7 @@ async def update_supplier(
     status_code=204,
     tags=["Fornecedores"],
     summary="Excluir fornecedor",
+    responses={409: {"description": "Fornecedor tem nota com item já vinculado ao estoque — exclusão bloqueada"}},
 )
 async def delete_supplier(
     supplier_id: int,
@@ -4632,6 +4633,21 @@ async def delete_supplier(
     )).scalars().first()
     if not s:
         raise HTTPException(404)
+
+    # ORD-203 — se qualquer nota do fornecedor já integrou estoque de
+    # verdade, bloqueia. Senão, apaga as notas e itens em cascata junto com
+    # o fornecedor (antes disso, excluir um fornecedor com nota quebrava
+    # com IntegrityError de FK — bug pré-existente, corrigido de brinde).
+    invoice_ids = (await db.execute(
+        select(SupplierInvoice.id).filter_by(supplier_id=supplier_id)
+    )).scalars().all()
+
+    if await _has_stock_integrated_items(db, invoice_ids):
+        raise HTTPException(
+            409,
+            detail="Este fornecedor tem notas de compra com produtos que já entraram no seu estoque — excluir agora apagaria esse histórico de compra.",
+        )
+
     # Apaga os filhos primeiro, com flush explícito antes do pai — sem
     # relationship() do SQLAlchemy configurada, o unit-of-work não tem grafo
     # de dependência pra ordenar os DELETEs sozinho (achado ao vivo contra
@@ -4639,7 +4655,13 @@ async def delete_supplier(
     # na ordem "certa" de chamada — o flush faz a ordem valer de verdade).
     # ON DELETE CASCADE também existe no banco (migration 20260924_1000)
     # como defesa a mais — mas SQLite (suíte de teste) não aplica FK por
-    # padrão, então o código não pode depender só disso.
+    # padrão, então o código não pode depender só disso. Notas/itens usam
+    # delete() core (executa na hora, sem esperar flush) — garante que
+    # sumem antes do fornecedor, sem precisar de ON DELETE CASCADE próprio
+    # nessa FK (não existe hoje).
+    if invoice_ids:
+        await db.execute(delete(SupplierInvoiceItem).where(SupplierInvoiceItem.supplier_invoice_id.in_(invoice_ids)))
+        await db.execute(delete(SupplierInvoice).where(SupplierInvoice.id.in_(invoice_ids)))
     contact = (await db.execute(select(SupplierContact).filter_by(supplier_id=supplier_id))).scalars().first()
     if contact:
         await db.delete(contact)
@@ -5409,11 +5431,34 @@ async def get_supplier_invoice(
     }
 
 
+async def _has_stock_integrated_items(db: AsyncSession, invoice_ids: list[int]) -> bool:
+    """ORD-203 — True se algum item de qualquer nota em invoice_ids teve
+    entrada de estoque de verdade aplicada (link_source real, não pendente
+    nem ignorado). link_source/pendente_motivo são mutuamente exclusivos
+    por construção (quando a baixa falha, link_source volta pra None antes
+    de gravar pendente_motivo, ver o loop de vínculo automático acima) — a
+    checagem de pendente_motivo aqui é defesa a mais, não estritamente
+    necessária."""
+    if not invoice_ids:
+        return False
+    result = await db.execute(
+        select(SupplierInvoiceItem.id)
+        .where(
+            SupplierInvoiceItem.supplier_invoice_id.in_(invoice_ids),
+            SupplierInvoiceItem.link_source.in_(["ean", "gtin_alt", "supplier_code", "manual"]),
+            SupplierInvoiceItem.pendente_motivo.is_(None),
+        )
+        .limit(1)
+    )
+    return result.scalars().first() is not None
+
+
 @app.delete(
     "/catalog/supplier-invoices/{invoice_id}",
     status_code=204,
     tags=["Fornecedores"],
     summary="Excluir nota de compra importada",
+    responses={409: {"description": "Nota tem item já vinculado ao estoque — exclusão bloqueada"}},
 )
 async def delete_supplier_invoice(
     invoice_id: int,
@@ -5424,14 +5469,16 @@ async def delete_supplier_invoice(
     # a chave de acesso pra reimportar. Não apaga o Supplier vinculado — pode
     # ter sido usado/editado independentemente da nota que o criou.
     #
-    # Seguro hoje só porque B1 não vincula nada a estoque ainda. Regra
-    # fechada com o usuário (2026-09-21, ver docs/estudo-modulo-estoque-
-    # erp.md): a partir de C1 (vínculo automático por EAN/cProd), se algum
-    # item desta nota já gerou estoque VENDIDO (baixa efetivada), a exclusão
-    # precisa ser bloqueada — senão quebra o rastro de auditoria compra→
-    # venda. Adicionar a checagem aqui quando C1 existir, não só na
-    # migration/model novos.
+    # ORD-203 — regra fechada desde a revisão de B1 (2026-09-21, ver docs/
+    # estudo-modulo-estoque-erp.md): nota com item já integrado ao estoque
+    # (C1/D1) não pode ser excluída, senão quebra o rastro de auditoria
+    # compra→venda.
     invoice = await _get_owned_invoice(db, invoice_id, company_id)
+    if await _has_stock_integrated_items(db, [invoice.id]):
+        raise HTTPException(
+            409,
+            detail="Esta nota tem produtos que já entraram no seu estoque — excluir agora apagaria esse histórico de compra.",
+        )
     await db.execute(delete(SupplierInvoiceItem).where(SupplierInvoiceItem.supplier_invoice_id == invoice.id))
     await db.delete(invoice)
     await db.commit()
