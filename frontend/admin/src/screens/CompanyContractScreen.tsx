@@ -459,9 +459,11 @@ export default function CompanyContractScreen() {
         </div>
         <div className={styles.headerActions}>
           <Tag variant={company.cadastral_status === "ATIVA" ? "success" : "warning"}>
+            <i className={`icon icon-${company.cadastral_status === "ATIVA" ? "check-circle" : "alert-triangle"} ${styles.statusIcon}`} />
             {company.cadastral_status === "ATIVA" ? "Ativa na Receita" : company.cadastral_status ?? "Não verificada"}
           </Tag>
           <Tag variant={status === "assinado" ? "success" : "warning"}>
+            <i className={`icon icon-${status === "assinado" ? "check-circle" : status === "enviado" ? "send" : "clock"} ${styles.statusIcon}`} />
             {`Contrato: ${STAGE_LABEL[status].toUpperCase()}`}
           </Tag>
           {!editing && (
@@ -683,7 +685,7 @@ export default function CompanyContractScreen() {
             </div>
 
             {status !== "assinado" && (
-              <div className={styles.uploadField} data-testid="input-signed-document">
+              <div className={styles.statusContentBlock} data-testid="input-signed-document">
                 <Upload
                   fullWidth
                   maxFileSize={CONTRATO_ASSINADO_MAX_SIZE_MB}
@@ -697,6 +699,12 @@ export default function CompanyContractScreen() {
               </div>
             )}
 
+            {status === "assinado" && (
+              <div className={styles.statusContentBlock}>
+                <Alert variant="success" icon="check-circle" text="Contrato assinado — documento arquivado." fullWidth />
+              </div>
+            )}
+
             <div className={status !== "assinado" ? styles.actionsRowSplit : styles.actionsRow}>
               {status === "pendente" && (
                 <Button onClick={markSent} loading={updating} data-testid="btn-marcar-enviado">Marcar como enviado</Button>
@@ -707,12 +715,9 @@ export default function CompanyContractScreen() {
                 </Button>
               )}
               {status === "assinado" && (
-                <>
-                  <span className={styles.signedNote}>Contrato assinado — documento arquivado.</span>
-                  <Button onClick={downloadSignedContract} loading={downloadingContract} data-testid="btn-baixar-contrato">
-                    Baixar contrato assinado
-                  </Button>
-                </>
+                <Button onClick={downloadSignedContract} loading={downloadingContract} data-testid="btn-baixar-contrato">
+                  Baixar contrato assinado
+                </Button>
               )}
             </div>
           </div>

@@ -129,11 +129,12 @@
 }
 
 // Achado ao vivo (revisão de urgência, 2026-09-24, print do usuário):
-// Upload ao lado dos botões no mesmo .actionsRow ficava desalinhado
-// (dropzone mais alto que os botões, quebra de linha no meio do fluxo) —
-// vira sua própria linha em largura total, com os botões de ação numa
-// linha separada logo abaixo.
-.uploadField {
+// Upload/Alert ao lado dos botões no mesmo .actionsRow ficava desalinhado
+// (bloco mais alto que os botões, quebra de linha no meio do fluxo) — vira
+// sua própria linha em largura total (Upload em "pendente"/"enviado", ou o
+// Alert de sucesso em "assinado"), com os botões de ação numa linha
+// separada logo abaixo.
+.statusContentBlock {
   margin-top: 26px;
 }
 
@@ -151,9 +152,21 @@
   }
 }
 
-.signedNote {
-  color: color('success-base');
-  @include font('sm');
+// Ícone dentro dos Tag do cabeçalho (status cadastral/contrato) —
+// menor que o tamanho padrão de 20px da fonte de ícones (Tag tem só 16px
+// de altura) e alinhado com a linha de base do texto xs-emphasys do Tag.
+.statusIcon {
+  margin-right: 4px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+
+  &::before {
+    font-size: 12px !important;
+    line-height: 12px !important;
+    height: 12px !important;
+    width: 12px !important;
+  }
 }
 
 .contactsGrid {
