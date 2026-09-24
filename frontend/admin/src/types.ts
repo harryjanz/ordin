@@ -584,13 +584,45 @@ export interface FiscalAddonPlanSummary {
 
 // ORD-182 (A6) — cadastro simples de fornecedor, por empresa (não é catálogo
 // da plataforma, diferente de FiscalAddonPlan/PriceTable acima).
+// ORD-202 — contato comercial e responsável legal do fornecedor, 1:1.
+// Responsável legal é opcional (null se nunca preenchido).
+export interface SupplierContact {
+  nome: string;
+  telefone: string;
+  email: string;
+}
+
+export interface SupplierLegalRepresentative {
+  nome: string;
+  cpf: string | null;
+  telefone: string;
+  email: string;
+}
+
 export interface Supplier {
   id: number;
   nome: string;
   cnpj: string;
   telefone: string | null;
   email: string | null;
+  // ORD-202 — dados cadastrais/endereço/situação cadastral, espelhando o
+  // cadastro de Company. Fornecedor cadastrado antes desta história tem
+  // todos esses campos null.
+  razao_social: string | null;
+  nome_fantasia: string | null;
+  inscricao_estadual: string | null;
+  inscricao_municipal: string | null;
+  cadastral_status: string | null;
+  zip_code: string | null;
+  street: string | null;
+  address_number: string | null;
+  complement: string | null;
+  neighborhood: string | null;
+  city: string | null;
+  state: string | null;
   created_at: string;
+  contato: SupplierContact | null;
+  responsavel_legal: SupplierLegalRepresentative | null;
 }
 
 // ORD-194 (B1) — prévia de importação de XML de NF de compra, devolvida sem

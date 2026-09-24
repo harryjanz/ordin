@@ -33,9 +33,14 @@ CNPJ_VALIDO = "11222333000181"  # mesmo CNPJ real já usado nos testes de compan
 CNPJ_ALFANUMERICO_VALIDO = "12ABC34501DE35"  # mesmo vetor oficial usado em test_ord064_cnpj_alfanumerico.py
 
 
-async def _create_supplier(client, token, *, nome="Fornecedor", cnpj=CNPJ_VALIDO):
+_CONTATO_PADRAO = {"nome": "Contato Padrão", "telefone": "11999998888", "email": "contato@fornecedor.com"}
+
+
+async def _create_supplier(client, token, *, nome="Fornecedor", cnpj=CNPJ_VALIDO, contato=None):
     return await client.post(
-        "/catalog/suppliers", json={"nome": nome, "cnpj": cnpj}, headers=auth(token),
+        "/catalog/suppliers",
+        json={"nome": nome, "cnpj": cnpj, "contato": contato or _CONTATO_PADRAO},
+        headers=auth(token),
     )
 
 
@@ -110,7 +115,8 @@ async def test_isolamento_na_edicao_e_exclusao(client, token_owner, token_compan
     supplier_id = r.json()["id"]
 
     r_edit = await client.put(
-        f"/catalog/suppliers/{supplier_id}", json={"nome": "Hack", "cnpj": CNPJ_VALIDO},
+        f"/catalog/suppliers/{supplier_id}",
+        json={"nome": "Hack", "cnpj": CNPJ_VALIDO, "contato": _CONTATO_PADRAO},
         headers=auth(token_owner),
     )
     assert r_edit.status_code == 404
@@ -165,7 +171,8 @@ async def test_lista_edita_e_exclui_fornecedor(client, token_owner):
 
     r_edit = await client.put(
         f"/catalog/suppliers/{supplier_id}",
-        json={"nome": "Distribuidora ABC Ltda", "cnpj": CNPJ_VALIDO, "telefone": "11999999999"},
+        json={"nome": "Distribuidora ABC Ltda", "cnpj": CNPJ_VALIDO, "telefone": "11999999999",
+              "contato": _CONTATO_PADRAO},
         headers=auth(token_owner),
     )
     assert r_edit.status_code == 200, r_edit.text

@@ -1,6 +1,6 @@
 import io
 import secrets
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal, Optional
@@ -8,7 +8,9 @@ from zoneinfo import ZoneInfo
 
 from auth import TokenPayload, get_current_user
 from cnpj import is_valid_cnpj, normalize_cnpj
+from cnpj_lookup import lookup_cnpj
 from config import get_cors_origins, require_env
+from crypto import decrypt_field, encrypt_field
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from infrastructure.image_storage import (
@@ -295,7 +297,13 @@ class Supplier(Base):
     estreito — só alimenta B1 (importação de XML) e C1 (vínculo automático por
     código do fornecedor), que exigem fornecedor com NF de verdade. Fornecedor
     informal (sem nota fiscal) usa A2 (ajuste manual de estoque), que não
-    depende de Supplier."""
+    depende de Supplier.
+
+    ORD-202 — ganha dados cadastrais/endereço/situação cadastral, espelhando
+    o cadastro de Company (company-service), pra ficar tão completo quanto o
+    de cliente. Todos os campos novos são nullable (migration aditiva sobre
+    tabela já em produção) — fornecedor cadastrado antes desta história
+    continua válido com eles em branco."""
     __tablename__ = "suppliers"
     __table_args__ = (UniqueConstraint("company_id", "cnpj", name="uq_suppliers_company_cnpj"),)
 
@@ -305,7 +313,53 @@ class Supplier(Base):
     cnpj       = Column(String(14), nullable=False)
     telefone   = Column(String(20), nullable=True)
     email      = Column(String(120), nullable=True)
+    razao_social         = Column(String(150), nullable=True)
+    nome_fantasia        = Column(String(150), nullable=True)
+    inscricao_estadual   = Column(String(20), nullable=True)
+    inscricao_municipal  = Column(String(20), nullable=True)
+    cadastral_status     = Column(String(20), nullable=True)
+    zip_code             = Column(String(9), nullable=True)
+    street                = Column(String(150), nullable=True)
+    address_number        = Column(String(20), nullable=True)
+    complement            = Column(String(100), nullable=True)
+    neighborhood           = Column(String(100), nullable=True)
+    city                   = Column(String(100), nullable=True)
+    state                   = Column(String(2), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SupplierContact(Base):
+    """ORD-202 — contato comercial do fornecedor, 1:1 (supplier_id único).
+    Sempre obrigatório na aplicação (nome/telefone/email), texto plano — não
+    é dado tão sensível quanto o responsável legal (CPF), mesmo racional já
+    usado em Supplier.telefone/.email hoje."""
+    __tablename__ = "supplier_contacts"
+
+    id          = Column(Integer, primary_key=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False, unique=True)
+    company_id  = Column(Integer, nullable=False, index=True)
+    nome        = Column(String(120), nullable=False)
+    telefone    = Column(String(20), nullable=False)
+    email       = Column(String(120), nullable=False)
+
+
+class SupplierLegalRepresentative(Base):
+    """ORD-202 — responsável legal do fornecedor, 1:1 (supplier_id único).
+    Opcional na aplicação — só existe se o admin preencher a seção. Dados
+    pessoais criptografados (mesmo padrão de CompanyLegalRepresentative,
+    company-service) — cpf_enc é nullable de propósito, diverge do padrão de
+    Company (lá é obrigatório): CPF do responsável legal de um fornecedor é
+    mais difícil de obter na hora e menos crítico que o da própria Empresa
+    cliente da Ordin (decisão do repasse de PM, ORD-202)."""
+    __tablename__ = "supplier_legal_representatives"
+
+    id          = Column(Integer, primary_key=True)
+    supplier_id = Column(Integer, ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False, unique=True)
+    company_id  = Column(Integer, nullable=False, index=True)
+    name_enc    = Column(String(500), nullable=False)
+    cpf_enc     = Column(String(500), nullable=True)
+    phone_enc   = Column(String(500), nullable=False)
+    email_enc   = Column(String(500), nullable=False)
 
 class SupplierInvoice(Base):
     """B1 (ORD-194) — nota fiscal de compra importada via XML. Só guarda o cabeçalho
@@ -4276,11 +4330,64 @@ async def internal_decrement_stock(
 
 # ── Fornecedores (ORD-182, A6) ────────────────────────────────────────────
 
+class SupplierContactIn(BaseModel):
+    nome: str
+    telefone: str
+    email: str
+
+    @field_validator("nome", "telefone", "email")
+    @classmethod
+    def _not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("contato comercial: nome, telefone e email são obrigatórios")
+        return v
+
+
+class SupplierLegalRepresentativeIn(BaseModel):
+    """ORD-202 — seção opcional como um todo, mas se QUALQUER campo vier
+    preenchido, nome+telefone+email viram obrigatórios juntos (decisão do
+    repasse de PM). cpf fica sempre opcional, mesmo com a seção "tocada" —
+    diverge de propósito do padrão de CompanyLegalRepresentative (lá CPF é
+    obrigatório)."""
+    nome: str | None = None
+    cpf: str | None = None
+    telefone: str | None = None
+    email: str | None = None
+
+    @model_validator(mode="after")
+    def _completo_se_tocado(self):
+        tocou = any([self.nome, self.cpf, self.telefone, self.email])
+        if tocou and not (self.nome and self.telefone and self.email):
+            raise ValueError("Responsável legal: nome, telefone e e-mail são obrigatórios juntos quando preenchido")
+        return self
+
+
 class SupplierIn(BaseModel):
     nome: str
     cnpj: str
     telefone: str | None = None
     email: str | None = None
+    razao_social: str | None = None
+    nome_fantasia: str | None = None
+    inscricao_estadual: str | None = None
+    inscricao_municipal: str | None = None
+    cadastral_status: str | None = None
+    zip_code: str | None = None
+    street: str | None = None
+    address_number: str | None = None
+    complement: str | None = None
+    neighborhood: str | None = None
+    city: str | None = None
+    state: str | None = None
+    # ORD-202 — payload único com sub-recursos aninhados (não 3 endpoints
+    # separados como Company/CompanyContact/CompanyLegalRepresentative):
+    # diferente de Company, contato e responsável legal de Supplier são 1:1
+    # (nunca uma lista de contatos por tipo), então não há cardinalidade que
+    # justifique CRUD próprio — decisão do Tech Explorer, revisada no
+    # repasse de Backend.
+    contato: SupplierContactIn
+    responsavel_legal: SupplierLegalRepresentativeIn | None = None
 
     @field_validator("nome")
     @classmethod
@@ -4298,16 +4405,107 @@ class SupplierIn(BaseModel):
             raise ValueError("CNPJ é obrigatório")
         return v
 
+class SupplierContactOut(BaseModel):
+    nome: str
+    telefone: str
+    email: str
+
+class SupplierLegalRepresentativeOut(BaseModel):
+    nome: str
+    cpf: str | None
+    telefone: str
+    email: str
+
 class SupplierOut(BaseModel):
     id: int
     nome: str
     cnpj: str
     telefone: str | None
     email: str | None
+    razao_social: str | None
+    nome_fantasia: str | None
+    inscricao_estadual: str | None
+    inscricao_municipal: str | None
+    cadastral_status: str | None
+    zip_code: str | None
+    street: str | None
+    address_number: str | None
+    complement: str | None
+    neighborhood: str | None
+    city: str | None
+    state: str | None
     created_at: datetime
+    contato: SupplierContactOut | None
+    responsavel_legal: SupplierLegalRepresentativeOut | None
 
 class SupplierListOut(BaseModel):
     suppliers: list[SupplierOut]
+
+
+async def _load_supplier_out(db: AsyncSession, s: Supplier) -> dict:
+    """Monta o SupplierOut a partir das 3 tabelas — sem relationship() do
+    SQLAlchemy (nenhuma outra entidade deste arquivo usa, mantendo o mesmo
+    estilo de query manual já usado no resto do catalog-service)."""
+    contact = (await db.execute(
+        select(SupplierContact).filter_by(supplier_id=s.id)
+    )).scalars().first()
+    rep = (await db.execute(
+        select(SupplierLegalRepresentative).filter_by(supplier_id=s.id)
+    )).scalars().first()
+    return {
+        **{c.name: getattr(s, c.name) for c in Supplier.__table__.columns},
+        "contato": SupplierContactOut(nome=contact.nome, telefone=contact.telefone, email=contact.email) if contact else None,
+        "responsavel_legal": SupplierLegalRepresentativeOut(
+            nome=decrypt_field(rep.name_enc),
+            cpf=decrypt_field(rep.cpf_enc) if rep.cpf_enc else None,
+            telefone=decrypt_field(rep.phone_enc),
+            email=decrypt_field(rep.email_enc),
+        ) if rep else None,
+    }
+
+
+async def _upsert_contact(db: AsyncSession, supplier_id: int, company_id: int, body: SupplierContactIn) -> None:
+    existing = (await db.execute(
+        select(SupplierContact).filter_by(supplier_id=supplier_id)
+    )).scalars().first()
+    if existing is None:
+        db.add(SupplierContact(
+            supplier_id=supplier_id, company_id=company_id,
+            nome=body.nome, telefone=body.telefone, email=body.email,
+        ))
+    else:
+        existing.nome, existing.telefone, existing.email = body.nome, body.telefone, body.email
+
+
+async def _upsert_or_clear_legal_rep(
+    db: AsyncSession, supplier_id: int, company_id: int, body: SupplierLegalRepresentativeIn | None,
+) -> None:
+    """3 transições possíveis: nunca existiu -> criado; existia -> editado;
+    existia -> removido (seção limpa na edição, não fica parcialmente
+    preenchida). Ver ORD-202, achado do repasse de Backend."""
+    existing = (await db.execute(
+        select(SupplierLegalRepresentative).filter_by(supplier_id=supplier_id)
+    )).scalars().first()
+    tocou = body is not None and any([body.nome, body.cpf, body.telefone, body.email])
+
+    if not tocou:
+        if existing is not None:
+            await db.delete(existing)
+        return
+
+    if existing is None:
+        db.add(SupplierLegalRepresentative(
+            supplier_id=supplier_id, company_id=company_id,
+            name_enc=encrypt_field(body.nome), phone_enc=encrypt_field(body.telefone),
+            email_enc=encrypt_field(body.email),
+            cpf_enc=encrypt_field(body.cpf) if body.cpf else None,
+        ))
+    else:
+        existing.name_enc = encrypt_field(body.nome)
+        existing.phone_enc = encrypt_field(body.telefone)
+        existing.email_enc = encrypt_field(body.email)
+        existing.cpf_enc = encrypt_field(body.cpf) if body.cpf else None
+
 
 @app.get(
     "/catalog/suppliers",
@@ -4320,7 +4518,8 @@ async def list_suppliers(
     company_id: int = Depends(resolve_company_id_write),  # cashier não vê nem a lista
 ):
     result = await db.execute(select(Supplier).filter_by(company_id=company_id).order_by(Supplier.nome))
-    return {"suppliers": result.scalars().all()}
+    suppliers = result.scalars().all()
+    return {"suppliers": [await _load_supplier_out(db, s) for s in suppliers]}
 
 @app.post(
     "/catalog/suppliers",
@@ -4344,12 +4543,22 @@ async def create_supplier(
     )).scalars().first()
     if dup is not None:
         raise HTTPException(400, detail="CNPJ já cadastrado para esta empresa")
-    s = Supplier(company_id=company_id, nome=body.nome, cnpj=body.cnpj,
-                 telefone=body.telefone, email=body.email)
+    s = Supplier(
+        company_id=company_id, nome=body.nome, cnpj=body.cnpj,
+        telefone=body.telefone, email=body.email,
+        razao_social=body.razao_social, nome_fantasia=body.nome_fantasia,
+        inscricao_estadual=body.inscricao_estadual, inscricao_municipal=body.inscricao_municipal,
+        cadastral_status=body.cadastral_status,
+        zip_code=body.zip_code, street=body.street, address_number=body.address_number,
+        complement=body.complement, neighborhood=body.neighborhood, city=body.city, state=body.state,
+    )
     db.add(s)
+    await db.flush()  # garante s.id antes de gravar os sub-recursos, mesma transação
+    await _upsert_contact(db, s.id, company_id, body.contato)
+    await _upsert_or_clear_legal_rep(db, s.id, company_id, body.responsavel_legal)
     await db.commit()
     await db.refresh(s)
-    return s
+    return await _load_supplier_out(db, s)
 
 @app.get(
     "/catalog/suppliers/{supplier_id}",
@@ -4367,7 +4576,7 @@ async def get_supplier(
     )).scalars().first()
     if not s:
         raise HTTPException(404)
-    return s
+    return await _load_supplier_out(db, s)
 
 @app.put(
     "/catalog/suppliers/{supplier_id}",
@@ -4396,9 +4605,16 @@ async def update_supplier(
     if dup is not None:
         raise HTTPException(400, detail="CNPJ já cadastrado para esta empresa")
     s.nome, s.cnpj, s.telefone, s.email = body.nome, body.cnpj, body.telefone, body.email
+    s.razao_social, s.nome_fantasia = body.razao_social, body.nome_fantasia
+    s.inscricao_estadual, s.inscricao_municipal = body.inscricao_estadual, body.inscricao_municipal
+    s.cadastral_status = body.cadastral_status
+    s.zip_code, s.street, s.address_number = body.zip_code, body.street, body.address_number
+    s.complement, s.neighborhood, s.city, s.state = body.complement, body.neighborhood, body.city, body.state
+    await _upsert_contact(db, supplier_id, company_id, body.contato)
+    await _upsert_or_clear_legal_rep(db, supplier_id, company_id, body.responsavel_legal)
     await db.commit()
     await db.refresh(s)
-    return s
+    return await _load_supplier_out(db, s)
 
 @app.delete(
     "/catalog/suppliers/{supplier_id}",
@@ -4416,8 +4632,35 @@ async def delete_supplier(
     )).scalars().first()
     if not s:
         raise HTTPException(404)
+    # Apaga os filhos primeiro, com flush explícito antes do pai — sem
+    # relationship() do SQLAlchemy configurada, o unit-of-work não tem grafo
+    # de dependência pra ordenar os DELETEs sozinho (achado ao vivo contra
+    # MySQL real: IntegrityError de FK só chamando db.delete() nos 3, mesmo
+    # na ordem "certa" de chamada — o flush faz a ordem valer de verdade).
+    # ON DELETE CASCADE também existe no banco (migration 20260924_1000)
+    # como defesa a mais — mas SQLite (suíte de teste) não aplica FK por
+    # padrão, então o código não pode depender só disso.
+    contact = (await db.execute(select(SupplierContact).filter_by(supplier_id=supplier_id))).scalars().first()
+    if contact:
+        await db.delete(contact)
+    rep = (await db.execute(select(SupplierLegalRepresentative).filter_by(supplier_id=supplier_id))).scalars().first()
+    if rep:
+        await db.delete(rep)
+    await db.flush()
     await db.delete(s)
     await db.commit()
+
+@app.get(
+    "/catalog/suppliers/cnpj-lookup/{cnpj}",
+    tags=["Fornecedores"],
+    summary="Consultar CNPJ na Receita Federal pra pré-preencher o cadastro de fornecedor",
+)
+async def lookup_supplier_cnpj(
+    cnpj: str,
+    company_id: int = Depends(resolve_company_id_write),  # não usado no lookup em si — não é dado de tenant
+):
+    result = await lookup_cnpj(normalize_cnpj(cnpj))
+    return asdict(result)
 
 # ── Upload de XML de NF de compra (B1, ORD-194) ──────────────────────────────
 

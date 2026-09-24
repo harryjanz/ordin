@@ -374,7 +374,7 @@ async def test_vinculo_por_codigo_do_fornecedor(client, token_owner):
 
     cnpj = _cnpj_valido("99999999")
     r_supplier = await client.post(
-        "/catalog/suppliers", json={"nome": "Fornecedor X", "cnpj": cnpj}, headers=auth(token_owner),
+        "/catalog/suppliers", json={"nome": "Fornecedor X", "cnpj": cnpj, "contato": {"nome": "Contato", "telefone": "11999998888", "email": "contato@fornecedor.com"}}, headers=auth(token_owner),
     )
     assert r_supplier.status_code == 201, r_supplier.text
     supplier_id = r_supplier.json()["id"]
@@ -402,7 +402,7 @@ async def test_mapeamento_de_cprod_isolado_por_fornecedor(client, token_owner):
     pid_a = await _create_product(client, token_owner, name="Produto A")
 
     cnpj_x = _cnpj_valido("10101010")
-    r_x = await client.post("/catalog/suppliers", json={"nome": "Fornecedor X", "cnpj": cnpj_x}, headers=auth(token_owner))
+    r_x = await client.post("/catalog/suppliers", json={"nome": "Fornecedor X", "cnpj": cnpj_x, "contato": {"nome": "Contato", "telefone": "11999998888", "email": "contato@fornecedor.com"}}, headers=auth(token_owner))
     supplier_x_id = r_x.json()["id"]
 
     async with svc.AsyncSessionLocal() as db:
@@ -572,7 +572,7 @@ async def test_mapeamento_de_cprod_nao_vaza_entre_empresas(client, token_owner, 
     pid = await _create_product(client, token_owner, name="Produto A")
 
     cnpj_x = _cnpj_valido("12121212")
-    r_x = await client.post("/catalog/suppliers", json={"nome": "Fornecedor X", "cnpj": cnpj_x}, headers=auth(token_owner))
+    r_x = await client.post("/catalog/suppliers", json={"nome": "Fornecedor X", "cnpj": cnpj_x, "contato": {"nome": "Contato", "telefone": "11999998888", "email": "contato@fornecedor.com"}}, headers=auth(token_owner))
     supplier_x_id = r_x.json()["id"]
 
     async with svc.AsyncSessionLocal() as db:

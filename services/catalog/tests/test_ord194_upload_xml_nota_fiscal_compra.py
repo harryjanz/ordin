@@ -105,7 +105,7 @@ async def test_upload_nfe_com_envelope_procnfe(client, token_owner):
 
 async def test_fornecedor_ja_cadastrado_e_reconhecido_pelo_cnpj(client, token_owner):
     r_supplier = await client.post(
-        "/catalog/suppliers", json={"nome": "Fornecedor Existente", "cnpj": "59594315000157"},
+        "/catalog/suppliers", json={"nome": "Fornecedor Existente", "cnpj": "59594315000157", "contato": {"nome": "Contato", "telefone": "11999998888", "email": "contato@fornecedor.com"}},
         headers=auth(token_owner),
     )
     assert r_supplier.status_code == 201, r_supplier.text

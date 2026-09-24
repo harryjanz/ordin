@@ -361,7 +361,7 @@ async def test_nota_futura_mesmo_fornecedor_codigo_aplica_fator_automaticamente(
 
     cnpj = _cnpj_valido("50505050")
     r_supplier = await client.post(
-        "/catalog/suppliers", json={"nome": "Fornecedor Fardo", "cnpj": cnpj}, headers=auth(token_owner),
+        "/catalog/suppliers", json={"nome": "Fornecedor Fardo", "cnpj": cnpj, "contato": {"nome": "Contato", "telefone": "11999998888", "email": "contato@fornecedor.com"}}, headers=auth(token_owner),
     )
     assert r_supplier.status_code == 201, r_supplier.text
     supplier_id = r_supplier.json()["id"]
@@ -430,7 +430,7 @@ async def test_isolamento_fator_conversao_nao_vaza_entre_empresas(client, token_
 
     cnpj = _cnpj_valido("60606060")
     r_supplier = await client.post(
-        "/catalog/suppliers", json={"nome": "Fornecedor Compartilhado", "cnpj": cnpj}, headers=auth(token_owner),
+        "/catalog/suppliers", json={"nome": "Fornecedor Compartilhado", "cnpj": cnpj, "contato": {"nome": "Contato", "telefone": "11999998888", "email": "contato@fornecedor.com"}}, headers=auth(token_owner),
     )
     assert r_supplier.status_code == 201, r_supplier.text
     supplier_id = r_supplier.json()["id"]
