@@ -476,3 +476,45 @@ cenário e endpoint/tela correspondente.
 - [x] Repasse de Backend — 4 achados aplicados (mecânica de `services/shared/` corrigida, dependência confirmada, migration corrigida, lógica de upsert/delete desenhada)
 - [x] Rastreabilidade ponta a ponta — tabela acima, sem célula vazia
 - [x] Sem bloqueios não resolvidos
+
+## Implementação — achados reais (2026-09-24)
+
+1. **`CREDENTIAL_ENCRYPTION_KEY` já estava disponível em catalog-service** — o risco/bloqueador
+   sinalizado no Tech Explorer/repasse de Backend (precisar adicionar a env var ao ambiente do
+   serviço) era falso: `catalog-service` já usa `env_file: .env` no `docker-compose.yml`, que
+   carrega **todo** o `.env` pro container, não só as variáveis listadas em `environment:`.
+   Confirmado com `docker exec` antes de tocar em infra — nenhuma mudança de `docker-compose.yml`/
+   `.env.example` foi necessária.
+2. **`ForeignKey` sem `ON DELETE CASCADE` quebrava a exclusão de fornecedor com filhos, achado ao
+   vivo contra o MySQL real** — `delete_supplier` chamando `db.delete(contact)`/`db.delete(rep)`/
+   `db.delete(s)` na ordem "certa" ainda falhou com `IntegrityError` de FK
+   (`supplier_legal_representatives_ibfk_1`), porque não há `relationship()` do SQLAlchemy
+   configurada entre `Supplier` e seus filhos — o unit-of-work não tem grafo de dependência pra
+   ordenar os `DELETE`s sozinho, só a ordem de chamada não garante nada no flush. Não pego pela
+   suíte SQLite dos testes (SQLite não aplica FK por padrão nesse setup). Corrigido em duas
+   camadas: `ON DELETE CASCADE` nas duas FKs (migration + modelo, defesa no banco) **e** um
+   `await db.flush()` explícito entre apagar os filhos e apagar o pai no código da aplicação (pra
+   funcionar de forma idêntica em SQLite/MySQL, sem depender só do CASCADE). Verificado ao vivo
+   contra o MySQL real após a correção — `DELETE` retorna 204, filhos confirmados removidos via
+   query direta no banco.
+3. **Achado durante o teste ao vivo, fora de escopo desta história**: sessão `superadmin` recebe
+   `400 Bad Request` (`"Parâmetro company_id é obrigatório para superadmin/admin"`) em qualquer
+   endpoint de `Supplier`, incluindo o novo de CNPJ lookup — confirmado como **gap pré-existente**
+   desde `ORD-182` (`SupplierListScreen.tsx`/`SupplierFormScreen.tsx` nunca usaram
+   `useCatalogParams()`, ao contrário de outras telas do admin que suportam navegação de
+   superadmin entre empresas). Não é regressão desta história — o endpoint novo só herdou o
+   mesmo `Depends(resolve_company_id_write)` já usado no resto do arquivo. Registrado aqui pra não
+   se perder, não corrigido (fora do escopo de ORD-202).
+4. Testado ao vivo de ponta a ponta com sessão de tenant real (`role: owner`): CNPJ ativo
+   (`11222333000181`) disparou a consulta, preencheu razão social/nome fantasia/endereço
+   automaticamente, `Alert variant="success"`; criação com contato comercial completo; edição
+   pré-carregando todos os campos corretamente (incluindo `contato` aninhado); exclusão
+   confirmada 204 com filhos removidos do banco. `SupplierListScreen.tsx` exibindo
+   telefone/e-mail a partir de `contato` corretamente (fallback pros campos legados confirmado
+   no código, não testado ao vivo por falta de fornecedor pré-ORD-202 sem contato disponível pro teste).
+
+Suíte completa: 533 testes em `catalog-service` (16 novos + 5 arquivos de teste pré-existentes
+atualizados pra incluir `contato`, agora obrigatório: `test_ord182`, `test_ord194`, `test_ord195`
+(3 call sites), `test_ord197` (2 call sites) — nenhuma lógica de teste mudou, só o payload de
+setup). `ruff check services/catalog/` limpo. `tsc --noEmit` (frontend/admin) limpo. Migration
+aplicada com sucesso contra o MySQL real de dev.
