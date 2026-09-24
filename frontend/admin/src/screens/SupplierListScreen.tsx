@@ -57,8 +57,11 @@ export default function SupplierListScreen() {
   const columns: TableColumn<Supplier>[] = [
     { key: "nome", header: "Nome", render: (s) => s.nome },
     { key: "cnpj", header: "CNPJ", mono: true, render: (s) => formatCnpj(s.cnpj) },
-    { key: "telefone", header: "Telefone", render: (s) => s.telefone ?? "—" },
-    { key: "email", header: "E-mail", render: (s) => s.email ?? "—" },
+    // ORD-202 — contato comercial substitui os campos legados telefone/
+    // email como fonte principal; fallback pros legados só pra fornecedor
+    // cadastrado antes desta história (nunca editado, sem contato ainda).
+    { key: "telefone", header: "Telefone", render: (s) => s.contato?.telefone ?? s.telefone ?? "—" },
+    { key: "email", header: "E-mail", render: (s) => s.contato?.email ?? s.email ?? "—" },
     { key: "created_at", header: "Criado em", mono: true, render: (s) => fmtDate(s.created_at) },
     {
       key: "action", header: "", render: (s) => (
