@@ -264,3 +264,29 @@ Todas as linhas preenchidas — nenhum passo do Fluxo Principal ficou só em pro
 - [x] Rastreabilidade ponta a ponta — tabela acima, sem célula vazia
 - [x] Sem bloqueios não resolvidos — história pequena e bem contida, sem achados que exigissem
       repasse adicional de PM/QA/Backend (confirmado pelo usuário, mesmo ritmo do `ORD-197`)
+
+## Implementação — achados reais (2026-09-24)
+
+Implementação seguiu o Tech Explorer sem desvio. Único ajuste durante os testes: as fixtures de
+XML de NF-e (`services/catalog/tests/fixtures/nfe/`) compartilham a mesma chave de acesso entre si
+(são variações da mesma nota-base pra testar casos negativos específicos, não notas independentes)
+— o cenário "segunda nota pro mesmo fornecedor pendente" precisou construir uma segunda chave
+válida (trocando um dígito e recalculando o dígito verificador mod-11, mesmo algoritmo de
+`_valida_chave_acesso`) em vez de reaproveitar uma fixture existente.
+
+Suíte nova (`test_ord204_pendencia_cadastro_fornecedor_importacao_nf.py`, 9 testes): auto-criado
+nasce pendente, manual não nasce pendente, reaproveitado não é afetado (incluindo segunda nota pro
+mesmo fornecedor ainda pendente), import nunca bloqueado, listagem sinaliza/não sinaliza
+corretamente, salvar com só o contato preenchido zera o flag sem exigir endereço, isolamento
+multi-tenant.
+
+Verificado ao vivo contra o MySQL real: fornecedor pendente exibindo `Tag` "Cadastro pendente" na
+listagem; editar e salvar (só com contato preenchido) fez a `Tag` desaparecer, confirmando o fluxo
+completo. Achado incidental útil durante o teste: o CNPJ usado no cenário ao vivo (`11.444.777/0001-61`)
+está com situação "INAPTA" de verdade na Receita — serviu de confirmação não-planejada do alerta
+`warning` não-bloqueante desenhado em `ORD-202`, que ainda não tinha sido visto ao vivo com um
+CNPJ real inativo (só com o teste síncrono/mockado até então).
+
+Suíte completa: 554 testes em `catalog-service` (9 novos), sem regressão. `ruff check
+services/catalog/` e `tsc --noEmit` (admin) limpos. Migration aplicada com sucesso contra o MySQL
+real de dev.
