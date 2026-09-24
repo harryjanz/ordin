@@ -669,7 +669,15 @@ export default function CompanyContractScreen() {
 
             <div className={styles.tracker} data-testid="contract-tracker">
               {STAGES.map((s, i) => {
-                const state = i < currentIndex ? "done" : i === currentIndex ? "current" : "upcoming";
+                // Achado ao vivo (revisão de urgência, 2026-09-24, print do
+                // usuário): a última etapa (assinado) nunca virava "done" —
+                // i === currentIndex sempre caía em "current" (roxo, número),
+                // mesmo sem nenhuma etapa seguinte pra justificar o estado
+                // "em andamento". Com contrato assinado, a 3ª bolinha também
+                // é conclusão, não "atual" — mesmo tratamento verde/✓ das
+                // etapas anteriores.
+                const isLastStage = i === STAGES.length - 1;
+                const state = i < currentIndex || (i === currentIndex && isLastStage) ? "done" : i === currentIndex ? "current" : "upcoming";
                 return (
                   <div key={s} className={styles.stage}>
                     <div className={`${styles.circle} ${state === "current" ? styles.circleCurrent : state === "done" ? styles.circleDone : ""}`}>
