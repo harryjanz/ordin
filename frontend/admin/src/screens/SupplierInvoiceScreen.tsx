@@ -180,11 +180,17 @@ export default function SupplierInvoiceScreen() {
       .finally(() => { if (thisRequest === requestId.current) setListLoading(false); });
   }
 
+  // Achado ao vivo (revisão de urgência, 2026-09-24): esta tela fica
+  // montada persistentemente dentro das abas de EstoqueScreen — trocar ou
+  // limpar a empresa selecionada (superadmin/admin) nunca disparava um
+  // refetch, deixando a tela "presa" nos dados da empresa anterior (o
+  // efeito de listUsers acima já incluía companyId corretamente, este não
+  // incluía). Mesmo padrão de correção já usado em CatalogScreen.tsx (ORD-136).
   useEffect(() => {
     fetchInvoices();
     isFirstRender.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataEmissaoFrom, dataEmissaoTo, dataImportacaoFrom, dataImportacaoTo, skip]);
+  }, [dataEmissaoFrom, dataEmissaoTo, dataImportacaoFrom, dataImportacaoTo, skip, companyId]);
 
   useEffect(() => {
     if (isFirstRender.current) return;
