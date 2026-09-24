@@ -459,7 +459,6 @@ export default function CompanyContractScreen() {
           <div className={styles.addr}>{formatCompanyAddress(company)}</div>
         </div>
         <div className={styles.headerActions}>
-          <Button variant="secondary" onClick={() => navigate("/companies")} data-testid="btn-voltar">Voltar</Button>
           <Tag variant={company.cadastral_status === "ATIVA" ? "success" : "warning"}>
             <i className={`icon icon-${company.cadastral_status === "ATIVA" ? "check-circle" : "alert-triangle"} ${styles.statusIcon}`} />
             {company.cadastral_status === "ATIVA" ? "Ativa na Receita" : company.cadastral_status ?? "Não verificada"}
@@ -471,6 +470,7 @@ export default function CompanyContractScreen() {
           {!editing && (
             <Button variant="secondary" onClick={startEditing} data-testid="btn-editar-cadastro">Editar cadastro</Button>
           )}
+          <Button variant="secondary" onClick={() => navigate("/companies")} data-testid="btn-voltar">Voltar</Button>
         </div>
       </div>
 
