@@ -77,10 +77,46 @@ async def test_criar_contato_comercial_happy_path(client, superadmin_token, empr
         "contact_type": "comercial", "name": "Maria Silva", "role_title": "Gerente",
         "email": "maria@burgerhouse.com", "phone": "11999990000",
     })
-    assert r.status_code == 201
+    # Achado ao vivo (revisão de urgência, 2026-09-24): endpoint virou
+    # upsert-por-tipo (mesmo padrão de upsert_legal_representative) — 200,
+    # não mais 201 fixo, já que a mesma chamada agora também serve edição.
+    assert r.status_code == 200
     body = r.json()
     assert body["name"] == "Maria Silva"
     assert body["email"] == "maria@burgerhouse.com"
+
+
+async def test_criar_contato_upsert_por_tipo_atualiza_registro_existente(client, superadmin_token, empresa):
+    # Achado ao vivo (revisão de urgência, 2026-09-24): antes, chamar de
+    # novo pro mesmo contact_type duplicava a linha em vez de editar — CRUD
+    # de fornecedores/estoque tem readOnly summaries que fazem
+    # contacts.find(c => c.contact_type === "comercial"), então uma
+    # duplicata quebraria silenciosamente (find pega sempre a primeira).
+    r1 = await client.post(f"/companies/{empresa['company_a']}/contacts", headers=auth(superadmin_token), json={
+        "contact_type": "comercial", "name": "Primeiro Nome", "email": "primeiro@empresa.com",
+    })
+    r2 = await client.post(f"/companies/{empresa['company_a']}/contacts", headers=auth(superadmin_token), json={
+        "contact_type": "comercial", "name": "Nome Atualizado", "email": "atualizado@empresa.com", "phone": "11988887777",
+    })
+    assert r1.json()["id"] == r2.json()["id"]  # mesmo registro, não duplicou
+
+    r3 = await client.get(f"/companies/{empresa['company_a']}/contacts", headers=auth(superadmin_token))
+    comerciais = [c for c in r3.json()["contacts"] if c["contact_type"] == "comercial"]
+    assert len(comerciais) == 1
+    assert comerciais[0]["name"] == "Nome Atualizado"
+    assert comerciais[0]["phone"] == "11988887777"
+
+
+async def test_criar_contato_upsert_por_tipo_nao_afeta_outros_tipos(client, superadmin_token, empresa):
+    await client.post(f"/companies/{empresa['company_a']}/contacts", headers=auth(superadmin_token), json={
+        "contact_type": "comercial", "name": "Contato Comercial", "email": "comercial@empresa.com",
+    })
+    await client.post(f"/companies/{empresa['company_a']}/contacts", headers=auth(superadmin_token), json={
+        "contact_type": "financeiro", "name": "Contato Financeiro", "email": "financeiro@empresa.com",
+    })
+    r = await client.get(f"/companies/{empresa['company_a']}/contacts", headers=auth(superadmin_token))
+    types = sorted(c["contact_type"] for c in r.json()["contacts"])
+    assert types == ["comercial", "financeiro"]
 
 
 async def test_contato_persistido_criptografado_no_banco(client, superadmin_token, empresa):
@@ -146,7 +182,8 @@ async def test_manager_pode_criar_contato_da_propria_empresa(client, empresa):
     r = await client.post(f"/companies/{empresa['company_a']}/contacts", headers=auth(empresa["manager_a_token"]), json={
         "contact_type": "comercial", "name": "Via Manager", "email": "manager@empresaA.com",
     })
-    assert r.status_code == 201
+    # Endpoint virou upsert-por-tipo — ver test_criar_contato_comercial_happy_path acima.
+    assert r.status_code == 200
 
 
 # ── Responsável legal ─────────────────────────────────────────────────────────

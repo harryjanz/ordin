@@ -36,11 +36,19 @@
   margin-top: 6px;
 }
 
+// Achado ao vivo (revisão de urgência, 2026-09-24, pedido do usuário):
+// .header já tem justify-content:space-between, mas com flex-wrap:wrap
+// isso só empurra pra direita quando os dois filhos cabem na mesma linha
+// — quando headerActions quebra pra linha própria (nome+endereço mais
+// compridos), ela vira o único item da linha e space-between não tem
+// mais efeito, ficando encostada à esquerda. margin-left:auto garante o
+// alinhamento à direita nos dois casos.
 .headerActions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+  margin-left: auto;
 }
 
 .panel {
@@ -57,6 +65,12 @@
 
 .h3Mb {
   margin-bottom: 16px;
+}
+
+.h4 {
+  @include font('sm-emphasys');
+  color: rgba(var(--a-text-rgb), 0.7);
+  margin-bottom: 12px;
 }
 
 .note {
@@ -122,9 +136,45 @@
   align-items: center;
 }
 
-.signedNote {
-  color: color('success-base');
-  @include font('sm');
+// Achado ao vivo (revisão de urgência, 2026-09-24, print do usuário):
+// Upload/Alert ao lado dos botões no mesmo .actionsRow ficava desalinhado
+// (bloco mais alto que os botões, quebra de linha no meio do fluxo) — vira
+// sua própria linha em largura total (Upload em "pendente"/"enviado", ou o
+// Alert de sucesso em "assinado"), com os botões de ação numa linha
+// separada logo abaixo.
+.statusContentBlock {
+  margin-top: 26px;
+}
+
+// Linha de botões abaixo do Upload — 50%/50% quando os dois aparecem
+// juntos (status "pendente": Marcar como enviado + Anexar e marcar como
+// assinado); com um botão só (status "enviado"), o único filho ocupa a
+// largura toda naturalmente.
+.actionsRowSplit {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+
+  > * {
+    flex: 1 1 0;
+  }
+}
+
+// Ícone dentro dos Tag do cabeçalho (status cadastral/contrato) —
+// menor que o tamanho padrão de 20px da fonte de ícones (Tag tem só 16px
+// de altura) e alinhado com a linha de base do texto xs-emphasys do Tag.
+.statusIcon {
+  margin-right: 4px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+
+  &::before {
+    font-size: 12px !important;
+    line-height: 12px !important;
+    height: 12px !important;
+    width: 12px !important;
+  }
 }
 
 .contactsGrid {
@@ -218,10 +268,11 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: rgba(29, 20, 52, 0.95);
-  border-top: 1px solid var(--a-border);
-  padding: 16px 4px;
-  margin-top: -4px;
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: 16px;
+  @include padding('l', 'xl', 'l', 'xl');
+  margin-bottom: 20px;
 }
 
 .dirtyNote {
@@ -248,6 +299,10 @@
   margin-bottom: 16px;
 }
 
-.emphasisTeal {
-  color: #33cccc;
+// Achado ao vivo (revisão de urgência, 2026-09-24, print do usuário): cor
+// hardcoded (#33cccc, teal) destoava da paleta da aplicação — troca pro
+// mesmo token de destaque (roxo da marca) já usado em outras telas do
+// admin (ex: ForgotPasswordScreen.module.scss, CompanyListScreen.module.scss).
+.emphasisAccent {
+  color: color('brand-primary');
 }
