@@ -6,6 +6,8 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
 import { formatCnpj } from "../lib/masks";
 import { parseApiError } from "../lib/apiErrors";
+import { useCatalogParams } from "../lib/catalogParams";
+import { useStore } from "../store";
 import type { Supplier } from "../types";
 
 // ORD-182 (A6) — CRUD de fornecedores por empresa (superadmin/admin/owner/
@@ -20,6 +22,15 @@ function fmtDate(iso: string): string {
 
 export default function SupplierListScreen() {
   const navigate = useNavigate();
+  const catalogParams = useCatalogParams();
+  // Achado ao vivo (revisão de urgência, 2026-09-24): esta tela nunca
+  // mandava company_id pro backend, nem no fetch nem na exclusão — pra
+  // superadmin/admin isso sempre dava 400 ("Parâmetro company_id é
+  // obrigatório"), mesmo com uma empresa selecionada. Mesmo padrão já usado
+  // em SupplierInvoiceScreen.tsx/PendingItemsScreen.tsx: catalogParams() nas
+  // chamadas + selectedCompanyId nas dependências do efeito de carregamento.
+  const selectedCompanyId = useStore((s) => s.selectedCompanyId);
+
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,7 +40,7 @@ export default function SupplierListScreen() {
     setLoading(true);
     setError(null);
     try {
-      const r = await api.get("/catalog/suppliers");
+      const r = await api.get("/catalog/suppliers", catalogParams());
       setSuppliers(r.data.suppliers ?? []);
     } catch (err) {
       setError(parseApiError(err).message);
@@ -40,12 +51,13 @@ export default function SupplierListScreen() {
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCompanyId]);
 
   async function confirmRemove() {
     if (!removeTarget) return;
     try {
-      await api.delete(`/catalog/suppliers/${removeTarget.id}`);
+      await api.delete(`/catalog/suppliers/${removeTarget.id}`, catalogParams());
       makeToast("success", "Fornecedor excluído");
       setRemoveTarget(null);
       load();

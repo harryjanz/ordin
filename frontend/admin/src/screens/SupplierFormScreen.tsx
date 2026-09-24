@@ -6,6 +6,7 @@ import Breadcrumb from "../components/Breadcrumb";
 import { formatCep, formatCnpj, formatCpf, formatPhone } from "../lib/masks";
 import { isValidCep, isValidCnpj, normalizeCep, normalizeCnpj, UF_VALUES } from "../lib/validators";
 import { parseApiError } from "../lib/apiErrors";
+import { useCatalogParams } from "../lib/catalogParams";
 import type { CnpjLookupResult, Supplier } from "../types";
 // ORD-182 (A6) — mesmo racional já registrado na FiscalAddonPlanFormScreen/
 // PriceTableFormScreen: sem componente genérico de formulário compartilhado
@@ -21,6 +22,11 @@ export default function SupplierFormScreen() {
   const { id } = useParams<{ id: string }>();
   const editingId = id ? Number(id) : null;
   const navigate = useNavigate();
+  // Achado ao vivo (revisão de urgência, 2026-09-24): nenhuma chamada desta
+  // tela mandava company_id — pra superadmin/admin, GET/POST/PUT e o
+  // cnpj-lookup todos davam 400 ("Parâmetro company_id é obrigatório").
+  // Mesmo padrão de catalogParams() já usado no resto do admin.
+  const catalogParams = useCatalogParams();
 
   const [loading, setLoading] = useState(editingId !== null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -67,7 +73,7 @@ export default function SupplierFormScreen() {
       setLoading(true);
       setLoadError(null);
       try {
-        const r = await api.get<Supplier>(`/catalog/suppliers/${editingId}`);
+        const r = await api.get<Supplier>(`/catalog/suppliers/${editingId}`, catalogParams());
         if (cancelled) return;
         const s = r.data;
         setNome(s.nome);
@@ -123,7 +129,7 @@ export default function SupplierFormScreen() {
     lookupTimer.current = setTimeout(async () => {
       setLookupLoading(true);
       try {
-        const r = await api.get<CnpjLookupResult>(`/catalog/suppliers/cnpj-lookup/${encodeURIComponent(normalized)}`);
+        const r = await api.get<CnpjLookupResult>(`/catalog/suppliers/cnpj-lookup/${encodeURIComponent(normalized)}`, catalogParams());
         const result = r.data;
         setLookupResult(result);
         if (result.found) {
@@ -186,9 +192,9 @@ export default function SupplierFormScreen() {
           : null,
       };
       if (editingId === null) {
-        await api.post("/catalog/suppliers", body);
+        await api.post("/catalog/suppliers", body, catalogParams());
       } else {
-        await api.put(`/catalog/suppliers/${editingId}`, body);
+        await api.put(`/catalog/suppliers/${editingId}`, body, catalogParams());
       }
       navigate("/stock/suppliers");
     } catch (err) {
