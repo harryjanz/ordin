@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, InputBase, Tag, makeToast, type DropdownOptions } from "design-system";
+import { Alert, Button, Dropdown, InputBase, Tag, Upload, UploadListFiles, makeToast, type DropdownOptions, type UploadFile } from "design-system";
 import api from "../api";
 import { applyCompanyPlanTable, createContact, getCompany, getCompanyPlan, getCompanyPlanHistory, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus, upsertLegalRepresentative } from "../api/companies";
 import Table, { type TableColumn } from "../components/Table";
@@ -36,6 +36,13 @@ export const TAX_REGIME_OPTIONS: DropdownOptions[] = [
 
 const UF_OPTIONS: DropdownOptions[] = UF_VALUES.map((uf) => ({ value: uf, label: uf }));
 
+// Achado ao vivo (revisão de urgência, 2026-09-24, print do usuário):
+// <input type="file"> nativo do navegador ao lado dos Button do design
+// system destoava (estilo de SO, sem nada em comum visualmente) — troca
+// pro componente Upload já usado em CompanyScreen.tsx (certificado A1).
+const CONTRATO_ASSINADO_TYPES = ["application/pdf"];
+const CONTRATO_ASSINADO_MAX_SIZE_MB = 10;
+
 // Achado ao vivo (revisão de urgência, 2026-09-24): mesmo shape de
 // ContactForm/campos já usado no passo 3/4 do wizard (NewCompanyScreen.tsx)
 // — duplicado aqui de propósito (tela pequena, mesmo padrão de
@@ -44,6 +51,19 @@ interface ContactFormValue { name: string; roleTitle: string; email: string; pho
 const emptyContactForm: ContactFormValue = { name: "", roleTitle: "", email: "", phone: "" };
 interface LegalRepFormValue { name: string; cpf: string; roleTitle: string; email: string; phone: string; }
 const emptyLegalRepForm: LegalRepFormValue = { name: "", cpf: "", roleTitle: "", email: "", phone: "" };
+
+// Achado ao vivo (revisão de urgência, 2026-09-24, print do usuário): com
+// endereço vazio (empresa cadastrada sem CEP/endereço, ex: Pasta & Co no
+// seed local), o cabeçalho renderizava literalmente ", — , /SP" — juntando
+// os separadores fixos com campos undefined/vazios. Monta cada pedaço só
+// com o que existe, e cai num fallback textual se nada estiver preenchido.
+function formatCompanyAddress(c: Company): string {
+  const streetPart = [c.street, c.address_number].filter(Boolean).join(", ");
+  const cityState = c.city && c.state ? `${c.city}/${c.state}` : c.city || c.state || "";
+  const rest = [c.neighborhood, cityState].filter(Boolean).join(", ");
+  const full = [streetPart, rest].filter(Boolean).join(" — ");
+  return full || "Endereço não informado";
+}
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -78,6 +98,7 @@ export default function CompanyContractScreen() {
   const [updating, setUpdating] = useState(false);
   const [downloadingContract, setDownloadingContract] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([]);
 
   // Modo de edição (ORD-063) — não reaproveita o WizardSteps do wizard
   // (ORD-060): aqui os dados já existem e já são válidos, então todas as
@@ -290,11 +311,18 @@ export default function CompanyContractScreen() {
       const updated = await updateContractStatus(companyId, "assinado", selectedFile);
       setCompany(updated);
       setSelectedFile(null);
+      setUploadFiles([]);
     } catch (err) {
       setError(parseApiError(err).message);
     } finally {
       setUpdating(false);
     }
+  }
+
+  function handleContractUpload(files: UploadFile[]) {
+    const picked = files[0];
+    setUploadFiles(files);
+    setSelectedFile(picked && picked.status === "success" ? picked.file : null);
   }
 
   async function downloadSignedContract() {
@@ -427,7 +455,7 @@ export default function CompanyContractScreen() {
         <div>
           <h2 className={styles.h2}>{company.name}</h2>
           <div className={styles.doc}>CNPJ {formatCnpj(company.document ?? "")} · {company.legal_name}</div>
-          <div className={styles.addr}>{company.street}, {company.address_number} — {company.neighborhood}, {company.city}/{company.state}</div>
+          <div className={styles.addr}>{formatCompanyAddress(company)}</div>
         </div>
         <div className={styles.headerActions}>
           <Tag variant={company.cadastral_status === "ATIVA" ? "success" : "warning"}>
@@ -632,8 +660,8 @@ export default function CompanyContractScreen() {
           <div className={styles.panel}>
             <h3 className={styles.h3}>Status do contrato</h3>
             <p className={styles.note}>
-              Envio e assinatura acontecem <strong className={styles.emphasisTeal}>fora da plataforma</strong> — o contrato é
-              enviado manualmente por e-mail e assinado via <strong className={styles.emphasisTeal}>gov.br</strong>. Esta tela
+              Envio e assinatura acontecem <strong className={styles.emphasisAccent}>fora da plataforma</strong> — o contrato é
+              enviado manualmente por e-mail e assinado via <strong className={styles.emphasisAccent}>gov.br</strong>. Esta tela
               só registra em qual etapa o processo está.
             </p>
 
@@ -660,12 +688,17 @@ export default function CompanyContractScreen() {
               )}
               {status !== "assinado" && (
                 <>
-                  <input
-                    type="file"
-                    accept="application/pdf"
-                    onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
-                    data-testid="input-signed-document"
-                  />
+                  <div className={styles.uploadField} data-testid="input-signed-document">
+                    <Upload
+                      maxFileSize={CONTRATO_ASSINADO_MAX_SIZE_MB}
+                      multipleFiles={false}
+                      types={CONTRATO_ASSINADO_TYPES}
+                      helperMessage="PDF, até 10 MB"
+                      errorMessage="Envie um arquivo PDF de até 10 MB"
+                      onCallbackUpload={handleContractUpload}
+                    />
+                    <UploadListFiles items={uploadFiles} removable={false} />
+                  </div>
                   <Button onClick={markSigned} disabled={!selectedFile} loading={updating} data-testid="btn-marcar-assinado">
                     Anexar e marcar como assinado
                   </Button>

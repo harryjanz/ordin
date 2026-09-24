@@ -128,6 +128,15 @@
   align-items: center;
 }
 
+// Upload é um bloco mais alto que um Button sozinho (dropzone + lista de
+// arquivos) — alinha pelo topo dentro do .actionsRow em vez de centralizar,
+// senão o botão "Anexar e marcar como assinado" fica flutuando no meio do
+// dropzone quando ele cresce (ex: depois de escolher um arquivo).
+.uploadField {
+  align-self: flex-start;
+  width: 320px;
+}
+
 .signedNote {
   color: color('success-base');
   @include font('sm');
@@ -255,6 +264,10 @@
   margin-bottom: 16px;
 }
 
-.emphasisTeal {
-  color: #33cccc;
+// Achado ao vivo (revisão de urgência, 2026-09-24, print do usuário): cor
+// hardcoded (#33cccc, teal) destoava da paleta da aplicação — troca pro
+// mesmo token de destaque (roxo da marca) já usado em outras telas do
+// admin (ex: ForgotPasswordScreen.module.scss, CompanyListScreen.module.scss).
+.emphasisAccent {
+  color: color('brand-primary');
 }
