@@ -331,3 +331,24 @@ Todas as linhas preenchidas — nenhum passo do Fluxo Principal ficou só em pro
 - [x] Repasse de QA — 3 achados aplicados (cenário de cascata explícito, mensagens reescritas, cenário de ordem contra MySQL real)
 - [x] Rastreabilidade ponta a ponta — tabela acima, sem célula vazia
 - [x] Sem bloqueios não resolvidos
+
+## Implementação — achados reais (2026-09-24)
+
+Implementação seguiu o Tech Explorer sem desvio — `_has_stock_integrated_items` +
+`delete_supplier_invoice`/`delete_supplier` alterados exatamente como desenhado. Nenhum achado
+novo durante a codificação (diferente de ORD-202, onde o Tech Explorer tinha 2 bugs reais que só
+apareceram ao vivo contra MySQL) — o repasse de QA já tinha antecipado o ponto de maior risco
+(ordem da cascata só validável contra FK real, não SQLite).
+
+Suíte nova (`test_ord203_bloquear_exclusao_fornecedor_nota_integrados_estoque.py`, 12 testes):
+regressão (fornecedor sem nota), bloqueio nos dois pontos de entrada (EAN, manual, 2-notas-só-1-
+integrada), falsos positivos (pendente, ignorado), cascata explícita (nota some de verdade),
+ordem da cascata com 2 notas, mensagem sem jargão técnico, isolamento multi-tenant.
+
+Verificado ao vivo contra o MySQL real de dev (não só a suíte SQLite): fornecedor com 2 notas sem
+integração excluído com sucesso (204), notas e itens confirmados removidos via query direta no
+banco; fornecedor e nota com item integrado corretamente bloqueados (409) com a mensagem exata
+esperada, sem termo técnico. Dados de teste revertidos depois da verificação.
+
+Suíte completa: 545 testes em `catalog-service` (12 novos), sem regressão. `ruff check
+services/catalog/` limpo.
