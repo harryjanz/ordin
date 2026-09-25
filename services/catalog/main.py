@@ -4520,10 +4520,20 @@ async def _upsert_or_clear_legal_rep(
     summary="Listar fornecedores da empresa",
 )
 async def list_suppliers(
+    nome: str | None = None,
+    cnpj: str | None = None,
+    cadastro_pendente: bool | None = None,
     db: AsyncSession = Depends(get_db),
     company_id: int = Depends(resolve_company_id_write),  # cashier não vê nem a lista
 ):
-    result = await db.execute(select(Supplier).filter_by(company_id=company_id).order_by(Supplier.nome))
+    query = select(Supplier).filter_by(company_id=company_id)
+    if nome:
+        query = query.filter(Supplier.nome.ilike(f"%{nome}%"))
+    if cnpj:
+        query = query.filter(Supplier.cnpj.ilike(f"%{normalize_cnpj(cnpj)}%"))
+    if cadastro_pendente is not None:
+        query = query.filter(Supplier.cadastro_pendente == cadastro_pendente)
+    result = await db.execute(query.order_by(Supplier.nome))
     suppliers = result.scalars().all()
     return {"suppliers": [await _load_supplier_out(db, s) for s in suppliers]}
 
