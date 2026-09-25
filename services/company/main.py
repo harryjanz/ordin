@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 import bcrypt
 import httpx
@@ -487,6 +488,50 @@ class CompanyPlanHistory(Base):
     to_price_table_id     = Column(Integer, nullable=False, index=True)
     action                = Column(String(20), nullable=False)  # "renew" | "apply"
     actor_user_id         = Column(Integer, nullable=True)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+
+
+class CommissionTable(Base):
+    # ORD-206: tabela de comissão de parceiro (setup por totem + percentual
+    # recorrente mensal) — espelha PriceTable, mas do lado oposto (Ordin
+    # paga parceiro, não cobra cliente). Sem company_id, dado de plataforma.
+    # Sem vínculo contratual nem tipo de parceiro (PF/PJ) de propósito —
+    # entidade "Parceiro" ainda não existe (ORD-207). note obrigatório (no
+    # handler) quando a tabela não é a padrão — validado em POST/PUT, não
+    # aqui, porque "é padrão" é decidido por is_default. Numeric(10,2) e
+    # Numeric(5,2) — dinheiro real multiplicado contra faturamento
+    # recorrente de cliente, mesmo cuidado de precisão do schema Pydantic
+    # (CommissionTableIn usa Decimal, não float, de propósito — diferente
+    # do float já existente e não corrigido em PriceTableTierIn).
+    __tablename__ = "commission_tables"
+    id                    = Column(Integer, primary_key=True)
+    name                  = Column(String(120), nullable=False)
+    is_default            = Column(Boolean, nullable=False, default=False)
+    setup_fee_per_totem   = Column(Numeric(10, 2), nullable=False)
+    recurring_percent     = Column(Numeric(5, 2), nullable=False)
+    note                  = Column(String(500), nullable=True)
+    vigente_desde         = Column(DateTime, nullable=False)
+    archived_at           = Column(DateTime, nullable=True)
+    created_at            = Column(DateTime, default=datetime.utcnow)
+    created_by_user_id    = Column(Integer, nullable=True)
+
+
+class CommissionTableHistory(Base):
+    # ORD-206: registro append-only de toda mudança de valor rastreado numa
+    # CommissionTable (setup_fee_per_totem, recurring_percent, is_default,
+    # vigente_desde) — gravado na MESMA transação da mudança (hard
+    # requirement, decisão do papel Financeiro; diverge de propósito do
+    # best-effort de CompanyPlanHistory, porque aqui é dinheiro pago a
+    # terceiro, não histórico de plano do próprio cliente). Sem ForeignKey
+    # real pra commission_table_id — mesmo padrão de integridade
+    # referencial em nível de aplicação já usado no resto do serviço.
+    __tablename__ = "commission_table_history"
+    id                    = Column(Integer, primary_key=True)
+    commission_table_id   = Column(Integer, nullable=False, index=True)
+    field_changed         = Column(String(30), nullable=False)  # setup_fee_per_totem | recurring_percent | is_default | vigente_desde
+    old_value             = Column(String(50), nullable=True)
+    new_value             = Column(String(50), nullable=True)
+    changed_by_user_id    = Column(Integer, nullable=True)
     created_at            = Column(DateTime, default=datetime.utcnow)
 
 
@@ -1244,6 +1289,51 @@ class CompanyPlanHistoryEntryOut(BaseModel):
 
 class CompanyPlanHistoryOut(BaseModel):
     entries: list[CompanyPlanHistoryEntryOut]
+
+
+# ── Comissionamento de parceiro (ORD-206) ───────────────────────────────────
+
+class CommissionTableIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    setup_fee_per_totem: Decimal = Field(ge=0)
+    recurring_percent: Decimal = Field(ge=0, le=100)
+    # Obrigatório (no handler) quando a tabela não é a padrão — min_length
+    # aqui só garante que, quando enviado, não é um preenchimento vazio de
+    # fachada. Ver _validate_commission_table_note.
+    note: str | None = Field(default=None, min_length=10, max_length=500)
+    vigente_desde: datetime
+
+
+class CommissionTableOut(BaseModel):
+    id: int
+    name: str
+    is_default: bool
+    setup_fee_per_totem: Decimal
+    recurring_percent: Decimal
+    note: str | None
+    vigente_desde: datetime
+    archived_at: datetime | None
+    created_at: datetime
+
+
+class CommissionTableListOut(BaseModel):
+    commission_tables: list[CommissionTableOut]
+
+
+class CommissionTableSetDefaultIn(BaseModel):
+    confirm_replace: bool = False
+
+
+class CommissionTableHistoryEntryOut(BaseModel):
+    field_changed: str
+    old_value: str | None
+    new_value: str | None
+    changed_by_user_id: int | None
+    created_at: datetime
+
+
+class CommissionTableHistoryOut(BaseModel):
+    entries: list[CommissionTableHistoryEntryOut]
 
 
 class HealthOut(BaseModel):
@@ -4637,6 +4727,304 @@ async def set_price_table_kind(
     await db.commit()
     await db.refresh(pt)
     return await _serialize_price_table(db, pt)
+
+
+# ── Comissionamento de parceiro (ORD-206) ───────────────────────────────────
+# Tabela de comissão de parceiro — mesmo formato de problema de PriceTable,
+# do lado oposto (Ordin paga parceiro, não cobra cliente). Sem company_id,
+# dado de plataforma. Cadastro de parceiro, contrato clickwrap e cálculo de
+# comissão no fechamento mensal são histórias futuras (ORD-207+) que vão
+# consumir esta estrutura — nenhuma delas é tocada aqui.
+
+def _serialize_commission_table(ct: CommissionTable) -> dict:
+    return {
+        "id": ct.id,
+        "name": ct.name,
+        "is_default": ct.is_default,
+        "setup_fee_per_totem": ct.setup_fee_per_totem,
+        "recurring_percent": ct.recurring_percent,
+        "note": ct.note,
+        "vigente_desde": ct.vigente_desde,
+        "archived_at": ct.archived_at,
+        "created_at": ct.created_at,
+    }
+
+
+async def _commission_table_note_required_on_create(db: AsyncSession) -> bool:
+    # A primeira tabela criada no sistema (ainda sem nenhuma padrão definida)
+    # não exige nota — é a candidata natural a virar a padrão via
+    # /set-default logo em seguida. A partir do momento em que já existe uma
+    # padrão, qualquer tabela nova é por definição um acordo customizado.
+    result = await db.execute(
+        select(CommissionTable.id).where(CommissionTable.is_default.is_(True)).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _has_commission_history(db: AsyncSession, commission_table_id: int) -> bool:
+    # Mesmo padrão de "já foi referenciado alguma vez" de
+    # _has_stock_integrated_items (ORD-203, catalog-service) e
+    # _price_table_ever_linked (linha ~4290) — checado antes de qualquer
+    # exclusão real.
+    result = await db.execute(
+        select(CommissionTableHistory.id)
+        .where(CommissionTableHistory.commission_table_id == commission_table_id)
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+def _add_commission_history(
+    db: AsyncSession, *, commission_table_id: int, field_changed: str,
+    old_value: str | None, new_value: str | None, actor: TokenPayload,
+) -> None:
+    # Hard-transacional de propósito (decisão do papel Financeiro) — o
+    # caller sempre faz db.add() daqui ANTES do único db.commit() da
+    # operação, nunca em commit separado. Diverge do best-effort de
+    # _record_plan_history (linha ~4941): aqui é dinheiro pago a terceiro,
+    # precisa ser auditável sem exceção, mesmo que a operação toda falhe e
+    # reverta (rollback também desfaz o histórico, é o comportamento certo).
+    db.add(CommissionTableHistory(
+        commission_table_id=commission_table_id,
+        field_changed=field_changed,
+        old_value=old_value,
+        new_value=new_value,
+        changed_by_user_id=int(actor.sub) if actor.sub.isdigit() else None,
+    ))
+
+
+@app.post(
+    "/commercial/commission-tables",
+    status_code=201,
+    response_model=CommissionTableOut,
+    tags=["Comercial"],
+    summary="Criar tabela de comissão de parceiro",
+)
+async def create_commission_table(
+    body: CommissionTableIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    if await _commission_table_note_required_on_create(db) and not body.note:
+        raise HTTPException(
+            422,
+            "note é obrigatória ao criar uma tabela de comissão quando já existe uma tabela padrão — "
+            "só a primeira tabela do sistema (candidata a padrão) dispensa nota.",
+        )
+    ct = CommissionTable(
+        name=body.name,
+        is_default=False,
+        setup_fee_per_totem=body.setup_fee_per_totem,
+        recurring_percent=body.recurring_percent,
+        note=body.note,
+        vigente_desde=body.vigente_desde,
+        created_by_user_id=int(current_user.sub) if current_user.sub.isdigit() else None,
+    )
+    db.add(ct)
+    await db.commit()
+    await db.refresh(ct)
+    return _serialize_commission_table(ct)
+
+
+@app.get(
+    "/commercial/commission-tables",
+    response_model=CommissionTableListOut,
+    tags=["Comercial"],
+    summary="Listar tabelas de comissão de parceiro",
+)
+async def list_commission_tables(
+    archived: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    query = select(CommissionTable).order_by(CommissionTable.created_at.desc())
+    if not archived:
+        query = query.where(CommissionTable.archived_at.is_(None))
+    result = await db.execute(query)
+    tables = result.scalars().all()
+    return {"commission_tables": [_serialize_commission_table(t) for t in tables]}
+
+
+@app.put(
+    "/commercial/commission-tables/{commission_table_id}",
+    response_model=CommissionTableOut,
+    tags=["Comercial"],
+    summary="Editar tabela de comissão de parceiro",
+)
+async def update_commission_table(
+    commission_table_id: int,
+    body: CommissionTableIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    ct = await db.get(CommissionTable, commission_table_id)
+    if not ct:
+        raise HTTPException(404, "Tabela de comissão não encontrada")
+    if not ct.is_default and not body.note:
+        raise HTTPException(422, "note é obrigatória para tabela que não é a padrão")
+
+    # Só os campos de VALOR (não name/note, que são metadado descritivo) são
+    # rastreados em histórico — mesmo escopo confirmado no repasse de QA
+    # (vigente_desde entrou no escopo porque decide qual comissão vale em
+    # qual fechamento mensal futuro, não é cosmético). Uma entrada por campo
+    # que de fato mudou de valor — reenviar o mesmo valor não gera ruído.
+    tracked = [
+        ("setup_fee_per_totem", ct.setup_fee_per_totem, body.setup_fee_per_totem),
+        ("recurring_percent", ct.recurring_percent, body.recurring_percent),
+        ("vigente_desde", ct.vigente_desde, body.vigente_desde),
+    ]
+    for field_changed, old_value, new_value in tracked:
+        if old_value != new_value:
+            _add_commission_history(
+                db, commission_table_id=ct.id, field_changed=field_changed,
+                old_value=str(old_value), new_value=str(new_value), actor=current_user,
+            )
+
+    ct.name = body.name
+    ct.setup_fee_per_totem = body.setup_fee_per_totem
+    ct.recurring_percent = body.recurring_percent
+    ct.note = body.note
+    ct.vigente_desde = body.vigente_desde
+    await db.commit()
+    await db.refresh(ct)
+    return _serialize_commission_table(ct)
+
+
+@app.post(
+    "/commercial/commission-tables/{commission_table_id}/set-default",
+    response_model=CommissionTableOut,
+    tags=["Comercial"],
+    summary="Marcar tabela de comissão como padrão",
+)
+async def set_default_commission_table(
+    commission_table_id: int,
+    body: CommissionTableSetDefaultIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    ct = await db.get(CommissionTable, commission_table_id)
+    if not ct:
+        raise HTTPException(404, "Tabela de comissão não encontrada")
+    if ct.is_default:
+        # já é a padrão — no-op idempotente, mesmo critério de activate_price_table.
+        return _serialize_commission_table(ct)
+
+    # Lock em TODAS as linhas antes de decidir — mesmo padrão de
+    # activate_price_table (linha ~4645): um FOR UPDATE filtrado por
+    # is_default=true não protege o caso de "nenhuma padrão ainda" contra
+    # duas chamadas concorrentes.
+    result = await db.execute(select(CommissionTable).with_for_update())
+    all_tables = result.scalars().all()
+    current_default = next((t for t in all_tables if t.is_default), None)
+
+    if current_default is not None and not body.confirm_replace:
+        raise HTTPException(
+            409,
+            f"Já existe uma tabela padrão ('{current_default.name}'). "
+            "Envie confirm_replace=true para substituí-la.",
+        )
+
+    if current_default is not None:
+        _add_commission_history(
+            db, commission_table_id=current_default.id, field_changed="is_default",
+            old_value="true", new_value="false", actor=current_user,
+        )
+        current_default.is_default = False
+
+    _add_commission_history(
+        db, commission_table_id=ct.id, field_changed="is_default",
+        old_value="false", new_value="true", actor=current_user,
+    )
+    ct.is_default = True
+    await db.commit()
+    await db.refresh(ct)
+    return _serialize_commission_table(ct)
+
+
+@app.post(
+    "/commercial/commission-tables/{commission_table_id}/archive",
+    response_model=CommissionTableOut,
+    tags=["Comercial"],
+    summary="Arquivar tabela de comissão de parceiro",
+)
+async def archive_commission_table(
+    commission_table_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    ct = await db.get(CommissionTable, commission_table_id)
+    if not ct:
+        raise HTTPException(404, "Tabela de comissão não encontrada")
+    if ct.is_default:
+        raise HTTPException(409, "Tabela padrão não pode ser arquivada — troque a padrão antes")
+    ct.archived_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(ct)
+    return _serialize_commission_table(ct)
+
+
+@app.delete(
+    "/commercial/commission-tables/{commission_table_id}",
+    status_code=204,
+    tags=["Comercial"],
+    summary="Excluir tabela de comissão de parceiro",
+)
+async def delete_commission_table(
+    commission_table_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    ct = await db.get(CommissionTable, commission_table_id)
+    if not ct:
+        raise HTTPException(404, "Tabela de comissão não encontrada")
+    if ct.is_default:
+        raise HTTPException(409, "Tabela padrão não pode ser excluída — troque a padrão antes")
+    if await _has_commission_history(db, commission_table_id):
+        raise HTTPException(
+            409,
+            "Tabela já tem histórico de alterações e não pode ser excluída — use /archive.",
+        )
+    await db.delete(ct)
+    await db.commit()
+
+
+@app.get(
+    "/commercial/commission-tables/{commission_table_id}/history",
+    response_model=CommissionTableHistoryOut,
+    tags=["Comercial"],
+    summary="Consultar histórico de uma tabela de comissão",
+)
+async def get_commission_table_history(
+    commission_table_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    ct = await db.get(CommissionTable, commission_table_id)
+    if not ct:
+        raise HTTPException(404, "Tabela de comissão não encontrada")
+    result = await db.execute(
+        select(CommissionTableHistory)
+        .where(CommissionTableHistory.commission_table_id == commission_table_id)
+        .order_by(CommissionTableHistory.created_at.asc())
+    )
+    entries = result.scalars().all()
+    return {"entries": [
+        {
+            "field_changed": e.field_changed,
+            "old_value": e.old_value,
+            "new_value": e.new_value,
+            "changed_by_user_id": e.changed_by_user_id,
+            "created_at": e.created_at,
+        }
+        for e in entries
+    ]}
 
 
 # ── Planos de add-on fiscal (ORD-174) ───────────────────────────────────────
