@@ -220,5 +220,5 @@ de uso antes de decidir — não assumir pelo nome/aparência do componente.
 
 - **`ARQUITETURA.md`** — documento autoritativo: stack, Clean Architecture alvo, Kong plugins, multi-tenancy, QR, filas, SLOs, segurança. Ler antes de qualquer mudança estrutural.
 - **`WORKFLOW.md`** — fluxo upstream/downstream completo com a regra de Ready obrigatório.
-- **`roles/`** — guias por papel: `backend-sr.md`, `frontend.md`, `devops.md`, `qa.md`, `pm.md`, `security.md`
+- **`roles/`** — guias por papel: `backend-sr.md`, `frontend.md`, `devops.md`, `qa.md`, `pm.md`, `security.md`, `administrativo.md`, `financeiro.md` (papéis de negócio — programa de parceiros, faturamento B2B, tributação; apoiam decisão, não substituem contador/advogado real)
 - **`stories/ORD-xxx.md`** — contexto de cada issue implementada (credentials, JWT, bcrypt, QR, Alembic, Kong, etc.)
