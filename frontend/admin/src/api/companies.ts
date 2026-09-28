@@ -1,5 +1,5 @@
 import api from "../api";
-import type { CepLookupResult, CnpjLookupResult, Company, CompanyPlan, CompanyPlanHistory, CompanyStatusSummary, Contact, ContactType, FiscalConfig, FiscalConfigUpdate, LegalRepresentative, Terminal, User } from "../types";
+import type { CepLookupResult, CnpjLookupResult, Company, CompanyPartner, CompanyPartnerHistory, CompanyPlan, CompanyPlanHistory, CompanyStatusSummary, Contact, ContactType, FiscalConfig, FiscalConfigUpdate, LegalRepresentative, Terminal, User } from "../types";
 import { normalizeCnpj } from "../lib/validators";
 
 export async function lookupCnpj(cnpj: string): Promise<CnpjLookupResult> {
@@ -243,4 +243,29 @@ export async function updateContractStatus(
 export async function getContractDocumentUrl(companyId: number): Promise<string> {
   const r = await api.get<{ url: string }>(`/companies/${companyId}/contract-document-url`);
   return r.data.url;
+}
+
+// ORD-208 — parceiro (ORD-207) responsável por trazer esta empresa, opcional
+// e corrigível a qualquer momento (diferente de document/partner_type do
+// próprio Partner, que são imutáveis). platform-admin only.
+export async function getCompanyPartner(companyId: number): Promise<CompanyPartner> {
+  const r = await api.get<CompanyPartner>(`/companies/${companyId}/partner`);
+  return r.data;
+}
+
+export async function setCompanyPartner(
+  companyId: number,
+  partnerId: number | null,
+  note?: string
+): Promise<CompanyPartner> {
+  const r = await api.put<CompanyPartner>(`/companies/${companyId}/partner`, {
+    partner_id: partnerId,
+    note: note?.trim() || null,
+  });
+  return r.data;
+}
+
+export async function getCompanyPartnerHistory(companyId: number): Promise<CompanyPartnerHistory> {
+  const r = await api.get<CompanyPartnerHistory>(`/companies/${companyId}/partner/history`);
+  return r.data;
 }

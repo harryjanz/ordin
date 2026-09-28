@@ -637,6 +637,32 @@ export interface PartnerHistory {
   entries: PartnerHistoryEntry[];
 }
 
+// ORD-208 — parceiro (Partner, ORD-207) responsável por trazer uma empresa
+// cliente. Fato comercial corrigível (não identidade), editável a qualquer
+// momento. status é resolvido ao vivo (reflete se o parceiro foi desativado
+// depois do vínculo ter sido registrado).
+export interface CompanyPartnerRef {
+  id: number;
+  name: string;
+  status: "ativo" | "inativo";
+}
+
+export interface CompanyPartner {
+  partner: CompanyPartnerRef | null;
+}
+
+export interface CompanyPartnerHistoryEntry {
+  from_partner: CompanyPartnerRef | null;
+  to_partner: CompanyPartnerRef | null;
+  changed_by_user_id: number | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface CompanyPartnerHistory {
+  entries: CompanyPartnerHistoryEntry[];
+}
+
 // ORD-182 (A6) — cadastro simples de fornecedor, por empresa (não é catálogo
 // da plataforma, diferente de FiscalAddonPlan/PriceTable acima).
 // ORD-202 — contato comercial e responsável legal do fornecedor, 1:1.
