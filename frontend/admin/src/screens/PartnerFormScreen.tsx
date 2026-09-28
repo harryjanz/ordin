@@ -17,11 +17,12 @@ import styles from "./ComboFormScreen.module.scss";
 // document/partner_type/acceptance_reference são imutáveis depois de
 // criados (decisão do Tech Explorer) — por isso viram ReadOnlyField em modo
 // de edição, nunca um input editável.
-function ReadOnlyField({ label, value }: { label: string; value: string }) {
+function ReadOnlyField({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className={styles.formRowField}>
       <span className={styles.formLabel}>{label}</span>
       <div style={{ fontWeight: 700 }}>{value}</div>
+      {hint && <div className={styles.muted} style={{ fontSize: 12, marginTop: 2 }}>{hint}</div>}
     </div>
   );
 }
@@ -231,7 +232,11 @@ export default function PartnerFormScreen() {
               />
             </div>
           ) : (
-            <ReadOnlyField label="Tipo" value={partnerType === "PF" ? "Pessoa física" : "Pessoa jurídica"} />
+            <ReadOnlyField
+              label="Tipo"
+              value={partnerType === "PF" ? "Pessoa física" : "Pessoa jurídica"}
+              hint="Não pode ser alterado depois de criado"
+            />
           )}
           {editingId === null ? (
             <div className={styles.formRowField}>
@@ -244,7 +249,11 @@ export default function PartnerFormScreen() {
               />
             </div>
           ) : (
-            <ReadOnlyField label={partnerType === "PF" ? "CPF" : "CNPJ"} value={partnerType === "PF" ? formatCpf(document) : formatCnpj(document)} />
+            <ReadOnlyField
+              label={partnerType === "PF" ? "CPF" : "CNPJ"}
+              value={partnerType === "PF" ? formatCpf(document) : formatCnpj(document)}
+              hint="Identidade legal do parceiro — não pode ser alterada depois de criado"
+            />
           )}
         </div>
         <div className={styles.formRow}>
@@ -309,7 +318,11 @@ export default function PartnerFormScreen() {
           </>
         ) : (
           <div className={styles.formRow}>
-            <ReadOnlyField label="Referência do aceite" value={acceptanceReference} />
+            <ReadOnlyField
+              label="Referência do aceite"
+              value={acceptanceReference}
+              hint="Evidência original do aceite — não pode ser alterada depois de criado"
+            />
             <ReadOnlyField label="Termo aceito" value={`${partner?.accepted_term_version} — ${partner ? fmtDateTime(partner.accepted_at) : ""}`} />
           </div>
         )}
