@@ -69,13 +69,15 @@ molde visual de `PartnerListScreen.tsx`/`PartnerFormScreen.tsx` (mais próximo q
 ## Solução Técnica
 
 ### Serviços impactados
-- **`company-service`**: ajuste pequeno em `archive_commission_table` (ver Endpoints). Os outros 6
-  endpoints não mudam.
+- **`company-service`**: ajuste em `archive_commission_table` + **endpoint novo**
+  `GET /commercial/commission-tables/{id}` (ver Endpoints — nenhum dos dois estava previsto no
+  Tech Explorer original, os dois só apareceram testando a implementação de verdade). Os outros 6
+  endpoints do ORD-206 não mudam.
 - **`frontend/admin`**: 2 telas novas, 1 aba nova, 3 rotas novas.
 
 ### Endpoints
 
-Todos já existentes desde o ORD-206, exceto o ajuste marcado abaixo.
+Já existentes desde o ORD-206, exceto os dois ajustes marcados abaixo.
 
 #### POST /commercial/commission-tables
 **Auth:** platform-admin. Request: `{ name, setup_fee_per_totem, recurring_percent, note?, vigente_desde }`.
@@ -84,6 +86,14 @@ Todos já existentes desde o ORD-206, exceto o ajuste marcado abaixo.
 
 #### GET /commercial/commission-tables?archived=
 Response 200: `{ commission_tables: CommissionTableOut[] }`.
+
+#### GET /commercial/commission-tables/{id} — **NOVO, ADICIONADO NESTA HISTÓRIA**
+Faltava desde o ORD-206 — só existiam criar/listar/editar/set-default/archive/delete/histórico,
+nenhum GET de item único. Passou pelos repasses do ORD-207 e ORD-208 sem ninguém notar porque
+nenhuma tela tinha precisado carregar uma tabela específica pra edição até agora. O Tech Explorer
+desta história presumiu, por analogia com `get_partner`/`get_price_table`, que o endpoint já
+existia — só apareceu como 405 real ao testar `CommissionTableFormScreen` no browser. Mesmo padrão
+de `get_partner`: 404 se não existe, `_require_platform_admin`, retorna `CommissionTableOut`.
 
 #### PUT /commercial/commission-tables/{id}
 Mesmo body do POST. Gera uma entrada de histórico por campo que realmente mudou entre
@@ -166,9 +176,28 @@ Nenhum novo. `PartnerFormScreen.tsx` já consome `GET /commercial/commission-tab
    ação — tratado com `parseApiError`/`makeToast`, sem lock otimista adicional.
 
 ### Estimativa
-- Backend: ~1–1.5h (checagem de 4 linhas reaproveitando `_has_partner_linked` + 1 teste).
+- Backend: ~2–2.5h (checagem de 4 linhas reaproveitando `_has_partner_linked` + endpoint
+  `GET .../{id}` que faltava + 4 testes — ambos os achados só apareceram implementando).
 - Frontend: ~10–14h.
-- **Total: ~11–15.5h.**
+- **Total: ~12–16.5h.**
+
+### Achados testando ao vivo (não previstos no Tech Explorer)
+- **`GET /commercial/commission-tables/{id}` não existia** (ver Endpoints) — 405 real ao abrir o
+  formulário de edição pela primeira vez no browser.
+- **`% recorrente` com `NumberSpinInput`/`decimalDigits` reproduz a mesma armadilha já documentada
+  em `PriceTableFormScreen`**: digitar "3,5" vira "0,35" (mascaramento estilo centavos, não parsing
+  de decimal). Diferente do multiplicador do PriceTable, aqui não dá pra contornar limitando a
+  porcentagem a inteiros (comissão real tem casas decimais). Corrigido trocando por `InputBase` +
+  parser próprio (`parsePercent`, aceita vírgula ou ponto, valida 0–100).
+  Achado ao vivo digitando no formulário renderizado — não pega em typecheck nem em teste de API.
+- **Nota obrigatória não aparecia ao editar uma tabela não-padrão** — o hint client-side (repasse de
+  PM/Administrativo) só cobria a criação; a regra do backend (`not ct.is_default and not body.note`)
+  também se aplica a edição, e faltava o mesmo aviso lá. Corrigido computando `noteRequired` a
+  partir de `!t.is_default` no load de edição.
+- 4 testes de `test_ord171_ativo_ambiente_credenciais.py` (módulo fiscal, sem nenhuma relação com
+  esta história) falham mesmo isolados e sem nenhuma mudança desta história — falha pré-existente
+  do ambiente local de teste, não investigada a fundo (fora de escopo). Confirmar se falha também
+  em CI antes de considerar bloqueante pra outra história.
 
 ### Nota para história futura (não implementar agora)
 A futura história de fechamento mensal/cálculo de comissão vai precisar reconstruir "qual valor de

@@ -5039,6 +5039,29 @@ async def list_commission_tables(
     return {"commission_tables": [_serialize_commission_table(t) for t in tables]}
 
 
+@app.get(
+    "/commercial/commission-tables/{commission_table_id}",
+    response_model=CommissionTableOut,
+    tags=["Comercial"],
+    summary="Consultar tabela de comissão de parceiro",
+)
+async def get_commission_table(
+    commission_table_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # ORD-209 — endpoint que faltava desde o ORD-206 (só existiam
+    # criar/listar/editar/set-default/archive/delete/histórico, nenhum
+    # GET de item único). A tela de admin desta história precisa carregar
+    # uma tabela específica pra edição, mesmo padrão de get_partner (ORD-207)
+    # e get_price_table.
+    _require_platform_admin(current_user)
+    ct = await db.get(CommissionTable, commission_table_id)
+    if not ct:
+        raise HTTPException(404, "Tabela de comissão não encontrada")
+    return _serialize_commission_table(ct)
+
+
 @app.put(
     "/commercial/commission-tables/{commission_table_id}",
     response_model=CommissionTableOut,
@@ -5154,6 +5177,17 @@ async def archive_commission_table(
         raise HTTPException(404, "Tabela de comissão não encontrada")
     if ct.is_default:
         raise HTTPException(409, "Tabela padrão não pode ser arquivada — troque a padrão antes")
+    # ORD-209: mesma checagem que o DELETE já usa (_has_partner_linked, ORD-207)
+    # — sem isso, uma tabela "arquivada" continuava calculando comissão de
+    # parceiro ativo normalmente. Garante que arquivada = ninguém mais usa,
+    # premissa de que a tela de admin depende pra tratar tabela arquivada
+    # como somente-leitura sem checagem adicional.
+    if await _has_partner_linked(db, commission_table_id):
+        raise HTTPException(
+            409,
+            "Tabela está vinculada a ao menos um parceiro e não pode ser arquivada — "
+            "troque a tabela desse(s) parceiro(s) antes.",
+        )
     ct.archived_at = datetime.utcnow()
     await db.commit()
     await db.refresh(ct)
