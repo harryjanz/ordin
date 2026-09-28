@@ -213,6 +213,12 @@ class Company(Base):
     # modal "Ainda está aí?" antes do reset (não é tempo adicional, é uma
     # janela dentro do próprio inactivity_timeout_min). Default 30s.
     inactivity_warn_sec       = Column(Integer, nullable=False, default=30)
+    # ORD-208 — parceiro (Partner, ORD-207) responsável por trazer esta
+    # empresa, opcional. Sem ForeignKey real, mesmo padrão de integridade
+    # referencial em nível de aplicação do resto do serviço. Fato
+    # comercial corrigível (não identidade) — diferente de
+    # Partner.document/partner_type, que são imutáveis.
+    referred_by_partner_id   = Column(Integer, nullable=True, index=True)
 
 
 class User(Base):
@@ -585,6 +591,35 @@ class PartnerCommissionHistory(Base):
     to_commission_table_id      = Column(Integer, nullable=False)
     changed_by_user_id          = Column(Integer, nullable=True)
     created_at                  = Column(DateTime, default=datetime.utcnow)
+
+
+class CompanyPartnerHistory(Base):
+    # ORD-208: log append-only de toda TROCA de vínculo Company→Partner.
+    # from_partner_id/to_partner_id nullable nas duas pontas (null = "sem
+    # parceiro"). Diferente de PartnerCommissionHistory acima: aqui a
+    # atribuição INICIAL (empresa saindo de null pra ter um parceiro pela
+    # primeira vez) TAMBÉM gera histórico, porque Company já existe antes
+    # desta história e sempre parte de null de verdade — não é um estado
+    # implícito como is_default no ORD-206. Reconstrução de "qual parceiro
+    # valia em qual mês" (achado do repasse de Financeiro): percorrer o
+    # histórico em ordem; to_partner_id de cada entrada vale até a próxima
+    # (ou até agora, na última); zero entradas = empresa nunca teve
+    # parceiro. Mais simples que a reconstrução de PartnerCommissionHistory
+    # porque não existe o caso "zero entradas = valor atual vale desde
+    # sempre" — aqui zero entradas é sempre "nunca teve". note é opcional
+    # (achado do repasse de Administrativo) — diferente do
+    # acceptance_reference obrigatório do Partner (ORD-207), porque este
+    # vínculo não sustenta obrigação de pagamento por si só. Sem
+    # ForeignKey real, mesmo padrão de integridade referencial em nível de
+    # aplicação do resto do serviço.
+    __tablename__ = "company_partner_history"
+    id                    = Column(Integer, primary_key=True)
+    company_id            = Column(Integer, nullable=False, index=True)
+    from_partner_id       = Column(Integer, nullable=True)
+    to_partner_id         = Column(Integer, nullable=True)
+    changed_by_user_id    = Column(Integer, nullable=True)
+    note                  = Column(String(500), nullable=True)
+    created_at            = Column(DateTime, default=datetime.utcnow)
 
 
 async def get_db():
@@ -1451,6 +1486,35 @@ class PartnerHistoryEntryOut(BaseModel):
 
 class PartnerHistoryOut(BaseModel):
     entries: list[PartnerHistoryEntryOut]
+
+
+# ── Vínculo Company→Partner (ORD-208) ───────────────────────────────────────
+
+class CompanyPartnerRefOut(BaseModel):
+    id: int
+    name: str
+    status: str  # "ativo" | "inativo" — resolvido ao vivo, não armazenado
+
+
+class CompanyPartnerOut(BaseModel):
+    partner: CompanyPartnerRefOut | None  # null = empresa sem parceiro vinculado
+
+
+class CompanyPartnerSetIn(BaseModel):
+    partner_id: int | None
+    note: str | None = Field(default=None, max_length=500)
+
+
+class CompanyPartnerHistoryEntryOut(BaseModel):
+    from_partner: CompanyPartnerRefOut | None
+    to_partner: CompanyPartnerRefOut | None
+    changed_by_user_id: int | None
+    note: str | None
+    created_at: datetime
+
+
+class CompanyPartnerHistoryOut(BaseModel):
+    entries: list[CompanyPartnerHistoryEntryOut]
 
 
 class HealthOut(BaseModel):
@@ -5450,6 +5514,136 @@ async def get_partner_history(
                 "name": tables_by_id[e.to_commission_table_id].name,
             },
             "changed_by_user_id": e.changed_by_user_id,
+            "created_at": e.created_at,
+        }
+        for e in entries
+    ]}
+
+
+# ── Vínculo Company→Partner (ORD-208) ───────────────────────────────────────
+# Registra qual parceiro (Partner, ORD-207) trouxe cada empresa cliente —
+# peça que falta pro futuro cálculo de comissão saber a quem pagar. Fato
+# comercial corrigível (editável a qualquer momento), não identidade.
+# platform-admin only (_require_platform_admin, não _require_company_admin
+# como get_company_plan) — informação comercial interna, não deve vazar
+# pro cliente final.
+
+def _serialize_company_partner_ref(partner: Partner | None) -> dict | None:
+    if partner is None:
+        return None
+    return {
+        "id": partner.id,
+        "name": partner.name,
+        "status": "inativo" if partner.deactivated_at else "ativo",
+    }
+
+
+@app.get(
+    "/companies/{company_id}/partner",
+    response_model=CompanyPartnerOut,
+    tags=["Empresas"],
+    summary="Consultar parceiro vinculado à empresa",
+)
+async def get_company_partner(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    co = await db.get(Company, company_id)
+    if not co:
+        raise HTTPException(404, "Empresa não encontrada")
+    partner = None
+    if co.referred_by_partner_id is not None:
+        partner = await db.get(Partner, co.referred_by_partner_id)
+    return {"partner": _serialize_company_partner_ref(partner)}
+
+
+@app.put(
+    "/companies/{company_id}/partner",
+    response_model=CompanyPartnerOut,
+    tags=["Empresas"],
+    summary="Vincular, trocar ou remover o parceiro da empresa",
+)
+async def set_company_partner(
+    company_id: int,
+    body: CompanyPartnerSetIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    co = await db.get(Company, company_id)
+    if not co:
+        raise HTTPException(404, "Empresa não encontrada")
+
+    new_partner = None
+    if body.partner_id is not None:
+        new_partner = await db.get(Partner, body.partner_id)
+        if not new_partner:
+            raise HTTPException(404, "Parceiro não encontrado")
+
+    if co.referred_by_partner_id == body.partner_id:
+        # já é o vínculo atual (incluindo null==null) — no-op idempotente.
+        return {"partner": _serialize_company_partner_ref(new_partner)}
+
+    db.add(CompanyPartnerHistory(
+        company_id=co.id,
+        from_partner_id=co.referred_by_partner_id,
+        to_partner_id=body.partner_id,
+        changed_by_user_id=int(current_user.sub) if current_user.sub.isdigit() else None,
+        note=body.note,
+    ))
+    co.referred_by_partner_id = body.partner_id
+    await db.commit()
+    return {"partner": _serialize_company_partner_ref(new_partner)}
+
+
+@app.get(
+    "/companies/{company_id}/partner/history",
+    response_model=CompanyPartnerHistoryOut,
+    tags=["Empresas"],
+    summary="Consultar histórico de vínculos de parceiro da empresa",
+)
+async def get_company_partner_history(
+    company_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    co = await db.get(Company, company_id)
+    if not co:
+        raise HTTPException(404, "Empresa não encontrada")
+    result = await db.execute(
+        select(CompanyPartnerHistory)
+        .where(CompanyPartnerHistory.company_id == company_id)
+        .order_by(CompanyPartnerHistory.created_at.asc())
+    )
+    entries = result.scalars().all()
+
+    # from_partner_id/to_partner_id são nullable (diferente do padrão de
+    # get_partner_history do ORD-207, onde nunca são nulos) — filtra None
+    # antes de resolver em lote, e trata None explicitamente na montagem
+    # da resposta, senão quebra com KeyError.
+    partner_ids = {
+        pid for pid in ({e.from_partner_id for e in entries} | {e.to_partner_id for e in entries})
+        if pid is not None
+    }
+    partners_by_id: dict[int, Partner] = {}
+    if partner_ids:
+        partners_result = await db.execute(select(Partner).where(Partner.id.in_(partner_ids)))
+        partners_by_id = {p.id: p for p in partners_result.scalars().all()}
+
+    def _ref(partner_id: int | None) -> dict | None:
+        if partner_id is None:
+            return None
+        return _serialize_company_partner_ref(partners_by_id[partner_id])
+
+    return {"entries": [
+        {
+            "from_partner": _ref(e.from_partner_id),
+            "to_partner": _ref(e.to_partner_id),
+            "changed_by_user_id": e.changed_by_user_id,
+            "note": e.note,
             "created_at": e.created_at,
         }
         for e in entries

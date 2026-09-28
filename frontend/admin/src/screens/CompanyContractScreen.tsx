@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Alert, Button, Dropdown, InputBase, Tag, Upload, UploadListFiles, makeToast, type DropdownOptions, type UploadFile } from "design-system";
+import { Alert, Button, Dropdown, InputBase, Tag, TextArea, Upload, UploadListFiles, makeToast, type DropdownOptions, type UploadFile } from "design-system";
 import api from "../api";
-import { applyCompanyPlanTable, createContact, getCompany, getCompanyPlan, getCompanyPlanHistory, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, updateCompany, updateContractStatus, upsertLegalRepresentative } from "../api/companies";
+import { applyCompanyPlanTable, createContact, getCompany, getCompanyPartner, getCompanyPartnerHistory, getCompanyPlan, getCompanyPlanHistory, getContractDocumentUrl, getLegalRepresentative, listContacts, lookupCep, renewCompanyPlan, setCompanyPartner, updateCompany, updateContractStatus, upsertLegalRepresentative } from "../api/companies";
+import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import { formatCep, formatCnpj, formatCpf } from "../lib/masks";
 import { isValidCep, isValidCpf, normalizeCep, UF_VALUES } from "../lib/validators";
 import { companyToEditForm, diffFields, type CompanyEditForm } from "../lib/companyEdit";
 import { useStore } from "../store";
-import type { CepLookupResult, Company, CompanyPlan, CompanyPlanHistoryEntry, Contact, LegalRepresentative, PriceTableSummary } from "../types";
+import type { CepLookupResult, Company, CompanyPartnerHistoryEntry, CompanyPartnerRef, CompanyPlan, CompanyPlanHistoryEntry, Contact, LegalRepresentative, Partner, PriceTableSummary } from "../types";
 import styles from "./CompanyContractScreen.module.scss";
+
+// ORD-208 — sentinel de "nenhum parceiro" no Dropdown (não dá pra usar
+// null como value, mesmo padrão já usado em PriceTableListScreen pro
+// kind alternativa/promocional/nenhuma).
+const NO_PARTNER_VALUE = "";
 
 const STAGES = ["pendente", "enviado", "assinado"] as const;
 const STAGE_LABEL: Record<string, string> = { pendente: "Pendente", enviado: "Enviado", assinado: "Assinado" };
@@ -94,6 +100,17 @@ export default function CompanyContractScreen() {
   const [planHistory, setPlanHistory] = useState<CompanyPlanHistoryEntry[]>([]);
   const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
   const [applyingTable, setApplyingTable] = useState(false);
+  // ORD-208 — parceiro vinculado à empresa (fato comercial corrigível, não
+  // identidade — editável a qualquer momento, diferente de plano/tabela
+  // acima). availablePartners alimenta o Dropdown do modal, sempre só
+  // ativos (GET /commercial/partners já filtra por padrão).
+  const [companyPartner, setCompanyPartnerState] = useState<CompanyPartnerRef | null>(null);
+  const [partnerHistory, setPartnerHistory] = useState<CompanyPartnerHistoryEntry[]>([]);
+  const [availablePartners, setAvailablePartners] = useState<Partner[]>([]);
+  const [partnerDialogOpen, setPartnerDialogOpen] = useState(false);
+  const [selectedPartnerId, setSelectedPartnerId] = useState<string>(NO_PARTNER_VALUE);
+  const [partnerNote, setPartnerNote] = useState("");
+  const [savingPartner, setSavingPartner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -236,6 +253,24 @@ export default function CompanyContractScreen() {
     } catch {
       setPlanHistory([]);
     }
+    // ORD-208 — parceiro vinculado + histórico + lista de parceiros ativos
+    // pro seletor do modal. Mesmo padrão não-bloqueante das buscas acima.
+    try {
+      setCompanyPartnerState((await getCompanyPartner(companyId)).partner);
+    } catch {
+      setCompanyPartnerState(null);
+    }
+    try {
+      setPartnerHistory((await getCompanyPartnerHistory(companyId)).entries);
+    } catch {
+      setPartnerHistory([]);
+    }
+    try {
+      const r = await api.get("/commercial/partners");
+      setAvailablePartners(r.data.partners ?? []);
+    } catch {
+      setAvailablePartners([]);
+    }
   }
 
   useEffect(() => {
@@ -288,6 +323,28 @@ export default function CompanyContractScreen() {
       setPlanHistory((await getCompanyPlanHistory(companyId)).entries);
     } catch {
       // silencioso — não é motivo pra atrapalhar o toast de sucesso da ação principal
+    }
+  }
+
+  function openPartnerDialog() {
+    setSelectedPartnerId(companyPartner ? String(companyPartner.id) : NO_PARTNER_VALUE);
+    setPartnerNote("");
+    setPartnerDialogOpen(true);
+  }
+
+  async function confirmSetPartner() {
+    setSavingPartner(true);
+    try {
+      const partnerId = selectedPartnerId === NO_PARTNER_VALUE ? null : Number(selectedPartnerId);
+      const result = await setCompanyPartner(companyId, partnerId, partnerNote);
+      setCompanyPartnerState(result.partner);
+      setPartnerHistory((await getCompanyPartnerHistory(companyId)).entries);
+      makeToast("success", partnerId ? "Parceiro vinculado" : "Vínculo removido");
+      setPartnerDialogOpen(false);
+    } catch (err) {
+      makeToast("error", parseApiError(err).message);
+    } finally {
+      setSavingPartner(false);
     }
   }
 
@@ -820,6 +877,46 @@ export default function CompanyContractScreen() {
           </div>
 
           <div className={styles.panel}>
+            <h3 className={`${styles.h3} ${styles.h3Mb}`}>Parceiro</h3>
+            <div className={styles.contactsGrid}>
+              <div className={styles.miniCard}>
+                <div className={styles.miniType}>Vinculado atualmente</div>
+                <div className={styles.miniName}>
+                  {companyPartner ? (
+                    <>
+                      {companyPartner.name}
+                      {companyPartner.status === "inativo" && (
+                        <Tag variant="neutral"> Inativo</Tag>
+                      )}
+                    </>
+                  ) : "Nenhum parceiro vinculado"}
+                </div>
+              </div>
+            </div>
+            <div className={styles.actionsRow}>
+              <Button size="small" variant="secondary" onClick={openPartnerDialog}>
+                {companyPartner ? "Trocar parceiro" : "Vincular parceiro"}
+              </Button>
+            </div>
+            {partnerHistory.length > 0 && (
+              <div className={styles.mt14}>
+                <div className={styles.changeTableHeading}>Histórico de vínculos</div>
+                <Table
+                  variant="compact"
+                  columns={[
+                    { key: "created_at", header: "Quando", mono: true, render: (e: CompanyPartnerHistoryEntry) => fmtDate(e.created_at) },
+                    { key: "from", header: "De", render: (e: CompanyPartnerHistoryEntry) => e.from_partner?.name ?? "Nenhum" },
+                    { key: "to", header: "Para", render: (e: CompanyPartnerHistoryEntry) => e.to_partner?.name ?? "Nenhum" },
+                    { key: "note", header: "Nota", render: (e: CompanyPartnerHistoryEntry) => e.note ?? "—" },
+                  ]}
+                  rows={partnerHistory}
+                  rowKey={(e) => e.created_at}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className={styles.panel}>
             <h3 className={`${styles.h3} ${styles.h3Mb}`}>Contatos e responsável legal</h3>
             <div className={styles.contactsGrid}>
               <div className={styles.miniCard}>
@@ -841,6 +938,39 @@ export default function CompanyContractScreen() {
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        open={partnerDialogOpen}
+        title={companyPartner ? "Trocar parceiro" : "Vincular parceiro"}
+        message="A troca fica registrada no histórico de vínculos desta empresa."
+        confirmLabel="Confirmar"
+        onConfirm={confirmSetPartner}
+        onCancel={() => setPartnerDialogOpen(false)}
+        confirmDisabled={savingPartner}
+      >
+        <Dropdown
+          label="Parceiro"
+          options={[
+            { value: NO_PARTNER_VALUE, label: "Nenhum" },
+            ...availablePartners.map((p) => ({ value: String(p.id), label: p.name })),
+          ]}
+          value={(() => {
+            if (selectedPartnerId === NO_PARTNER_VALUE) return { value: NO_PARTNER_VALUE, label: "Nenhum" };
+            const p = availablePartners.find((p) => String(p.id) === selectedPartnerId);
+            return p ? { value: String(p.id), label: p.name } : null;
+          })()}
+          onValueSelected={(opt) => setSelectedPartnerId(opt.value)}
+        />
+        <div className={styles.mt14}>
+          <TextArea
+            label="Nota (opcional)"
+            placeholder="ex: confirmado com o parceiro por e-mail de 20/09"
+            value={partnerNote}
+            onChange={(e) => setPartnerNote(e.target.value)}
+            maxLength={500}
+          />
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }
