@@ -127,7 +127,9 @@ qualquer regra de "o que conta como uma ativação" além do vínculo simples de
 
 Todas as 5 linhas com as 4 colunas preenchidas. Nenhum passo cortado silenciosamente.
 
-## QA Explorer — cenários Gherkin (18 no total)
+## QA Explorer — cenários Gherkin (17 no total — contagem corrigida na implementação: a
+soma de "15 pós-repasse de PM + 3 do repasse de QA" foi rotulada como 18 por engano ao
+consolidar, o mesmo tipo de erro de contagem já visto no ORD-206; a lista real abaixo tem 17)
 
 ```gherkin
 Feature: Vínculo Company→Partner
@@ -387,7 +389,7 @@ N/A — tudo dentro do company-service e seu próprio frontend.
 - [x] Critérios de aceite rotulados por lente
 
 ### QA Explorer
-- [x] Happy path, bordas e erros em Gherkin (18 cenários)
+- [x] Happy path, bordas e erros em Gherkin (17 cenários)
 - [x] Acesso (403/401) coberto — isolamento multi-tenant é N/A, mesmo padrão de `CompanyContractScreen`
 - [x] Cenários aprovados pelo PM
 
