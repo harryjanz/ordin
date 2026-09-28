@@ -598,6 +598,16 @@ export interface CommissionTable {
   created_at: string;
 }
 
+// ORD-209 — histórico de alteração de VALOR de uma CommissionTable (não
+// confundir com PartnerHistoryEntry, que é troca de VÍNCULO parceiro↔tabela).
+export interface CommissionTableHistoryEntry {
+  field_changed: string;
+  old_value: string | null;
+  new_value: string | null;
+  changed_by_user_id: number | null;
+  created_at: string;
+}
+
 // ORD-207 — parceiro comercial (PF/PJ) vinculado a uma CommissionTable.
 // document/partner_type são imutáveis depois de criados (ver Tech Explorer)
 // — por isso não têm um "form de edição" que os altere, só exibição.
