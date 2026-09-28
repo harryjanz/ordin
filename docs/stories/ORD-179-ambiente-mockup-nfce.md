@@ -1,6 +1,6 @@
 ---
 id: ORD-179
-status: Ready
+status: Done
 estimativa: 3 pontos (2 backend + 1 frontend)
 fase: null
 sprint: null
