@@ -535,6 +535,58 @@ class CommissionTableHistory(Base):
     created_at            = Column(DateTime, default=datetime.utcnow)
 
 
+class Partner(Base):
+    # ORD-207: parceiro comercial (PF ou PJ) — dado de plataforma, sem
+    # company_id, mesmo padrão de CommissionTable. document é único em
+    # nível de BANCO (unique=True) + checado em nível de aplicação antes
+    # do INSERT pra devolver 422 com mensagem clara (mesmo padrão de
+    # create_company pra CNPJ duplicado). commission_table_id sem
+    # ForeignKey real, mesmo padrão de integridade referencial em nível
+    # de aplicação já usado no resto do serviço. document/partner_type
+    # são IMUTÁVEIS depois de criados (decisão do repasse de
+    # Administrativo — evita contaminar histórico de comissão com troca
+    # de identidade legal sem rastro), por isso não entram no
+    # PartnerUpdateIn. acceptance_reference é obrigatório (não opcional —
+    # correção do repasse de Financeiro): é a única evidência de uma
+    # obrigação de pagamento futura.
+    __tablename__ = "partners"
+    id                      = Column(Integer, primary_key=True)
+    name                    = Column(String(120), nullable=False)
+    partner_type            = Column(String(2), nullable=False)  # "PF" | "PJ"
+    document                = Column(String(20), nullable=False, unique=True, index=True)
+    email                   = Column(String(255), nullable=False)
+    phone                   = Column(String(20), nullable=False)
+    acceptance_reference    = Column(String(500), nullable=False)
+    commission_table_id     = Column(Integer, nullable=False, index=True)
+    accepted_term_version   = Column(String(10), nullable=False)
+    accepted_at             = Column(DateTime, nullable=False)
+    registered_by_user_id   = Column(Integer, nullable=True)
+    deactivated_at          = Column(DateTime, nullable=True)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+
+
+class PartnerCommissionHistory(Base):
+    # ORD-207: log append-only de TROCA de tabela de comissão vinculada a
+    # um parceiro — não registra a atribuição inicial na criação (mesma
+    # filosofia de CompanyPlanHistory, que só loga renew/apply, nunca a
+    # criação do CompanyPlan em si). Reconstrução de "qual tabela valia
+    # em qual mês" (achado do repasse de Financeiro, documentado aqui pra
+    # não ser rederivado errado na história de fechamento mensal): sem
+    # nenhuma entrada, Partner.commission_table_id atual vale desde
+    # Partner.created_at; com entradas, from_commission_table_id da mais
+    # antiga vale desde created_at até ela, e cada to_commission_table_id
+    # vale até a próxima troca (ou até agora, na última). Sem ForeignKey
+    # real pra partner_id, mesmo padrão de integridade referencial em
+    # nível de aplicação.
+    __tablename__ = "partner_commission_history"
+    id                          = Column(Integer, primary_key=True)
+    partner_id                  = Column(Integer, nullable=False, index=True)
+    from_commission_table_id    = Column(Integer, nullable=False)
+    to_commission_table_id      = Column(Integer, nullable=False)
+    changed_by_user_id          = Column(Integer, nullable=True)
+    created_at                  = Column(DateTime, default=datetime.utcnow)
+
+
 async def get_db():
     async with AsyncSessionLocal() as db:
         yield db
@@ -1334,6 +1386,71 @@ class CommissionTableHistoryEntryOut(BaseModel):
 
 class CommissionTableHistoryOut(BaseModel):
     entries: list[CommissionTableHistoryEntryOut]
+
+
+# ── Parceiros comerciais (ORD-207) ──────────────────────────────────────────
+
+class PartnerIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    partner_type: str = Field(pattern="^(PF|PJ)$")
+    document: str
+    email: str = Field(min_length=1, max_length=255)
+    phone: str = Field(min_length=1, max_length=20)
+    # Obrigatório (não opcional — correção do repasse de Financeiro):
+    # única evidência de uma obrigação de pagamento futura.
+    acceptance_reference: str = Field(min_length=10, max_length=500)
+    commission_table_id: int
+    confirm_clickwrap: bool = False
+
+
+class PartnerUpdateIn(BaseModel):
+    # document, partner_type e acceptance_reference NÃO entram aqui de
+    # propósito — imutáveis depois de criados (ver Partner, comentário no
+    # model).
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=1, max_length=255)
+    phone: str = Field(min_length=1, max_length=20)
+
+
+class PartnerCommissionTableChangeIn(BaseModel):
+    commission_table_id: int
+
+
+class PartnerCommissionTableOut(BaseModel):
+    id: int
+    name: str
+
+
+class PartnerOut(BaseModel):
+    id: int
+    name: str
+    partner_type: str
+    document: str
+    email: str
+    phone: str
+    acceptance_reference: str
+    commission_table: PartnerCommissionTableOut
+    status: str  # "ativo" | "inativo" — calculado de deactivated_at, nunca armazenado
+    accepted_term_version: str
+    accepted_at: datetime
+    registered_by_user_id: int | None
+    created_at: datetime
+    deactivated_at: datetime | None
+
+
+class PartnerListOut(BaseModel):
+    partners: list[PartnerOut]
+
+
+class PartnerHistoryEntryOut(BaseModel):
+    from_commission_table: PartnerCommissionTableOut
+    to_commission_table: PartnerCommissionTableOut
+    changed_by_user_id: int | None
+    created_at: datetime
+
+
+class PartnerHistoryOut(BaseModel):
+    entries: list[PartnerHistoryEntryOut]
 
 
 class HealthOut(BaseModel):
@@ -4774,6 +4891,17 @@ async def _has_commission_history(db: AsyncSession, commission_table_id: int) ->
     return result.scalar_one_or_none() is not None
 
 
+async def _has_partner_linked(db: AsyncSession, commission_table_id: int) -> bool:
+    # ORD-207: correção retroativa ao DELETE do ORD-206 — Partner não
+    # existia quando delete_commission_table foi implementado, então essa
+    # checagem faltava. Sem FK real, precisa ser checado em nível de
+    # aplicação, mesmo padrão de _has_commission_history acima.
+    result = await db.execute(
+        select(Partner.id).where(Partner.commission_table_id == commission_table_id).limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 def _add_commission_history(
     db: AsyncSession, *, commission_table_id: int, field_changed: str,
     old_value: str | None, new_value: str | None, actor: TokenPayload,
@@ -4990,6 +5118,12 @@ async def delete_commission_table(
             409,
             "Tabela já tem histórico de alterações e não pode ser excluída — use /archive.",
         )
+    if await _has_partner_linked(db, commission_table_id):
+        raise HTTPException(
+            409,
+            "Tabela está vinculada a ao menos um parceiro e não pode ser excluída — "
+            "troque a tabela desse(s) parceiro(s) antes, ou arquive esta tabela em vez de excluí-la.",
+        )
     await db.delete(ct)
     await db.commit()
 
@@ -5020,6 +5154,301 @@ async def get_commission_table_history(
             "field_changed": e.field_changed,
             "old_value": e.old_value,
             "new_value": e.new_value,
+            "changed_by_user_id": e.changed_by_user_id,
+            "created_at": e.created_at,
+        }
+        for e in entries
+    ]}
+
+
+# ── Parceiros comerciais (ORD-207) ──────────────────────────────────────────
+# Entidade Parceiro (PF/PJ) vinculada a uma CommissionTable (ORD-206). Dado
+# de plataforma, sem company_id. Cadastro/manutenção de comissão e cobrança
+# ao parceiro são histórias futuras — esta história só cria a entidade e o
+# vínculo com rastreabilidade suficiente pra elas.
+
+def _serialize_partner(partner: Partner, commission_table: CommissionTable) -> dict:
+    return {
+        "id": partner.id,
+        "name": partner.name,
+        "partner_type": partner.partner_type,
+        "document": partner.document,
+        "email": partner.email,
+        "phone": partner.phone,
+        "acceptance_reference": partner.acceptance_reference,
+        "commission_table": {"id": commission_table.id, "name": commission_table.name},
+        "status": "inativo" if partner.deactivated_at else "ativo",
+        "accepted_term_version": partner.accepted_term_version,
+        "accepted_at": partner.accepted_at,
+        "registered_by_user_id": partner.registered_by_user_id,
+        "created_at": partner.created_at,
+        "deactivated_at": partner.deactivated_at,
+    }
+
+
+async def _get_commission_table_or_404(db: AsyncSession, commission_table_id: int) -> CommissionTable:
+    ct = await db.get(CommissionTable, commission_table_id)
+    if not ct:
+        raise HTTPException(404, "Tabela de comissão não encontrada")
+    return ct
+
+
+def _validate_document_for_partner_type(partner_type: str, document: str) -> str:
+    # Validação cruzada tipo↔documento feita no handler, não em
+    # model_validator do Pydantic — mesma escolha do ORD-206 pra regras
+    # que dependem de outro campo do mesmo payload (sem precedente de
+    # model_validator cross-field neste arquivo).
+    if partner_type == "PF":
+        normalized = normalize_cpf(document)
+        if not is_valid_cpf(normalized):
+            raise HTTPException(422, "CPF inválido")
+    else:
+        normalized = normalize_cnpj(document)
+        if not is_valid_cnpj(normalized):
+            raise HTTPException(422, "CNPJ inválido")
+    return normalized
+
+
+@app.post(
+    "/commercial/partners",
+    status_code=201,
+    response_model=PartnerOut,
+    tags=["Comercial"],
+    summary="Cadastrar parceiro comercial",
+)
+async def create_partner(
+    body: PartnerIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    if not body.confirm_clickwrap:
+        raise HTTPException(422, "Aceite do contrato é obrigatório para cadastrar um parceiro")
+    document = _validate_document_for_partner_type(body.partner_type, body.document)
+    ct = await _get_commission_table_or_404(db, body.commission_table_id)
+    if ct.archived_at is not None:
+        raise HTTPException(422, "Não é possível vincular parceiro a uma tabela de comissão arquivada")
+
+    partner = Partner(
+        name=body.name,
+        partner_type=body.partner_type,
+        document=document,
+        email=body.email,
+        phone=body.phone,
+        acceptance_reference=body.acceptance_reference,
+        commission_table_id=ct.id,
+        accepted_term_version="v1",
+        accepted_at=datetime.utcnow(),
+        registered_by_user_id=int(current_user.sub) if current_user.sub.isdigit() else None,
+    )
+    db.add(partner)
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(422, "Documento já cadastrado para outro parceiro")
+    await db.refresh(partner)
+    return _serialize_partner(partner, ct)
+
+
+@app.get(
+    "/commercial/partners",
+    response_model=PartnerListOut,
+    tags=["Comercial"],
+    summary="Listar parceiros comerciais",
+)
+async def list_partners(
+    include_inactive: bool = False,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    query = select(Partner).order_by(Partner.created_at.desc())
+    if not include_inactive:
+        query = query.where(Partner.deactivated_at.is_(None))
+    result = await db.execute(query)
+    partners = result.scalars().all()
+
+    table_ids = {p.commission_table_id for p in partners}
+    tables_by_id: dict[int, CommissionTable] = {}
+    if table_ids:
+        tables_result = await db.execute(select(CommissionTable).where(CommissionTable.id.in_(table_ids)))
+        tables_by_id = {t.id: t for t in tables_result.scalars().all()}
+
+    return {"partners": [_serialize_partner(p, tables_by_id[p.commission_table_id]) for p in partners]}
+
+
+@app.get(
+    "/commercial/partners/{partner_id}",
+    response_model=PartnerOut,
+    tags=["Comercial"],
+    summary="Consultar parceiro comercial",
+)
+async def get_partner(
+    partner_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    partner = await db.get(Partner, partner_id)
+    if not partner:
+        raise HTTPException(404, "Parceiro não encontrado")
+    ct = await _get_commission_table_or_404(db, partner.commission_table_id)
+    return _serialize_partner(partner, ct)
+
+
+@app.put(
+    "/commercial/partners/{partner_id}",
+    response_model=PartnerOut,
+    tags=["Comercial"],
+    summary="Editar dados cadastrais do parceiro",
+)
+async def update_partner(
+    partner_id: int,
+    body: PartnerUpdateIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    partner = await db.get(Partner, partner_id)
+    if not partner:
+        raise HTTPException(404, "Parceiro não encontrado")
+    partner.name = body.name
+    partner.email = body.email
+    partner.phone = body.phone
+    await db.commit()
+    await db.refresh(partner)
+    ct = await _get_commission_table_or_404(db, partner.commission_table_id)
+    return _serialize_partner(partner, ct)
+
+
+@app.post(
+    "/commercial/partners/{partner_id}/commission-table",
+    response_model=PartnerOut,
+    tags=["Comercial"],
+    summary="Trocar a tabela de comissão vinculada ao parceiro",
+)
+async def change_partner_commission_table(
+    partner_id: int,
+    body: PartnerCommissionTableChangeIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    # Lock só na linha deste parceiro — a invariante aqui é por linha (1
+    # parceiro = 1 tabela), diferente da invariante global de is_default
+    # do CommissionTable, que precisa lockar todas as linhas. Ler
+    # commission_table_id DENTRO do lock corrige a race de "from" obsoleto
+    # em troca concorrente pro mesmo parceiro (achado do repasse de QA).
+    result = await db.execute(select(Partner).where(Partner.id == partner_id).with_for_update())
+    partner = result.scalar_one_or_none()
+    if not partner:
+        raise HTTPException(404, "Parceiro não encontrado")
+
+    new_table = await _get_commission_table_or_404(db, body.commission_table_id)
+    if new_table.archived_at is not None:
+        raise HTTPException(422, "Não é possível vincular parceiro a uma tabela de comissão arquivada")
+
+    if new_table.id == partner.commission_table_id:
+        # já é a tabela vinculada — no-op idempotente, sem histórico.
+        return _serialize_partner(partner, new_table)
+
+    db.add(PartnerCommissionHistory(
+        partner_id=partner.id,
+        from_commission_table_id=partner.commission_table_id,
+        to_commission_table_id=new_table.id,
+        changed_by_user_id=int(current_user.sub) if current_user.sub.isdigit() else None,
+    ))
+    partner.commission_table_id = new_table.id
+    await db.commit()
+    await db.refresh(partner)
+    return _serialize_partner(partner, new_table)
+
+
+@app.post(
+    "/commercial/partners/{partner_id}/deactivate",
+    response_model=PartnerOut,
+    tags=["Comercial"],
+    summary="Desativar parceiro comercial",
+)
+async def deactivate_partner(
+    partner_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    partner = await db.get(Partner, partner_id)
+    if not partner:
+        raise HTTPException(404, "Parceiro não encontrado")
+    if not partner.deactivated_at:
+        partner.deactivated_at = datetime.utcnow()
+        await db.commit()
+        await db.refresh(partner)
+    ct = await _get_commission_table_or_404(db, partner.commission_table_id)
+    return _serialize_partner(partner, ct)
+
+
+@app.post(
+    "/commercial/partners/{partner_id}/reactivate",
+    response_model=PartnerOut,
+    tags=["Comercial"],
+    summary="Reativar parceiro comercial",
+)
+async def reactivate_partner(
+    partner_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    partner = await db.get(Partner, partner_id)
+    if not partner:
+        raise HTTPException(404, "Parceiro não encontrado")
+    if partner.deactivated_at:
+        partner.deactivated_at = None
+        await db.commit()
+        await db.refresh(partner)
+    ct = await _get_commission_table_or_404(db, partner.commission_table_id)
+    return _serialize_partner(partner, ct)
+
+
+@app.get(
+    "/commercial/partners/{partner_id}/history",
+    response_model=PartnerHistoryOut,
+    tags=["Comercial"],
+    summary="Consultar histórico de troca de tabela de comissão do parceiro",
+)
+async def get_partner_history(
+    partner_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    _require_platform_admin(current_user)
+    partner = await db.get(Partner, partner_id)
+    if not partner:
+        raise HTTPException(404, "Parceiro não encontrado")
+    result = await db.execute(
+        select(PartnerCommissionHistory)
+        .where(PartnerCommissionHistory.partner_id == partner_id)
+        .order_by(PartnerCommissionHistory.created_at.asc())
+    )
+    entries = result.scalars().all()
+
+    table_ids = {e.from_commission_table_id for e in entries} | {e.to_commission_table_id for e in entries}
+    tables_by_id: dict[int, CommissionTable] = {}
+    if table_ids:
+        tables_result = await db.execute(select(CommissionTable).where(CommissionTable.id.in_(table_ids)))
+        tables_by_id = {t.id: t for t in tables_result.scalars().all()}
+
+    return {"entries": [
+        {
+            "from_commission_table": {
+                "id": e.from_commission_table_id,
+                "name": tables_by_id[e.from_commission_table_id].name,
+            },
+            "to_commission_table": {
+                "id": e.to_commission_table_id,
+                "name": tables_by_id[e.to_commission_table_id].name,
+            },
             "changed_by_user_id": e.changed_by_user_id,
             "created_at": e.created_at,
         }

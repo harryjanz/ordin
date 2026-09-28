@@ -582,6 +582,61 @@ export interface FiscalAddonPlanSummary {
   price_per_document: number;
 }
 
+// ORD-206 — tabela de comissão de parceiro (setup por totem + percentual
+// recorrente mensal), catálogo comercial da própria plataforma, mesmo padrão
+// de controle de PriceTable (role, não tenant). ORD-206 não teve nenhuma UI —
+// este tipo nasce junto com a primeira tela que consome a API (ORD-207).
+export interface CommissionTable {
+  id: number;
+  name: string;
+  is_default: boolean;
+  setup_fee_per_totem: number;
+  recurring_percent: number;
+  note: string | null;
+  vigente_desde: string;
+  archived_at: string | null;
+  created_at: string;
+}
+
+// ORD-207 — parceiro comercial (PF/PJ) vinculado a uma CommissionTable.
+// document/partner_type são imutáveis depois de criados (ver Tech Explorer)
+// — por isso não têm um "form de edição" que os altere, só exibição.
+export type PartnerType = "PF" | "PJ";
+export type PartnerStatus = "ativo" | "inativo";
+
+export interface PartnerCommissionTableRef {
+  id: number;
+  name: string;
+}
+
+export interface Partner {
+  id: number;
+  name: string;
+  partner_type: PartnerType;
+  document: string;
+  email: string;
+  phone: string;
+  acceptance_reference: string;
+  commission_table: PartnerCommissionTableRef;
+  status: PartnerStatus;
+  accepted_term_version: string;
+  accepted_at: string;
+  registered_by_user_id: number | null;
+  created_at: string;
+  deactivated_at: string | null;
+}
+
+export interface PartnerHistoryEntry {
+  from_commission_table: PartnerCommissionTableRef;
+  to_commission_table: PartnerCommissionTableRef;
+  changed_by_user_id: number | null;
+  created_at: string;
+}
+
+export interface PartnerHistory {
+  entries: PartnerHistoryEntry[];
+}
+
 // ORD-182 (A6) — cadastro simples de fornecedor, por empresa (não é catálogo
 // da plataforma, diferente de FiscalAddonPlan/PriceTable acima).
 // ORD-202 — contato comercial e responsável legal do fornecedor, 1:1.
