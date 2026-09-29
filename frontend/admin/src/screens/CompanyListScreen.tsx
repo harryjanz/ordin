@@ -173,6 +173,19 @@ export default function CompanyListScreen() {
       ),
     },
     {
+      // ORD-210 — quem indicou esta empresa (Company.referred_by_partner_id,
+      // ORD-208). "—" quando não tem parceiro. title nativo explica o
+      // caveat, mesmo padrão de PartnerListScreen (sem introduzir o
+      // componente Tooltip do design-system pela primeira vez só pra isso).
+      key: "referred_by_partner",
+      header: (
+        <span title="Vínculo atual — não usar para cálculo de comissão. O fechamento mensal reconstrói o vínculo histórico separadamente.">
+          Parceiro
+        </span>
+      ),
+      render: (c) => c.referred_by_partner?.name ?? "—",
+    },
+    {
       // ORD-176 — sinaliza certificado vencendo/vencido sem precisar abrir
       // cada empresa. Vazio pra maioria das linhas de propósito (módulo
       // inativo, validade normal, ou > 30 dias) — só chama atenção pra quem

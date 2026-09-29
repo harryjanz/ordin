@@ -57,6 +57,9 @@ export interface Company {
   // precisar abrir empresa por empresa. null = módulo fiscal inativo ou
   // validade ainda não conhecida (nada a monitorar); negativo = já venceu.
   certificado_dias_restantes?: number | null;
+  // ORD-210 — vínculo ATUAL (referred_by_partner_id), não histórico. Não
+  // usar pra cálculo de comissão — ver CompanyPartnerHistory pra isso.
+  referred_by_partner?: CompanyPartnerRef | null;
 }
 
 // ORD-115 — vídeo de modo espera (attract mode) do totem.
@@ -634,6 +637,22 @@ export interface Partner {
   registered_by_user_id: number | null;
   created_at: string;
   deactivated_at: string | null;
+  // ORD-210 — vínculo ATUAL (Company.referred_by_partner_id), não
+  // histórico. Não usar pra cálculo de comissão/fechamento mensal.
+  referred_companies_count: number;
+}
+
+// ORD-210 — item da lista nominal de empresas indicadas por um parceiro.
+export interface ReferredCompany {
+  id: number;
+  name: string;
+  document: string | null;
+  contract_status: string;
+  vinculado_desde: string | null;
+}
+
+export interface ReferredCompanies {
+  companies: ReferredCompany[];
 }
 
 export interface PartnerHistoryEntry {

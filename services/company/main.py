@@ -650,6 +650,15 @@ def _require_company_admin(u: TokenPayload, company_id: int) -> None:
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
+# ORD-208 — movido pra antes de CompanyOut porque o ORD-210 passou a usá-lo
+# ali também (referred_by_partner); sem `from __future__ import annotations`
+# neste módulo, o nome precisa existir antes do primeiro uso.
+class CompanyPartnerRefOut(BaseModel):
+    id: int
+    name: str
+    status: str  # "ativo" | "inativo" — resolvido ao vivo, não armazenado
+
+
 class CompanyOut(BaseModel):
     id: int
     name: str
@@ -695,6 +704,12 @@ class CompanyOut(BaseModel):
     # CompanyFiscalConfig, não coluna de Company. None quando módulo
     # inativo ou validade ainda não conhecida (nada a monitorar).
     certificado_dias_restantes: int | None = None
+    # ORD-210 — vínculo ATUAL (referred_by_partner_id), não coluna direta
+    # (é objeto aninhado com o nome do parceiro) — mesmo motivo de
+    # fiscal_module_ativo acima, montado manualmente em list_companies.
+    # Não usar pra cálculo de comissão de fechamento mensal (ver aviso em
+    # _count_referred_companies).
+    referred_by_partner: CompanyPartnerRefOut | None = None
     model_config = {"from_attributes": True}
 
 
@@ -1471,6 +1486,22 @@ class PartnerOut(BaseModel):
     registered_by_user_id: int | None
     created_at: datetime
     deactivated_at: datetime | None
+    # ORD-210 — vínculo ATUAL (Company.referred_by_partner_id), não histórico.
+    # Ver aviso em _count_referred_companies antes de reaproveitar em
+    # qualquer cálculo de comissão/fechamento mensal.
+    referred_companies_count: int
+
+
+class ReferredCompanyOut(BaseModel):
+    id: int
+    name: str
+    document: str | None
+    contract_status: str
+    vinculado_desde: datetime | None
+
+
+class ReferredCompaniesOut(BaseModel):
+    companies: list[ReferredCompanyOut]
 
 
 class PartnerListOut(BaseModel):
@@ -1489,12 +1520,9 @@ class PartnerHistoryOut(BaseModel):
 
 
 # ── Vínculo Company→Partner (ORD-208) ───────────────────────────────────────
-
-class CompanyPartnerRefOut(BaseModel):
-    id: int
-    name: str
-    status: str  # "ativo" | "inativo" — resolvido ao vivo, não armazenado
-
+# CompanyPartnerRefOut definido mais acima no arquivo (antes de CompanyOut,
+# que passou a referenciá-lo desde o ORD-210) — sem from __future__ import
+# annotations neste módulo, o nome precisa existir antes do primeiro uso.
 
 class CompanyPartnerOut(BaseModel):
     partner: CompanyPartnerRefOut | None  # null = empresa sem parceiro vinculado
@@ -1882,12 +1910,27 @@ async def list_companies(
         )
         fiscal_by_company = {cfg.company_id: cfg for cfg in fiscal_rows.scalars().all()}
 
+    # ORD-210 — mesmo padrão de resolução em lote acima (fiscal_by_company),
+    # aplicado ao parceiro que indicou cada empresa. Conjunto de ids
+    # distintos da página (pode ter vários parceiros diferentes ao mesmo
+    # tempo, achado do repasse de QA), um único IN.
+    partner_ids = {c.referred_by_partner_id for c in companies if c.referred_by_partner_id is not None}
+    partners_by_id: dict[int, Partner] = {}
+    if partner_ids:
+        partners_result = await db.execute(select(Partner).where(Partner.id.in_(partner_ids)))
+        partners_by_id = {p.id: p for p in partners_result.scalars().all()}
+
     companies_out = []
     for c in companies:
         data = {col.name: getattr(c, col.name) for col in Company.__table__.columns}
         cfg = fiscal_by_company.get(c.id)
         data["fiscal_module_ativo"] = bool(cfg and cfg.ativo)
         data["certificado_dias_restantes"] = _certificado_dias_restantes(cfg) if (cfg and cfg.ativo) else None
+        partner = partners_by_id.get(c.referred_by_partner_id) if c.referred_by_partner_id else None
+        data["referred_by_partner"] = (
+            {"id": partner.id, "name": partner.name, "status": "inativo" if partner.deactivated_at else "ativo"}
+            if partner else None
+        )
         companies_out.append(data)
 
     return {"companies": companies_out, "total": total, "summary": summary}
@@ -5265,7 +5308,7 @@ async def get_commission_table_history(
 # ao parceiro são histórias futuras — esta história só cria a entidade e o
 # vínculo com rastreabilidade suficiente pra elas.
 
-def _serialize_partner(partner: Partner, commission_table: CommissionTable) -> dict:
+def _serialize_partner(partner: Partner, commission_table: CommissionTable, referred_companies_count: int) -> dict:
     return {
         "id": partner.id,
         "name": partner.name,
@@ -5281,7 +5324,24 @@ def _serialize_partner(partner: Partner, commission_table: CommissionTable) -> d
         "registered_by_user_id": partner.registered_by_user_id,
         "created_at": partner.created_at,
         "deactivated_at": partner.deactivated_at,
+        "referred_companies_count": referred_companies_count,
     }
+
+
+async def _count_referred_companies(db: AsyncSession, partner_id: int) -> int:
+    # ORD-210. ATENÇÃO — futuro dev de fechamento mensal: este count é o
+    # vínculo ATUAL (Company.referred_by_partner_id), não serve pra
+    # calcular comissão de mês fechado. Pra isso, reconstruir via
+    # CompanyPartnerHistory (ver nota no doc do ORD-209/210) — uma empresa
+    # pode ter trocado de parceiro DEPOIS do mês que está sendo fechado.
+    # Company.active == True — consistente com list_companies, que já
+    # esconde empresa inativa de toda listagem do admin.
+    result = await db.execute(
+        select(func.count())
+        .select_from(Company)
+        .where(Company.referred_by_partner_id == partner_id, Company.active == True)
+    )
+    return result.scalar_one()
 
 
 async def _get_commission_table_or_404(db: AsyncSession, commission_table_id: int) -> CommissionTable:
@@ -5346,7 +5406,10 @@ async def create_partner(
         await db.rollback()
         raise HTTPException(422, "Documento já cadastrado para outro parceiro")
     await db.refresh(partner)
-    return _serialize_partner(partner, ct)
+    # Parceiro recém-criado nunca pode ter empresa indicada ainda — 0
+    # literal, sem query (diferente dos outros endpoints, que editam um
+    # parceiro que já pode ter vínculos).
+    return _serialize_partner(partner, ct, 0)
 
 
 @app.get(
@@ -5373,7 +5436,22 @@ async def list_partners(
         tables_result = await db.execute(select(CommissionTable).where(CommissionTable.id.in_(table_ids)))
         tables_by_id = {t.id: t for t in tables_result.scalars().all()}
 
-    return {"partners": [_serialize_partner(p, tables_by_id[p.commission_table_id]) for p in partners]}
+    # ORD-210 — mesmo padrão de resolução em lote de table_ids acima,
+    # aplicado à contagem de empresas indicadas por parceiro.
+    partner_ids = [p.id for p in partners]
+    counts_by_partner: dict[int, int] = {}
+    if partner_ids:
+        count_rows = await db.execute(
+            select(Company.referred_by_partner_id, func.count())
+            .where(Company.referred_by_partner_id.in_(partner_ids), Company.active == True)
+            .group_by(Company.referred_by_partner_id)
+        )
+        counts_by_partner = dict(count_rows.all())
+
+    return {"partners": [
+        _serialize_partner(p, tables_by_id[p.commission_table_id], counts_by_partner.get(p.id, 0))
+        for p in partners
+    ]}
 
 
 @app.get(
@@ -5392,7 +5470,60 @@ async def get_partner(
     if not partner:
         raise HTTPException(404, "Parceiro não encontrado")
     ct = await _get_commission_table_or_404(db, partner.commission_table_id)
-    return _serialize_partner(partner, ct)
+    return _serialize_partner(partner, ct, await _count_referred_companies(db, partner.id))
+
+
+@app.get(
+    "/commercial/partners/{partner_id}/companies",
+    response_model=ReferredCompaniesOut,
+    tags=["Comercial"],
+    summary="Consultar empresas indicadas por um parceiro",
+)
+async def get_partner_referred_companies(
+    partner_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: TokenPayload = Depends(get_current_user),
+):
+    # ORD-210. Sem paginação — volume atual do produto não justifica
+    # (mesmo racional de linkedCompanies em PriceTableFormScreen, ORD-167).
+    _require_platform_admin(current_user)
+    partner = await db.get(Partner, partner_id)
+    if not partner:
+        raise HTTPException(404, "Parceiro não encontrado")
+
+    result = await db.execute(
+        select(Company)
+        .where(Company.referred_by_partner_id == partner_id, Company.active == True)
+        .order_by(Company.name)
+    )
+    companies = result.scalars().all()
+
+    # vinculado_desde = created_at da entrada mais recente do histórico
+    # pra cada empresa (achado do repasse de Financeiro — poupa
+    # retrabalho na futura história de fechamento mensal). Uma query por
+    # empresa é aceitável no volume atual (poucas dezenas, sem paginação).
+    vinculado_desde_by_company: dict[int, datetime] = {}
+    for c in companies:
+        latest = await db.execute(
+            select(CompanyPartnerHistory.created_at)
+            .where(CompanyPartnerHistory.company_id == c.id, CompanyPartnerHistory.to_partner_id == partner_id)
+            .order_by(CompanyPartnerHistory.created_at.desc())
+            .limit(1)
+        )
+        row = latest.scalar_one_or_none()
+        if row is not None:
+            vinculado_desde_by_company[c.id] = row
+
+    return {"companies": [
+        {
+            "id": c.id,
+            "name": c.name,
+            "document": c.document,
+            "contract_status": c.contract_status,
+            "vinculado_desde": vinculado_desde_by_company.get(c.id),
+        }
+        for c in companies
+    ]}
 
 
 @app.put(
@@ -5417,7 +5548,7 @@ async def update_partner(
     await db.commit()
     await db.refresh(partner)
     ct = await _get_commission_table_or_404(db, partner.commission_table_id)
-    return _serialize_partner(partner, ct)
+    return _serialize_partner(partner, ct, await _count_referred_companies(db, partner.id))
 
 
 @app.post(
@@ -5449,7 +5580,7 @@ async def change_partner_commission_table(
 
     if new_table.id == partner.commission_table_id:
         # já é a tabela vinculada — no-op idempotente, sem histórico.
-        return _serialize_partner(partner, new_table)
+        return _serialize_partner(partner, new_table, await _count_referred_companies(db, partner.id))
 
     db.add(PartnerCommissionHistory(
         partner_id=partner.id,
@@ -5460,7 +5591,7 @@ async def change_partner_commission_table(
     partner.commission_table_id = new_table.id
     await db.commit()
     await db.refresh(partner)
-    return _serialize_partner(partner, new_table)
+    return _serialize_partner(partner, new_table, await _count_referred_companies(db, partner.id))
 
 
 @app.post(
@@ -5483,7 +5614,7 @@ async def deactivate_partner(
         await db.commit()
         await db.refresh(partner)
     ct = await _get_commission_table_or_404(db, partner.commission_table_id)
-    return _serialize_partner(partner, ct)
+    return _serialize_partner(partner, ct, await _count_referred_companies(db, partner.id))
 
 
 @app.post(
@@ -5506,7 +5637,7 @@ async def reactivate_partner(
         await db.commit()
         await db.refresh(partner)
     ct = await _get_commission_table_or_404(db, partner.commission_table_id)
-    return _serialize_partner(partner, ct)
+    return _serialize_partner(partner, ct, await _count_referred_companies(db, partner.id))
 
 
 @app.get(
