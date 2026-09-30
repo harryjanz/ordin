@@ -68,6 +68,20 @@ export default function PartnerListScreen() {
     { key: "document", header: "Documento", mono: true, render: (p) => maskDocument(p) },
     { key: "commission_table", header: "Tabela de comissão", render: (p) => p.commission_table.name },
     {
+      // ORD-210 — title nativo (não o componente Tooltip do design-system,
+      // que exigiria wiring de ref/estado sem nenhum uso prévio no admin
+      // pra uma dica cosmética) explica o caveat sem esconder informação
+      // atrás de um componente novo e não testado no projeto.
+      key: "referred_companies_count",
+      header: (
+        <span title="Vínculo atual — não usar para cálculo de comissão. O fechamento mensal reconstrói o vínculo histórico separadamente.">
+          Empresas indicadas
+        </span>
+      ),
+      mono: true,
+      render: (p) => p.referred_companies_count,
+    },
+    {
       key: "status", header: "Status",
       render: (p) => <Tag variant={STATUS_VARIANT[p.status]}>{p.status === "ativo" ? "Ativo" : "Inativo"}</Tag>,
     },

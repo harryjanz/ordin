@@ -7,7 +7,7 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import { formatCnpj, formatCpf, formatPhone } from "../lib/masks";
 import { isValidCnpj, isValidCpf, normalizeCnpj, normalizeCpf } from "../lib/validators";
 import { parseApiError } from "../lib/apiErrors";
-import type { CommissionTable, Partner, PartnerHistoryEntry, PartnerType } from "../types";
+import type { CommissionTable, Partner, PartnerHistoryEntry, PartnerType, ReferredCompany } from "../types";
 // ORD-207 — mesmo racional já registrado em PriceTableFormScreen/
 // FiscalAddonPlanFormScreen/SupplierFormScreen: sem componente genérico de
 // formulário compartilhado pra este tipo de tela, reaproveita o mesmo
@@ -56,6 +56,7 @@ export default function PartnerFormScreen() {
 
   const [commissionTables, setCommissionTables] = useState<CommissionTable[]>([]);
   const [history, setHistory] = useState<PartnerHistoryEntry[]>([]);
+  const [referredCompanies, setReferredCompanies] = useState<ReferredCompany[]>([]);
   const [changeTableTarget, setChangeTableTarget] = useState<number | null>(null);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
 
@@ -97,6 +98,15 @@ export default function PartnerFormScreen() {
 
         const h = await api.get<{ entries: PartnerHistoryEntry[] }>(`/commercial/partners/${editingId}/history`);
         if (!cancelled) setHistory(h.data.entries ?? []);
+
+        // ORD-210 — não bloqueia o load principal se falhar (mesmo padrão
+        // best-effort de loadCommissionTables acima).
+        try {
+          const rc = await api.get<{ companies: ReferredCompany[] }>(`/commercial/partners/${editingId}/companies`);
+          if (!cancelled) setReferredCompanies(rc.data.companies ?? []);
+        } catch {
+          if (!cancelled) setReferredCompanies([]);
+        }
       } catch {
         if (!cancelled) setLoadError("Erro ao carregar parceiro.");
       } finally {
@@ -340,6 +350,28 @@ export default function PartnerFormScreen() {
                   <div className={styles.comboItemInfo}>
                     <span>{entry.from_commission_table.name} → {entry.to_commission_table.name}</span>
                     <Tag variant="neutral">{fmtDateTime(entry.created_at)}</Tag>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {editingId !== null && (
+        <div className={styles.panel}>
+          <h2 className={styles.h2} title="Vínculo atual — não usar para cálculo de comissão. O fechamento mensal reconstrói o vínculo histórico separadamente.">
+            Empresas indicadas
+          </h2>
+          {referredCompanies.length === 0 ? (
+            <div className={styles.searchEmpty}>Este parceiro ainda não indicou nenhuma empresa.</div>
+          ) : (
+            <div className={styles.comboItemsBox}>
+              {referredCompanies.map((c) => (
+                <div key={c.id} className={styles.comboItemRow}>
+                  <div className={styles.comboItemInfo}>
+                    <span>{c.name}</span>
+                    {c.vinculado_desde && <Tag variant="neutral">vinculado desde {fmtDateTime(c.vinculado_desde)}</Tag>}
                   </div>
                 </div>
               ))}
