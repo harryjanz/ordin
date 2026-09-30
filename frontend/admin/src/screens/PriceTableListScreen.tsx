@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, Dropdown, Tag, makeToast, type DropdownOptions } from "design-system";
+import { Alert, Button, Dropdown, InputBase, Tag, makeToast, type DropdownOptions } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import type { PriceTableKind, PriceTableStatus, PriceTableSummary } from "../types";
+// ORD-211 — mesmo stylesheet reaproveitado por PartnerListScreen/
+// CommissionTableListScreen/CatalogScreen (.filterBar: caixa branca com borda).
+import styles from "./CompanyScreen.module.scss";
 
 // ORD-162 — CRUD de tabela de preço comercial da plataforma (superadmin/
 // admin). Não confundir com CompanyContractScreen ("/companies/:id/contract"),
@@ -40,9 +43,36 @@ const KIND_OPTIONS: DropdownOptions[] = [
   { value: "promocional", label: "Promocional" },
 ];
 
+// ORD-211 — filtros de listagem (Status/Categoria), independentes do modal
+// de categoria acima (que edita o dado, não filtra a lista) — "todos" é o
+// estado neutro (sem filtro), diferente de KIND_OPTIONS onde "" representa
+// null como valor de fato salvável.
+export type PriceTableStatusFilter = "todos" | PriceTableStatus;
+export type PriceTableKindFilter = "todos" | "sem_categoria" | "alternativa" | "promocional";
+
+const STATUS_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "todos", label: "Todos" },
+  { value: "draft", label: "Rascunho" },
+  { value: "active", label: "Vigente" },
+  { value: "historical", label: "Histórica" },
+];
+
+const KIND_FILTER_OPTIONS: DropdownOptions[] = [
+  { value: "todos", label: "Todas" },
+  { value: "sem_categoria", label: "Sem categoria" },
+  { value: "alternativa", label: "Alternativa" },
+  { value: "promocional", label: "Promocional" },
+];
+
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("pt-BR");
+}
+
+// ORD-211 — extraída como função pura testável (mesmo racional de
+// buildCompanyListQuery em api/companies.ts), separada do componente.
+export function matchesPriceTableSearch(table: PriceTableSummary, search: string): boolean {
+  return table.name.toLowerCase().includes(search.toLowerCase());
 }
 
 export default function PriceTableListScreen() {
@@ -50,6 +80,12 @@ export default function PriceTableListScreen() {
   const [tables, setTables] = useState<PriceTableSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // ORD-211 — client-side: nenhum dos 4 endpoints de Comercial pagina hoje
+  // (lista inteira sempre carregada), então filtrar em memória evita
+  // endpoint novo e round-trip a cada tecla. Sem debounce — não há I/O.
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<PriceTableStatusFilter>("todos");
+  const [kindFilter, setKindFilter] = useState<PriceTableKindFilter>("todos");
   const [confirmState, setConfirmState] = useState<{ message: string; onConfirm: () => void } | null>(null);
   // ORD-164 (ajuste de UX pós-feedback) — select solto na linha da tabela
   // trocado por modal com confirmação explícita, mesmo padrão já usado nas
@@ -143,7 +179,20 @@ export default function PriceTableListScreen() {
     });
   }
 
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("todos");
+    setKindFilter("todos");
+  }
+
   const hasCurrentActive = tables.some((t) => t.status === "active");
+  const filteredTables = tables.filter((t) => {
+    if (statusFilter !== "todos" && t.status !== statusFilter) return false;
+    if (kindFilter === "sem_categoria" && t.kind !== null) return false;
+    if ((kindFilter === "alternativa" || kindFilter === "promocional") && t.kind !== kindFilter) return false;
+    return matchesPriceTableSearch(t, search);
+  });
+  const hasActiveFilters = search.length > 0 || statusFilter !== "todos" || kindFilter !== "todos";
 
   const columns: TableColumn<PriceTableSummary>[] = [
     { key: "name", header: "Nome", render: (t) => t.name },
@@ -197,8 +246,33 @@ export default function PriceTableListScreen() {
   return (
     <>
       {/* ORD-174 (revisão) — página/título ficaram por conta de CommercialScreen
-          (aba compartilhada com Módulo fiscal); aqui só o botão de criar. */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+          (aba compartilhada com Módulo fiscal); aqui só o botão de criar.
+          ORD-211 — mesma caixa branca de filtro do Catálogo (.filterBar),
+          Status/Categoria como Dropdown reaproveitando os campos já
+          existentes na entidade (PriceTableStatus, kind). */}
+      <div className={styles.filterBar}>
+        <InputBase
+          label="Buscar"
+          placeholder="Nome…"
+          icon="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Dropdown
+          label="Status"
+          options={STATUS_FILTER_OPTIONS}
+          value={STATUS_FILTER_OPTIONS.find((o) => o.value === statusFilter) ?? STATUS_FILTER_OPTIONS[0]}
+          onValueSelected={(opt) => setStatusFilter(opt.value as PriceTableStatusFilter)}
+        />
+        <Dropdown
+          label="Categoria"
+          options={KIND_FILTER_OPTIONS}
+          value={KIND_FILTER_OPTIONS.find((o) => o.value === kindFilter) ?? KIND_FILTER_OPTIONS[0]}
+          onValueSelected={(opt) => setKindFilter(opt.value as PriceTableKindFilter)}
+        />
+        <Button type="button" variant="secondary" onClick={clearFilters} disabled={!hasActiveFilters}>
+          Limpar filtros
+        </Button>
         <Button onClick={() => navigate("/commercial/price-tables/new")}>+ Nova tabela</Button>
       </div>
 
@@ -208,9 +282,11 @@ export default function PriceTableListScreen() {
         <Table
           variant="compact"
           columns={columns}
-          rows={tables}
+          rows={filteredTables}
           rowKey={(t) => t.id}
-          emptyMessage={loading ? "Carregando…" : "Nenhuma tabela de preço cadastrada ainda."}
+          emptyMessage={
+            loading ? "Carregando…" : search ? "Nenhuma tabela encontrada." : "Nenhuma tabela de preço cadastrada ainda."
+          }
         />
       )}
 

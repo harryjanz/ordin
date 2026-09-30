@@ -4,8 +4,14 @@
 
 ## História
 Como Administrativo/Financeiro da Ordin, quero buscar por nome (e documento, no caso de
-Parceiros) nas 4 listagens de Comercial, para encontrar um item rapidamente quando o volume
-crescer.
+Parceiros) e filtrar por status/categoria nas 4 listagens de Comercial, dentro da mesma caixa de
+filtro visual já usada no Catálogo, para encontrar um item rapidamente quando o volume crescer.
+
+> **Nota de escopo (pós-Ready):** o desenho original desta história (abaixo, na íntegra) cobria só
+> busca por texto. Durante a implementação, feedback direto do usuário ampliou o escopo pra incluir
+> a caixa de filtro visual (`.filterBar`, mesmo componente do Catálogo), filtros de Status/Categoria
+> como `Dropdown`, e o botão "Limpar filtros" — ver seção **Revisão pós-Ready** ao final deste
+> documento pra o desenho final realmente implementado.
 
 ## Contexto e motivação
 Nenhuma das 4 abas de `CommercialScreen.tsx` (Tabela de preço, Módulo fiscal, Parceiros, Tabelas
@@ -136,3 +142,75 @@ precisa dos 5 repasses por padrão).
 
 Fora de escopo (paginação/filtro server-side) — decisão explícita, registrada como nota, não
 omissão.
+
+---
+
+## Revisão pós-Ready — filterBar + Dropdown de Status/Categoria + Limpar filtros
+
+Feedback do usuário durante a implementação (depois do "vai pra Ready e implementa") ampliou o
+desenho original. Registrado aqui em vez de reabrir o upstream porque é refinamento de UI sobre a
+mesma história, sem novo endpoint nem mudança de regra de negócio.
+
+### O que mudou
+1. **Caixa de filtro visual** — as 4 telas ganharam a mesma `.filterBar` (caixa branca com borda,
+   grid responsivo) já usada em `CatalogScreen.tsx`/`CompanyScreen.tsx`, via
+   `import styles from "./CompanyScreen.module.scss"` (nenhuma das 4 telas importava CSS module
+   antes — só `style={{}}` inline).
+2. **Filtros de Status/Categoria ampliados** (pedido explícito do usuário: "amplie oportunidades de
+   filtros como status, categoria, ativos e inativos"), usando campos que já existiam nas
+   entidades:
+   - **Parceiros**: Status vira `Dropdown` de 3 estados (Ativos/Inativos/Todos) — antes só um
+     checkbox binário "mostrar inativos" (sem estado "só inativos").
+   - **Tabelas de comissão**: Status vira `Dropdown` de 3 estados (Ativas/Arquivadas/Todas) —
+     mesma lacuna do checkbox binário original.
+   - **Tabela de preço**: ganhou 2 `Dropdown` novos que não existiam — Status (Todos/Rascunho/
+     Vigente/Histórica, usando o `PriceTableStatus` já existente) e Categoria (Todas/Sem categoria/
+     Alternativa/Promocional, usando o campo `kind` já existente, mesmo dado que já aparecia como
+     coluna "Categoria" na tabela).
+   - **Módulo fiscal**: só ganhou a `.filterBar` — `FiscalAddonPlan` não tem campo de status nem
+     categoria, não há o que filtrar além do nome.
+3. **Botão "Limpar filtros"** — pedido à parte ("faltou o botão limpar filtros também"), ao lado do
+   botão "+ Novo X", habilitado só quando existe algum filtro ativo (`hasActiveFilters`), resetando
+   busca + todos os dropdowns pro estado neutro.
+
+### Decisão revertida em tempo real: Tabs → Dropdown
+A primeira instrução do usuário foi explícita: status "não como chackbox e select". Implementei
+como `Tabs` (segmented control), componente do design-system nunca usado antes como filtro inline
+de listagem (só como navegação de seção, ex.: as próprias abas de `CommercialScreen.tsx`).
+Verificado ao vivo, funcionando, em `PartnerListScreen.tsx`.
+
+O usuário então contestou a própria instrução anterior: "sério qeu vc colocou estilo aba para ativo
+e inativos, qual o problema de colocar um campo select?". Como isso contradizia diretamente o que
+foi pedido antes, resolvi com `AskUserQuestion` em vez de adivinhar — resposta confirmada:
+**Dropdown/select, não Tabs**. As 4 telas foram implementadas (ou revertidas, no caso de
+`PartnerListScreen.tsx`) para `Dropdown`, consistente com o padrão já usado em `CatalogScreen.tsx`
+pros mesmos tipos de filtro.
+
+### Semântica de 3 estados sobre endpoints binários
+Nenhum dos 2 endpoints com toggle (`list_partners`/`include_inactive`,
+`list_commission_tables`/`archived`) tem um modo nativo "só inativos"/"só arquivadas" — os dois só
+sabem responder "com ou sem" o registro inativo/arquivado junto dos ativos. O terceiro estado do
+Dropdown ("Inativos"/"Arquivadas" isoladamente) é resolvido com filtro client-side adicional sobre
+a resposta que já inclui todos os registros (`params: { include_inactive: filter !== "ativos" }` /
+`{ archived: filter !== "ativas" }`, seguido de `.filter()` no array retornado).
+
+### Critérios de aceite adicionados
+- [x] As 4 telas têm a mesma caixa de filtro visual (`.filterBar`) do Catálogo
+- [x] Parceiros e Tabelas de comissão têm filtro de Status com 3 estados via Dropdown (incluindo
+      "só inativos"/"só arquivadas", que o checkbox binário original não permitia)
+- [x] Tabela de preço tem filtro de Status (4 estados) e Categoria (4 estados) via Dropdown
+- [x] Botão "Limpar filtros" presente nas 4 telas, desabilitado quando não há filtro ativo, reseta
+      busca + todos os dropdowns
+
+### Testes
+Sem mudança na estratégia — os testes de componente (Vitest) continuam cobrindo só as funções
+puras de busca por texto (`matchesXSearch`), que não mudaram. A lógica de filtro por
+status/categoria é comparação de campo simples (`t.status === filter`), inline no componente, sem
+justificar extração pra função pura testável separada (diferente da normalização de documento em
+Parceiros, que tinha lógica real o suficiente pra valer a pena). Verificação de Status/Categoria
+feita via browser ao vivo nas 4 telas (evidência abaixo).
+
+### Evidências
+`docs/stories/ORD-211/evidencias/manual/` — 1 print por tela (`parceiros-filtros.jpg`,
+`tabela-preco-filtros.jpg`, `modulo-fiscal-filtros.jpg`, `tabelas-comissao-filtros.jpg`),
+substituindo o print único genérico previsto no desenho original.

@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Button, makeToast } from "design-system";
+import { Alert, Button, InputBase, makeToast } from "design-system";
 import api from "../api";
 import ConfirmDialog from "../components/ConfirmDialog";
 import Table, { type TableColumn } from "../components/Table";
 import { parseApiError } from "../lib/apiErrors";
 import type { FiscalAddonPlan } from "../types";
+// ORD-211 — mesmo stylesheet reaproveitado pelas outras 3 telas de Comercial
+// (.filterBar: caixa branca com borda).
+import styles from "./CompanyScreen.module.scss";
 
 // ORD-174 — CRUD de planos de add-on fiscal (superadmin/admin). Custo do
 // módulo fiscal é uma dimensão SEPARADA da PriceTable do totem (Focus NFe
@@ -20,12 +23,20 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleString("pt-BR");
 }
 
+// ORD-211 — extraída como função pura testável (mesmo racional de
+// buildCompanyListQuery em api/companies.ts).
+export function matchesFiscalAddonPlanSearch(plan: FiscalAddonPlan, search: string): boolean {
+  return plan.name.toLowerCase().includes(search.toLowerCase());
+}
+
 export default function FiscalAddonPlanListScreen() {
   const navigate = useNavigate();
   const [plans, setPlans] = useState<FiscalAddonPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<FiscalAddonPlan | null>(null);
+  // ORD-211 — client-side, sem debounce (mesmo racional de PriceTableListScreen).
+  const [search, setSearch] = useState("");
 
   async function load() {
     setLoading(true);
@@ -56,6 +67,13 @@ export default function FiscalAddonPlanListScreen() {
     }
   }
 
+  function clearFilters() {
+    setSearch("");
+  }
+
+  const filteredPlans = plans.filter((p) => matchesFiscalAddonPlanSearch(p, search));
+  const hasActiveFilters = search.length > 0;
+
   const columns: TableColumn<FiscalAddonPlan>[] = [
     { key: "name", header: "Nome", render: (p) => p.name },
     { key: "monthly_price", header: "Preço fixo/mês", mono: true, render: (p) => fmtBRL(p.monthly_price) },
@@ -85,7 +103,19 @@ export default function FiscalAddonPlanListScreen() {
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+      {/* ORD-211 — mesma caixa branca de filtro do Catálogo (.filterBar).
+          Sem Status/Categoria aqui — FiscalAddonPlan não tem esses campos. */}
+      <div className={styles.filterBar}>
+        <InputBase
+          label="Buscar"
+          placeholder="Nome…"
+          icon="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <Button type="button" variant="secondary" onClick={clearFilters} disabled={!hasActiveFilters}>
+          Limpar filtros
+        </Button>
         <Button onClick={() => navigate("/commercial/fiscal-addon-plans/new")}>+ Novo plano</Button>
       </div>
 
@@ -95,9 +125,11 @@ export default function FiscalAddonPlanListScreen() {
         <Table
           variant="compact"
           columns={columns}
-          rows={plans}
+          rows={filteredPlans}
           rowKey={(p) => p.id}
-          emptyMessage={loading ? "Carregando…" : "Nenhum plano do módulo fiscal cadastrado ainda."}
+          emptyMessage={
+            loading ? "Carregando…" : search ? "Nenhum plano encontrado." : "Nenhum plano do módulo fiscal cadastrado ainda."
+          }
         />
       )}
 
