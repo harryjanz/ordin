@@ -279,6 +279,16 @@ services:
     depends_on:
       - nginx
 
+  site:
+    # Site institucional/comercial — sem API, sem backend, não depende de
+    # nenhum outro serviço (docs/marketing/04-arquitetura-site.md).
+    build: ./frontend/site
+    restart: always
+    ports:
+      - "3004:80"
+    networks:
+      - ordin
+
 networks:
   ordin:
     driver: bridge
